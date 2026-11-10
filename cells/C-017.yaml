@@ -1,0 +1,25 @@
+id: C-017
+title: 'Section 12: public surfaces and growth experiments'
+type: normal
+priority: 5
+goal: 'Write spec/12-public-growth.md (prompt scope G): live counter (verified cells only; definition and query), public ledger and parameter page (what is shown, aggregation to protect privacy, versioning), change log, milestone pages (V6), share cards without personal data or location (card content spec), teams with opt-in only (scoring on verified cells, no location by default), referral with two-sided bonus after the newcomer''s verified first cell and anti-farming rules (funding source: Reserve per FD§4.6, caps, invite-tree checks, delayed payout, clawback), and growth mechanics V1-V6 as feature-flagged, instrumented, randomizable experiments: for each, the flag, assignment mechanism (deterministic hash of member id + experiment salt, stratification, logged exposure event), events emitted, metric, success and kill criteria fields (to be filled and locked via pre-registration S13), and Phase-1 vs Phase-2 status per FD§6.2. Badges definition. No rewards that move money. Given/When/Then.
+
+  '
+inputs:
+- from: C-000
+  kind: contract
+  contract: spec/00-conventions.md fixes entity names, ID formats, enums, state names, parameter names (snake_case, prefix by area), API prefix /v1, evidence-tag usage and cross-reference style. Use them exactly; if one is wrong or missing call cell_signal feedback, do not invent a variant.
+after:
+- C-000
+read:
+- docs/decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- spec/00-conventions.md
+allowed_paths:
+- spec/12-public-growth.md
+outputs:
+- spec/12-public-growth.md
+acceptance:
+- cmd: python scripts/check_spec.py spec/12-public-growth.md --min-lines 220 --min-tags 8 --require 'V1' --require 'V6' --require 'assignment'
+notes: 'Document cell: write markdown only, in several appends/commits. Do not summarize away required items; every bullet of the named prompt scope letters must appear as a decision, table, schema, pseudocode or Given/When/Then. Founding Document section numbers are §N. Mark facts you cannot know [V].'

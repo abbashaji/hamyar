@@ -1,0 +1,31 @@
+id: C-000
+title: Conventions and decisions skeleton
+type: skeleton
+priority: 10
+lease_minutes: 15
+goal: 'Write spec/00-conventions.md (the shared vocabulary every other spec part uses) and spec/00-decisions.md.
+
+  00-conventions.md must fix, as tables: (1) the evidence-tag legend [D][H][V][P][A]; (2) entity names exactly as in the prompt scope B list (Member, Device, Invite, Template, TemplateVersion, Job, Cell, Lease, Submission, VerificationRecord, GoldCell, Audit, LedgerAccount, LedgerEntry, Escrow, Reserve, Policy, PolicyVersion, ServiceRegistryEntry, TermsCopy, FlagAnswer, Report, Appeal, Reservation, Team, Badge, ChangeLogEntry, LaunchGateItem, plus any you add) with ID format (prefixed ULID, e.g. mem_, job_, cel_) and table naming; (3) every state-machine state name and event name for Job, Cell, Member trust tier, Template review, Service review, Appeal (use the Cell lifecycle of §3.4 and extend it: queued, leased, submitted, accepted, rejected, flagged_for_audit, expired, cancelled, etc.); (4) enums for purpose P0-P3, license L0-L3, sensitivity S0-S3, service requirement M0-M2, roles, flag answers yes/no/unknown, ledger account types and entry types (mint, transfer, escrow_hold, escrow_release,
+  settle, refund, levy, expire, retire, grant, ...); (5) configuration parameter naming scheme (area.name, e.g. credit.lifetime_days, price.levy_lambda, admission.phi, verify.gold_rate_g, verify.audit_rate_s, lease.timeout_s, cell.envelope.max_input_chars ...), parameter record fields (name, type, validation, default, version, owner, calibration source), and the FULL initial list of parameter names with initial defaults labeled "initial configurable default" and which measurement replaces each (C-022 completes the table, so keep the names stable); (6) API conventions: prefix /v1, JSON, error model {error:{code,message,details,request_id}}, Idempotency-Key header, cursor pagination, auth schemes member vs admin, rate-limit headers; (7) cross-reference style (§N of Founding Document as FD§N, spec parts as S<n>.<m>); (8) the Issue ID scheme ISS-nn and how parts report issues; (9) the build milestone IDs M0..Mn names (list only names and one-line themes; C-023 details them, launch gate and ledger
+  invariants early); (10) the list of ALL spec files with owner cell. Also decide, state and justify: ledger numeric type (integer micro-credits or integer credits; show how fractional price p=1+v+lambda is handled so FD§3.3 example reproduces exactly), time handling (UTC storage, Jalali display), ID and hashing choices.
+
+  00-decisions.md: the short list (at most 10 lines) of the biggest decisions made and anything challenged in the owner''s instructions (the prompt asked for this before the spec), plus at most 3 clarifying questions only if truly blocking (else state assumptions).
+
+  '
+provides:
+- 'spec/00-conventions.md: shared names, IDs, enums, states, parameter naming, API conventions, cross-reference style'
+- 'spec/00-decisions.md: <=10-line list of biggest decisions and challenges to the owner''s instructions'
+read:
+- docs/decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+allowed_paths:
+- spec/00-conventions.md
+- spec/00-decisions.md
+outputs:
+- spec/00-conventions.md
+- spec/00-decisions.md
+acceptance:
+- cmd: python scripts/check_spec.py spec/00-conventions.md --min-lines 120 --min-tags 8 --require 'ISS-' --require 'credit.lifetime_days' --require 'Idempotency-Key'
+- cmd: python scripts/check_spec.py spec/00-decisions.md --min-lines 120 --min-tags 8 --require 'ISS-' --require 'credit.lifetime_days' --require 'Idempotency-Key'
+notes: 'Document cell: write markdown only, in several appends/commits. Do not summarize away required items; every bullet of the named prompt scope letters must appear as a decision, table, schema, pseudocode or Given/When/Then. Founding Document section numbers are §N. Mark facts you cannot know [V].'

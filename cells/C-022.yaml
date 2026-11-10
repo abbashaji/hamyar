@@ -1,0 +1,29 @@
+id: C-022
+title: 'Section 16: configuration parameter table'
+type: normal
+priority: 5
+goal: 'Write spec/16-parameters.md (prompt section 16): the complete table of EVERY configuration parameter used anywhere in the spec parts (start from spec/00-conventions.md list, then scan the already-merged spec/*.md files and the Founding Document for parameters and thresholds; add missing ones): name, type, unit, validation (range/relations such as phi<1, s>=floor, g>=0), initial default (each labeled ''initial configurable default'' or derived with its formula; no invented statistics: state the measurement that replaces it), owner role, change policy (tighten-immediately vs loosen-with-notice), prospective-only flag, versioning, calibration method (which Phase 0/1 measurement), where used. Group: cell envelope, credit/expiry (E, K, G, mint cap, reserve ceiling), price (lambda, v window), admission (phi, forecast window, margin), verification (g, s, floor, redundancy), lease, rate limits, privacy/retention, UI budgets, experiment arms, thresholds for pre-registration. Also the config
+  mechanics: version records, validation at write, activation timestamps, rollback, public exposure. List any parameter found in other parts but missing from 00-conventions.md under ''## Issues raised''. Include a cross-check table ''FD§4.9 parameter -> spec parameter name''.
+
+  '
+inputs:
+- from: C-000
+  kind: contract
+  contract: spec/00-conventions.md fixes entity names, ID formats, enums, state names, parameter names (snake_case, prefix by area), API prefix /v1, evidence-tag usage and cross-reference style. Use them exactly; if one is wrong or missing call cell_signal feedback, do not invent a variant.
+after:
+- C-003
+- C-005
+- C-006
+- C-009
+read:
+- docs/decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- spec/00-conventions.md
+allowed_paths:
+- spec/16-parameters.md
+outputs:
+- spec/16-parameters.md
+acceptance:
+- cmd: python scripts/check_spec.py spec/16-parameters.md --min-lines 200 --min-tags 8 --require 'initial configurable default' --require 'phi' --require 'lease.timeout'
+notes: 'Document cell: write markdown only, in several appends/commits. Do not summarize away required items; every bullet of the named prompt scope letters must appear as a decision, table, schema, pseudocode or Given/When/Then. Founding Document section numbers are §N. Mark facts you cannot know [V].'

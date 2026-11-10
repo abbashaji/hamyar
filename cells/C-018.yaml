@@ -1,0 +1,26 @@
+id: C-018
+title: 'Section 13: measurement, experiments, pre-registration'
+type: normal
+priority: 5
+goal: 'Write spec/13-measurement.md (prompt scope H): event schema (table of events: name, trigger, fields, privacy class, retention) and metrics pipeline producing EVERY Phase 1 measure of FD§9: deposit-to-withdrawal ratio, time to complete a large job vs quote, rejection rate overall/by template, false-reject (gold), false-accept estimate (audits), v and eta, week-2 and week-4 return, median time per contribution and share under 60 s, time to first verified cell, active capacity per member per day, concentration (top 10% share), decline and opt-out rates by category, incidents (typed), plus qualitative-interview tracking; for each metric: exact definition, SQL/pseudocode, rollup cadence, known biases. Pre-registration support: thresholds and decision rules recorded BEFORE launch and locked (data model, lock mechanism with hash and timestamp, what is allowed after lock, link to launch-gate item). Experiment arms as configuration with random assignment (accelerated-expiry arm e.g. 14-day
+  vs 60-day: assignment, balance, logging; any other arm). Phase 0 calibration tool: record cells per day per service, seconds per cell, refusal and failure rates, copy-paste error rate (form fields, storage, summaries feeding parameter defaults; usable by founders without members). Analytics privacy: aggregate by default, no third-party trackers, minimal retention, small-cell suppression (parameter). State what cannot be concluded statistically with 30-50 members.
+
+  '
+inputs:
+- from: C-000
+  kind: contract
+  contract: spec/00-conventions.md fixes entity names, ID formats, enums, state names, parameter names (snake_case, prefix by area), API prefix /v1, evidence-tag usage and cross-reference style. Use them exactly; if one is wrong or missing call cell_signal feedback, do not invent a variant.
+after:
+- C-000
+read:
+- docs/decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- spec/00-conventions.md
+allowed_paths:
+- spec/13-measurement.md
+outputs:
+- spec/13-measurement.md
+acceptance:
+- cmd: python scripts/check_spec.py spec/13-measurement.md --min-lines 250 --min-tags 8 --require 'pre-registration' --require 'week-2' --require 'calibration'
+notes: 'Document cell: write markdown only, in several appends/commits. Do not summarize away required items; every bullet of the named prompt scope letters must appear as a decision, table, schema, pseudocode or Given/When/Then. Founding Document section numbers are §N. Mark facts you cannot know [V].'

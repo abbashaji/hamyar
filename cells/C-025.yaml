@@ -1,0 +1,25 @@
+id: C-025
+title: 'Section 19: risks, unverified items, pre-build checklist'
+type: normal
+priority: 5
+goal: 'Write spec/19-risks.md (prompt section 19): risk register extending FD§8.2 with spec-level risks (technical, legal [V], safety, operational, project), each with likelihood/impact as qualitative labels (no invented numbers), mitigation, owner, and status tag; a consolidated list of everything that remains unverified [V] with where the answer is stored in the system (Service Registry field, LaunchGateItem, config parameter); a pre-build checklist (what the owner must decide or do before coding starts, before first member, before public exposure: separate the three), including G0-G5, counsel questions, secret rotation, repo review, hosting reachability test, name check. Include the open decisions of S3 by reference.
+
+  '
+inputs:
+- from: C-000
+  kind: contract
+  contract: spec/00-conventions.md fixes entity names, ID formats, enums, state names, parameter names (snake_case, prefix by area), API prefix /v1, evidence-tag usage and cross-reference style. Use them exactly; if one is wrong or missing call cell_signal feedback, do not invent a variant.
+after:
+- C-001
+read:
+- docs/decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- spec/00-conventions.md
+allowed_paths:
+- spec/19-risks.md
+outputs:
+- spec/19-risks.md
+acceptance:
+- cmd: python scripts/check_spec.py spec/19-risks.md --min-lines 120 --min-tags 8 --require 'pre-build' --require '[V]'
+notes: 'Document cell: write markdown only, in several appends/commits. Do not summarize away required items; every bullet of the named prompt scope letters must appear as a decision, table, schema, pseudocode or Given/When/Then. Founding Document section numbers are §N. Mark facts you cannot know [V].'

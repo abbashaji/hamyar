@@ -1,0 +1,26 @@
+id: C-015
+title: 'Section 11c: reviewer and operator tools'
+type: normal
+priority: 5
+goal: 'Write spec/11c-admin-tools.md (prompt scope F reviewer/operator): template review queue, service review (flag recording with terms copy upload and dated answers), audit queue, appeals, abuse flags, ledger explorer, parameter editor with versioning and changelog (prospective-only, notice), capacity dashboard, launch-gate checklist screen (links to S14), kill switches (pause a template, a service, a member, all minting, all new jobs) with who may press them and audit trail, member-lookup limits (minimal data), Release / Hand over equivalents from the existing panel (see docs/source/panel-review.md). Per tool: purpose, roles/permissions, screen blocks, actions and their dangerous-action confirmation (two-person rule where stated), audit events, API names, Given/When/Then.
+
+  '
+inputs:
+- from: C-000
+  kind: contract
+  contract: spec/00-conventions.md fixes entity names, ID formats, enums, state names, parameter names (snake_case, prefix by area), API prefix /v1, evidence-tag usage and cross-reference style. Use them exactly; if one is wrong or missing call cell_signal feedback, do not invent a variant.
+after:
+- C-000
+read:
+- docs/decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- docs/source/panel-review.md
+- spec/00-conventions.md
+allowed_paths:
+- spec/11c-admin-tools.md
+outputs:
+- spec/11c-admin-tools.md
+acceptance:
+- cmd: python scripts/check_spec.py spec/11c-admin-tools.md --min-lines 250 --min-tags 8 --require 'kill switch' --require 'two-person' --require 'Given'
+notes: 'Document cell: write markdown only, in several appends/commits. Do not summarize away required items; every bullet of the named prompt scope letters must appear as a decision, table, schema, pseudocode or Given/When/Then. Founding Document section numbers are §N. Mark facts you cannot know [V].'

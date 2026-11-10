@@ -1,0 +1,34 @@
+id: C-001
+title: 'Sections 1-3: purpose, issues found, assumptions'
+type: normal
+priority: 5
+goal: 'Write spec/01-purpose.md (prompt section 1: purpose, scope, how to read, evidence-tag legend), spec/02-issues.md (section 2: Issues found in the Founding Document with a proposed resolution each, applied consistently; be genuinely critical — examples to examine: R3''s volunteer-instruction rule vs. templates that ask volunteers to paste data; ''unknown is treated as no'' vs. G0 questions (a),(b),(c),(h),(j),(k) which are not yes/no flags in the registry list of §5.3; ledger invariant §4.2 ''every unit traces to an accepted Commons cell'' vs starter-grant/levy flows and fractional price 1+v+lambda; v defined per accepted primary cell but donors earn for audit/gold cells; mint cap ''no higher than forecast redeemable capacity'' circular with phi; Commons jobs need a requester/sponsor identity; the 60-day expiry vs the starter grant ''expires quickly''; M2 hosted vs local open-weight cells and how a volunteer proves model; P1+L1 on services whose open-publication flag unknown; human-review
+  channel needs its own credit rules; K cap vs escrowed credit; reservation escrow vs expiry; deadline classes at 1.0; salted-hash volunteer ID salt scope; policy ''re-check at acceptance'' for already-submitted work; etc. Verify each against the document before listing; do not invent inconsistencies) and spec/03-assumptions.md (section 3: assumptions [A] and open decisions only the owner can make: operator jurisdiction, template/policy reviewers, hosting, services to review, entity form, name check, etc., each with a default the spec uses meanwhile).
+
+  Section 2 must incorporate and deduplicate the ''## Issues raised'' lists from the other spec parts: since this cell may run before them, write the issues you find now, number them ISS-01.., and reserve the range ISS-50.. for later parts (they append to their own files; assembly lists them). Add a short instruction at the end of 02-issues.md: ''Later parts append issues as ISS-5x...''.
+
+  '
+inputs:
+- from: C-000
+  kind: contract
+  contract: spec/00-conventions.md fixes entity names, ID formats, enums, state names, parameter names (snake_case, prefix by area), API prefix /v1, evidence-tag usage and cross-reference style. Use them exactly; if one is wrong or missing call cell_signal feedback, do not invent a variant.
+after:
+- C-000
+read:
+- docs/decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- spec/00-conventions.md
+allowed_paths:
+- spec/01-purpose.md
+- spec/02-issues.md
+- spec/03-assumptions.md
+outputs:
+- spec/01-purpose.md
+- spec/02-issues.md
+- spec/03-assumptions.md
+acceptance:
+- cmd: python scripts/check_spec.py spec/01-purpose.md --min-lines 60 --min-tags 8 --require 'ISS-01'
+- cmd: python scripts/check_spec.py spec/02-issues.md --min-lines 60 --min-tags 8 --require 'ISS-01'
+- cmd: python scripts/check_spec.py spec/03-assumptions.md --min-lines 60 --min-tags 8 --require 'ISS-01'
+notes: 'Document cell: write markdown only, in several appends/commits. Do not summarize away required items; every bullet of the named prompt scope letters must appear as a decision, table, schema, pseudocode or Given/When/Then. Founding Document section numbers are §N. Mark facts you cannot know [V].'

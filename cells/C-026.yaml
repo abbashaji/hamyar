@@ -1,0 +1,28 @@
+id: C-026
+title: 'Sections 20-21: glossary and Persian summary'
+type: normal
+priority: 5
+goal: 'Write spec/20-glossary.md (section 20: glossary of all terms used, extending FD§11 with spec terms; alphabetical; each with the part where defined) and spec/21-persian-summary.md (section 21: a short Persian summary, about 10 lines, correct natural Persian; says ''declared'' (اعلام‌شده) not guaranteed; mentions that the spec separates building from launching and that legal and provider-terms items are unverified; marked as needing human review). Scan the existing spec/*.md for terms (use read_files on the first lines of each file only; if few parts exist yet, use 00-conventions.md and the Founding Document).
+
+  '
+inputs:
+- from: C-000
+  kind: contract
+  contract: spec/00-conventions.md fixes entity names, ID formats, enums, state names, parameter names (snake_case, prefix by area), API prefix /v1, evidence-tag usage and cross-reference style. Use them exactly; if one is wrong or missing call cell_signal feedback, do not invent a variant.
+after:
+- C-000
+read:
+- docs/decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- spec/00-conventions.md
+allowed_paths:
+- spec/20-glossary.md
+- spec/21-persian-summary.md
+outputs:
+- spec/20-glossary.md
+- spec/21-persian-summary.md
+acceptance:
+- cmd: python scripts/check_spec.py spec/20-glossary.md --min-lines 25 --min-tags 0
+- cmd: python scripts/check_spec.py spec/21-persian-summary.md --min-lines 25 --min-tags 0
+notes: 'Document cell: write markdown only, in several appends/commits. Do not summarize away required items; every bullet of the named prompt scope letters must appear as a decision, table, schema, pseudocode or Given/When/Then. Founding Document section numbers are §N. Mark facts you cannot know [V].'

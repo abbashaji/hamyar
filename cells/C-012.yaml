@@ -1,0 +1,27 @@
+id: C-012
+title: 'Section 10b: threat model, member safety, secrets, hosting, abuse process'
+type: normal
+priority: 5
+goal: 'Write spec/10b-safety.md (prompt scope I): (1) threat model TABLE (actor, goal, attack, impact, mitigation, residual risk) covering at least forged results, credit farming, fake accounts and invite-tree abuse, malicious requesters and malicious inputs, prompt injection against volunteers, XSS and injection via submitted text, ledger tampering, insider and operator risk, account takeover, de-anonymization of members, compelled disclosure, DoS, reviewer capture — and add others you find; (2) member safety design in a high-risk context: pseudonymity, minimal collection, retention limits, what a network observer and the host can see, what happens on subpoena or seizure (what exists to disclose: be exact), no location display by default, no mandatory identity, and a plain ''what the platform can NOT promise'' list; (3) secrets management for the four existing secrets (PANEL_TOKEN, ADMIN_TOKEN, GITHUB_TOKEN, MCP_AUTH_TOKEN; see docs/source/panel-review.md) plus new ones (signing keys, nonce
+  keys, salts, backup keys): inventory table, storage, rotation procedure and cadence, and the rule that all existing secrets are rotated before any public exposure, with a launch-gate item for it; (4) hosting and reachability: interfaces so the system can move, reachability from Iran [V], low bandwidth, no third-party CDN/font/tracker; (5) abuse reporting, takedown and ban process including appeals (roles, SLAs as configurable defaults, evidence retention). Everything legal is [V] for counsel.
+
+  '
+inputs:
+- from: C-000
+  kind: contract
+  contract: spec/00-conventions.md fixes entity names, ID formats, enums, state names, parameter names (snake_case, prefix by area), API prefix /v1, evidence-tag usage and cross-reference style. Use them exactly; if one is wrong or missing call cell_signal feedback, do not invent a variant.
+after:
+- C-000
+read:
+- docs/decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- docs/source/panel-review.md
+- spec/00-conventions.md
+allowed_paths:
+- spec/10b-safety.md
+outputs:
+- spec/10b-safety.md
+acceptance:
+- cmd: python scripts/check_spec.py spec/10b-safety.md --min-lines 250 --min-tags 8 --require 'residual risk' --require 'subpoena' --require 'rotate'
+notes: 'Document cell: write markdown only, in several appends/commits. Do not summarize away required items; every bullet of the named prompt scope letters must appear as a decision, table, schema, pseudocode or Given/When/Then. Founding Document section numbers are §N. Mark facts you cannot know [V].'

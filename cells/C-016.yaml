@@ -1,0 +1,26 @@
+id: C-016
+title: 'Section 11d: Persian first, accessibility, notices copy'
+type: normal
+priority: 5
+goal: 'Write spec/11d-i18n-copy.md (prompt scope F last bullet): Persian first: full RTL rules, Persian numerals option (storage always ASCII digits), Jalali and Gregorian dates (display rules; calendar library choice left to stack with requirement; UTC storage), mixed-direction text handling inside prompts and outputs (isolates, dir=auto, bidi policy, copying to clipboard preserves text), fonts (self-hosted, subsetting, fallbacks, no third-party font dependency), English, accessibility (WCAG-level targets as [A]), low-bandwidth behaviour (budgets as initial configurable defaults, no heavy assets, offline-tolerant paste-back drafts). Then the COPY: all policy, privacy and risk notices in BOTH Persian and English, marked ''needs human and legal review'' each: account risk notice (provider terms, account suspension), privacy notice (what is and is not collected), safety notice for members in Iran (plain, no promises of anonymity), open-license ''downstream use uncontrolled'' notice, declared-not-guaranteed
+  notice, credit is not money notice, prompt-injection advice (clean chat, memory off where available), decline/report explanation, recovery key warning, consent/opt-in text, no-circumvention statement. Persian must be correct natural Persian; every promise-like sentence says ''declared'' (اعلام‌شده), never guaranteed. Use a keyed copy table (key, FA, EN, review status).
+
+  '
+inputs:
+- from: C-000
+  kind: contract
+  contract: spec/00-conventions.md fixes entity names, ID formats, enums, state names, parameter names (snake_case, prefix by area), API prefix /v1, evidence-tag usage and cross-reference style. Use them exactly; if one is wrong or missing call cell_signal feedback, do not invent a variant.
+after:
+- C-000
+read:
+- docs/decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- spec/00-conventions.md
+allowed_paths:
+- spec/11d-i18n-copy.md
+outputs:
+- spec/11d-i18n-copy.md
+acceptance:
+- cmd: python scripts/check_spec.py spec/11d-i18n-copy.md --min-lines 200 --min-tags 3 --require 'اعلام‌شده' --require 'needs human and legal review' --require 'RTL'
+notes: 'Document cell: write markdown only, in several appends/commits. Do not summarize away required items; every bullet of the named prompt scope letters must appear as a decision, table, schema, pseudocode or Given/When/Then. Founding Document section numbers are §N. Mark facts you cannot know [V].'

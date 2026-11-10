@@ -1,0 +1,26 @@
+id: C-004
+title: 'Section 5b: state machines, idempotency, concurrency'
+type: normal
+priority: 5
+goal: 'Write spec/05b-state-machines.md: explicit state machines (text diagrams + transition tables: from, event, guard, side effects, ledger effects, audit log entry) for Job, Cell (queued -> leased -> submitted -> accepted / rejected / flagged_for_audit, plus expiry and requeue, cancel, service revoked, policy tightened), Member trust tiers, Template review (second-reviewer rule), Service review (unreviewed -> ... -> approved / revoked), Appeal. Then ''Idempotency, concurrency and race handling'' for leasing, submission and settlement with EXACT guarantees: lease acquisition atomicity (compare-and-set), at-most-one active lease per cell, lease-bound nonce, duplicate submission handling, settlement exactly-once via idempotency keys on ledger entries, behaviour when lease expires while a submission is arriving, double-spend of escrow, crash recovery for each background job. Include pseudocode for lease(), submit(), settle() and a race table (scenario, outcome, mechanism). Include Given/When/Then
+  tests for each race.
+
+  '
+inputs:
+- from: C-000
+  kind: contract
+  contract: spec/00-conventions.md fixes entity names, ID formats, enums, state names, parameter names (snake_case, prefix by area), API prefix /v1, evidence-tag usage and cross-reference style. Use them exactly; if one is wrong or missing call cell_signal feedback, do not invent a variant.
+after:
+- C-000
+read:
+- docs/decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- spec/00-conventions.md
+allowed_paths:
+- spec/05b-state-machines.md
+outputs:
+- spec/05b-state-machines.md
+acceptance:
+- cmd: python scripts/check_spec.py spec/05b-state-machines.md --min-lines 250 --min-tags 8 --require 'Given' --require 'idempot'
+notes: 'Document cell: write markdown only, in several appends/commits. Do not summarize away required items; every bullet of the named prompt scope letters must appear as a decision, table, schema, pseudocode or Given/When/Then. Founding Document section numbers are §N. Mark facts you cannot know [V].'

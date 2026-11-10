@@ -1,0 +1,26 @@
+id: C-008
+title: 'Section 8a: template format and first templates'
+type: normal
+priority: 5
+goal: 'Write spec/08a-templates.md (prompt scope E templates): template format (data slots, prompt body, delimiters, output schema, automatic checks, comparator for audits, cell envelope reference, review status, version) as a JSON/YAML schema; template review workflow with second-reviewer rule for new templates and versioning/deprecation; then the first set of templates CONCRETELY, each with purpose, prompt skeleton (text with slots and delimiters, EN and FA where relevant), input schema, output schema, automatic checks, comparator for audits, gold-cell construction method, known risks, and effectiveness marked [H]: (1) translation with a shared glossary, (2) classification/extraction into a fixed schema, (3) summarization into a schema, (4) code change with supplied tests (explain how the cell stays copy-send-return only and how tests are run server-side or by the requester without the volunteer running anything — the volunteer must not be asked to run code), (5) format conversion with
+  a validator. Do not claim any works. Each template must pass rule R3 (copy, press Send, return text only).
+
+  '
+inputs:
+- from: C-000
+  kind: contract
+  contract: spec/00-conventions.md fixes entity names, ID formats, enums, state names, parameter names (snake_case, prefix by area), API prefix /v1, evidence-tag usage and cross-reference style. Use them exactly; if one is wrong or missing call cell_signal feedback, do not invent a variant.
+after:
+- C-000
+read:
+- docs/decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- spec/00-conventions.md
+allowed_paths:
+- spec/08a-templates.md
+outputs:
+- spec/08a-templates.md
+acceptance:
+- cmd: python scripts/check_spec.py spec/08a-templates.md --min-lines 300 --min-tags 8 --require 'glossary' --require 'comparator' --require '[H]'
+notes: 'Document cell: write markdown only, in several appends/commits. Do not summarize away required items; every bullet of the named prompt scope letters must appear as a decision, table, schema, pseudocode or Given/When/Then. Founding Document section numbers are §N. Mark facts you cannot know [V].'

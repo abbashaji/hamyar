@@ -1,0 +1,26 @@
+id: C-007
+title: 'Section 7: policy engine and Service Registry'
+type: normal
+priority: 5
+goal: 'Write spec/07-policy.md (prompt scope D): rules R1-R10 as DATA (rules table schema + small evaluator: input facts, ordered evaluation, first failing rule rejects, reason codes and requester-facing reason text in EN and FA keys), policy versioning, stamping at admission and re-check at acceptance (R9, define precisely what happens to in-flight cells when policy tightens), tighten-immediately vs loosen-with-changelog workflow (R10) with who approves; job metadata schema (purpose, license, sensitivity, service requirement, + system fields) with validation and the allowlist of permitted combinations as a table (Phase 1 active profiles per FD§5.7(5)); rejection reasons; volunteer opt-in model (defaults, per-category opt-ins, topic categories, how R8 filters cells, per-category supply gauge); Service Registry workflow (unreviewed default, unknown = no, reviewer records flags yes/no/unknown with dated saved terms copy, approve / revoke, second reviewer?, what happens to in-flight cells on
+  revoke, job cannot be created for a service without recorded flags + saved copy); the G0 questions (a)-(k) mapped to stored FlagAnswer fields (see FD§8.3; some are not yes/no); prompt-injection and abuse defenses as concrete mechanisms: template wrapping with delimiters, input screening rules (link detection, instruction-pattern detection, personal-data patterns, with example rule definitions as data), output flagging, and the rule a task may only ask the volunteer to copy, press Send and return text. Include a table of allowed and rejected combinations used as the policy-engine test table, and Given/When/Then criteria.
+
+  '
+inputs:
+- from: C-000
+  kind: contract
+  contract: spec/00-conventions.md fixes entity names, ID formats, enums, state names, parameter names (snake_case, prefix by area), API prefix /v1, evidence-tag usage and cross-reference style. Use them exactly; if one is wrong or missing call cell_signal feedback, do not invent a variant.
+after:
+- C-000
+read:
+- docs/decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- spec/00-conventions.md
+allowed_paths:
+- spec/07-policy.md
+outputs:
+- spec/07-policy.md
+acceptance:
+- cmd: python scripts/check_spec.py spec/07-policy.md --min-lines 300 --min-tags 8 --require 'R1' --require 'R10' --require 'unreviewed' --require 'Given'
+notes: 'Document cell: write markdown only, in several appends/commits. Do not summarize away required items; every bullet of the named prompt scope letters must appear as a decision, table, schema, pseudocode or Given/When/Then. Founding Document section numbers are §N. Mark facts you cannot know [V].'

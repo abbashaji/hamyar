@@ -1,0 +1,26 @@
+id: C-005
+title: 'Section 6a: credit, ledger and pricing'
+type: normal
+priority: 5
+goal: 'Write spec/06a-ledger.md (prompt scope C, except admission control): append-only double-entry ledger design (accounts, entry types, posting rules as a table for mint, transfer, escrow hold/release, settlement, refund on cancel, levy lambda to Reserve, expiry oldest-first with per-balance expiry dates (lots), expired credit to Reserve, Reserve retirement above ceiling, per-member cap K, starter grant G with conditions and anti-farming limits); the FD§4.2 invariants as automated continuous checks (each invariant: formula, SQL/pseudocode, frequency, alarm, response e.g. auto-pause minting); numeric representation that makes the FD§3.3 worked example exact; pricing p = 1 + v + lambda: how v is measured over a trailing window per job type (exact formula, window parameter, minimum sample size and what price applies below it), how eta and the claim ratio are computed, published and versioned; prospective-only parameter changes with notice period and public change log; mint cap utilization.
+  Worked numeric example reproducing FD§3.3 line by line AND as a test specification (test name, setup, expected ledger entries, expected balances) — Sara pays 276, donors get 264, Reserve gets 12. Address the fractional-credit issue and the ''every unit traces to Commons cell'' invariant honestly; raise issues ISS-5x if the FD cannot be implemented as written.
+
+  '
+inputs:
+- from: C-000
+  kind: contract
+  contract: spec/00-conventions.md fixes entity names, ID formats, enums, state names, parameter names (snake_case, prefix by area), API prefix /v1, evidence-tag usage and cross-reference style. Use them exactly; if one is wrong or missing call cell_signal feedback, do not invent a variant.
+after:
+- C-000
+read:
+- docs/decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- spec/00-conventions.md
+allowed_paths:
+- spec/06a-ledger.md
+outputs:
+- spec/06a-ledger.md
+acceptance:
+- cmd: python scripts/check_spec.py spec/06a-ledger.md --min-lines 300 --min-tags 8 --require '276' --require '264' --require 'invariant'
+notes: 'Document cell: write markdown only, in several appends/commits. Do not summarize away required items; every bullet of the named prompt scope letters must appear as a decision, table, schema, pseudocode or Given/When/Then. Founding Document section numbers are §N. Mark facts you cannot know [V].'

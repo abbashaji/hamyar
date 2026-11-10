@@ -1,0 +1,26 @@
+id: C-021
+title: 'Section 15b: API specification, admin, ledger, public'
+type: normal
+priority: 5
+goal: 'Write spec/15b-api-admin.md (prompt scope J API continued): endpoint tables (same fields as 15a: method, path under /v1, auth, request, response, errors, idempotency, pagination, rate limit class) for: admin auth (passkey or chosen mechanism per S10.a, step-up approvals), service registry (list, create, record flags, upload terms copy, approve, revoke), template review (submit, review, second review, deprecate), policy (rules, versions, tighten, loosen with changelog), parameter editor (propose, notice, activate prospectively, history), launch gates and switches, kill switches, audit/appeal/report queues, abuse flags and bans, ledger explorer (read-only), invariant status, capacity dashboard, pre-registration lock, experiment config, calibration records; public endpoints (counter, ledger summary, parameters, change log, milestones, share card, provenance manifest verification). Event model: list of domain events (name, payload schema, producer, consumers) consistent with S4. Webhook-free
+  by design (no outbound to volunteers). Worked examples: record flags + terms copy, tighten policy, kill switch.
+
+  '
+inputs:
+- from: C-000
+  kind: contract
+  contract: spec/00-conventions.md fixes entity names, ID formats, enums, state names, parameter names (snake_case, prefix by area), API prefix /v1, evidence-tag usage and cross-reference style. Use them exactly; if one is wrong or missing call cell_signal feedback, do not invent a variant.
+after:
+- C-000
+read:
+- docs/decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- spec/00-conventions.md
+allowed_paths:
+- spec/15b-api-admin.md
+outputs:
+- spec/15b-api-admin.md
+acceptance:
+- cmd: python scripts/check_spec.py spec/15b-api-admin.md --min-lines 300 --min-tags 8 --require '/v1/admin' --require 'kill' --require 'event'
+notes: 'Document cell: write markdown only, in several appends/commits. Do not summarize away required items; every bullet of the named prompt scope letters must appear as a decision, table, schema, pseudocode or Given/When/Then. Founding Document section numbers are §N. Mark facts you cannot know [V].'

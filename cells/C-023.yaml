@@ -1,0 +1,30 @@
+id: C-023
+title: 'Section 17: build plan, milestones, acceptance tests'
+type: normal
+priority: 5
+goal: 'Write spec/17-build-plan.md (prompt scope J build order + section 17): milestones M0..Mn (names from 00-conventions.md), each ending with a working, testable system; launch-gate machinery and ledger invariants EARLY (state which milestone; justify); for each milestone: scope (components/entities/endpoints/screens from other parts by reference), dependencies, what is stubbed, explicit acceptance tests (Given/When/Then), Definition of Done checklist, what can be demoed. Include the dependency graph in text and the ''always leaves a working system'' argument. Include a step ''review existing panel repo and decide keep/wrap/replace'' (G4) and the secret-rotation step before any public exposure. Specify also the migration/seed order (fresh DB: services unreviewed, gates unsigned, switches off, no members). Suggest parallelizable work packages for coding agents with file/module ownership boundaries (like the Blueprint cells of the existing panel: small cells, protected shared files) as
+  [A]. Do not shrink scope: every scope item A-K appears in some milestone (include a coverage matrix scope-item -> milestone).
+
+  '
+inputs:
+- from: C-000
+  kind: contract
+  contract: spec/00-conventions.md fixes entity names, ID formats, enums, state names, parameter names (snake_case, prefix by area), API prefix /v1, evidence-tag usage and cross-reference style. Use them exactly; if one is wrong or missing call cell_signal feedback, do not invent a variant.
+after:
+- C-002
+- C-004
+- C-014
+- C-019
+read:
+- docs/decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- docs/source/panel-review.md
+- spec/00-conventions.md
+allowed_paths:
+- spec/17-build-plan.md
+outputs:
+- spec/17-build-plan.md
+acceptance:
+- cmd: python scripts/check_spec.py spec/17-build-plan.md --min-lines 250 --min-tags 8 --require 'M0' --require 'Definition of Done' --require 'coverage'
+notes: 'Document cell: write markdown only, in several appends/commits. Do not summarize away required items; every bullet of the named prompt scope letters must appear as a decision, table, schema, pseudocode or Given/When/Then. Founding Document section numbers are §N. Mark facts you cannot know [V].'

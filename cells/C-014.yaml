@@ -1,0 +1,26 @@
+id: C-014
+title: 'Section 11b: requester experience screens'
+type: normal
+priority: 5
+goal: 'Write spec/11b-requester-ux.md (prompt scope F requester): job creation wizard (template choice, data upload and screening with the screening result display, metadata declarations with plain-language explanations of P/L/S/M, policy result with reason codes, price and window quote showing p=1+v+lambda breakdown, escrow confirmation, ''downstream use uncontrolled'' notice for open licenses), job progress with a per-cell status map (reuse the status-graph/bottleneck ideas of the existing panel as per docs/source/panel-review.md, [V]), cancellation and refund display, waitlist/reservation screens, results download with provenance manifest (give the manifest JSON schema), rating of the outcome. Same per-screen format as volunteer screens: purpose, entry conditions, blocks, states, actions, API names, copy intent, accessibility, Given/When/Then. Include requester-visible rejection reasons in EN and FA.
+
+  '
+inputs:
+- from: C-000
+  kind: contract
+  contract: spec/00-conventions.md fixes entity names, ID formats, enums, state names, parameter names (snake_case, prefix by area), API prefix /v1, evidence-tag usage and cross-reference style. Use them exactly; if one is wrong or missing call cell_signal feedback, do not invent a variant.
+after:
+- C-000
+read:
+- docs/decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- docs/source/panel-review.md
+- spec/00-conventions.md
+allowed_paths:
+- spec/11b-requester-ux.md
+outputs:
+- spec/11b-requester-ux.md
+acceptance:
+- cmd: python scripts/check_spec.py spec/11b-requester-ux.md --min-lines 250 --min-tags 8 --require 'manifest' --require 'wizard' --require 'Given'
+notes: 'Document cell: write markdown only, in several appends/commits. Do not summarize away required items; every bullet of the named prompt scope letters must appear as a decision, table, schema, pseudocode or Given/When/Then. Founding Document section numbers are §N. Mark facts you cannot know [V].'

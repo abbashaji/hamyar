@@ -1,0 +1,25 @@
+id: C-003
+title: 'Section 5a: domain model entities'
+type: normal
+priority: 5
+goal: 'Write spec/05a-entities.md (prompt scope B entities): for EVERY entity listed in 00-conventions.md give a table of fields (name, type, constraint/nullability), primary/foreign keys, unique constraints, indexes, retention rule, and what is stored vs deliberately NOT stored (data minimization: no IP addresses in member records, no provider credentials, salted-hash volunteer id with salt scope stated). Include SQL-like DDL or JSON-schema blocks for the critical ones (Member, Device, Cell, Lease, Submission, LedgerAccount, LedgerEntry, Escrow, ServiceRegistryEntry/TermsCopy/FlagAnswer, PolicyVersion, LaunchGateItem). Include entity-relationship summary in text. State the append-only guarantees (which tables are immutable, how corrections are modelled).
+
+  '
+inputs:
+- from: C-000
+  kind: contract
+  contract: spec/00-conventions.md fixes entity names, ID formats, enums, state names, parameter names (snake_case, prefix by area), API prefix /v1, evidence-tag usage and cross-reference style. Use them exactly; if one is wrong or missing call cell_signal feedback, do not invent a variant.
+after:
+- C-000
+read:
+- docs/decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- spec/00-conventions.md
+allowed_paths:
+- spec/05a-entities.md
+outputs:
+- spec/05a-entities.md
+acceptance:
+- cmd: python scripts/check_spec.py spec/05a-entities.md --min-lines 250 --min-tags 8 --require 'LedgerEntry' --require 'LaunchGateItem' --require 'ServiceRegistryEntry'
+notes: 'Document cell: write markdown only, in several appends/commits. Do not summarize away required items; every bullet of the named prompt scope letters must appear as a decision, table, schema, pseudocode or Given/When/Then. Founding Document section numbers are §N. Mark facts you cannot know [V].'

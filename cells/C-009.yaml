@@ -1,0 +1,26 @@
+id: C-009
+title: 'Section 8b: verification pipeline'
+type: normal
+priority: 5
+goal: 'Write spec/08b-verification.md (prompt scope E verification): pipeline order (automatic checks, hidden gold cells at rate g, sampled audits at rate s with comparator and third execution on mismatch, adaptive sampling with a floor, blanket redundancy for new donors'' first cells and high-risk templates, human review cells with their own gold cells, appeals) as pseudocode and state transitions; gold-cell insertion rules (hidden how, rotation, retirement, leak detection); donor reliability estimator (give the exact method, e.g. Beta posterior or Wilson interval over gold and audit outcomes, priors as parameters, how trust tier uses it) and estimators for false-accept and false-reject rates from gold cells and audits, WITH their limits stated plainly (selection bias, gold detectability, small samples, comparator error, collusion); adaptive sampling function with floor; how verification and rework cells are counted into v; who gets paid what (donor 1 credit per accepted cell incl. audit/gold);
+  rejection reasons shown to donors; appeal flow handoff; human-review channel (channel 2) credit rules as an experimental arm; no model-based judging to mint credit in Phase 1. Include Given/When/Then tests and a worked example with numbers labeled illustrative.
+
+  '
+inputs:
+- from: C-000
+  kind: contract
+  contract: spec/00-conventions.md fixes entity names, ID formats, enums, state names, parameter names (snake_case, prefix by area), API prefix /v1, evidence-tag usage and cross-reference style. Use them exactly; if one is wrong or missing call cell_signal feedback, do not invent a variant.
+after:
+- C-000
+read:
+- docs/decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- spec/00-conventions.md
+allowed_paths:
+- spec/08b-verification.md
+outputs:
+- spec/08b-verification.md
+acceptance:
+- cmd: python scripts/check_spec.py spec/08b-verification.md --min-lines 250 --min-tags 8 --require 'false-accept' --require 'floor' --require 'Given'
+notes: 'Document cell: write markdown only, in several appends/commits. Do not summarize away required items; every bullet of the named prompt scope letters must appear as a decision, table, schema, pseudocode or Given/When/Then. Founding Document section numbers are §N. Mark facts you cannot know [V].'

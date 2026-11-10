@@ -1,0 +1,26 @@
+id: C-024
+title: 'Section 18: test strategy and simulation harness'
+type: normal
+priority: 5
+goal: 'Write spec/18-testing.md (prompt scope K): test strategy by layer (unit, property-based tests for the ledger and admission control with the concrete properties, state-machine tests (model-based), policy-engine tests with the table of allowed and rejected combinations (reference S7), adversarial tests (forgery, replay, double submission, races on leasing and settlement), injection and XSS tests with payload corpus categories, RTL and Persian rendering tests (visual and DOM), load tests (targets as initial configurable defaults), end-to-end simulation); the simulation harness: generates synthetic donors and requesters including adversarial ones (farmers, forgers, colluders, run-on-the-bank requesters, lazy donors), exercises the credit model, run-on-the-bank scenarios and credit expiry, parameter sweeps; specify inputs, agent behaviour models (parameters), outputs, determinism (seeded), and acceptance runs; state clearly and repeatedly that simulation output is NOT evidence about real
+  human behavior. Acceptance criteria (Given/When/Then) for every major feature listed in the prompt, as a table feature -> criteria IDs -> milestone; Definition of Done per milestone cross-referenced to S17.
+
+  '
+inputs:
+- from: C-000
+  kind: contract
+  contract: spec/00-conventions.md fixes entity names, ID formats, enums, state names, parameter names (snake_case, prefix by area), API prefix /v1, evidence-tag usage and cross-reference style. Use them exactly; if one is wrong or missing call cell_signal feedback, do not invent a variant.
+after:
+- C-000
+read:
+- docs/decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- spec/00-conventions.md
+allowed_paths:
+- spec/18-testing.md
+outputs:
+- spec/18-testing.md
+acceptance:
+- cmd: python scripts/check_spec.py spec/18-testing.md --min-lines 300 --min-tags 8 --require 'property' --require 'not evidence' --require 'Given'
+notes: 'Document cell: write markdown only, in several appends/commits. Do not summarize away required items; every bullet of the named prompt scope letters must appear as a decision, table, schema, pseudocode or Given/When/Then. Founding Document section numbers are §N. Mark facts you cannot know [V].'
