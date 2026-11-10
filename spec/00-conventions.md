@@ -459,7 +459,7 @@ in_review               --template.first_approved-->      awaiting_second_review
 awaiting_second_review  --template.second_approved-->     approved
 in_review|awaiting_second_review --template.changes_requested--> changes_requested
 in_review|awaiting_second_review --template.rejected-->  rejected
-approved                --template.paused-->              paused         kill switch (0.11 of S14.*)
+approved                --template.paused-->              paused         kill switch (S14.*)
 paused                  --template.resumed-->             approved
 approved|paused         --template.retired-->             retired        includes superseded by a newer version
 ```
@@ -567,3 +567,71 @@ Every accepted change writes one `ParameterVersion`, one `ChangeLogEntry` (publi
 | `launch`, `change` | `operator` (two approvers for `launch`) | S14.* |
 | `analytics`, `experiment`, `growth`, `team`, `public`, `metrics`, `calibration` | `founders` for thresholds, `operator` otherwise | S12.*, S13.* |
 | `api`, `ui`, `i18n` | `operator` | S11.*, S15.* |
+
+### 0.10.6 Initial parameter list
+
+The list below is the FULL set of parameter names; names are stable and C-022 completes the table (units, owners, notes) without renaming. Every default is an `initial configurable default`: a safe starting value that is replaced by the measurement in the last column, never a finding. Where a default is derived, the formula is shown. Values marked "FD§3.3 illustrative" are the Founding Document's own example inputs, not measurements. `ratio` values are written as decimals here and stored as ppm.
+
+**Table A: credit, price, admission, reservation, grant, reserve, mint, inflation, ledger, job, change**
+
+| Name | Type | Initial configurable default | Validation | Replaced by |
+| --- | --- | --- | --- | --- |
+| `credit.scale_ucr_per_credit` | int | 1,000,000 | constant | `CON` |
+| `credit.lifetime_days` (E) | days | 60 (FD§4.5 proposal) | 1..365 | `P1M` arm comparison: return, share of credit expiring |
+| `credit.lifetime_days_accelerated` | days | 14 (FD§4.5 example arm) | 1..365; C4 | `P1M` arm comparison |
+| `credit.member_cap_credits` (K) | credits | 350 = round to 50 of 1.25 x 240 x 1.15 (the FD§3.3 reference job with a 25% margin) | 1..100000; C8 | `DEM` p90 large-job size, then `P1M` |
+| `credit.expiry_notice_days` | days | 7 | 0..60 | `OPS` member feedback |
+| `credit.expiry_sweep_interval_s` | duration_s | 3600 | 60..86400 | `OPS` |
+| `price.levy_lambda` (λ) | ratio | 0.05 (FD§3.3 illustrative) | 0 <= x < 1; C6 | `P1M` Reserve inflow versus grant demand, then `FND` |
+| `price.v_prior` | ratio | 0.10 (FD§3.3 illustrative) | 0..price.v_cap | `P1M` measured v |
+| `price.v_cap` | ratio | 0.50 | 0..1 | `FND` |
+| `price.v_window_days` | days | 28 | 7..90 | `P1M` stability of v |
+| `price.v_min_sample_cells` | int | 100 | 1..100000 | `P1M` variance of v |
+| `price.publish_period_days` | days | 30 (FD§4.3 "monthly") | 1..90 | `FND` |
+| `price.eta_alarm_threshold` | ratio | 0.80 (FD§4.3 suggested, arbitrary) | 0..1 | `FND` (pre-registered) |
+| `price.quote_ttl_s` | duration_s | 1800 | 60..86400 | `OPS` |
+| `price.v_rounding` | enum | `ceil` | constant | `CON` |
+| `admission.phi` (φ) | ratio | 0.50 (FD§3.3 illustrative) | 0 < x < 1; C1 | `P1M` throughput and deposit-to-withdrawal ratio |
+| `admission.forecast_window_days` | days | 14 | 3..60 | `P1M` forecast error |
+| `admission.active_donor_window_days` | days | 7 | 1..30 | `P1M` |
+| `admission.forecast_haircut` | ratio | 0.00 (so FD§3.3 reproduces exactly) | 0 <= x < 1 | `P1M` forecast error; expected to become > 0 [H] |
+| `admission.min_window_s` | duration_s | 43,200 | C7 | `DEM` accepted windows |
+| `admission.max_window_days` | days | 14 | 1..60; C7 | `DEM` |
+| `admission.max_job_cells` | int | 300 = floor(350 / 1.15) rounded down to a multiple of 100 | 1..100000 | `DEM`, then `P1M` |
+| `admission.max_concurrent_jobs_per_member` | int | 2 | 1..20 | `FND` |
+| `admission.waitlist_ttl_days` | days | 7 | 1..60 | `OPS` |
+| `admission.waitlist_max_per_member` | int | 1 | 0..10 | `OPS` |
+| `admission.deadline_multiplier_standard` | ratio | 1.0 (FD§4.8 fixed in Phase 1) | constant in Phase 1 | `CON` |
+| `reservation.max_horizon_days` | days | 30 | 1..180 | `P1M` |
+| `reservation.max_active_per_member` | int | 1 | 0..10 | `FND` |
+| `reservation.free_cancel_notice_s` | duration_s | 86,400 | 0..2592000 | `OPS` |
+| `reservation.capacity_share_cap` | ratio | 0.25 of the φ capacity of any day | 0..1 | `P1M` burstiness |
+| `grant.starter_credits` (G) | credits | 3 (FD§4.6 "a few cells") | 0..1000; C5 | `P1M` first-job completion, Reserve flow |
+| `grant.starter_lifetime_days` | days | 14 (FD§4.6 "expires quickly") | 1..365; C4 | `P1M` |
+| `grant.required_verified_cells` | int | 1 (FD§4.6) | 1..50 | `FND` |
+| `grant.max_per_device` | int | 1 (lifetime) | 0..10 | `OPS` farming flags |
+| `grant.max_per_invite_tree_per_day` | int | 2 | 0..100 | `OPS` |
+| `grant.max_per_day` | int | 20 | 0..10000 | `OPS` |
+| `grant.reserve_floor_credits` | credits | 0 (grants pause rather than overdraw; FD§4.6) | >= 0 | `FND` |
+| `grant.non_transferable` | bool | true | constant | `CON` |
+| `reserve.ceiling_credits` | credits | 1000 | >= grant.starter_credits; C5 | `P1M` grant demand and expiry inflow |
+| `reserve.retire_interval_s` | duration_s | 86,400 | 3600..604800 | `OPS` |
+| `reserve.retire_min_credits` | credits | 10 (avoids noise entries) | >= 0 | `OPS` |
+| `mint.monthly_cap_credits` | credits | 4800 = 40 donors x 8 cells/day x 30 days x (1 - 0.5) (FD§3.3 illustrative inputs); never above forecast redeemable capacity | >= 0 | `CAL` then `P1M` throughput |
+| `mint.cap_period` | enum | `utc_month` | constant | `CON` |
+| `mint.per_member_daily_cap_credits` | credits | 30 (three times the FD§3.2 habit of about 10 cells a day) | >= 1 | `P1M` |
+| `mint.requires_launch_gate` | bool | true | constant | `CON` |
+| `inflation.claim_ratio_threshold_weeks` | ratio | 6.0 (weeks of capacity) | > 0 | `FND`, `P1M` |
+| `inflation.mint_cap_cut_ratio` | ratio | 0.25 (cut applied when the threshold is passed) | 0 < x <= 1 | `FND` |
+| `inflation.mint_utilization_alarm` | ratio | 0.90 | 0..1 | `OPS` |
+| `inflation.throughput_window_days` | days | 28 | 7..90 | `P1M` |
+| `ledger.invariant_check_interval_s` | duration_s | 60 (sampled checks; the per-commit check is a constant) | 5..3600 | `OPS` |
+| `ledger.full_recompute_interval_s` | duration_s | 3600 | 60..86400 | `OPS` |
+| `ledger.checkpoint_interval_s` | duration_s | 86,400 | 3600..604800 | `OPS` |
+| `ledger.reversal_min_approvers` | int | 2 | constant | `CON` |
+| `ledger.allow_negative_balance` | bool | false | constant | `CON` |
+| `job.max_overrun_ratio` | ratio | 2.0 (a job stops with partial settlement at 2 x its quoted window) | >= 1 | `P1M` |
+| `job.max_upload_bytes` | int | 4,194,304 (300 cells x 4,000 chars x up to 3 bytes of UTF-8 is about 3.6 MB) | 1..104857600 | `TEC` |
+| `change.notice_days_default` | days | 7 (FD Principle 5) | 0..90 | `FND` |
+| `change.notice_days_price` | days | 14 (for `price.*`, `admission.*`, `credit.*`) | 0..90 | `FND` |
+| `change.tighten_publish_within_s` | duration_s | 86,400 (tightening is immediate, its public log entry follows within a day) | 0..604800 | `FND` |
