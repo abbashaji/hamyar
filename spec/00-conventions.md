@@ -151,3 +151,93 @@ If the verification pool is not a whole number of cells, `floor` applies and the
 | Low-entropy secrets | Not used. If a future feature needs one, use Argon2id with parameters held in configuration | |
 | IP addresses | Raw IPs are not stored; rate-limit counters use `HMAC-SHA-256(secret.ip_hash_key[version], ip)` with retention `retention.ip_hash_ttl_days` | Safety principle for members in Iran (FD Principle 8) |
 | Randomness | OS CSPRNG only | |
+
+## 0.7 Entities, ID prefixes and table naming
+
+**Naming rules** [D]
+
+- Entity names are `UpperCamelCase`, singular, exactly as below. Tables are `snake_case` plural of the entity name. Columns are singular `snake_case`.
+- Every table has `id` (text primary key, format 0.6.3), `created_at` (timestamptz) and, if mutable, `updated_at` and an integer `row_version` for optimistic concurrency. `LedgerEntry` and every other append-only table has no `updated_at` and no delete path.
+- Foreign keys are `<entity_snake>_id` (`member_id`, `template_version_id`). Timestamps end `_at`, durations `_s`, amounts `_ucr`, ratios `_ppm`, content hashes `_hash`, booleans start `is_` or `has_`, enums are text columns with a `CHECK` against the enum names in 0.8.
+- No soft-delete flag on ledger, registry, policy, parameter or change-log tables; corrections are new rows (`reversal`, new version).
+- No table stores a raw IP address, an e-mail address in clear text, a provider credential, a session of a provider, or the text of a volunteer's chat page (FD Principle 3 and 8). [D]
+
+**Retention classes** (the column below; S10.* sets the numbers as `retention.*` parameters) [A]
+
+| Class | Meaning |
+| --- | --- |
+| `permanent` | Never deleted. Contains no personal data by construction |
+| `member_bound` | Kept while the member is not `closed`; on closure the row is deleted or reduced to an opaque `mem_` id |
+| `job_bound` | Payload fields purged `retention.job_payload_days` after the job reaches a terminal state; hashes and manifests stay |
+| `moderation` | Kept `retention.moderation_days` after resolution, then reduced to counts |
+| `short` | Days (`retention.session_days`, `retention.ip_hash_ttl_days`) |
+| `ops` | Operational telemetry, `retention.ops_log_days` |
+
+**Entities named by the prompt (scope B)**
+
+| Entity | Table | Prefix | Retention | Role in one line |
+| --- | --- | --- | --- | --- |
+| `Member` | `members` | `mem_` | `member_bound` | Pseudonymous identity; holds `status` and `trust_tier` |
+| `Device` | `devices` | `dev_` | `short` | Keyed-hash device record for rate limits and linking; no fingerprinting beyond what S10.* lists |
+| `Invite` | `invites` | `inv_` | `member_bound` | Vouched invitation; edges form the invite tree |
+| `Template` | `templates` | `tpl_` | `permanent` | Stable identity of a reviewed prompt pattern; points at its active version |
+| `TemplateVersion` | `template_versions` | `tpv_` | `permanent` | Immutable once approved; carries review status |
+| `Job` | `jobs` | `job_` | `job_bound` | A requester's request, or a Commons job, split into cells |
+| `Cell` | `cells` | `cel_` | `job_bound` | One prompt-and-response unit inside the envelope; unit of credit |
+| `Lease` | `leases` | `lse_` | `job_bound` | Time-boxed hold of a cell by one member, bound to a nonce |
+| `Submission` | `submissions` | `sub_` | `job_bound` | One pasted-back result for one lease |
+| `VerificationRecord` | `verification_records` | `vrf_` | `job_bound` | Outcome of one verification method on one submission |
+| `GoldCell` | `gold_cells` | `gld_` | `permanent` | Known-answer cell in the hidden library; answers are access-restricted |
+| `Audit` | `audits` | `aud_` | `job_bound` | Sampled re-execution of a cell, comparator result, third execution |
+| `LedgerAccount` | `ledger_accounts` | `lac_` | `permanent` | One account of type `member`, `escrow`, `reserve`, `issuance` or `retired` |
+| `LedgerEntry` | `ledger_entries` | `lge_` | `permanent` | One balanced pair of legs, append-only, hash-chained |
+| `Escrow` | `escrows` | `esc_` | `permanent` | Per job or reservation hold; bound to one `escrow` account |
+| `Reserve` | `reserves` | `rsv_` | `permanent` | Singleton: the public Commons Reserve; bound to the `reserve` account; holds ceiling state |
+| `Policy` | `policies` | `pol_` | `permanent` | Named policy profile (FD§5.4 default profile) |
+| `PolicyVersion` | `policy_versions` | `plv_` | `permanent` | Immutable rule set plus allowlist; stamped on jobs at admission |
+| `ServiceRegistryEntry` | `service_registry_entries` | `svc_` | `permanent` | A service with review state, adapter capabilities and dated flags |
+| `TermsCopy` | `terms_copies` | `tcp_` | `permanent` | Saved copy of a service's terms: bytes, hash, source reference, capture date |
+| `FlagAnswer` | `flag_answers` | `fla_` | `permanent` | One dated yes / no / unknown answer for one flag of one entry |
+| `Report` | `reports` | `rpt_` | `moderation` | Abuse or content report from a volunteer or requester |
+| `Appeal` | `appeals` | `apl_` | `moderation` | Challenge to a rejection, ban or report outcome |
+| `Reservation` | `reservations` | `rsn_` | `job_bound` | Capacity booking for a future date with escrow at booking |
+| `Team` | `teams` | `tem_` | `member_bound` | Self-created opt-in group |
+| `Badge` | `badges` | `bdg_` | `permanent` | Badge definition (criteria in terms of verified cells only) |
+| `ChangeLogEntry` | `change_log_entries` | `chg_` | `permanent` | Public record of a parameter, policy, template or service change |
+| `LaunchGateItem` | `launch_gate_items` | `lgi_` | `permanent` | One checklist line of G0..G5 with evidence and sign-offs |
+
+**Entities added by this spec** [A] (each is required by something in the prompt; reported as convention additions)
+
+| Entity | Table | Prefix | Retention | Why it exists |
+| --- | --- | --- | --- | --- |
+| `MemberKey` | `member_keys` | `mky_` | `member_bound` | Public keys of a member; supports rotation and device linking (scope A) |
+| `Session` | `sessions` | `ses_` | `short` | Member or admin session (hash of token only) |
+| `AdminUser` | `admin_users` | `adm_` | `permanent` | Operator or Reviewer principal, separate from `Member` (scope A) |
+| `AdminCredential` | `admin_credentials` | `acr_` | `permanent` | Passkey credential of an `AdminUser` |
+| `AdminAction` | `admin_actions` | `act_` | `permanent` | Log of every operator and reviewer action. Named so it does not collide with the sampled `Audit` |
+| `Rule` | `rules` | `rul_` | `permanent` | One row per policy rule `R1`..`R10` inside a `PolicyVersion` (rules are data, scope D) |
+| `Parameter` | `parameters` | `prm_` | `permanent` | Definition of a configuration parameter (0.10) |
+| `ParameterVersion` | `parameter_versions` | `pmv_` | `permanent` | One immutable value with `effective_from` |
+| `KillSwitch` | `kill_switches` | `ksw_` | `permanent` | State history of each kill switch (scope F) |
+| `FeatureFlag` | `feature_flags` | `ffl_` | `permanent` | Feature flag including growth flags `V1`..`V6` |
+| `Upload` | `uploads` | `upl_` | `job_bound` | Requester data file before it is split into cells |
+| `Glossary` | `glossaries` | `gls_` | `job_bound` | Shared glossary for translation jobs |
+| `Deliverable` | `deliverables` | `dlv_` | `job_bound` | Assembled output of a job |
+| `Manifest` | `manifests` | `mfs_` | `job_bound` | Provenance manifest of a deliverable (FD§5.6) |
+| `OptIn` | `opt_ins` | `opt_` | `member_bound` | A volunteer's purpose, sensitivity, license, service and topic opt-ins |
+| `TopicCategory` | `topic_categories` | `top_` | `permanent` | Data-defined topic categories for opt-in (R8) |
+| `CreditLot` | `credit_lots` | `lot_` | `permanent` | A dated, expiring portion of a member's credit; enables oldest-first spending |
+| `LedgerTransaction` | `ledger_transactions` | `txn_` | `permanent` | Atomic group of entries with a `txn_kind` (0.8.8) |
+| `Experiment` | `experiments` | `exp_` | `permanent` | An arm configuration, including the accelerated-expiry arm |
+| `ExperimentAssignment` | `experiment_assignments` | `asg_` | `permanent` | Logged, randomized assignment (scope G) |
+| `PreRegistration` | `pre_registrations` | `prr_` | `permanent` | Thresholds and decision rules recorded before launch, then locked |
+| `Event` | `events` | `evt_` | `ops` | Analytics event without personal data |
+| `MetricSnapshot` | `metric_snapshots` | `mts_` | `permanent` | Aggregated published metric (v, η, claim ratio, ...) |
+| `CalibrationRecord` | `calibration_records` | `cal_` | `permanent` | Phase 0 calibration observation |
+| `Referral` | `referrals` | `ref_` | `member_bound` | Referral link and its two-sided bonus state |
+| `WaitlistEntry` | `waitlist_entries` | `wlt_` | `job_bound` | Admission waitlist position |
+| `BadgeAward` | `badge_awards` | `baw_` | `member_bound` | A badge held by a member |
+| `InvariantCheck` | `invariant_checks` | `ivc_` | `ops` | Result of one run of a ledger invariant |
+| `Alarm` | `alarms` | `alm_` | `ops` | A raised alarm and its acknowledgement |
+
+Every prefix above is unique and exactly three letters; `req_` (request ids) is the only other prefix in use. [D]
