@@ -134,7 +134,7 @@ If the verification pool is not a whole number of cells, `floor` applies and the
 - Format: `<prefix>_<ulid>`: a 3-letter lowercase prefix, an underscore, a 26-character ULID in lowercase Crockford base32. Regex: `^[a-z]{3}_[0-9a-hjkmnp-tv-z]{26}$`. Examples: `mem_01j9z6x4k7q2m8v5t3r1w0c9ab`, `job_...`, `cel_...`.
 - Generated server-side only, monotonic within a process; sortable by creation time; opaque to clients (never parsed for meaning). Prefixes are unique across the system (table in 0.7).
 - The time part of a ULID is not a secret; it adds nothing beyond `created_at`. Identifiers of other members are never shown: public surfaces and provenance use `vol_` handles (0.6.4), not `mem_` ids. [D]
-- Natural keys: `ParameterName` (0.10), `policy_rule_id` (`R1`..`R10`), `flag_key` (0.8.6), invariant ids. These are stable strings, not ULIDs.
+- Natural keys: `ParameterName` (0.10), `policy_rule_id` (`R1`..`R10`), `flag_key` (0.8.3), invariant ids. These are stable strings, not ULIDs.
 - `request_id` uses the prefix `req_` and is not an entity.
 
 ### 0.6.4 Hashing, randomness and token choices [D][A]
@@ -227,7 +227,7 @@ If the verification pool is not a whole number of cells, `floor` applies and the
 | `OptIn` | `opt_ins` | `opt_` | `member_bound` | A volunteer's purpose, sensitivity, license, service and topic opt-ins |
 | `TopicCategory` | `topic_categories` | `top_` | `permanent` | Data-defined topic categories for opt-in (R8) |
 | `CreditLot` | `credit_lots` | `lot_` | `permanent` | A dated, expiring portion of a member's credit; enables oldest-first spending |
-| `LedgerTransaction` | `ledger_transactions` | `txn_` | `permanent` | Atomic group of entries with a `txn_kind` (0.8.8) |
+| `LedgerTransaction` | `ledger_transactions` | `txn_` | `permanent` | Atomic group of entries with a `txn_kind` (0.8.5) |
 | `Experiment` | `experiments` | `exp_` | `permanent` | An arm configuration, including the accelerated-expiry arm |
 | `ExperimentAssignment` | `experiment_assignments` | `asg_` | `permanent` | Logged, randomized assignment (scope G) |
 | `PreRegistration` | `pre_registrations` | `prr_` | `permanent` | Thresholds and decision rules recorded before launch, then locked |
@@ -362,3 +362,88 @@ Reject reason codes shown to requesters: `policy.<policy_rule_id>.<slug>` (for e
 | `member_status` | `active`, `suspended`, `banned`, `closed` (orthogonal to `trust_tier`, 0.9.4) |
 | `change_class` (R10) | `tighten`, `loosen`, `neutral` |
 | `locale` / `digits` / `calendar` | `fa`, `en` / `latin`, `persian` / `jalali`, `gregorian` |
+
+## 0.9 State machines: state names and event names
+
+This section fixes names only. Guards, side effects, concurrency and the ledger postings belong to S5.*, S6.*, S7.*, S8.*, S9.* (the owning part is named per machine). [D]
+
+### 0.9.1 Naming rules [D]
+
+- States are `snake_case` adjectives or past participles, scoped to their machine (two machines may both have `expired` or `cancelled`; a state is always written with its machine, for example `Cell.expired`). `(T)` marks a terminal state.
+- Events are `<entity>.<past_participle>` in lowercase, for example `cell.lease_expired`. Every state change emits exactly one event with the name shown on the transition; the event is stored in the outbox in the same database transaction (S4.*), logged under the same name (0.5) and carries `event_version`, `occurred_at`, `actor` (`principal_type` plus opaque id) and the policy and parameter versions in force.
+- An event that is rejected by a guard changes nothing and is not emitted; the rejection is an API error (0.11.3), not an event.
+- Transition notation: `from --event--> to`; `*` means any non-terminal state.
+
+### 0.9.2 Job (owner S5.*, S6.*)
+
+States: `draft`, `screening`, `rejected` (T), `quoted`, `quote_expired` (T), `waitlisted`, `admitted`, `running`, `suspended`, `assembling`, `settling`, `completed` (T), `cancelling`, `cancelled` (T), `failed` (T).
+
+```
+(none)       --job.created-->              draft
+draft        --job.submitted-->            screening      wizard complete: template, data, declarations
+screening    --job.policy_rejected-->      rejected       reasons use policy.<rule>.<slug>
+screening    --job.policy_passed-->        quoted         policy version stamped; price and window quoted
+quoted       --job.quote_expired-->        quote_expired
+quoted       --job.waitlisted-->           waitlisted     capacity cannot honor the window now
+waitlisted   --job.waitlist_released-->    quoted         re-quoted
+waitlisted   --job.waitlist_expired-->     cancelled
+quoted       --job.escrow_confirmed-->     admitted       escrow_hold posted; cells created and queued
+admitted     --job.started-->              running        first cell leased
+admitted|running --job.paused-->           suspended      kill switch, template or service pause, policy tightening
+suspended    --job.resumed-->              admitted|running (the state it left)
+running      --job.all_cells_accepted-->   assembling
+assembling   --job.assembled-->            settling
+admitted|running|suspended --job.stop_requested--> settling   closure_reason: policy_stopped, service_revoked, template_retired, operator_killed, overrun_timeout
+settling     --job.settled-->              completed      all primary cells accepted
+settling     --job.settled_partial-->      failed         not all accepted; refunds and payouts posted
+admitted|running|suspended --job.cancel_requested--> cancelling
+waitlisted|draft|quoted --job.cancel_requested--> cancelled
+cancelling   --job.cancel_settled-->       cancelled      unstarted cells refunded, in-flight cells drained
+```
+
+### 0.9.3 Cell, Lease, Submission (owner S5.*, S8.*, S9.*)
+
+Cell states (extends FD§3.4): `queued`, `leased`, `submitted`, `flagged_for_audit`, `accepted` (T), `rejected`, `expired`, `suspended`, `cancelled` (T), `voided` (T), `exhausted` (T), `overturned` (T). `rejected` and `expired` are attempt outcomes that requeue at once (FD§3.4), so a cell is only briefly in them. A `Cell` row persists across attempts and carries `attempt` (starts at 1, limit `cell.max_attempts`).
+
+```
+(none)            --cell.created-->            queued
+queued            --cell.leased-->             leased          creates a Lease
+leased            --cell.submitted-->          submitted       paste-back received
+leased            --cell.lease_expired-->      expired
+leased            --cell.declined-->           queued          decline or release, no penalty (FD§5.5)
+submitted         --cell.checks_passed-->      accepted        not selected for audit
+submitted         --cell.flagged_for_audit-->  flagged_for_audit   sampled, anomalous, or blanket-redundancy pending
+submitted         --cell.checks_failed-->      rejected
+flagged_for_audit --cell.audit_passed-->       accepted
+flagged_for_audit --cell.audit_failed-->       rejected
+rejected|expired  --cell.requeued-->           queued          attempt + 1
+rejected|expired  --cell.attempts_exhausted--> exhausted
+queued|leased     --cell.paused-->             suspended       a leased cell's lease is revoked first
+suspended         --cell.resumed-->            queued
+*                 --cell.cancelled-->          cancelled       job cancelled; lease revoked
+*                 --cell.voided-->             voided          service revoked, policy stop, integrity finding
+accepted          --cell.overturned-->         overturned      appeal or fraud finding; ledger reversal; a rework cell is created
+```
+
+Lease states: `active`, `submitted`, `expired`, `released`, `revoked`. Events: `lease.issued` (none -> `active`), `lease.submission_received` (`active` -> `submitted`), `lease.expired` (`active` -> `expired`), `lease.released` (`active` -> `released`), `lease.revoked` (`active` -> `revoked`).
+
+Submission states: `received`, `schema_failed` (T), `checks_failed` (T), `checks_passed`, `quarantined`, `accepted` (T), `rejected` (T). Events: `submission.received`, `submission.schema_failed`, `submission.checks_passed`, `submission.checks_failed`, `submission.quarantined` (output with links, code to run or requests for action; withheld from results, FD§5.5), `submission.accepted`, `submission.rejected`, `submission.released_from_quarantine`. A replayed submission with the same lease and nonce returns the stored outcome and emits nothing.
+
+### 0.9.4 Member trust tier and status (owner S10.*, S8.*)
+
+Trust tier states: `new`, `established`, `trusted`, `restricted`. Status (separate column, 0.8.6): `active`, `suspended`, `banned`, `closed`. Tier changes follow the parameters `trust.*` (0.10).
+
+```
+(none)       --member.created-->           new            (status active)
+new          --member.tier_promoted-->     established
+established  --member.tier_promoted-->     trusted
+trusted      --member.tier_demoted-->      established
+established  --member.tier_demoted-->      new
+new|established|trusted --member.restricted--> restricted   anomaly or gold failures; sampling rises, caps fall
+restricted   --member.restriction_lifted-->  the tier recorded as tier_before_restriction
+status: active --member.suspended--> suspended --member.reinstated--> active
+status: active|suspended --member.banned--> banned   (appealable)
+status: active|suspended --member.closed--> closed   (member-initiated or inactivity)
+```
+
+Other member events: `member.key_rotated`, `member.device_linked`, `member.recovered`, `member.optin_changed`.
