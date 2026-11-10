@@ -241,3 +241,124 @@ If the verification pool is not a whole number of cells, `floor` applies and the
 | `Alarm` | `alarms` | `alm_` | `ops` | A raised alarm and its acknowledgement |
 
 Every prefix above is unique and exactly three letters; `req_` (request ids) is the only other prefix in use. [D]
+
+## 0.8 Enumerations
+
+Stored values are exactly the values in the first column, case-sensitive. A new value requires a convention edit (0.1). [D]
+
+### 0.8.1 Purpose, license, sensitivity, service requirement (FD§5.3)
+
+| Enum | Value | Meaning | Status in Phases 1-2 (FD§5.3) |
+| --- | --- | --- | --- |
+| `purpose` | `P0` | Personal, study or internal non-commercial use; output stays with the requester | allowed, default |
+| `purpose` | `P1` | Open publication under an open license; includes all Commons jobs | allowed, default |
+| `purpose` | `P2` | Commercial or professional use of outputs, no training | locked; unlocks per service after its terms are verified [V] |
+| `purpose` | `P3` | Training, fine-tuning, distillation or benchmark creation | locked; `M2` or a service whose `training_use_of_output` is `yes`; `S0` only |
+| `license` | `L0` | Requester only, no publication; volunteers waive claims | pairs with `P0` |
+| `license` | `L1` | Public-domain dedication (for example CC0) | pairs with `P1` |
+| `license` | `L2` | Open license with attribution (for example CC BY) | pairs with `P1` |
+| `license` | `L3` | Requester-defined commercial terms | pairs with `P2` only |
+| `sensitivity` | `S0` | Public, public-domain, openly licensed, or written for publication | accepted |
+| `sensitivity` | `S1` | Private but non-sensitive; no personal data of identifiable people; the requester accepts that a stranger reads it | accepted |
+| `sensitivity` | `S2` | Personal data of others, confidential business material, unpublished third-party work | rejected |
+| `sensitivity` | `S3` | Special-category or dangerous (health, privileged, minors, credentials, financial identifiers, anything that could identify or endanger a person) | never accepted |
+| `service_requirement` | `M0` | Any approved general chat service; the volunteer chooses; the service is recorded | default |
+| `service_requirement` | `M1` | Pinned approved service(s) named by the requester | allowed |
+| `service_requirement` | `M2` | Open-weight model with a checked license (hosted or local) | required for `P3` unless a service permits training use in writing [V] |
+
+The allowlist of permitted combinations is data in `PolicyVersion` (S7.*); this table only names the axes. Output pairing of `L*` with `P*` is the starting allowlist, not a separate rule. [D]
+
+### 0.8.2 Roles and principals [D]
+
+| Enum | Value | Notes |
+| --- | --- | --- |
+| `role` | `donor`, `requester`, `reviewer`, `operator` | FD§3.1. One person may hold several |
+| `principal_type` | `anonymous`, `member`, `admin`, `system` | `member` holds `donor` and `requester` capabilities (no separate accounts); `admin` is an `AdminUser` holding `reviewer` and/or `operator`; `system` is a background job |
+| `auth_scheme` | `none`, `member`, `admin` | 0.11.4. A token of one scheme is never valid on endpoints of another |
+
+Executing human-review cells (FD§6.4 channel 2) is a member activity on `cell_kind` = `review`, not the `reviewer` role; the `reviewer` role is the admin-side role for templates, services, policy, appeals and audits [A]. The permission matrix is S10.*. Permission names: `perm.<area>.<action>`.
+
+### 0.8.3 Flag answers and Service Registry flag keys [D]
+
+`flag_answer` = `yes` | `no` | `unknown`. **`unknown` is evaluated as `no` everywhere** (FD§5.3). Every gating flag is phrased as a permission, so `yes` always means the terms permit it and `unknown`-as-`no` is always the safe direction (`ISS-02`). A `FlagAnswer` is dated, carries the reviewer, an optional `region` (ISO 3166-1 alpha-2) and points at the `TermsCopy` it was read from.
+
+| `flag_key` | Kind | `yes` means the saved terms permit... | FD source |
+| --- | --- | --- | --- |
+| `third_party_task_use` | gate | using a personal or free account to perform tasks for other people | FD§8.3 G0(a) |
+| `access_pooling_or_crediting` | gate | pooling, sharing or crediting of access | G0(b) |
+| `human_copy_paste_use` | gate | a human copying a prompt, pressing Send and copying the answer out | G0(c) |
+| `prefilled_link_use` | gate | opening the service with a prefilled prompt from a link | G0(c) |
+| `regional_availability` | gate | use by people in the stated `region` (recorded per region) | G0(d) |
+| `commercial_use_of_output` | gate | commercial use of outputs on the free tier (`R5`) | G0(e) |
+| `training_use_of_output` | gate | using outputs to train or develop other models (`R6`) | G0(f) |
+| `open_publication_of_output` | gate | publishing outputs openly (`R7`) | G0(g) |
+| `prohibited_content_compatible` | gate | the service's usage policy is compatible with the content Hamyar accepts (FD§5.4 R3) | G0(i) |
+| `info.provider_trains_on_chats` | info | (`yes` = it does; informs volunteer advice, never gates) | G0(h) |
+| `info.memory_or_connectors_risk` | info | (`yes` = account memory or connectors could leak content) | G0(h) |
+| `info.allowance_may_change` | info | (`yes` = the free allowance may change without notice) | G0(j) |
+| `info.written_permission` | info | (`yes` = written permission for this use was obtained) | G0(k) |
+
+A service reaches `approved` only if `third_party_task_use` and `prohibited_content_compatible` are `yes` with a saved `TermsCopy` (FD§5.3); further per-purpose conditions are rules `R5`..`R7`. [D]
+
+**Adapter capability fields** of `ServiceRegistryEntry` (no provider is hardcoded; every value is entered by a reviewer [V]): `adapter.supports_prefill` (bool), `adapter.prefill_url_template` (string with `{prompt}` placeholder), `adapter.max_url_chars` (int), `adapter.copy_only` (bool; true when prefill is not supported or `prefilled_link_use` is not `yes`), `adapter.clean_chat_hint_key` (copy key).
+
+### 0.8.4 Policy rules and reason codes [D]
+
+| `policy_rule_id` | Slug | FD§5.4 meaning |
+| --- | --- | --- |
+| `R1` | `metadata_missing_or_inconsistent` | Missing or inconsistent declarations |
+| `R2` | `sensitivity_not_accepted` | `S2` or `S3` |
+| `R3` | `prohibited_content` | Prohibited content, or a task asking more than copy, Send, return text |
+| `R4` | `template_required` | Prompts only from reviewed templates |
+| `R5` | `commercial_needs_flag` | `P2` needs `commercial_use_of_output` = `yes` |
+| `R6` | `training_needs_m2_or_flag` | `P3` needs `M2` or `training_use_of_output` = `yes`; `S0` only |
+| `R7` | `license_exceeds_service_flags` | License may not exceed the service flags |
+| `R8` | `volunteer_optin_mismatch` | Cell shown only to volunteers whose opt-ins cover it |
+| `R9` | `policy_version_stale` | Policy stamped at admission, re-checked at acceptance |
+| `R10` | `loosen_without_changelog` | Tighten at once; loosen only with a public change-log entry |
+
+Reject reason codes shown to requesters: `policy.<policy_rule_id>.<slug>` (for example `policy.R2.sensitivity_not_accepted`). Cell rejection reasons shown to volunteers (seed list, S8.* and S9.* may extend through a convention gap): `reject.schema_invalid`, `reject.refusal_pattern`, `reject.length_out_of_bounds`, `reject.language_mismatch`, `reject.test_failed`, `reject.gold_mismatch`, `reject.audit_mismatch`, `reject.duplicate_of_other_output`, `reject.timing_anomaly`, `reject.forbidden_content`, `reject.nonce_invalid`, `reject.lease_expired`, `reject.size_exceeded`, `reject.policy_changed`.
+
+### 0.8.5 Ledger enums [D]
+
+**`ledger_account_type`**
+
+| Type | Count | Constraint | Meaning |
+| --- | --- | --- | --- |
+| `member` | one per `Member` | balance >= 0 | Holds `CreditLot`s |
+| `escrow` | one per `Escrow` | balance >= 0; zero when closed | Held credit of a job or reservation |
+| `reserve` | one (the `Reserve`) | balance >= 0 | Commons Reserve |
+| `issuance` | one | balance <= 0; equals minus cumulative mint | Source of minted credit |
+| `retired` | one | balance >= 0; equals cumulative retired | Sink of retired credit |
+
+**`ledger_entry_type`** (one entry = one balanced pair `debit_account -> credit_account`, amount > 0 ucr)
+
+| Type | From -> To | Lot effect | Meaning |
+| --- | --- | --- | --- |
+| `mint` | `issuance` -> `member` | creates a lot | Accepted Commons cell (FD§4.2) |
+| `grant` | `reserve` -> `member` | creates a lot with `grant.starter_lifetime_days` (starter) or `credit.lifetime_days` (referral) | Starter grant and referral bonus (`ISS-06`) |
+| `escrow_hold` | `member` -> `escrow` | consumes lots oldest-first | Job admission or reservation booking |
+| `transfer` | `escrow` -> `member` | creates a lot | Donor earns 1 credit for one accepted cell of a member job, paid at acceptance (`ISS-09`) |
+| `escrow_release` | `escrow` -> `escrow` | none | Reservation escrow moves into the activated job's escrow |
+| `levy` | `escrow` -> `reserve` | none | λ share of a job, paid at settlement |
+| `refund` | `escrow` -> `member` | restores consumed lots with their original expiry (`ISS-07`) | Unspent escrow after settlement or cancel |
+| `expire` | `member` -> `reserve` | consumes the expired lot | Expired credit to the Reserve (FD§4.5) |
+| `retire` | `reserve` -> `retired` | none | Reserve excess above its ceiling leaves existence (FD§4.2) |
+| `reserve_donation` | `member` -> `reserve` | consumes lots oldest-first | A member (a founder) voluntarily funds the Reserve (`ISS-08`) |
+| `reversal` | the mirror of the original entry | mirrors | Correction of an earlier entry; two-operator approval; the original is never edited |
+
+**`ledger_txn_kind`** (an atomic group of entries with one `LedgerTransaction`): `mint`, `grant`, `hold`, `payout`, `settle`, `cancel`, `reservation_activate`, `expire`, `retire`, `reserve_donation`, `reversal`. `settle` closes a job: its entries are `levy`, `refund` and any final `transfer`, and it leaves the escrow account at exactly zero. `payout` groups the `transfer` for one accepted cell. [D]
+
+### 0.8.6 Cell, verification and job-type enums [D]
+
+| Enum | Values |
+| --- | --- |
+| `cell_kind` | `primary`, `gold`, `audit`, `third`, `review`, `rework` (`rework` is defined in `ISS-05`) |
+| `verification_method` | `auto_check`, `gold`, `audit_second`, `audit_third`, `human_review`, `blanket_redundancy` |
+| `verification_outcome` | `pending`, `pass`, `fail`, `inconclusive` |
+| `job_type` (initial templates, FD§2 and prompt E; extensible as data) | `translation_glossary`, `classify_extract`, `summarize_schema`, `code_change_tests`, `format_convert_validator`, `human_review` |
+| `size_class` | `standard` (the only value in Phases 1-2) |
+| `deadline_class` | `standard` (multiplier fixed at 1.0 in Phase 1, FD§4.8) |
+| `member_status` | `active`, `suspended`, `banned`, `closed` (orthogonal to `trust_tier`, 0.9.4) |
+| `change_class` (R10) | `tighten`, `loosen`, `neutral` |
+| `locale` / `digits` / `calendar` | `fa`, `en` / `latin`, `persian` / `jalali`, `gregorian` |
