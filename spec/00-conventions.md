@@ -80,3 +80,74 @@ C-001 consolidates all tables into S2.* (grouped by severity, each with the part
 | Log events | `<area>.<event>` lowercase dotted, same names as domain events (0.9) | S4.* | `cell.leased` |
 | Experiments | `EXP-<nn>`; growth mechanics keep `V1`..`V6` (FD§6.2) | S12.*, S13.* | `EXP-02` |
 | Measurements that replace defaults | codes in 0.10 (`CAL`, `P1M`, `DEM`, `FND`, `CNS`, `SEC`, `TEC`, `OPS`, `CON`) | S16.* | `CAL` |
+
+## 0.6 Technical decisions: numbers, time, IDs, hashing
+
+### 0.6.1 Ledger numeric type [D]
+
+**Decision: integer micro-credits.** One credit = 1,000,000 micro-credits (`ucr`).
+
+| Item | Decision |
+| --- | --- |
+| Unit and scale | `ucr`; constant `credit.scale_ucr_per_credit` = 1,000,000, immutable (changing it is a data migration, never a configuration edit) |
+| Database | signed 64-bit integer, column suffix `_ucr`; never float or decimal |
+| JSON | amounts are base-10 integer strings (`"276000000"`) because JavaScript numbers are exact only to 2^53; field suffix `_ucr` |
+| Ratios | v, λ, η, φ, g, s and every `ratio` parameter are fixed-point integers in ppm (1.0 = 1,000,000); decimals appear only at the display edge |
+| Per-cell price | `p_ucr = 1,000,000 + v_ppm + lambda_ppm`. It equals p expressed in ppm because the credit scale equals the ppm scale; this identity is the reason for scale 10^6 [A] |
+| Job escrow | `escrow_ucr = N * p_ucr` for N primary cells: integer times integer, no rounding |
+| Components | primary pay `N * 1,000,000`; verification pool `N * v_ppm`; levy `N * lambda_ppm`; their sum is `escrow_ucr` exactly |
+| Rounding | only where a ratio is measured: `v_ppm = ceil(10^6 * verification_cells / accepted_primary_cells)` (rounded up so the pool is never under-funded); `eta_ppm = floor(10^12 / p_ucr)`. Displayed balances round down, displayed prices round up |
+| Donor earn | exactly 1,000,000 ucr per accepted cell of any kind (FD§4.3) |
+| Whole-credit parameters | stored in ucr (a grant of 3 credits is 3,000,000) |
+| Range | int64 holds about 9.2 x 10^12 credits; every invariant check uses exact integer equality with zero tolerance |
+
+*Why not integer credits:* p = 1.15 forces job-level rounding (N = 10 gives 11.5 credits); rounding creates a systematic transfer between requester, donors and Reserve and makes the FD§4.2 identities approximate. *Why not decimals or floats:* not exact. *Why not a finer unit:* six decimal places of p are enough and keep every product inside int64 [A].
+
+**Reproduction of the FD§3.3 example** (becomes `AC-ledger-01` and `T-unit-01`; inputs are the FD's illustrative values, not measurements):
+
+| Step | Computation (integers) | Result |
+| --- | --- | --- |
+| Inputs | v_ppm = 100,000; lambda_ppm = 50,000; N = 240; Sara holds 300 credits | |
+| Price per cell | 1,000,000 + 100,000 + 50,000 | 1,150,000 ucr = 1.15 |
+| Escrow | 240 x 1,150,000 | 276,000,000 ucr = 276 credits; Sara keeps 24 |
+| Verification pool | 240 x 100,000 = 24,000,000 ucr; `floor(pool / 10^6)` | 24 verification and rework cells |
+| Levy | 240 x 50,000 | 12,000,000 ucr = 12 credits |
+| Donor payout | (240 + 24) cells x 1,000,000 | 264,000,000 ucr = 264 credits |
+| Closing identity | 264,000,000 + 12,000,000 | 276,000,000 = escrow; refund 0 |
+| Round-trip efficiency | `floor(10^12 / 1,150,000)` | 869,565 ppm, displayed 0.870 (FD: about 0.87) |
+| Admission | capacity = `floor(40 x 8 x 2 x 500,000 / 10^6)` = 320 cells; committed = 240 + 24 = 264 | 264 <= 320, admitted with a 2-day quote |
+| Time value | 240 cells / 8 per day | 30 days for one account versus a 2-day window |
+
+If the verification pool is not a whole number of cells, `floor` applies and the remainder stays in escrow and is refunded at settlement (S6.* owns the full rule; see `ISS-04`).
+
+### 0.6.2 Time handling [D]
+
+- **Storage:** UTC `timestamptz` only; no local time is stored. API: RFC 3339 with `Z` (`2026-11-11T09:30:00Z`). Durations are integer seconds (suffix `_s`); `_days` parameters mean exactly 86,400 s each, with no calendar arithmetic.
+- **Day and month boundaries** for rate limits, the monthly mint cap and daily jobs are UTC calendar boundaries [A]; screens show the local-time equivalent next to any cap or reset.
+- **Authority:** server time only. Client clocks are never trusted; `expires_at` of leases, nonces, quotes and lots is computed and stored server-side. Ledger order is the per-ledger sequence number `seq`, never a timestamp.
+- **Lot expiry:** `expires_at = earned_at + credit.lifetime_days * 86,400 s`, evaluated with the parameter version in force at `earned_at` (changes are prospective only, FD Principle 5).
+- **Display:** converted on the client. Locale `fa` defaults to the Jalali (Solar Hijri) calendar and Persian numerals as a user option; locale `en` defaults to Gregorian; detail views show both calendars (FD§10). Conversion uses the platform calendar support where present [V: support on the target phones] with a bundled arithmetic fallback. The server never stores, accepts or emits Jalali strings; exports use Gregorian ISO dates.
+- **Time zone:** the device zone by default, overridable by an IANA zone chosen in settings, never inferred from an IP address (privacy). Offset and daylight-saving rules for any country come from the tz database and are not hardcoded [V].
+
+### 0.6.3 Identifiers [D]
+
+- Format: `<prefix>_<ulid>`: a 3-letter lowercase prefix, an underscore, a 26-character ULID in lowercase Crockford base32. Regex: `^[a-z]{3}_[0-9a-hjkmnp-tv-z]{26}$`. Examples: `mem_01j9z6x4k7q2m8v5t3r1w0c9ab`, `job_...`, `cel_...`.
+- Generated server-side only, monotonic within a process; sortable by creation time; opaque to clients (never parsed for meaning). Prefixes are unique across the system (table in 0.7).
+- The time part of a ULID is not a secret; it adds nothing beyond `created_at`. Identifiers of other members are never shown: public surfaces and provenance use `vol_` handles (0.6.4), not `mem_` ids. [D]
+- Natural keys: `ParameterName` (0.10), `policy_rule_id` (`R1`..`R10`), `flag_key` (0.8.6), invariant ids. These are stable strings, not ULIDs.
+- `request_id` uses the prefix `req_` and is not an entity.
+
+### 0.6.4 Hashing, randomness and token choices [D][A]
+
+| Purpose | Choice | Notes |
+| --- | --- | --- |
+| Content hash (inputs, outputs, terms copies) | SHA-256 over the raw bytes, lowercase hex, written `sha256:<hex>` | Terms copies are stored as bytes plus hash |
+| Structured-data hash (manifests, request bodies) | SHA-256 over RFC 8785 canonical JSON | One canonicalizer for the whole system |
+| Ledger tamper evidence | `entry_hash = SHA-256(prev_hash \|\| canonical(entry))` per ledger, with a daily published checkpoint hash | Detects edits; does not replace access control (S6.*, S10.*) |
+| Provenance volunteer handle | `vol_<32 hex>` = first 128 bits of `HMAC-SHA-256(key = secret.volunteer_handle_key[version], data = member_id)` | Requesters never see it; rotating the key unlinks old handles by design |
+| Session and lease tokens, nonces | 256-bit CSPRNG values, stored only as SHA-256 hashes; lease nonce 128 bits (`lease.nonce_bytes` = 16) | High-entropy secrets need no slow hash |
+| Member authentication | Public-key keypair generated on the device; server stores public keys (`MemberKey`); signature scheme Ed25519 [A] | Detailed in S10.*; there are no passwords |
+| Admin authentication | WebAuthn passkeys per `AdminUser`; no shared password, separate origin and session store [A] | Detailed in S10.* |
+| Low-entropy secrets | Not used. If a future feature needs one, use Argon2id with parameters held in configuration | |
+| IP addresses | Raw IPs are not stored; rate-limit counters use `HMAC-SHA-256(secret.ip_hash_key[version], ip)` with retention `retention.ip_hash_ttl_days` | Safety principle for members in Iran (FD Principle 8) |
+| Randomness | OS CSPRNG only | |
