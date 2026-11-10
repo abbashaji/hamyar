@@ -447,3 +447,123 @@ status: active|suspended --member.closed--> closed   (member-initiated or inacti
 ```
 
 Other member events: `member.key_rotated`, `member.device_linked`, `member.recovered`, `member.optin_changed`.
+
+### 0.9.5 Template review (owner S8.*)
+
+Applies to `TemplateVersion.review_status`. States: `draft`, `in_review`, `awaiting_second_review`, `changes_requested`, `approved`, `rejected` (T), `paused`, `retired` (T). A new `Template` needs `template.min_reviewers_new` approvals from distinct reviewers who are not the author (second-reviewer rule, FD§5.7 failure mode 10); a new version of an approved template needs `template.min_reviewers_edit`.
+
+```
+(none)                  --template.version_created-->     draft
+draft|changes_requested --template.review_requested-->    in_review
+in_review               --template.first_approved-->      awaiting_second_review   (or approved when only one approval is required)
+awaiting_second_review  --template.second_approved-->     approved
+in_review|awaiting_second_review --template.changes_requested--> changes_requested
+in_review|awaiting_second_review --template.rejected-->  rejected
+approved                --template.paused-->              paused         kill switch (0.11 of S14.*)
+paused                  --template.resumed-->             approved
+approved|paused         --template.retired-->             retired        includes superseded by a newer version
+```
+
+### 0.9.6 Service review (owner S7.*)
+
+States: `unreviewed` (initial for every service; counts as no), `in_review`, `approved`, `review_due`, `rejected`, `suspended`, `revoked`. Only `approved` allows new jobs. `review_due` blocks new jobs at once and lets in-flight cells continue for `service.review_grace_days`.
+
+```
+(none)       --service.created-->         unreviewed
+unreviewed|rejected|review_due|revoked --service.review_started--> in_review
+in_review    --service.approved-->        approved       guard: gate flags yes, TermsCopy saved, reviewer recorded
+in_review    --service.rejected-->        rejected
+approved     --service.review_due-->      review_due     timer: service.review_max_age_days
+review_due   --service.review_lapsed-->   suspended      timer: service.review_grace_days
+approved|review_due --service.suspended--> suspended     kill switch
+suspended    --service.resumed-->         approved       only when the cause was a kill switch
+approved|review_due|suspended --service.revoked--> revoked   in-flight cells handled per S7.*
+```
+
+### 0.9.7 Appeal (owner S10.*, S8.*)
+
+`appeal_kind`: `cell_rejection`, `member_suspension`, `member_ban`, `job_rejection`, `template_rejection`, `report_outcome`. States: `filed`, `assigned`, `in_review`, `awaiting_second_review`, `upheld` (T), `overturned` (T), `withdrawn` (T). Filing is allowed only within `appeal.window_days` of the decision; a late filing is an API error, not a state.
+
+```
+(none)       --appeal.filed-->                    filed
+filed        --appeal.assigned-->                 assigned       reviewer must not be the original decider
+assigned     --appeal.review_started-->           in_review
+assigned     --appeal.reassigned-->               assigned       conflict of interest
+in_review    --appeal.second_review_requested--> awaiting_second_review   bans and template rejections
+in_review|awaiting_second_review --appeal.upheld-->      upheld
+in_review|awaiting_second_review --appeal.overturned-->  overturned
+filed|assigned|in_review --appeal.withdrawn-->    withdrawn
+```
+
+### 0.9.8 Smaller machines [D]
+
+| Machine | States | Events |
+| --- | --- | --- |
+| `Audit` (S8.*) | `pending`, `second_executed`, `matched` (T), `mismatched`, `third_pending`, `resolved` (T), `cancelled` (T) | `audit.created`, `audit.second_submitted`, `audit.matched`, `audit.mismatched`, `audit.third_requested`, `audit.third_submitted`, `audit.resolved`, `audit.cancelled` |
+| `Escrow` (S6.*) | `open`, `settling`, `closed` (T) | `escrow.opened`, `escrow.settling_started`, `escrow.closed` |
+| `Reservation` (S6.*) | `held`, `activated` (T), `cancelled` (T), `expired` (T) | `reservation.held`, `reservation.activated`, `reservation.cancelled`, `reservation.expired` |
+| `Report` (S10.*) | `open`, `triaged`, `actioned` (T), `dismissed` (T) | `report.filed`, `report.triaged`, `report.actioned`, `report.dismissed` |
+| `LaunchGateItem` (S14.*) | `open`, `evidence_attached`, `signed_off`, `reopened` | `gate.evidence_attached`, `gate.signed_off`, `gate.reopened` |
+| Kill switch (S14.*) | `released`, `engaged` | `killswitch.engaged`, `killswitch.released` |
+| Ledger and configuration events | not machines | `ledger.entry_committed`, `ledger.invariants_passed`, `ledger.invariant_violated`, `parameter.changed`, `policy.version_published`, `changelog.entry_published`, `launch.members_may_join_changed` |
+
+## 0.10 Configuration parameters
+
+### 0.10.1 Naming scheme [D]
+
+- A parameter name is `area.name` or `area.group.name`, lowercase `snake_case` segments: regex `^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*){1,2}$`. The name is the primary key and never changes; a rename is a new parameter plus retirement of the old one.
+- Unit suffixes: `_s` seconds, `_days` days (86,400 s), `_chars`, `_bytes`, `_credits` (whole credits, stored as ucr), `_per_day`, `_per_hour`, `_rpm`. A ratio has no suffix (the type says so) unless the FD symbol is part of the name.
+- FD symbols map to names exactly: E -> `credit.lifetime_days`; K -> `credit.member_cap_credits`; v -> measured, published as `MetricSnapshot` (prior `price.v_prior`); λ -> `price.levy_lambda`; g -> `verify.gold_rate_g`; s -> `verify.audit_rate_s`; φ -> `admission.phi`; G -> `grant.starter_credits`; mint cap -> `mint.monthly_cap_credits`; lease timeout -> `lease.timeout_s`; cell envelope -> `cell.envelope.*`.
+- Not parameters: feature flags `ff.<area>.<name>` (entity `FeatureFlag`, default off), kill switches `kill.<scope>` (entity `KillSwitch`), and secrets `secret.<name>` (named in S10.*, never stored in the parameter table, never exposed by an API).
+
+### 0.10.2 Types [D]
+
+`int`; `ratio` (integer ppm, 0.6.1; written as a decimal in this table for readability); `credits` (whole credits stored as ucr); `duration_s`; `days`; `bool`; `enum`; `string`; `json`. Constants (`mutable` = false, measurement code `CON`) cannot be edited by the parameter editor.
+
+### 0.10.3 Parameter record [D]
+
+| Field | Type | Rule |
+| --- | --- | --- |
+| `name` | text | Primary key, 0.10.1 |
+| `type`, `unit` | enum, text | 0.10.2 |
+| `validation` | json | `min`, `max`, `enum`, `exclusive_bounds`, and named cross-parameter constraints (below); evaluated on write; a violation is `VALIDATION_FAILED` |
+| `default` | per type | The `initial configurable default`; never edited after publication |
+| `value`, `version` | per type, int | Current value; `version` increases by 1 per accepted change; every version is an immutable `ParameterVersion` |
+| `effective_from` | timestamptz | Changes are prospective: `effective_from >= now + notice_days` unless `change_class` = `tighten` (R10: tighten at once) |
+| `tighten_direction` | enum `up`, `down`, `none` | Which direction of change counts as tightening (for example `verify.audit_rate_s` is `up`, `admission.phi` is `down`) |
+| `notice_days` | int | Advance notice for `loosen` and `neutral` changes; default `change.notice_days_default` |
+| `owner` | enum | `operator`, `reviewer` or `founders` (area table 0.10.5); only the owner role may edit; a `loosen` change also needs a second `operator` approval [A] |
+| `calibration_source` | enum | Measurement code from 0.10.4 plus a free-text pointer to the replacing measurement |
+| `public` | bool | Published on the parameter page and change log (default true except `security.*`) |
+| `introduced_in` | text | `S<n>.<m>` of the part that defined it |
+
+Every accepted change writes one `ParameterVersion`, one `ChangeLogEntry` (public when `public`), one `AdminAction` and the event `parameter.changed`. Mutable resources use `ETag` and `If-Match` (0.11.7). A job, lot or lease keeps the parameter version it was created under where the spec says so (lot expiry, policy stamp, quote). [D]
+
+**Named cross-parameter constraints** (checked on every write): `C1` `0 < admission.phi < 1`; `C2` `verify.audit_rate_floor <= verify.audit_rate_s <= verify.audit_rate_max`, and the same for gold (`verify.gold_rate_floor`, `verify.gold_rate_g`, `verify.gold_rate_max`); `C3` `lease.timeout_s >= cell.envelope.expected_time_s`; `C4` `credit.lifetime_days_accelerated <= credit.lifetime_days` and `grant.starter_lifetime_days <= credit.lifetime_days`; `C5` `reserve.ceiling_credits >= grant.starter_credits`; `C6` `0 <= price.levy_lambda < 1` and `price.v_prior <= price.v_cap`; `C7` `admission.min_window_s <= admission.max_window_days * 86400`; `C8` warning only: `credit.member_cap_credits >= admission.max_job_cells * (1 + price.v_prior + price.levy_lambda)`, because a member who cannot hold the price of a maximum job can never request one.
+
+### 0.10.4 Measurement codes (what replaces a default) [D]
+
+| Code | Measurement | Source |
+| --- | --- | --- |
+| `CAL` | Phase 0 calibration on the founders' own accounts: cells per day per service, seconds per cell, refusal and failure rates, copy-paste error rate | FD§8.3 G3, FD§9 Phase 0; stored as `CalibrationRecord` |
+| `P1M` | A Phase 1 pilot measure | FD§9 Phase 1 list |
+| `DEM` | Demand check: interviews about real job sizes, splittability, accepted window | FD§8.3 G5 |
+| `FND` | A founders' decision recorded in a `PreRegistration` before day 1 | FD§9 Phase 1 |
+| `CNS` | Counsel's answer in the operator's jurisdiction [V] | FD§8.3 G0 |
+| `SEC` | The G1 threat-model decision | FD§8.3 G1 |
+| `TEC` | Feasibility measurement on real phones and desktops | FD§8.3 G2 |
+| `OPS` | Operating experience: alerts, incidents, capacity dashboard | S4.*, S13.* |
+| `CON` | Constant: no measurement, changed only by a spec change | |
+
+### 0.10.5 Areas, owners and defining parts [D]
+
+| Area | Owner role | Defining part |
+| --- | --- | --- |
+| `credit`, `price`, `grant`, `reserve`, `mint`, `inflation`, `ledger`, `job` | `operator` | S6.* |
+| `admission`, `reservation` | `operator` | S6.* |
+| `verify`, `lease`, `cell`, `trust` | `operator` | S8.*, S9.* |
+| `policy`, `screen`, `service`, `template`, `optin`, `appeal`, `report` | `reviewer` | S7.*, S8.*, S10.* |
+| `identity`, `session`, `invite`, `ratelimit`, `retention`, `security` | `operator` | S10.* |
+| `launch`, `change` | `operator` (two approvers for `launch`) | S14.* |
+| `analytics`, `experiment`, `growth`, `team`, `public`, `metrics`, `calibration` | `founders` for thresholds, `operator` otherwise | S12.*, S13.* |
+| `api`, `ui`, `i18n` | `operator` | S11.*, S15.* |
