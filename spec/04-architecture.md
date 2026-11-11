@@ -527,3 +527,94 @@ The authoritative list is every S5.* table that has no `updated_at` and no delet
 ### 4.10.3 Migration tests [D]
 
 CI applies all migrations to an empty store and to the previous release's schema loaded with synthetic fixtures; runs the contract suite of every port driver; checks the append-only list; runs the full invariant recompute on a fixture ledger before and after; and measures duration against the declared lock impact.
+
+## 4.11 Observability
+
+### 4.11.1 Logs without personal data [D]
+
+- One logging facade, `log.event(name, fields)`. Each event name has an allowlist schema; unknown fields are dropped and counted in `hamyar_log_dropped_fields_total`. Event names follow S0.5 (`<area>.<event>`, the same names as domain events); operational names `http.request_served`, `sched.run_finished`, `outbox.relayed` and `alarm.raised` are convention additions (`ISS-45`).
+- Never logged, by construction: raw IP or any value derived from it, user agent, e-mail, display names, prompts, outputs, uploads, report or appeal text, request or response bodies, headers (including `Authorization`), cursors, file names, exception messages that may quote input (only `error.code` and scrubbed frames are kept).
+- Request logs carry `request_id`, route template, status, duration, response size, `principal_type`, `auth_scheme`, `config_epoch`. They carry no member id. Domain-event logs carry the aggregate's id (`cel_`, `job_`) and `actor.principal_type`, not `mem_` ids. Reason: logs are the weakest-protected store, so they must not link a member to activity; that link exists only in the system of record under access control [A: if investigators need member ids in logs, that is an owner decision with a retention cost, S3.*].
+- Retention: `retention.request_log_days` for request logs, `retention.ops_log_days` for the rest. Logs leave the host only to a `LogSink` the operator controls; a third-party log service is not used by default, because even sanitized logs reveal traffic patterns [A][V: counsel and G1].
+- Canary test [D]: fixtures feed a fake IP, e-mail, prompt text and token through every endpoint; the test fails if any canary appears in captured logs, metrics, traces, alert payloads or error bodies (`AC-arch-08`).
+
+### 4.11.2 Metrics [D]
+
+Names follow S0.5 (`hamyar_<area>_<name>_<unit>`). Labels come from closed sets (surface, route template, status class, job type, template id, service id, outcome, job name); never member, job or cell ids. Anything published publicly is suppressed below `analytics.min_cohort_k`.
+
+| Metric | Type | Purpose |
+| --- | --- | --- |
+| `hamyar_api_requests_total`, `hamyar_api_request_duration_seconds` | counter, histogram | Traffic, latency, error ratio |
+| `hamyar_api_rate_limited_total` | counter | Limiter activity by bucket |
+| `hamyar_ledger_append_duration_seconds`, `hamyar_ledger_serialization_retries_total` | histogram, counter | Posting throughput against 4.6.2 |
+| `hamyar_ledger_invariant_violations_total` | counter | Invariant failures by id and tier |
+| `hamyar_ledger_checkpoint_age_seconds`, `hamyar_ledger_chain_verified_seq` | gauge | Tier 3 and 4 health |
+| `hamyar_cell_queue_depth_cells` | gauge | Queue by template and service requirement |
+| `hamyar_lease_expired_total`, `hamyar_lease_submit_to_accept_seconds` | counter, histogram | Lease health |
+| `hamyar_submission_outcomes_total` | counter | Accept and reject mix by outcome |
+| `hamyar_verify_gold_fail_total`, `hamyar_verify_audit_mismatch_total` | counter | Verification signals |
+| `hamyar_mint_utilization_ratio`, `hamyar_claim_ratio_weeks`, `hamyar_reserve_balance_credits` | gauge | Economy gauges (S6.*) |
+| `hamyar_sched_run_duration_seconds`, `hamyar_sched_run_overdue_seconds`, `hamyar_sched_run_failures_total` | histogram, gauge, counter | Job health by job name |
+| `hamyar_outbox_lag_seconds`, `hamyar_outbox_dead_total` | gauge, counter | Event delivery |
+| `hamyar_clock_skew_seconds`, `hamyar_db_pool_in_use_connections` | gauge | Infrastructure |
+| `hamyar_backup_age_seconds`, `hamyar_restore_drill_age_days` | gauge | Recovery readiness |
+| `hamyar_config_epoch_count` | gauge | Detects instances on a stale epoch |
+
+### 4.11.3 Alarms [D]
+
+An `Alarm` row has an `alarm_key`, severity (`critical`, `major`, `warning`), the metric and value that fired it, and an acknowledgement (`AdminAction`). Payloads contain no personal data. Alarms deduplicate by key. The admin tool always shows them; an operator-configured `AlertSink` may also deliver them [V: sink choice and its reachability, G1].
+
+| `alarm_key` | Condition | Severity | Automatic response |
+| --- | --- | --- | --- |
+| `alarm.ledger_invariant_violated` | Any tier 2 or 3 failure, or a chain mismatch | critical | Engage `kill.all_minting` and `kill.all_new_jobs` (below) |
+| `alarm.checkpoint_stale` | Checkpoint age over twice `ledger.checkpoint_interval_s` | major | None |
+| `alarm.sched_overdue` | A job overdue by `ops.job_overdue_factor` | major | None |
+| `alarm.outbox_lag`, `alarm.outbox_dead_letter` | Lag over `ops.outbox_lag_alarm_s`; any dead row | major | None |
+| `alarm.clock_skew` | Skew over `ops.clock_skew_alarm_s` | major | None |
+| `alarm.error_rate` | 5xx ratio over `ops.alert_error_ratio` within `ops.alert_window_s` | major | None |
+| `alarm.backup_stale`, `alarm.restore_drill_overdue` | Backup older than twice `ops.backup_interval_s`; drill older than `ops.restore_drill_interval_days` | major | None |
+| `alarm.mint_utilization` | Above `inflation.mint_utilization_alarm` | warning | None |
+| `alarm.eta_low`, `alarm.false_accept_high`, `alarm.false_reject_high` | Below `price.eta_alarm_threshold`; above `verify.false_accept_alarm` or `verify.false_reject_alarm` | major | None (pre-registered thresholds, S13.*) |
+| `alarm.reserve_empty` | Reserve at or below `grant.reserve_floor_credits` | warning | Grants pause by rule |
+| `alarm.secret_rotation_due`, `alarm.service_review_due` | Past `security.secret_rotation_days`; `service.review_due` event | warning | None |
+
+Automatic brake [D][A]: on `alarm.ledger_invariant_violated` the system itself, as principal `system`, engages `kill.all_minting` and `kill.all_new_jobs`; releasing them needs two operators and a passing full recompute. Reason: fail closed on integrity. Risk: a false positive halts the system, which the founders may prefer to decide by hand (S3.*). The brake is performed by the checker's own transaction, not by the event consumer, so it does not depend on the relay.
+
+Request correlation: `request_id` is generated at the edge, echoed in `X-Request-Id`, and passed as `causation_id`. Traces, if used, carry no payload attributes. `/v1/public/health` returns liveness and `build_id` only; detailed readiness is an admin operation (S15.*).
+
+## 4.12 Backup and recovery
+
+### 4.12.1 What is protected [D]
+
+| Data | Method | Notes |
+| --- | --- | --- |
+| Transactional store | Base snapshot every `ops.backup_interval_s` plus continuous log archiving for point-in-time recovery [V: host support] | Loss bound `ops.rpo_s`; restore time target `ops.rto_s` |
+| Blob store | Versioned or replicated copy; blobs are write-once, so copies cannot diverge | Integrity by content hash |
+| Configuration manifests, migrations, policy seeds | Source repository | Not secret |
+| Secrets | Not in backups; recovered through the custody procedure of S10.* | Two custodians [A] |
+| Ephemeral store, caches, logs | Not backed up | Rebuilt or lost by design |
+
+Artifacts are encrypted before they leave the host with a key the backup sink does not hold (`secret.backup_key`, name proposed [A], owned by S10.*), and are stored in at least two independent locations behind `BackupSink`, retained `ops.backup_retention_days`. A deletion in the primary reaches backups only when they age out; whether that satisfies privacy duties is a counsel question [V] (`ISS-47`).
+
+### 4.12.2 Restore procedure with verification gates [D]
+
+1. Restore into an isolated environment to the target time. Never restore over production first.
+2. Check `schema_migrations` against the expected release.
+3. Run the tier 3 recompute: it must pass.
+4. Verify the hash chain from genesis to the restored head.
+5. Compare with the last published checkpoint: the restored head must have `seq` at or above the checkpoint's and the same hash at that `seq`. If the head is below it, a rollback occurred: declare a data-loss incident.
+6. Production cut-over keeps `kill.all_minting` and `kill.all_new_jobs` engaged until two operators release them.
+7. Open leases expire by themselves; submissions lost inside the loss window are re-executed through normal acceptance. The platform never fabricates or edits ledger rows to cover a gap; the incident and the gap are published through the change log (S12.*).
+8. If host compromise is suspected, rotate every secret before reopening.
+
+| Scenario | Detection | Response |
+| --- | --- | --- |
+| Host unreachable or blocked for members | Reachability measurements (4.15), error-rate alarm | Move host through the ports; restore from backup if needed |
+| Corruption or operator error | Tier 2 or 3 alarm | Automatic brake, restore procedure |
+| Rollback or tampering with the store | Checkpoint comparison, chain verification | Data-loss incident, restore procedure |
+| Loss of one backup location | `alarm.backup_stale` | Re-seed from the other |
+| Seizure or compelled disclosure of a host | Out of band | S10.* (what the host can see); backups are encrypted |
+
+### 4.12.3 Drills [D]
+
+A restore drill every `ops.restore_drill_interval_days` and before launch (BM9), following 4.12.2 on staging with synthetic data, logged with duration against `ops.rto_s`. A portability drill exports everything to neutral formats (SQL dump, blob manifest, configuration) and imports into a fresh environment on a different host class, proving the ports hold (`AC-arch-10`).
