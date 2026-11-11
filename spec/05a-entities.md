@@ -144,3 +144,120 @@ Rate-limit counters (per member, per IP hash, per invite tree) are infrastructur
 ### 5.3.4 What a database dump reveals [D]
 
 A full dump reveals pseudonymous `mem_` ids; public keys; day-granular activity; the submitted text of cells still inside the payload retention window; ciphertext of optional e-mails (not readable without the secrets); keyed hashes (not reversible without the keys); the ledger; and the registry. It reveals no IP address and no provider credential, because none is stored. Whether a seizure of the host, the secrets or both defeats pseudonymity, and what the platform can NOT promise, is stated in S10.*; this part states only that the data model never contains more than the list above. Legal questions about compelled disclosure and about keyed IP hashes with a one-day TTL are [V] for counsel (`CNS`).
+
+## 5.4 Entity catalogue, mutability and retention
+
+One row per entity of S0.7 (57 rows). `Class` is S5.2.3. `Retention` is the S0.7 class, with exceptions marked [A] in `ISS-51`. The last column says how a correction is modelled, because no `IMM` or `CHN` row is ever edited. [D]
+
+| Entity | Section | Class | Retention | A correction is modelled as |
+| --- | --- | --- | --- | --- |
+| `Member` | S5.6.1 | `MUT` | `member_bound` | status and tier changes (events); closure reduces the row to a tombstone |
+| `MemberKey` | S5.6.2 | `MUT` | `member_bound` | rotation: new key row, old row `rotated` |
+| `Device` | S5.6.3 | `MUT` | `short` | `blocked` status; purge nulls hashes |
+| `Session` | S5.6.4 | `MUT` | `short` | `revoked_at`; expiry |
+| `Invite` | S5.6.5 | `MUT` | `member_bound` | `revoked` status |
+| `OptIn` | S5.6.6 | `MUT` | `member_bound` | new version of the row; change event carries before and after hashes |
+| `TopicCategory` | S5.6.7 | `MUT` | `permanent` | `retired` status; every change is a `ChangeLogEntry` |
+| `AdminUser` | S5.6.8 | `MUT` | `permanent` | `disabled` status; never deleted |
+| `AdminCredential` | S5.6.9 | `MUT` | `permanent` | `revoked` status |
+| `AdminAction` | S5.6.10 | `CHN` | `permanent` | a later action that references the earlier one |
+| `Template` | S5.7.1 | `MUT` | `permanent` | pointer to the active `TemplateVersion` |
+| `TemplateVersion` | S5.7.2 | `IMS` | `permanent` | a new version; the old one is `retired` |
+| `Glossary` | S5.7.3 | `IMS` | `job_bound` | a new glossary row for a new job |
+| `Upload` | S5.7.4 | `IMS` | `job_bound` | a new upload; the old is `purged` or `rejected` |
+| `Job` | S5.7.5 | `MUT` | `job_bound` | state machine; terminal states never reopen |
+| `Reservation` | S5.7.6 | `MUT` | `job_bound` | `cancelled` or `expired`; escrow refund is a ledger entry |
+| `WaitlistEntry` | S5.7.7 | `MUT` | `job_bound` | `cancelled` or `expired` |
+| `Cell` | S5.8.1 | `MUT` | `job_bound` | state machine; `overturned` plus a `rework` cell |
+| `Lease` | S5.8.2 | `MUT` | `job_bound` | `expired`, `released`, `revoked`; a new lease row per attempt |
+| `Submission` | S5.8.3 | `IMS` | `job_bound` | `rejected`; the output text is never edited |
+| `VerificationRecord` | S5.8.4 | `IMS` | `job_bound` | a superseding record (`supersedes_id`) |
+| `GoldCell` | S5.8.5 | `IMS` | `permanent` | `retired` or `compromised`; a new gold cell |
+| `Audit` | S5.8.6 | `MUT` | `job_bound` | state machine; `cancelled` |
+| `Deliverable` | S5.8.7 | `IMS` | `job_bound` | a new deliverable row is not allowed; reassembly is a new job state, see S5.8.7 |
+| `Manifest` | S5.8.8 | `IMM` | `job_bound` (rows stay) | superseding manifest row |
+| `LedgerAccount` | S5.9.1 | `DER` | `permanent` | never edited except its cached balance |
+| `LedgerEntry` | S5.9.2 | `CHN` | `permanent` | a `reversal` entry (two approvers) |
+| `LedgerTransaction` | S5.9.3 | `IMM` | `permanent` | a `reversal` transaction |
+| `CreditLot` | S5.9.4 | `DER` | `permanent` | rebuilt from entries; never edited by hand |
+| `Escrow` | S5.9.5 | `MUT` | `permanent` | state machine; caches checked against entries |
+| `Reserve` | S5.9.6 | `MUT` | `permanent` | singleton; caches checked against entries |
+| `Policy` | S5.10.1 | `MUT` | `permanent` | pointer to the active `PolicyVersion` |
+| `PolicyVersion` | S5.10.2 | `IMM` | `permanent` | a new version |
+| `Rule` | S5.10.3 | `IMM` | `permanent` | new rows under a new `PolicyVersion` |
+| `ServiceRegistryEntry` | S5.10.4 | `MUT` | `permanent` | review machine; evidence rows are `IMM` |
+| `TermsCopy` | S5.10.5 | `IMM` | `permanent` | a new capture that supersedes |
+| `FlagAnswer` | S5.10.6 | `IMM` | `permanent` | a later dated answer; the latest wins |
+| `Report` | S5.11.1 | `MUT` | `moderation` | state machine; reduced to counts after retention |
+| `Appeal` | S5.11.2 | `MUT` | `moderation` | state machine; a resulting `AdminAction` |
+| `Team` | S5.11.3 | `MUT` | `member_bound` | `archived` status |
+| `Badge` | S5.11.4 | `IMS` | `permanent` | a new badge row; the old is `retired` |
+| `BadgeAward` | S5.11.5 | `IMM` | `member_bound` | none; deleted with the member's data on closure |
+| `Referral` | S5.11.6 | `MUT` | `member_bound` | `voided` with a reason |
+| `Parameter` | S5.12.1 | `MUT` | `permanent` | pointer to the current `ParameterVersion` |
+| `ParameterVersion` | S5.12.2 | `IMM` | `permanent` | a new version |
+| `KillSwitch` | S5.12.3 | `IMM` | `permanent` | a new state row (`engaged`, `released`) |
+| `FeatureFlag` | S5.12.4 | `MUT` | `permanent` | every change is an `AdminAction` and a `ChangeLogEntry` |
+| `ChangeLogEntry` | S5.12.5 | `IMM` | `permanent` | a later entry that references it |
+| `LaunchGateItem` | S5.12.6 | `IMM` | `permanent` | a new revision row (`ISS-53`) |
+| `Experiment` | S5.13.1 | `IMS` | `permanent` | `stopped`; arms are frozen once `running` |
+| `ExperimentAssignment` | S5.13.2 | `IMM` | `permanent` | none; assignments are never changed |
+| `PreRegistration` | S5.13.3 | `IMS` | `permanent` | after lock, an amendment row that points at it |
+| `Event` | S5.13.4 | `IMS` | `ops` | none; only `published_at` is set once |
+| `MetricSnapshot` | S5.13.5 | `IMM` | `permanent` | a superseding snapshot |
+| `CalibrationRecord` | S5.13.6 | `IMM` | `permanent` | a superseding record |
+| `InvariantCheck` | S5.13.7 | `IMM` | `ops` (exception [A]) | none; checkpoint and `violated` rows are exempt from purging |
+| `Alarm` | S5.13.8 | `MUT` | `ops` | state machine (`open`, `acknowledged`, `resolved`) |
+
+## 5.5 Entity-relationship summary
+
+Notation: `A 1--* B` means one `A` has many `B` (the foreign key is on `B`); `0..1` marks an optional parent. Arrows show the direction of the foreign key. [D]
+
+```
+IDENTITY
+  Member 1--* MemberKey            Member 1--* Session(member)       Member 0..1--1 OptIn
+  Device 1--* MemberKey (device_id)   Device 1--* Member (creating_device_id)
+  Member 1--* Invite (issuer)      Invite 0..1--1 Member (redeemed_by)   Member *--0..1 Team
+  AdminUser 1--* AdminCredential   AdminUser 1--* Session(admin)     AdminUser 1--* AdminAction
+
+TEMPLATES AND JOBS
+  Template 1--* TemplateVersion    Template 0..1--1 TemplateVersion (active_version_id)
+  Job *--1 TemplateVersion         Job *--1 PolicyVersion (stamped)  Job *--0..1 Member (requester; null = Commons)
+  Job 1--0..1 Upload               Job 1--0..1 Glossary             Job 1--0..1 Escrow
+  Job 1--0..1 WaitlistEntry        Reservation 1--0..1 Job (activated_job_id)   Reservation 1--1 Escrow
+
+EXECUTION AND VERIFICATION
+  Job 1--* Cell                    Cell *--1 TemplateVersion        Cell *--0..1 GoldCell
+  Cell 1--* Lease (one active)     Lease *--1 Member                Lease 1--0..1 Submission
+  Cell 1--* Submission             Submission 1--* VerificationRecord   Cell *--0..1 Audit
+  Audit 1--1 Cell (primary_cell)   Audit 0..1--1 Cell (second) / (third)
+  Job 1--0..1 Deliverable          Deliverable 1--1 Manifest
+
+CREDIT
+  Member 1--1 LedgerAccount(member)    Escrow 1--1 LedgerAccount(escrow)    Reserve 1--1 LedgerAccount(reserve)
+  LedgerTransaction 1--* LedgerEntry   LedgerEntry *--1 LedgerAccount (debit) and (credit)
+  LedgerEntry *--0..1 CreditLot        CreditLot *--1 Member            LedgerEntry 0..1--1 LedgerEntry (reverses / restores)
+  Cell *--0..1 LedgerTransaction (credit_txn_id)    Escrow *--0..1 LedgerTransaction (closing_txn_id)
+
+POLICY AND REGISTRY
+  Policy 1--* PolicyVersion        PolicyVersion 1--* Rule          PolicyVersion 0..1--1 ChangeLogEntry (loosen)
+  ServiceRegistryEntry 1--* TermsCopy   ServiceRegistryEntry 1--* FlagAnswer   FlagAnswer *--0..1 TermsCopy
+  ServiceRegistryEntry 0..1--1 TermsCopy (current)     Lease/Submission *--0..1 ServiceRegistryEntry (reported)
+
+MODERATION, COMMUNITY
+  Report *--0..1 Member (reporter)     Appeal *--1 Member (appellant)    Appeal *--0..1 AdminUser (assigned, second)
+  Team 1--* Member                     Badge 1--* BadgeAward *--1 Member
+  Referral *--1 Member (referrer)      Referral 0..1--1 Member (newcomer)   Referral *--0..2 LedgerTransaction (bonus)
+
+CONFIGURATION, LAUNCH, MEASUREMENT
+  Parameter 1--* ParameterVersion      Parameter 0..1--1 ParameterVersion (current)   ParameterVersion 0..1--1 ChangeLogEntry
+  KillSwitch rows by switch_key        FeatureFlag *--0..1 Experiment   Experiment 1--* ExperimentAssignment *--1 Member
+  PreRegistration 0..1--* Experiment   LaunchGateItem revisions by item_key    LaunchGateItem *--0..1 ServiceRegistryEntry
+  MetricSnapshot, Event, InvariantCheck, Alarm, CalibrationRecord reference subjects by (subject_type, subject_id) or by a named FK
+```
+
+**Reference rules** [D]
+
+1. The ledger is reached from business entities only through `LedgerTransaction.natural_key` and `Cell.credit_txn_id`, `Escrow.closing_txn_id`, `Referral.bonus_*_txn_id`. No business table stores an amount that it also posts; the amount lives in `LedgerEntry`, and business columns that echo it are caches checked by the invariants.
+2. `AdminAction` is the audit trail for every privileged write. Approvals (template, service, ledger reversal, launch sign-off) are `AdminAction` rows that reference the approved row and its content hash, not columns edited on the approved row (S5.15).
+3. Polymorphic references (`subject_type`, `subject_id`) exist only on `AdminAction`, `Report`, `Appeal`, `Event`, `Alarm` and `ChangeLogEntry`. Every other relationship is a real foreign key. Polymorphic ids are validated by the writing service against the prefix of the id (S0.6.3).
