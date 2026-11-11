@@ -373,3 +373,80 @@ Invariants are registered in an `InvariantRegistry` (id, tier, query or function
 | `checker_ro` | Read everything except secrets-bearing columns, at snapshot isolation | Write anything |
 | `analytics_ro` | Read the analytics read models | Read member-linked tables |
 | `migrator` | DDL and data migrations, only during a migration run | Be used by the running application |
+
+## 4.7 Event model
+
+### 4.7.1 Rules [D]
+
+1. Every state change in S0.9 emits exactly one event with the name shown on the transition. The event row is written in the same commit as the change (transactional outbox). Rejected guards emit nothing.
+2. Events announce committed facts. They are never a transport for money or commands: a payout is posted inline in the transaction that accepts the cell (4.4.3 rule 1), not by an event consumer.
+3. The event stream is not the system of record and is not event sourcing. Every projection (analytics, public counters, capacity gauges) can be rebuilt from the ledger and entity tables.
+4. Delivery is at-least-once to each consumer, ordered per aggregate by `aggregate.version`, and consumers are idempotent.
+5. Payloads carry identifiers, enums, hashes and amounts only; never prompts, outputs, uploads, report text, e-mail, IP-derived values or display names. Content is referenced by blob id and hash.
+
+### 4.7.2 Envelope
+
+```yaml
+event_id: evt_01j9z...            # ULID id, S0.6.3
+event_name: cell.leased           # S0.9, lowercase dotted
+event_version: 1                  # bumped on a breaking payload change; consumers accept N and N-1
+occurred_at: 2026-11-12T09:30:00Z # store clock
+aggregate: {type: Cell, id: cel_..., version: 7}   # version = row_version after the change
+actor: {principal_type: member, id: mem_...}       # admin and system ids too; see 4.11 for logs
+causation_id: req_...             # the request or job run that caused it
+correlation_id: job_...           # the job or other root, when there is one
+policy_version_id: plv_...
+config_epoch: 1842                # 4.9: resolves every parameter version in force
+payload: {}                       # per-event schema in the repository; CI checks it
+```
+
+CI rule [D]: for every transition in S0.9 there is exactly one event schema, and a transition test asserts that one event with that name is written in the same commit.
+
+### 4.7.3 Outbox and relay [D]
+
+- At emit time the writer inserts one outbox row per subscribed asynchronous consumer (fan-out at write, from a static subscription table in code). This avoids the offset-gap problem of cursor polling over late-committing transactions.
+- Row: `event_id`, `consumer`, `payload`, `attempts`, `next_attempt_at`, `delivered_at`, `dead_at`. The relay claims due rows with a store-level claim (for example skip-locked selection or a conditional update), delivers, and sets `delivered_at`. Failure backs off up to `ops.outbox_max_attempts`, then sets `dead_at` and raises `alarm.outbox_dead_letter`. Replay of a dead row is an admin action (`AdminAction`).
+- The consumer records `(consumer, event_id)` in its own dedupe table inside its own transaction.
+- Outbox rows are deleted `ops.outbox_retention_days` after delivery. Infrastructure tables (`outbox`, `idempotency_keys`, `scheduler_locks`, `schema_migrations`, `config_epoch_counter`, consumer dedupe tables) are exempt from the entity rules of S0.7 except naming, and are reported as a convention addition (`ISS-45`).
+
+| Consumer | Subscribes to | Effect | Impact if it lags |
+| --- | --- | --- | --- |
+| `analytics_projector` | all domain events | Writes `Event` rows through the allowlist projection (S13.*) | Metrics late |
+| `public_projection` | `ledger.entry_committed`, `cell.accepted`, `member.created`, `changelog.entry_published` | Updates public read models within `public.counter_refresh_s` and `public.ledger_lag_s` | Public page stale |
+| `alarm_evaluator` | `ledger.invariant_violated`, `killswitch.engaged`, `service.review_due`, `template.paused` | Creates `Alarm` rows and calls `AlertSink` | Alert late; the brakes themselves do not depend on it (4.11) |
+| `capacity_counters` | `cell.accepted`, `lease.issued`, `member.optin_changed` | Incremental inputs for the capacity forecaster | Forecast uses the last full recompute |
+| `admin_feed` | all domain events | Admin tool activity view (pull) | Feed stale |
+
+## 4.8 Background jobs
+
+### 4.8.1 Runner rules [D]
+
+- Jobs are declared in a manifest: name, interval parameter, batch-size parameter, maximum runtime (`ops.job_max_runtime_s`), handler.
+- Every handler is state-based and idempotent: it selects what is due now (not what a tick missed), changes it with compare-and-set on `row_version`, and is safe to run twice at once. Missed ticks are never queued; the next run covers everything due.
+- The lock in `scheduler_locks` (holder, fencing token, `expires_at` renewed while running, TTL `ops.job_lock_ttl_s`) only avoids wasted work. Safety comes from idempotency, because a lock cannot guarantee exclusivity after expiry.
+- Time comes from the `Clock` port (the store clock). Each run logs `sched.run_finished`, updates `hamyar_sched_run_duration_seconds`, and the watchdog raises `alarm.sched_overdue` when a job has not succeeded for `ops.job_overdue_factor` times its interval.
+- An operator may trigger a run from the admin tool (`AdminAction`); this calls the same handler.
+
+### 4.8.2 Job table [D]
+
+| Job | Purpose and rule | Interval parameter | Detail |
+| --- | --- | --- | --- |
+| `lease_reaper` | Lease expiry: leases `active` past `expires_at` become `expired`; their cells requeue (`attempt` + 1) or become `exhausted` at `cell.max_attempts`; late paste-back within `lease.submit_grace_s` is handled by the submission path | `lease.reap_interval_s` | S5.*, S9.* |
+| `ttl_sweeper` | Time-driven transitions: quote expiry (`price.quote_ttl_s`), waitlist expiry (`admission.waitlist_ttl_days`), reservation expiry and release, invite expiry (`invite.ttl_days`), referral bonus release (`growth.referral.hold_s`), restriction lift (`trust.restriction_days`), service review timers (`service.review_max_age_days`, `service.review_grace_days`), session purge | `ops.ttl_sweep_interval_s` | S5.* to S10.* |
+| `escrow_settler` | Escrow settlement: finds jobs in `settling` or draining `cancelling`, posts the `settle` transaction (levy, refund, closure at exactly zero), and stops jobs past `job.max_overrun_ratio` of their quote with closure reason `overrun_timeout`. Triggered inline when possible, but always also swept, so settlement never depends on an event | `ops.ttl_sweep_interval_s` | S6.* |
+| `assembler` | Builds the deliverable and manifest after `job.all_cells_accepted` | `ops.ttl_sweep_interval_s` | S5.*, S9.* |
+| `credit_expirer` | Credit expiry: lots past `expires_at` with remainder are moved to the Reserve by `expire` postings, oldest first, batched per member | `credit.expiry_sweep_interval_s` | S6.* |
+| `reserve_retirer` | Retires Reserve excess above `reserve.ceiling_credits` when the excess is at least `reserve.retire_min_credits` | `reserve.retire_interval_s` | S6.* |
+| `audit_sweeper` | Audits: re-leases audit and third-execution cells not returned, closes `Audit` machines, schedules the third execution on mismatch | `ops.ttl_sweep_interval_s` | S8.* |
+| `metric_rollup` | Metric rollups: v per job type over `price.v_window_days` (minimum `price.v_min_sample_cells`), η, claim ratio, mint-cap utilization, concentration, reliability estimates; monthly `MetricSnapshot` per `price.publish_period_days` | `metrics.rollup_interval_s` | S6.*, S13.* |
+| `inflation_governor` | If the claim ratio passes `inflation.claim_ratio_threshold_weeks`, lowers `mint.monthly_cap_credits` by `inflation.mint_cap_cut_ratio` as principal `system`, through the config write path with a public change-log entry (a tightening, effective at once) | `metrics.rollup_interval_s` | S6.* |
+| `ledger_invariant_checker` | Tier 2 checks (4.6.4) | `ledger.invariant_check_interval_s` | S6.* |
+| `ledger_full_recompute` | Tier 3 checks | `ledger.full_recompute_interval_s` | S6.* |
+| `ledger_checkpointer` | Tier 4 checkpoint | `ledger.checkpoint_interval_s` | S6.*, S12.* |
+| `capacity_forecaster` | Capacity forecast: verified throughput over `admission.forecast_window_days` and active donors over `admission.active_donor_window_days`, times (1 - `admission.forecast_haircut`), per category supply gauges; writes a `capacity_forecasts` row that `quote` reads; then promotes waitlisted jobs that now fit | `admission.forecast_refresh_s` | S6.* |
+| `retention_purger` | Applies the retention classes of S0.7: job payloads, IP hashes, sessions, request and ops logs, raw events, moderation data, inactive members (`retention.member_inactive_days`), orphan blobs | `ops.purge_interval_s` | S10.* |
+| `backup_runner` | Snapshot, log archiving check, encryption and upload; verifies the last artifact is restorable by checksum | `ops.backup_interval_s` | 4.12 |
+| `outbox_relay` | Delivers events (4.7.3) | `ops.outbox_relay_interval_s` | 4.7 |
+| `scheduler_watchdog` | Detects overdue jobs, clock skew, stale checkpoints, stale backups | `ops.ttl_sweep_interval_s` | 4.11 |
+
+Template auto-pause on reports (`template.autopause_report_count` within `template.autopause_window_s`) is not a job: it is evaluated inline when a report is filed, so a tightening is not delayed by a sweep [D].
