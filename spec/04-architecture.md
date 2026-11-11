@@ -833,3 +833,96 @@ Fact base: `docs/source/panel-review.md` (PR§n), a static reading of `github.co
 | Cloudflare Worker runtime and static assets hosting | keep as an option | PR§1: usable for the static public bundle or as alternative B (4.17.4), subject to reachability | Reachability from Iran [V] (PR§9) |
 | `GitHubApi`-style seam, `redact()` and constant-time compare helpers, bounded request bodies | wrap | PR§8: small reusable helpers; Hamyar uses the pattern for ports and its own logging scrubber (4.11) | Code review only |
 | Steward role, self-heal tools, MCP tool surface, kit embedding, `cell_fix` and `publish_plan` | exclude | They exist to run the build of this specification, not the commons; PR§4.5 item 9 shows why they must not face the public | None |
+
+## 4.19 Names, parameters, assumptions and verifications introduced by this part
+
+### 4.19.1 New parameters (convention additions, area `ops` plus one in `admission`) [D]
+
+Owner role `operator`. Every default is an `initial configurable default` replaced by the measurement in the last column; S16.* completes the table without renaming. `ops.*` is a new area for S0.10.5 (`ISS-45`).
+
+| Name | Type | Initial configurable default | Validation | Replaced by |
+| --- | --- | --- | --- | --- |
+| `ops.rpo_s` | duration_s | 300 | 0..86400 | `OPS`; restore drill on the chosen host |
+| `ops.rto_s` | duration_s | 14,400 | 60..604800 | `OPS`; restore drill duration |
+| `ops.txn_retry_max` | int | 5 | 0..20 | `OPS` retry counters |
+| `ops.capacity_headroom_ratio` | ratio | 5.0 | >= 1 | `OPS`; load test (4.6.2) |
+| `ops.clock_skew_alarm_s` | duration_s | 2 | 0..60 | `OPS` |
+| `ops.outbox_relay_interval_s` | duration_s | 2 | 1..60 | `OPS` |
+| `ops.outbox_max_attempts` | int | 10 | 1..100 | `OPS` |
+| `ops.outbox_retention_days` | days | 7 | 1..90 | `OPS` |
+| `ops.outbox_lag_alarm_s` | duration_s | 60 | 1..86400 | `OPS` |
+| `ops.job_lock_ttl_s` | duration_s | 120 = 4 x `lease.reap_interval_s` | 10..3600 | `OPS` |
+| `ops.job_max_runtime_s` | duration_s | 300 | 10..3600; below which the lock is renewed | `OPS` |
+| `ops.job_overdue_factor` | ratio | 3.0 | >= 1 | `OPS` |
+| `ops.ttl_sweep_interval_s` | duration_s | 60 | 5..3600 | `OPS` |
+| `ops.purge_interval_s` | duration_s | 3600 | 60..86400 | `OPS` |
+| `ops.backup_interval_s` | duration_s | 86,400 | 3600..604800 | `OPS`; meets `ops.rpo_s` together with log archiving |
+| `ops.backup_retention_days` | days | 35 | 1..365 | `CNS` (privacy duties), `OPS` |
+| `ops.restore_drill_interval_days` | days | 90 | 7..365 | `OPS` |
+| `ops.config_cache_ttl_s` | duration_s | 30 | 1..600 | `OPS` |
+| `ops.migration_batch_size` | int | 1000 | 1..100000 | `OPS` |
+| `ops.alert_error_ratio` | ratio | 0.05 | 0..1 | `OPS` |
+| `ops.alert_window_s` | duration_s | 300 | 30..86400 | `OPS` |
+| `admission.forecast_refresh_s` | duration_s | 3600 | 60..86400 | `P1M` forecast error |
+
+Also added: flag `ff.verify.sandboxed_tests` (default off); registry field `adapter.open_url`; `config_epoch` and the envelope fields of 4.7.2; alarm keys of 4.11.3; bootstrap settings of 4.13.2; secret name `secret.backup_key` (proposed, owned by S10.*).
+
+### 4.19.2 Assumptions [A] for S3.* (with the decision that could overturn each)
+
+| Assumption | Overturned by |
+| --- | --- |
+| Modular monolith with an optional check runner (4.3.2) | A larger team or a host that forces separate deployables |
+| TypeScript, PostgreSQL, static SPAs (4.17.3) | Owner stack preference; the alternative-B decision memo |
+| Automatic engagement of two kill switches on an invariant violation (4.11.3) | Founders preferring a manual decision |
+| Notification-free public site; no unsolicited messages (4.4.1) | A wish for expiry reminders or marketing messages |
+| Member ids absent from logs (4.11.1) | Investigators needing them |
+| Ephemeral store inside the transactional store (4.6.1) | Load measurements |
+| Five distinct origins in staging and production (4.3.3) | Hosting limits |
+| Second maintainer approves production deploys (4.13.3) | A one-person team |
+| `config_epoch` as the stamp of versions in force (4.9.2) | A better stamping scheme in S5.* |
+
+### 4.19.3 Verifications [V]: what, by whom, where stored
+
+| Claim | Verified by | Stored in |
+| --- | --- | --- |
+| Reachability of each origin from Iran (4.15.2) | Founders and consenting testers | `LaunchGateItem` evidence under G2; `CalibrationRecord` |
+| Serial posting rate of the chosen store meets `C_peak` (4.6.2) | Engineer | `LaunchGateItem` evidence under G2 |
+| Durability, point-in-time recovery and replication of the chosen host | Operator, restore drill | `LaunchGateItem` evidence under G2; drill log |
+| Capabilities of any named product in 4.17 | Engineer, from current documentation | Decision memo, `LaunchGateItem` evidence under G2 |
+| Prefill support, template, length limit, per service and device class (4.14) | Reviewer | `ServiceRegistryEntry` `adapter.*`; `CalibrationRecord` |
+| Terms permit prefilled links and copy-and-paste | Reviewer | `FlagAnswer` with `TermsCopy` |
+| Font licenses allow self-hosting | Operator | `LaunchGateItem` evidence |
+| Backup retention against privacy duties; legal exposure of a host jurisdiction | Counsel | `CNS` memo |
+| Check runner design is safe enough to enable | Security reviewer | `LaunchGateItem` evidence under G1 |
+| Panel code matches PR and may be reused (4.18) | Human reviewer | `LaunchGateItem` evidence under G4 |
+| All existing secrets rotated before exposure | Operator | `LaunchGateItem` evidence under G4 |
+
+## 4.20 Acceptance criteria
+
+Given / When / Then; each is also a test (ids assigned by S18.*).
+
+| Id | Criterion |
+| --- | --- |
+| `AC-arch-01` | Given a posting whose second entry violates a constraint, when it is committed, then no entry, lot change, head update, idempotency record or outbox row exists |
+| `AC-arch-02` | Given a member whose balance covers exactly one hold, when two `escrow_hold` postings run concurrently, then exactly one commits, the other returns `INSUFFICIENT_CREDIT`, and `seq` has no gap |
+| `AC-arch-03` | Given postings that roll back at random, when many commit, then the committed `seq` values are consecutive from 1 |
+| `AC-arch-04` | Given the application database role, when it issues an update or delete on any append-only table, then the statement is rejected by privilege and by trigger |
+| `AC-arch-05` | Given a posting retried with the same idempotency key, when it is replayed, then the stored result is returned and no entry is added |
+| `AC-arch-06` | Given instance A holding a cached snapshot and instance B committing `killswitch.engaged` for a template, when A then handles a lease request for that template, then no lease is issued and the error is `KILL_SWITCH_ENGAGED`, without waiting for `ops.config_cache_ttl_s` |
+| `AC-arch-07` | Given a fresh build in any environment, when parameters are read, then the three launch switches are `false`; a direct write to `launch.*` is rejected; only `LaunchGate.applySignedOff` with the S14.* rule satisfied flips one |
+| `AC-arch-08` | Given canary values for IP, e-mail, prompt text and a token, when every endpoint is exercised, then no canary appears in logs, metrics, traces, alarms or error bodies |
+| `AC-arch-09` | Given a seeded corruption of a balance projection, when the tier 2 check runs, then `ledger.invariant_violated` is emitted, an alarm is raised, `kill.all_minting` and `kill.all_new_jobs` are engaged by the checker's transaction, and release requires two operators |
+| `AC-arch-10` | Given staging data, when the portability drill exports and imports into a fresh environment on a different host class, then the tier 3 recompute passes and the chain head equals the exported head |
+| `AC-arch-11` | Given a backup older than the last published checkpoint, when the restore procedure runs, then step 5 declares a data-loss incident and production stays closed |
+| `AC-arch-12` | Given two `lease_reaper` runs at once, when an expired lease is due, then its cell is requeued once with `attempt` increased once |
+| `AC-arch-13` | Given a failing consumer, when delivery is attempted `ops.outbox_max_attempts` times, then the row is dead-lettered and `alarm.outbox_dead_letter` is raised, and no ledger entry is affected |
+| `AC-arch-14` | Given any emitted event, when inspected, then it carries `config_epoch` and `policy_version_id`, and its name matches the transition in S0.9 |
+| `AC-arch-15` | Given a `loosen` parameter change with `effective_from` earlier than now plus its notice, when applied, then it is rejected with `VALIDATION_FAILED` |
+| `AC-arch-16` | Given `ff.verify.sandboxed_tests` off, when a template needing `run_tests` is submitted for approval or its cell for leasing, then it is refused and no submitted content is executed anywhere |
+| `AC-arch-17` | Given `HAMYAR_ENV` = `prod`, when two origins are equal or one is not HTTPS, then the process refuses to start |
+| `AC-adapter-01` | Given a service that is not `approved`, when its descriptor is requested, then `mode_allowed` is `[copy_only]` and `open_url` is absent |
+| `AC-adapter-02` | Given `supports_prefill` true and `prefilled_link_use` `unknown`, when the descriptor is computed, then `mode_allowed` is `[copy_only]` |
+| `AC-adapter-03` | Given the built member bundle, when scanned, then it contains no provider name or provider URL |
+| `AC-adapter-04` | Given any prompt, when `plan` returns a prefill action, then the URL is at most `adapter.max_url_chars` long and percent-decodes to exactly the prompt; otherwise it returns copy-only with reason `url_too_long` |
+| `AC-adapter-05` | Given the member bundle, when statically analyzed, then it contains no clipboard-read call, no frame embedding a service, no retained handle to an opened window and no message posted to one |
+| `AC-adapter-06` | Given a template with two placeholders, a non-HTTPS scheme, or the placeholder in the host, when a reviewer saves it, then validation rejects it |
