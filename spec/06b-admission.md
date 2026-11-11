@@ -217,3 +217,137 @@ With φ = 0.5 and empty counters the first offer is Commons, the second member, 
 | SC-3 | A reserved job gets priority for up to `slot_plan[k]` cells in absolute slot `k`; the unserved remainder of a slot is not carried over and falls back to SC-1 |
 | SC-4 | `offer_class` decides the Commons versus member mix |
 | SC-5 | No cell of a job is offered before the job is `admitted`; cells of a `suspended` job are not offered |
+
+## 6.27 Quoting a completion window
+
+### 6.27.1 The admission test [D]
+
+Service is first come (SC-1), so the cells ahead of a new job must be done before it. A window of `n` steps, `[t0, t0 + n × step)`, is **feasible** for a job needing `R` cells in scope S (S = `ALL`, and S = the job's `category_key`) when
+
+`R + backlog(S) <= phi_capacity(fc(S), t0, t0 + n × step) − reserved_in(t0, t0 + n × step, S)`
+
+with `backlog(S)` the sum of `remaining` over capacity-holding jobs in S (all of it counts, because first come puts it ahead), and `reserved_in` the cells of **held** reservations in S that overlap the window (an activated reservation is an ordinary job and is counted in the backlog, never in both). The job is admissible in a window only if both scopes pass. This is the FD§4.8 rule "committed cells over its window <= φ × forecast active capacity", made precise for several jobs, several categories and reservations (`ISS-65`). [D]
+
+### 6.27.2 Claim stretch (FD§4.7)
+
+When the published claim ratio passes its threshold, quoted windows lengthen: `stretch_ppm = clamp(claim_ratio_ppm × 10^6 / threshold_ppm, 10^6, admission.claim_stretch_max × 10^6)`, where `claim_ratio_ppm` is the latest `MetricSnapshot` `inflation.claim_ratio` (weeks of capacity, from `S6.*`) and `threshold_ppm` is `inflation.claim_ratio_threshold_weeks`. At or below the threshold the stretch is 1.0. A missing snapshot counts as 1.0 and is logged. [D]
+
+### 6.27.3 Pseudocode
+
+```text
+function quote_job(job, requested_window_s, now) -> Quote          # caller holds admission_lock
+  N, v_ppm, lam_ppm = job.cells_n, quote_inputs.v_ppm, quote_inputs.lambda_ppm    # from S6.*
+  V      = floor(N * v_ppm / 1e6)                                  # ISS-04
+  R      = ceil((N + V) * params.deadline_multiplier_standard)
+  p_ucr  = 1_000_000 + v_ppm + lam_ppm ;  escrow_ucr = N * p_ucr
+  cat    = job.category_key
+  fcA, fcC = latest_or_compute_forecast(ALL, now), latest_or_compute_forecast(cat, now)
+  if not fcA.ok: return decide_waitlist(fcA.reason)
+  if not fcC.ok: return decide_waitlist(fcC.reason)
+  bA, bC = backlog(ALL), backlog(cat)
+  n_min  = ceil(params.min_window_s / step)
+  n_max  = params.max_window_days * 86400 / step
+  feasible(n) = for S, fc, b in ((ALL, fcA, bA), (cat, fcC, bC)):
+                   R + b <= phi_capacity(fc, now, now + n*step, now) - reserved_in(now, now + n*step, S)
+  L_min  = smallest n in [n_min, n_max] with feasible(n)           # linear scan; never binary search
+  if none: return decide_waitlist("exceeds_max_window")
+  stretch = claim_stretch_ppm()
+  n_need  = smallest n in [ceil(L_min * stretch / 1e6), n_max] with feasible(n)   # else n_need = L_min
+  limiting = classify(L_min, n_need)    # global_capacity | category_supply | backlog | claim_pressure | window_bounds
+  req = requested_window_s / step if requested_window_s else n_need   # validated: on the grid, in bounds
+  if req < n_need: return Quote(decision=counter_offer, window_s=n_need*step, ...)
+  return Quote(decision=accept, window_s=req*step, ...)
+```
+
+`requested_window_s` is optional (null means earliest). It must lie in `[admission.min_window_s, admission.max_window_days × 86,400]` and be a multiple of `step`, else `VALIDATION_FAILED`. The quote never promises less than `admission.min_window_s`, so "instant" completion is never quoted (Principle 10). A requester may choose a window longer than the earliest one. [D]
+
+### 6.27.4 Quote record [D]
+
+Stored on the `Job` as an immutable document `quote` (the column is `S5.*`'s); a re-quote increments `quote_seq` and never edits an earlier document.
+
+| Field | Meaning |
+| --- | --- |
+| `quote_seq`, `issued_at`, `expires_at` | `expires_at = issued_at + price.quote_ttl_s` (`admission.waitlist_quote_ttl_s` after a waitlist release; the activation deadline for a reserved job, 6.30) |
+| `decision` | `accept`, `counter_offer`, `waitlist` |
+| `reason` | For `waitlist`: `insufficient_history`, `forecast_below_min_donors`, `exceeds_max_window`, `category_no_supply`, `forecast_dropped_before_confirm` |
+| `requested_window_s`, `window_s` | Declared window in seconds, a multiple of `step` (null when waitlisted) |
+| `cells_n`, `verification_cells_v`, `committed_cells_r`, `class_multiplier_ppm` | N, V, R |
+| `v_ppm`, `lambda_ppm`, `p_ucr`, `escrow_ucr` | Price stamped from `S6.*`; `escrow_ucr = N × p_ucr` (S0 0.6.1) |
+| `category_key`, `supply.limiting_factor`, `stretch_ppm` | 6.25, 6.27.2 |
+| `has_hold`, `hold_seq`, `reservation_id` | 6.28 |
+| `forecast_refs` | Snapshot ids and `inputs_hash` of `fcA`, `fcC`; backlog and reserved totals used |
+| `param_versions` | Versions of `admission.*`, `reservation.*`, `price.*` in force |
+| `policy_version_id` | The policy stamped at screening (R9) |
+
+The copy shown to the requester says the window is *declared*, never guaranteed (`copy.admission.window_declared`). [D]
+
+## 6.28 Decision: accept, later quote or waitlist
+
+### 6.28.1 Guards before the test [D]
+
+Checked in order; the first failure refuses with the error shown and changes no state.
+
+| # | Guard | Error |
+| --- | --- | --- |
+| 1 | `launch.member_jobs_enabled` is true | `403 LAUNCH_GATE_CLOSED` |
+| 2 | `kill.all_new_jobs`, `kill.template.<tpl_id>`, `kill.service.<svc_id>` and `kill.member.<mem_id>` are released | `503 KILL_SWITCH_ENGAGED` |
+| 3 | `N <= admission.max_job_cells` | `400 VALIDATION_FAILED` (details point to splitting the job) |
+| 4 | The member's jobs in `quoted`, `admitted`, `running`, `suspended`, `assembling`, `settling`, `cancelling` number fewer than `admission.max_concurrent_jobs_per_member` (checked at `job.submitted` and again under the lock) | `422 CAP_EXCEEDED` |
+| 5 | At `job.submitted`, unexpired balance is at least `N × p_ucr` at the current published price | `422 INSUFFICIENT_CREDIT` |
+
+### 6.28.2 Decision table
+
+| Condition (evaluated top down) | Decision | Job transition (S0 0.9.2) | Capacity hold |
+| --- | --- | --- | --- |
+| A forecast is not `ok` for `ALL` or for the category | `waitlist` | `job.policy_passed` then `job.waitlisted` in one transaction | none |
+| No feasible window within `n_max` | `waitlist` | same | none |
+| `req < n_need` (the requested window is too short) | `counter_offer` with window `n_need × step` | `job.policy_passed` (stays `quoted`) | yes if funded |
+| Otherwise | `accept` with the requested or earliest window | `job.policy_passed` (stays `quoted`) | yes if funded |
+| `decision = waitlist` and the member already has `admission.waitlist_max_per_member` entries (0 disables the waitlist) | refused: `422 NO_CAPACITY`; the job ends `cancelled` with `cancel_reason` = `no_capacity` | `job.cancel_requested` by `system` | none |
+
+`quoted` is therefore always passed through, even for a waitlist decision, because S0 0.9.2 reaches `waitlisted` only from `quoted`. [D]
+
+### 6.28.3 Holds, confirmation and expiry [D]
+
+- **Hold.** A hold is created only if the member's unexpired balance is at least `escrow_ucr` at quote time (`has_hold` = true). An unfunded member cannot reserve capacity by opening quotes. The hold takes the next `hold_seq` and counts in every later backlog.
+- **Confirm** (`confirmJobQuote`, body `{quote_seq}`; `Idempotency-Key` required). Under the admission lock: the job is `quoted`, `now < quote.expires_at`, `quote_seq` is current. With a hold, the job's own position is re-tested on `[now, now + window_s)` with only holds of smaller `hold_seq` as backlog; without a hold, a fresh test is run as for a new quote. If the window can still be honored, the system posts `escrow_hold` (S6.*), creates and queues the cells, and the job becomes `admitted` (`job.escrow_confirmed`), all in one transaction; `window_end_at = admitted_at + window_s`. If it cannot, the confirm is refused with `422 NO_CAPACITY` and `details.requote = true`, no escrow is posted, and either a new quote (`quote_seq + 1`, still `quoted`) or a `waitlist` follows according to 6.28.2 (reason `forecast_dropped_before_confirm`). If escrow cannot be funded (balance spent or a lot expired meanwhile) the answer is `422 INSUFFICIENT_CREDIT` and the job stays `quoted` until expiry.
+- **Expiry.** At `expires_at` the reaper (6.34) emits `job.quote_expired` and releases the hold. The job is terminal. A counter-offer is accepted only by confirming it.
+- **Cancel** from `quoted` releases the hold at once (`job.cancel_requested` to `cancelled`).
+- **Events.** Besides S0 events, `admission.quote_issued` is logged per quote (6.34).
+
+## 6.29 Waitlist
+
+### 6.29.1 `WaitlistEntry` fields required by admission [D][A]
+
+(`S5.*` owns the DDL; prefix `wlt_`, retention `job_bound`.)
+
+| Field | Type | Rule |
+| --- | --- | --- |
+| `id`, `job_id`, `member_id` | text | `job_id` unique among entries with `status` = `waiting` |
+| `category_key`, `committed_cells_r`, `requested_window_s` | text, int, int | Copied from the quote |
+| `waitlist_seq` | int | Strictly increasing under the admission lock; the first-come key |
+| `reason` | enum | As in 6.27.4 |
+| `status` | enum | `waiting`, `released`, `expired`, `cancelled` |
+| `created_at`, `expires_at`, `last_evaluated_at` | timestamptz | `expires_at = created_at + admission.waitlist_ttl_days × 86,400 s` |
+
+A waitlisted job holds no capacity and no escrow. The requester sees the position (`1 +` earlier `waiting` entries of the same category), the reason, and the expiry; no completion estimate is invented.
+
+### 6.29.2 Release and expiry [D]
+
+- **Triggers:** capacity freed (`job.settled`, `job.settled_partial`, `job.cancel_settled`, `job.quote_expired`, a reservation ending), a forecast that rises, and a timer every `admission.waitlist_recheck_interval_s`.
+- **Order and no overtaking.** Entries are evaluated in ascending `waitlist_seq`. When an entry is still infeasible, its category is blocked for the rest of the sweep: later entries of the same category are skipped, so a small late job cannot starve a large early one. Entries of other categories are still evaluated; the global constraint keeps them honest. Utilization cost of this rule is measured (`hamyar_admission_waitlist_wait_s`, [H]).
+- **Release.** A feasible entry becomes `released`; the job moves `waitlisted` to `quoted` (`job.waitlist_released`) with a fresh quote, a hold if funded, and `expires_at = now + admission.waitlist_quote_ttl_s`. The longer TTL stops a requester who is away from losing a place after one missed quote; a missed quote still ends the job (`job.quote_expired`).
+- **Expiry.** At `expires_at` the entry is `expired` and the job `cancelled` (`job.waitlist_expired`); no refund is needed.
+- **Cancel.** `job.cancel_requested` from `waitlisted` marks the entry `cancelled`.
+- While `kill.all_new_jobs` is engaged or `launch.member_jobs_enabled` is false, no entry is released; entries still age and expire. [D]
+
+```text
+function release_waitlist(now)                                   # holds admission_lock
+  blocked = {}
+  for e in entries where status == waiting order by waitlist_seq:
+      if e.expires_at <= now: expire(e); continue
+      if e.category_key in blocked: continue
+      q = quote_job(e.job, e.requested_window_s, now)
+      if q.decision == waitlist: blocked.add(e.category_key); continue
+      mark_released(e); transition(e.job, job.waitlist_released); issue(q, ttl=params.waitlist_quote_ttl_s)
+```
