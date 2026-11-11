@@ -749,3 +749,61 @@ These show which components act and which writes commit together. States and gua
 **F4. Revoke or suspend a service.** An admin action (second approver where required) in one unit of work: change the service state, bump `config_epoch`, engage `kill.service.<id>` if suspending, mark dependent jobs `suspended` or stopped per S7.*, write `AdminAction`, emit events. Because brakes are read inside lease and admission transactions (4.9.4), no new lease is issued after this commit. In-flight leases follow S7.*.
 
 **F5. Settle.** `escrow_settler` finds a `settling` job; one unit of work posts the `settle` transaction (levy, refund) and closes the escrow account at exactly zero, then marks the job `completed` or `failed`. A second run finds nothing to do.
+
+## 4.17 Recommended concrete stack, with alternatives
+
+The choice is driven by two things stated in the brief: the ledger needs strong consistency (4.6.2), and reachability of the host from Iran is unknown [V] (4.15). Statements below about the capabilities of named products are design-level and unchecked; each is [V] against the product's current documentation by the engineer before the choice is frozen (decision memo stored as `LaunchGateItem` evidence under G2).
+
+### 4.17.1 What the ledger forces [D]
+
+| Need | Consequence for the store |
+| --- | --- |
+| Ledger, escrow, cell state and outbox in one atomic commit (LC-1, LC-9) | One store with multi-row transactions that span all of them |
+| No write skew on balances and caps (LC-2) | Serializable isolation, or a single serial writer per ledger |
+| One serial chain with gapless `seq` (LC-3, LC-4) | A single serialization point and transactional sequence assignment |
+| Invariant queries over all entries (LC-8) | SQL aggregates on a consistent snapshot |
+| Point-in-time recovery and encrypted off-host backups (4.12) | Log archiving or equivalent [V: per host] |
+| Host can change (4.15) | A widely available, non-proprietary transaction model |
+
+The panel's own storage shows why a weaker store is not enough: it has no database, uses git refs for locks, and an eventually consistent key-value namespace for counters and one-time codes, which its own review records as racy (PR§2, PR§4.5 items 3 and 6).
+
+### 4.17.2 Options compared
+
+| Criterion | A. Conventional server + PostgreSQL | B. Cloudflare Worker + Durable Object (ledger) + D1 | C. Single binary (Go or similar) + SQLite with replication | D. Server + managed PostgreSQL |
+| --- | --- | --- | --- | --- |
+| Atomic ledger + state + outbox (LC-1, LC-9) | Native | Only if all of it lives in one Durable Object; cross-object transactions are not available [V] | Native (single file) | Native |
+| Isolation (LC-2) | Serializable available [V: version], with retry | Serial execution inside one object [V] | Single writer | As A |
+| Chain and throughput (LC-3, LC-4) | One head row; rate measured by 4.6.2 | One object is one serial writer: simple, but a hard ceiling and a single location [V] | One writer, simple | As A |
+| Backups and PITR | Mature tools; host-independent | Platform features [V] | Replication tools; weaker PITR [V] | Provider feature [V] |
+| Reachability from Iran [V] | Chosen after measurement; many hosts possible | Depends on one vendor's network [V] | As A | Depends on provider [V] |
+| Portability (4.15) | High | Low: Durable Object API is proprietary; the ports contain it | High | Medium |
+| Operations burden | Highest of the four; offset by simplicity of one node plus archive | Lowest | Low | Low to medium |
+| Cost for a small team | Low (one small host) | Low to unknown [V] | Lowest | Medium |
+| Fit with the owner's panel code and skills | TypeScript runs on any server | Same runtime as the panel (PR§1) | New language | As A |
+
+### 4.17.3 Recommendation [D][A]
+
+| Layer | Choice | Reasons |
+| --- | --- | --- |
+| System of record | **PostgreSQL**, one primary, point-in-time recovery to an independent location, serializable isolation for ledger postings with bounded retry | Meets LC-1 to LC-9 without proprietary primitives; runs on any host chosen after the reachability test; mature backup, role, trigger and privilege features for 4.6.5 and 4.10.2 |
+| Server | **TypeScript (strict) on a current LTS Node.js runtime**, one modular monolith (4.3.2) | The owner already works in TypeScript (PR§1); one language lets the client and server share the domain library (ids, canonical JSON, hashing, `ucr` arithmetic, validation schemas), which removes a class of client-server drift and lets the simulation harness reuse production code |
+| Web | Static single-page apps built with Vite, React and TypeScript, logical (direction-neutral) CSS properties for RTL, all assets self-hosted | Reuses the owner's web stack and, if the review passes, panel components (4.18); no runtime third-party code |
+| Blob store | An S3-style object API behind `BlobStore`, or the file system of the host with content-addressed names | Smallest dependency that satisfies write-once and integrity checks |
+| Ephemeral store | Tables in the same PostgreSQL (4.6.1) | No second stateful dependency |
+| Scheduler | In-process runner with database locks (4.8) | No external scheduler to reach or secure |
+| Hosting | Not named. One small server or container host chosen after the G2 measurement; the database on the same private network or a managed instance [V] | Hosting is an owner decision (S3.*) |
+
+Phase 1 topology (a configuration of the full topology, not a different design): one `server` instance with both roles, one primary with archived log, optional warm replica, the static bundles on the same host or a static host, no check runner. Full topology: N server instances, a replica, a separate check runner, backups in two locations.
+
+Optional use of Cloudflare Workers is limited to serving the static public bundle behind the `StaticHost` port if the reachability test favors it [V]. No such worker holds a secret or touches the ledger.
+
+### 4.17.4 Alternatives and when to choose them
+
+| Alternative | Choose when | Cost |
+| --- | --- | --- |
+| B. Worker + Durable Object + D1 | The owner prefers minimal operations and the reachability test shows that vendor's network works from Iran and is acceptable to members [V]; measured posting rate fits one object | The ledger actor must hold all state that changes with money; lock-in; a single serial writer is the ceiling; the `LedgerStore` contract (LC-1 to LC-9) must still be demonstrated by the contract suite |
+| C. Single binary + SQLite with replication | Operations must be minimal and the team can accept a single writer node | Weaker recovery tooling; language change |
+| D. Server + managed PostgreSQL | The team wants no database administration | Provider reachability and compelled-disclosure exposure to assess [V] |
+| Not recommended: a document or key-value store as the ledger | Never | Cannot meet LC-2 and LC-8 without rebuilding transactions |
+
+Whichever is chosen, the contract suites of 4.5 decide acceptance: a driver that fails LC-1 to LC-9 is rejected regardless of its other merits.
