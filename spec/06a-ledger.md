@@ -457,3 +457,132 @@ A member denied only for `reserve_empty`, `day_limit`, `tree_limit` or `cap` is 
 | Referral bonuses as a second channel | Same Reserve floor and the limits `growth.referral.*` (S12.*); a bonus is a `grant` entry (ISS-06) and is checked against `K` | Owned by S12.* |
 
 The ledger exposes `hamyar_ledger_grants_denied_total{reason}` and `hamyar_ledger_grants_paid_total` so that denial rates and a farm signature (many grants, almost no later contribution) are visible to operators and, in aggregate, to the pilot analysis (`S13.*`). Whether the limits deter farming is [H]; the success criterion is that grants per day stay below the limit with a first-job completion rate above the founders' pre-registered threshold (`P1M`, `FND`).
+
+## 6.11 Pricing: v, lambda, p, eta, claim ratio, mint-cap utilization
+
+### 6.11.1 The price [D]
+
+For a job type t (`job_type`, S0 0.8.6) the requester's price per accepted primary cell is
+
+```
+p_ucr(t, at) = 1,000,000 + v_ppm(t, at) + lambda_ppm(at)           (p = 1 + v + lambda, FD§4.3)
+escrow_ucr   = N x p_ucr        primary N x 1,000,000 ; pool N x v_ppm ; levy N x lambda_ppm
+```
+
+All job types and sizes share one lambda; v differs per job type because verification burden differs by template (FD§4.3 'per job type'). The donor earn rate is exactly 1,000,000 ucr per accepted cell of any kind. `size_class` and `deadline_class` have one value in Phase 1, so no multiplier exists (FD§4.3, FD§4.8). The quote interface used by file 06b and by the job wizard is
+
+```
+price_quote(job_type, n_cells, at) -> { p_ucr, v_ppm, lambda_ppm, escrow_ucr, pool_ucr, levy_ucr,
+                                        snapshot_ids, expires_at = at + price.quote_ttl_s }
+```
+
+### 6.11.2 Measuring v [D][A]
+
+Definitions. A cell is counted at its acceptance time `accepted_at`. A verification cell is a cell with `cell_kind` in `gold`, `audit`, `third`, `review`, `rework`; it is attributed to the job type of the cell or template it serves (a gold cell to its `GoldCell` template's job type). FD§4.3 names audit, gold and rework cells; `third` (the third execution of FD§4.4) and `review` (paid human review cells, FD§4.4) cost credit in the same way and are included, otherwise v would understate the cost [A: clarification of FD§4.3].
+
+```
+function measure_v(t, T):                        -- T = measurement instant (publication instant)
+    W0 = T - price.v_window_days x 86400         -- default 28 days; the window is [W0, T)
+    A  = count(cells: charged_job_type = t, cell_kind = 'primary',  state = 'accepted', accepted_at in [W0, T))
+    V  = count(cells: charged_job_type = t, cell_kind in verification set, state = 'accepted', accepted_at in [W0, T))
+    if A < price.v_min_sample_cells:             -- default 100 accepted primary cells
+        return { v_ppm = price.v_prior_ppm, basis = 'prior', A, V }         -- default 100,000 = 0.10
+    v_obs = div_ceil(10^6 x V, A)
+    if v_obs > price.v_cap_ppm: return { v_ppm = price.v_cap_ppm, basis = 'capped', A, V, v_obs }   -- default 500,000
+    return { v_ppm = v_obs, basis = 'measured', A, V }
+```
+
+| Question | Decision |
+| --- | --- |
+| Which jobs count? | Commons and member jobs of the same type together: the burden belongs to the template, and Phase 1 will have few member jobs. The two ratios are also published separately (`v_commons`, `v_member`) so the assumption can be tested [A][H: equal burden; falsified if they differ by more than the founders' pre-registered tolerance, `FND`] |
+| What happens below the minimum sample? | The prior `price.v_prior` applies and the snapshot says `basis = prior`. With the defaults this reproduces FD§3.3 (v = 0.10) before any data exists |
+| What if v_obs exceeds the cap? | The cap applies (`basis = capped`), the excess cost is absorbed by the levy through the rule of 6.7.2, and the alarm `ledger.v_cap_hit` is raised (severity `warn`); the cap protects requesters, the levy absorbs the difference, and publishing both makes the loss visible |
+| Overturned cells? | A cell that is `overturned` is no longer `accepted` at the next measurement and drops out of both counts |
+| Rounding | `div_ceil` (6.3.2); the pool is never smaller than measured cost |
+| Windows | The trailing window is fixed-length and half-open; it moves with each publication |
+| Limits | v measures cells, not cost in time or tokens (provider tokens are never the unit, FD§4.1); a template whose verification gets cheaper or dearer shows it only after the window turns over |
+
+### 6.11.3 lambda [D]
+
+`price.levy_lambda` (default 0.05, FD§3.3 illustrative; replaced by `P1M` Reserve inflow versus grant demand, then `FND`). It is a published constant, changed only through 6.12. Effective levy (levy posted divided by accepted primary cells) is published beside it (6.7.3).
+
+### 6.11.4 Round-trip efficiency eta [D]
+
+```
+eta_ppm(t)   = div_floor(10^12, p_ucr(t))                  -- 1 / (1 + v + lambda); p = 1,150,000 gives 869,565 (0.870 displayed)
+eta_blend    = div_floor(10^12 x sum_t A_t, sum_t (A_t x p_ucr(t)))      -- A_t = accepted primary cells of member jobs of type t in the window
+```
+
+`price.eta_alarm_threshold` (default 0.80, arbitrary, FD§4.3, replaced through a `PreRegistration`, `FND`) is compared with `eta_ppm` of each job type and with `eta_blend`; below it the alarm `ledger.eta_below_threshold` (`warn`) is raised and shown on the capacity dashboard. No automatic price change follows: whether to change v, lambda or verification rates is a founders' decision (FD§4.3 says the threshold is set by the founders).
+
+### 6.11.5 Claim ratio, throughput and mint-cap utilization [D]
+
+```
+claims_ucr          = sum(unexpired lot remaining of all member accounts) + sum(unexpired slices held by reservation escrows)
+accepted_cells      = count of accepted cells of any kind (Commons and member) with accepted_at in the last inflation.throughput_window_days (default 28)
+claim_ratio_ppm     = div_floor(claims_ucr x inflation.throughput_window_days, 7 x accepted_cells)        -- weeks of capacity, in ppm
+mint_utilization_ppm = div_floor(10^6 x minted_this_utc_month_ucr, mint.monthly_cap_credits x 10^6)
+```
+
+Why the formula is in these units: one credit pays one executed cell, because the donor earn rate is 1 credit per accepted cell of any kind; credit held in escrow of an admitted job is already counted as committed by admission control (file 06b), so claims are credit that is not yet committed. Weekly throughput is `accepted_cells x 7 / window_days`; dividing credits (cells) by cells per week gives weeks. If `accepted_cells` = 0 the ratio is undefined: the gauge is published as null, `ledger.claim_ratio_undefined` (`warn`) is raised, and no automatic cut is applied (cutting minting because nobody contributes would not help).
+
+Gauges are recomputed every `metrics.rollup_interval_s` (default 3,600 s) and published (6.11.6). Utilization at or above `inflation.mint_utilization_alarm` (default 0.90) raises `ledger.mint_utilization_high` (`warn`).
+
+Automatic response (FD§4.7: 'the mint cap is lowered and quoted windows lengthen; credit is not silently devalued') [D]:
+
+```
+after each rollup:
+    if claim_ratio_ppm > inflation.claim_ratio_threshold_weeks x 10^6          -- default 6.0 weeks
+       and no automatic cut in the last price.publish_period_days             -- one cut per 30 days
+       and mint.monthly_cap_credits > 0:
+        new_cap_ucr = div_floor(cap_ucr x (10^6 - inflation.mint_cap_cut_ratio_ppm), 10^6)       -- default cut 25%
+        write ParameterVersion for mint.monthly_cap_credits by principal 'system', change_class 'tighten',
+        effective at once; ChangeLogEntry published within change.tighten_publish_within_s;
+        events parameter.changed and ledger.mint_cap_cut
+```
+
+File 06b reads `claim_ratio_ppm` to lengthen quoted windows. Raising the cap again is a `loosen` change: notice, a second operator, and the forecast check below. Mint cap against capacity: FD§4.2 says the cap is no higher than forecast redeemable capacity. Redeemable capacity is the cells member jobs can use, so `redeemable_per_month = div_floor(admission.phi_ppm x accepted_cells x 30, inflation.throughput_window_days)` and the alarm `ledger.mint_cap_above_forecast` (`warn`, plus a required second approver on the edit) fires when `mint.monthly_cap_credits x 10^6 > redeemable_per_month x 10^6`; with the FD§3.3 illustration (40 donors x 8 cells x 30 days x phi 0.5) it gives 4,800, the default cap. S0 0.10.6 writes that derivation with (1 - 0.5); the two agree only at phi = 0.5, and this file uses phi (ISS-63). Before throughput data exists (Phase 0) the check is skipped and the cap is the configured default [A].
+
+### 6.11.6 Publication and versioning [D]
+
+Published values are immutable `MetricSnapshot` rows (S0 0.7; schema owned by `S13.*`; the fields this file requires are below). A value is never edited: a new row supersedes it.
+
+| Field | Meaning |
+| --- | --- |
+| `kind` | `price`, `eta`, `claim_ratio`, `mint_utilization`, `reserve`, `ledger_checkpoint` |
+| `job_type` | For `price` and `eta`; null otherwise |
+| `window_start`, `window_end` | The measurement window |
+| `value_ppm`, `sample_primary_cells`, `sample_verification_cells`, `basis` | v (or the gauge), A, V, and `measured`, `prior` or `capped` |
+| `inputs` | json of the counts used, so anyone can recompute |
+| `formula_version` | Integer; 1 for the formulas of this file; a formula change is a spec change and a new number |
+| `version`, `supersedes_id` | Per `kind` and `job_type` |
+| `published_at`, `effective_from` | Notice: `effective_from = published_at + change.notice_days_price x 86,400 s` (default 14 days) |
+
+Schedule: a `price` snapshot per job type is published when at least `price.publish_period_days` (default 30, 'monthly', FD§4.3) have passed since the last one, at the next UTC day boundary. The first snapshot (v = `price.v_prior`) takes effect when published, because there is no earlier price to protect. Every later change in v, up or down, takes effect after the notice and is announced in the public change log (`ChangeLogEntry` kind `price`, with old and new `p_ucr` and eta); until then quotes use the snapshot in force and the page shows the upcoming one. Gauges (`eta`, `claim_ratio`, `mint_utilization`, `reserve`) are recomputed each rollup and are not subject to notice, because they are not parameters.
+
+Binding [D]: a quote stores the snapshot ids it used; the escrow stores `quote_p_ucr`, `quote_v_ppm`, `quote_lambda_ppm` at the hold and never changes them; a quote is valid for `price.quote_ttl_s` (default 1,800 s), far shorter than the notice period, so a price change can never fall inside a quote's life. A reservation fixes the price at booking (6.6).
+
+## 6.12 Prospective-only changes, notice and the public change log
+
+### 6.12.1 Rule [D]
+
+Changes to any parameter in this file follow S0 0.10.3: a new `ParameterVersion`, `effective_from >= now + notice_days`, a `ChangeLogEntry`, an `AdminAction` and the event `parameter.changed`. `tighten` changes (R10 pattern) apply at once and are published within `change.tighten_publish_within_s`. A `loosen` or `neutral` change also needs a second operator [A]. Nothing is recomputed retroactively: a report or audit for time t uses the versions in force at t.
+
+### 6.12.2 What each parameter binds to [D]
+
+| Parameter(s) | Bound to | A change affects |
+| --- | --- | --- |
+| `credit.lifetime_days`, `credit.lifetime_days_accelerated` | the lot (`lifetime_param_version`) | lots earned after `effective_from`; no existing lot changes |
+| `credit.member_cap_credits`, `trust.cap_multiplier.*` | the lease (`ledger_versions`) | leases issued after; balances above a lowered cap are not touched |
+| `price.levy_lambda`, the `price` snapshots | the quote and the escrow | quotes made after `effective_from`; open escrows keep their price |
+| `price.v_window_days`, `price.v_min_sample_cells`, `price.v_cap`, `price.v_prior` | the next measurement | the next publication, then after its notice |
+| `mint.monthly_cap_credits`, `mint.per_member_daily_cap_credits` | the lease | leases after; leases in flight are honored (6.8.2) |
+| `grant.*` | the evaluation run | members not yet granted; posted grants stay |
+| `reserve.ceiling_credits`, `reserve.retire_*` | the next retirement run | after notice, because retirement is irreversible |
+| `inflation.*`, `ledger.*_interval_s` | the next rollup or run | immediately after `effective_from` |
+
+Tighten directions required from `S16.*` for the parameter record (`tighten_direction`): `mint.monthly_cap_credits` = `down`; `grant.starter_credits`, `grant.max_per_device`, `grant.max_per_invite_tree_per_day`, `grant.max_per_day` = `down`; `verify.*` rates as in S0; every price, lifetime, cap-K and Reserve-ceiling parameter = `none` (always notice, `change.notice_days_price` = 14 days), because they change what members hold or pay [D][A].
+
+### 6.12.3 Content of the public log line [D]
+
+Parameter name, old and new value, versions, `change_class`, `effective_from`, notice days, a mandatory reason, the approvers' pseudonymous admin handles, and an impact line computed by the system: for price, old and new `p_ucr` and eta per job type; for K, the count of members above the new cap (published only if >= `analytics.min_cohort_k`); for lifetimes, 'existing lots affected: 0'; for the mint cap, the new utilization. Automatic changes (6.11.5) are labeled with the principal `system` and the gauge value that triggered them.
