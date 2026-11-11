@@ -103,3 +103,117 @@ This file specifies how the platform decides whether, when and at which quoted w
 **C. Cross-parameter constraints proposed** (numbering is `S16.*`'s) [A]: `C9` `admission.min_window_s` and `admission.max_window_days × 86,400` are multiples of `admission.window_step_s`; `C10` `admission.min_history_days <= admission.forecast_window_days` and `admission.active_donor_window_days <= admission.forecast_window_days`; `C11` `reservation.min_lead_s <= reservation.max_horizon_days × 86,400`; `C12` `admission.waitlist_quote_ttl_s >= price.quote_ttl_s`.
 
 **D. Change rules.** `admission.*` and `reservation.*` follow S0 0.10.3 and the notice `change.notice_days_price`. Tightening applies at once; loosening needs a change-log entry and notice (R10). A quote, hold or reservation keeps the parameter versions it was created under (recorded in the quote); a change never alters an existing hold or an admitted job's declared window. Lowering `admission.phi` is a tightening, so it can never invalidate an admitted job; it only affects later quotes. [D]
+
+## 6.24 Capacity forecasting
+
+### 6.24.1 Estimator [D][H]
+
+The forecast answers one question: how many cells per day will today's active donors execute and have accepted? The estimator is a **retrospective-cohort trailing mean**: take the donors who are active now, replay their verified throughput over the last `W` complete days, and use the lower of the `W`-day and the `A`-day mean.
+
+| Element | Rule | Reason |
+| --- | --- | --- |
+| Cohort | Active donors (6.22), restricted to eligible donors for a category scope | Donors who left are not counted; donors who joined recently count with zeros for days before they joined, which errs low |
+| Daily throughput `X(d)` | `sum over cohort members m of min(admission.donor_daily_clamp_cells, cells_accepted(m, d))` | The clamp stops one heavy donor from dominating the forecast; capacity concentration is a Phase 1 measure (FD§9) |
+| `M_W`, `M_A` | Mean of `X(d)` over the newest `min(W, hist)` and `min(A, hist)` complete days; `hist` = complete days since the first accepted cell of the platform | A rise shows up slowly (through `M_W`); a fall shows up quickly (through `M_A`) |
+| Base rate | `B = min(M_W, M_A)` cells per day, an exact rational | Conservative in both directions |
+| Safety margins | haircut `h = admission.forecast_haircut`; horizon weight `w(d) = max(0, 1 − admission.horizon_discount_per_day × d)` for the d-th day after the forecast time; φ itself; the clamp; the `min` | The first two are the explicit margins; φ is a share, not a margin, but also keeps a buffer |
+| Insufficient data | `hist < admission.min_history_days` gives reason `insufficient_history`; cohort smaller than `admission.min_forecast_donors` gives `forecast_below_min_donors`. Either makes the forecast `ok = false` | A forecast that is not trusted never accepts a job; the decision is `waitlist` (6.28) |
+
+All quantities are exact rationals (integer numerator and denominator, 128-bit or arbitrary precision). Nothing is rounded until a capacity is displayed, and then it is **rounded down**; a comparison `integer demand <= rational capacity` needs no rounding. The ppm parameters enter as integers over 10^6. [D]
+
+The forecast is a function of its inputs only. Its `inputs_hash` is the SHA-256 (S0 0.6.4) of the canonical JSON of the cohort size, the daily `X(d)` vector, the parameter versions and the forecast time, so the same inputs give the same snapshot and an audit can replay a quote. [D]
+
+### 6.24.2 Pseudocode
+
+```text
+type Q = exact rational
+
+function compute_forecast(scope, now) -> Forecast          # scope = ALL or a category_key
+  W, A = params.forecast_window_days, params.active_donor_window_days
+  hist = min(W, complete_days_since(platform_first_accept_day, now))
+  if hist < params.min_history_days: return Forecast(ok=false, reason="insufficient_history")
+  use    = newest min(W, hist) complete days            # d(1) oldest .. d(k) newest
+  recent = newest min(A, hist) complete days
+  cohort = { m in Member :
+               m.status == active and not killed(m)
+             and sum(counts(m, recent, svc_filter(scope))) >= params.active_donor_min_cells
+             and (scope == ALL or optin_covers(m, scope)) }
+  if |cohort| < params.min_forecast_donors:
+      return Forecast(ok=false, reason="forecast_below_min_donors", n=|cohort|)
+  X(d)  = sum over m in cohort of min(params.donor_daily_clamp_cells, counts(m, d, svc_filter(scope)))
+  M_W   = Q(sum over d in use of X(d), |use|)
+  M_A   = Q(sum over d in recent of X(d), |recent|)
+  return Forecast(ok=true, B=min(M_W, M_A), n=|cohort|, hist=hist, inputs_hash=...)
+  # svc_filter(scope): rows of the pinned service only when scope pins one; otherwise no filter
+
+function phi_capacity(fc, a, b, now) -> Q        # member-job share of forecast cells in [a, b)
+  total = Q(0)
+  for each day index d with day_d = [now + d*86400, now + (d+1)*86400) overlapping [a, b):
+      overlap = seconds in [a, b) intersect day_d
+      w       = max(0, 1e6 - params.horizon_discount_ppm * d)            # ppm
+      total  += fc.B * (1e6 - params.haircut_ppm)/1e6 * w/1e6 * overlap/86400
+  return Q(params.phi_ppm, 1e6) * total
+```
+
+Check against FD§3.3: `B = 320` (40 donors × 8 cells), `h = 0`, `w = 1`, a 2-day window gives `phi_capacity = 0.5 × 320 × 2 = 320`, the number in `AC-admission-01`. [D]
+
+### 6.24.3 Commons capacity bound
+
+The same snapshot publishes `commons_cells_per_day = (1 − φ) × B(ALL) × (1 − h)` as `MetricSnapshot` key `admission.commons_capacity_cells_per_day`. `S6.*` reads it as the "forecast redeemable capacity" that bounds `mint.monthly_cap_credits` (FD§4.2). With the FD§3.3 inputs, `(1 − 0.5) × 320 × 30 = 4,800`, the initial default of `mint.monthly_cap_credits`. [D]
+
+## 6.25 Per-category supply gauge (FD§5.7(8))
+
+Restrictive opt-ins can starve one category while the platform as a whole has capacity. The remedy named by the FD is a per-category supply gauge that feeds the quote. [D]
+
+| Item | Decision |
+| --- | --- |
+| Gauge | For every `category_key` that has a live job, a waitlist entry, a reservation or a recent quote, and for `ALL`: the `Forecast` of 6.24 with `scope` = that key. The gauge is recomputed every `admission.reforecast_interval_s` and at every quote |
+| Overlap | One donor can be eligible for several categories, so category capacities are not additive. The admission test therefore applies **two** constraints, the global one and the category one; a job must satisfy both (6.27). By construction `B(category) <= B(ALL)` |
+| Feeding the quote | The quote record carries `supply` = `{category_key, limiting_factor}`; `limiting_factor` is one of `global_capacity`, `category_supply`, `backlog`, `claim_pressure`, `window_bounds`. The requester sees the factor, never donor counts |
+| Public gauge | `GET /v1/public/capacity` returns per category: eligible-donor bucket, `forecast_cells_per_day` and the committed share, refreshed every `public.counter_refresh_s`. A category with fewer than `analytics.min_cohort_k` eligible donors shows `"<k"` for both counts, so a small category cannot reveal individual donors (S10.*). No member id, handle or location appears [D] |
+| Operator view | The admin capacity dashboard (`SCR-ops-*`, S11.*) shows exact counts, the gauge history and the forecast error of 6.33 |
+| Opt-out fragmentation signal | `hamyar_admission_category_supply_ratio` = `B(category) / B(ALL)` per category; a falling ratio is the early sign of FD§5.7(8) [H: that opt-out fragmentation matters in Phase 1; test: the ratio of the two most restrictive categories over the pilot; kill criterion: ratio stays above `0.9` for every live category] |
+
+## 6.26 φ and preservation of the Commons share
+
+### 6.26.1 φ
+
+`admission.phi` (φ, `0 < φ < 1`, constraint C1) is the share of forecast capacity that may be committed to member jobs and reserved for them. It is a single global value in Phase 1 [D]; a per-category φ is not specified (open decision, 6.39). The initial default 0.5 is the FD§3.3 illustrative value. It is replaced by `P1M`: measured throughput and the deposit-to-withdrawal ratio. [D][H]
+
+### 6.26.2 Three layers that keep (1 − φ) for Commons work [D]
+
+| Layer | Mechanism | Guarantee it gives |
+| --- | --- | --- |
+| L1 admission bound | Every quote, hold and reservation is tested against `φ × capacity` (6.27, 6.30) | Committed member cells cannot exceed φ of forecast capacity at the moment of admission |
+| L2 offer guard | The lease scheduler uses `offer_class` below whenever a donor could be offered either a Commons cell or a member-job cell | While both classes have eligible queued cells, the member share of leases never exceeds φ in any prefix of the offers, so Commons minting continues |
+| L3 reservation share cap | Reserved cells in any slot never exceed `reservation.capacity_share_cap` of the φ capacity of that slot | Reservations cannot absorb the member share and then push it over φ |
+| Monitoring | `hamyar_admission_commons_share_ratio` (Commons leases divided by all leases over `admission.share_window_s`). An alarm (`Alarm`, S4.*) is raised when it stays below `1 − φ` while eligible Commons cells exist | Detects a scheduler defect |
+
+If no eligible Commons cell exists, member cells are offered; capacity is never left idle. If no eligible member cell exists, Commons cells are offered. [D]
+
+```text
+function offer_class(donor, now) -> COMMONS | MEMBER | NONE        # called by the lease scheduler (S8.*, S9.*)
+  W        = params.share_window_s
+  m        = count of leases issued for member-job cells in [now - W, now)
+  a        = count of leases issued for all cells in [now - W, now)
+  member_ok  = exists queued member-job cell eligible for donor (R8)
+  commons_ok = exists queued Commons cell eligible for donor (R8)
+  if not member_ok and not commons_ok: return NONE
+  if not member_ok: return COMMONS
+  if not commons_ok: return MEMBER
+  # both available: offer a member cell only if the member share stays <= phi afterwards
+  if (m + 1) * 1e6 <= params.phi_ppm * (a + 1): return MEMBER
+  return COMMONS
+```
+
+With φ = 0.5 and empty counters the first offer is Commons, the second member, then alternating. The counters are global, not per donor; a donor may receive a different mix. [A]
+
+### 6.26.3 Scheduler contract (consumed by S5.*, S8.*, S9.*) [D]
+
+| Id | Requirement |
+| --- | --- |
+| SC-1 | Within one deadline class, member-job cells are offered in ascending `hold_seq` of their job (first come) |
+| SC-2 | Deadline classes are served in ascending class rank; only `standard` (rank 0) exists in Phase 1 |
+| SC-3 | A reserved job gets priority for up to `slot_plan[k]` cells in absolute slot `k`; the unserved remainder of a slot is not carried over and falls back to SC-1 |
+| SC-4 | `offer_class` decides the Commons versus member mix |
+| SC-5 | No cell of a job is offered before the job is `admitted`; cells of a `suspended` job are not offered |
