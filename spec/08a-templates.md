@@ -1084,3 +1084,89 @@ Because the target is deterministic for grounded fields, two correct executions 
 | --- | --- | --- | --- | --- |
 | H-FC-1 | V1 to V5 reject hallucinated or corrupted values without rejecting faithful conversions | Offline test with seeded corruptions plus reviewer-converted rows; Phase 0 dry-run pass rates per service | Seeded corruptions all rejected; faithful rows rejected no more often than `verify.false_reject_alarm` | Otherwise a new version of the checks |
 | H-FC-2 | Two executions agree exactly on grounded fields | Share of `record_equal` matches on gold-derived pairs | Third-execution rate keeps implied v within `price.v_cap` | Implied v above `price.v_cap` after `calibration.min_samples_per_service` cells |
+
+## 8.15 Cross-template summary
+
+| Template slug | `output.kind` | Strongest automatic check | Weakest point | Comparator | `risk_class` | `quality_class` |
+| --- | --- | --- | --- | --- | --- | --- |
+| `translation_glossary` | `marked_segments` | Marker and id match (c05) | No check of meaning; glossary check may false-reject inflections | `segment_overlap` (weak) | `standard` | `mixed` |
+| `classify_extract` | `json` | Schema, id set and span grounding | Label correctness is unverified except by gold and audits | `item_agreement` | `standard` | `mixed` |
+| `summarize_schema` | `json` | Entity and numeral grounding | Faithfulness of statements is unverified | `summary_overlap` (weak) | `standard` | `subjective` |
+| `code_change_tests` | `text` | `test_run` in the isolated runner | The runner itself is the largest attack surface | `test_outcome_equal` | `standard` | `objective` |
+| `code_change_tests_rs` | `text` | `static_parse` only | No automatic quality signal | `patch_normalized_equal` (weak) | `high` | `objective` |
+| `format_convert_validator` | `jsonl` | Row id match and field grounding | `none`-grounded fields are type-checked only | `record_equal` | `standard` | `objective` |
+
+Cross-template hypotheses [H]
+
+| Id | Claim [H] | Measurement | Success | Kill |
+| --- | --- | --- | --- | --- |
+| H-ALL-1 | Chat services reproduce the per-render result token correctly in the `RESULT` block | Share of Phase 0 dry-run cells failing `reject.echo_token_mismatch`, per service | Token failures no more frequent than other format failures after `calibration.min_samples_per_service` cells | Token failures dominate rejections: set `delimiters.echo_token` to false in a new version (a `loosen`) |
+| H-ALL-2 | The raw-text fallback of 8.5.4 recovers most answers that lost their wrapper lines | Share of accepted cells that needed the fallback | Pre-registered (`FND`) | Pre-registered |
+| H-ALL-3 | The R3 lint (8.7) does not block reasonable prompts | Number of lint blocks that reviewers judge false positives during seed review | Pre-registered (`FND`) | Pre-registered |
+
+None of the six templates is claimed to work. All start as `draft`, are never pre-approved, and become `approved` only through 8.8 with Phase 0 dry-run evidence attached [D].
+
+## 8.16 Acceptance criteria and tests
+
+Given / When / Then, in addition to `AC-template-01` to `AC-template-08` above. Test layers and numbering belong to `S18.*` (`T-unit`, `T-policy`, `T-inj`, `T-rtl`, `T-adv`).
+
+- `AC-template-09` (render purity). Given an approved version, a cell and a variant, When the cell is rendered twice with the same token, Then the two texts are byte-identical; When rendered with different tokens, Then they differ only in the token.
+- `AC-template-10` (budget). Given the worst-case input of a template version, When it is rendered at the default `cell.envelope.max_input_chars`, Then `chars(text) <= cell.envelope.max_input_chars`; When the envelope parameter is lowered so the render no longer fits, Then the template is auto-paused with `template.paused` and no cell is shown.
+- `AC-template-11` (variant parity). Given a version whose `fa` variant has a different placeholder multiset from `en`, When `template.review_requested` is attempted, Then LR-04 refuses it.
+- `AC-template-12` (forgeable close line). Given source text that contains `<<<RESULT zzzzzzzzzzzz` and `RESULT zzzzzzzzzzzz>>>`, When the upload is screened, Then it is refused with `delimiter_collision`.
+- `AC-template-13` (glossary density). Given a glossary whose matched subset for one segment exceeds the slot budget, When the upload is split, Then it fails with field code `glossary_too_dense` and no entry is dropped.
+- `AC-template-14` (gold indistinguishability). Given a gold cell and a primary cell of the same template, When both are rendered, Then they pass through the same function, have the same structure and delimiters, and the gold cell's answer is absent from every volunteer-visible field.
+- `AC-template-15` (execution order). Given a submission for `code_change_tests` that fails `output_flag_scan`, When checks run, Then `test_run` is not invoked and the submission is `quarantined`.
+- `AC-template-16` (sandbox off). Given `ff.template.code_change_sandbox` is off, When a reviewer tries to approve `code_change_tests`, Then it is refused; When `code_change_tests_rs` passes review, Then it can be approved and its deliverable carries the label "tests not run by the platform".
+- `AC-template-17` (runner outage). Given the runner is unavailable, When `test_run` is evaluated, Then the check result is `inconclusive`, the submission is not rejected and no credit moves.
+- `AC-template-18` (no pre-approval). Given a fresh install seeded from this spec, When the template list is read, Then every seed `TemplateVersion` is `draft`, `Template.active_version_id` is null and the job wizard offers no template.
+- `AC-template-19` (no volunteer-side execution). Given any approved template variant, When the volunteer card is built from it, Then the only actions offered are copy prompt, open in service where the adapter supports it, and paste back; no action runs, installs or downloads anything.
+- `AC-template-20` (promise wording). Given any user-facing string of a template, When the linter scans it, Then "guarantee" and its Persian equivalents are absent (LR-09).
+
+## 8.17 Names, parameters and conventions added by this file
+
+Every item is a convention gap reported for folding into `S0.*` (rule 0.1). Values marked `initial configurable default` are replaced by the measurement in the last column [A].
+
+**New parameters** (area `template`, owner per `S0.10.5` unless stated)
+
+| Name | Type | Initial configurable default | Validation | Replaced by |
+| --- | --- | --- | --- | --- |
+| `template.delimiter_token_chars` | int | 12 (base32, so 60 bits of token) | 8..32 | `SEC` |
+| `template.max_skeleton_share` | ratio | 0.50 | 0 < x < 1 | `CAL` |
+| `template.min_reviewers_loosen` | int | 2 | 1..5 | `FND` |
+| `template.exec.timeout_s` | duration_s | 30 | 1..600 | `TEC` |
+| `template.exec.memory_bytes` | int | 268,435,456 (2^28) | 1,048,576..4,294,967,296 | `TEC` |
+| `template.exec.max_output_bytes` | int | 65,536 (2^16) | 1,024..1,048,576 | `OPS` |
+
+The three `template.exec.*` parameters are operational and are owned by the `operator` role, not `reviewer` [A].
+
+**Other additions**
+
+| Kind | Addition |
+| --- | --- |
+| Feature flag | `ff.template.code_change_sandbox` (default off) |
+| Reject reasons (`S0.8.4` seed list) | `reject.glossary_violation`, `reject.echo_token_mismatch`, `reject.grounding_failed` |
+| Check types | `size_bounds`, `output_flag_scan`, `refusal_pattern`, `extract_result`, `json_schema` (params `schema`, `schema_from`, `ids_at`, `ids_from`), `jsonl_records_match`, `marked_segments_match`, `glossary_adherence`, `grounded_span`, `numbers_grounded`, `script_ratio`, `orthography_variants`, `length_ratio`, `static_parse`, `test_run` |
+| Comparator types | `normalized_equal`, `segment_overlap`, `item_agreement`, `summary_overlap`, `record_equal`, `test_outcome_equal`, `patch_normalized_equal` |
+| Template slugs | The `job_type` values and `code_change_tests_rs` |
+| `TemplateVersion` fields | `body`, `body_hash`, `change_class`, `change_note`, `author_admin_id`, `supersedes_version_id`, `approved_at`, `effective_from`, `retired_at`, `retired_reason` (`superseded`, `withdrawn`) |
+| `Lease` fields | `prompt_variant`, `render_token`, `prompt_hash` (owner `S5.*`) |
+| Validation field codes (API error `details.fields`) | `marker_collision`, `delimiter_collision`, `glossary_too_dense`, `flaky_tests` |
+| Permissions | `perm.template.author`, `perm.template.review`, `perm.template.pause` (matrix in `S10.*`) |
+| Ids local to this file | `LR-01`..`LR-12` (linter), `RC-01`..`RC-13` (reviewer checklist), `AC-template-01`..`AC-template-20`, `KR-<template>-<n>`, `H-<template>-<n>` |
+| Part layout | `spec/08a-templates.md` uses `8.1`..`8.17`; sibling files of part S8 start at `8.18` and omit the top-level heading |
+| Handoff | The `human_review` template is specified by the sibling file(s) of part S8 using the format of 8.4 |
+
+**Assumptions [A] introduced here, for `S3.*`:** the language-pair allowlist `en>fa`, `fa>en`; the Persian prompt variant selected by the volunteer's locale at lease time (variant effect measured, H-TR-3); keeping ZWNJ, LRM and RLM while stripping bidi overrides; the non-author second-reviewer interpretation (`ISS-82`); delayed activation of loosening template versions; Phase 0 dry-run evidence as an approval item; `code_change_tests_rs` as a separate slug.
+
+**Open owner decisions** (also listed for `S3.*`): whether the platform may execute submitted code in an isolated runner at all (`ISS-81`); how many people hold the `reviewer` role in Phase 1 (`ISS-82`); which runner languages, if any, are supported [V].
+
+## Issues raised
+
+Provenance: owner cell C-008. Block `ISS-81`..`ISS-83` (first-sorting file of part S8, `S0.4`). Each resolution is already applied in this file; `C-001` consolidates and may record a different one.
+
+| id | severity | fd_ref | issue | resolution | status |
+| --- | --- | --- | --- | --- | --- |
+| `ISS-81` | major | FD§4.4, FD§10, prompt | FD§4.4 lists unit tests as an automatic check and FD§2 lists code changes with supplied tests as a likely fit, but the result-return rule (FD§10 item 4, prompt scope E) says submitted content is never executed. Tests cannot be run by the volunteer (R3). Running them needs the platform to execute donor-written code | Scope the rule: submitted content is never executed on the web or API tier; `code_change_tests` may execute it only in an isolated runner (8.13.3), behind `ff.template.code_change_sandbox` (off by default) and a G1 review item; otherwise the `_rs` template, where the requester runs tests and the platform runs nothing (8.13.2) | `needs_owner` |
+| `ISS-82` | major | FD§5.7 | FD§5.7 failure mode 10 asks for "a second reviewer for new templates" (author plus one), while `S0.9.5` and `template.min_reviewers_new` = 2 require two approvals from reviewers who are not the author, so three people. FD§0.2 says founders are the Phase 1 reviewers, possibly two or one | Follow `S0.9.5` (two non-author approvals), state the staffing consequence (8.8.4), and let seed templates be authored by an importing admin who is not one of the two approvers; the owner decides the Phase 1 reviewer count or lowers `template.min_reviewers_new` knowingly | `needs_owner` |
+| `ISS-83` | minor | none | Rule 2 of `S0.2` says every number labeled `initial configurable default` must exist in the parameter table, but template documents contain many such numbers (budget shares, thresholds) that are versioned and reviewed per template version, and a parameter per threshold would be unmanageable. Also three reject reasons and several names are missing from `S0.8.4` | Template-document numbers are template data, labeled `initial configurable default` with a `calibration_source`, kept in the reviewed body instead of the parameter table (8.1 rule 4); names and reasons are listed in 8.17 for folding back | `proposed` |
