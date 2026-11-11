@@ -74,3 +74,165 @@ Rules [D]:
 ### 6.3.3 Why FD§3.3 is exact under this representation [D]
 
 The escrow of a job of N primary cells is `escrow_ucr = N x (1,000,000 + v_ppm + lambda_ppm)`, a product and a sum of integers, so it is exact for every N, v and lambda. Its three parts are `N x 1,000,000` (primary pay), `N x v_ppm` (verification pool) and `N x lambda_ppm` (levy), and their sum is the escrow with no remainder. Rounding happens only where a ratio is measured (v, ceiling) and where a gauge is displayed. For the FD§3.3 inputs (v = 0.10, lambda = 0.05, N = 240) every part is a whole number of credits: 240, 24 and 12. That is a property of those inputs (240 x 0.10 = 24 exactly), not of the model; 6.14 states what happens when the pool is not a whole number of cells. The line-by-line reproduction is 6.15 and the test is `AC-ledger-01` / `T-unit-01` (6.16).
+
+## 6.4 Accounts, lots and escrow slices
+
+### 6.4.1 Accounts [D]
+
+`ledger_accounts` (entity `LedgerAccount`, prefix `lac_`, retention `permanent`):
+
+| Column | Type | Constraint |
+| --- | --- | --- |
+| `id` | text | primary key, `lac_` |
+| `account_type` | text | CHECK in `member`, `escrow`, `reserve`, `issuance`, `retired` (S0 0.8.5) |
+| `member_id` | text | not null iff type `member`; unique |
+| `escrow_id` | text | not null iff type `escrow`; unique |
+| `balance_ucr` | bigint | Cache of credits minus debits; written only by the posting function; verified by INV-L03 |
+| `created_at`, `row_version` | | |
+
+Constraints: partial unique indexes allow exactly one row each of type `reserve`, `issuance` and `retired`. CHECK `balance_ucr >= 0` for `member`, `escrow`, `reserve`, `retired`; CHECK `balance_ucr <= 0` for `issuance` (its balance is minus cumulative mint). `ledger.allow_negative_balance` is a constant false (S0 0.10.6), so no code path may bypass these checks. A member account is created with the `Member`; an escrow account in the same transaction as its first `escrow_hold`.
+
+Sign convention: a credit leg increases `balance_ucr` and a debit leg decreases it, for every type. `issuance` therefore falls below zero as credit is minted, and the sum of all balances is always 0 (INV-L01).
+
+### 6.4.2 Credit lots [D]
+
+A lot is a dated portion of one member's balance (entity `CreditLot`, `lot_`). Lots are a projection of entries: every column that changes can be recomputed from `lot_movements` (INV-L05).
+
+| Column | Type | Constraint |
+| --- | --- | --- |
+| `id`, `member_id`, `ledger_account_id` | text | `lot_`; the owning member account |
+| `origin_entry_id` | text | The `mint`, `transfer` or `grant` entry that created it |
+| `origin_kind` | text | `mint`, `transfer`, `grant_starter`, `grant_referral` |
+| `initial_ucr` | bigint | > 0 |
+| `remaining_ucr` | bigint | 0 <= remaining <= initial |
+| `earned_at`, `expires_at` | timestamptz | `expires_at > earned_at` |
+| `lifetime_param_name`, `lifetime_param_version` | text, int | The parameter and version that fixed `expires_at` (LD-14) |
+| `is_grant` | bool | True for starter and referral grants (non-transferable, `grant.non_transferable`) |
+| `status` | text | `active` (remaining > 0), `exhausted` (remaining = 0), `expired` (swept) |
+
+Indexes: spending index `(ledger_account_id, expires_at, earned_at, id) WHERE remaining_ucr > 0`; sweep index `(expires_at) WHERE remaining_ucr > 0`.
+
+Lifetime at creation [D]: `mint` and `transfer` lots use `credit.lifetime_days`, or `credit.lifetime_days_accelerated` when the member is assigned to the accelerated-expiry arm (`ff.experiment.expiry_arm`, assignment logged by S13.*); `grant_starter` lots use `grant.starter_lifetime_days`; `grant_referral` lots use `credit.lifetime_days`. `expires_at = earned_at + lifetime_days x 86,400 s` (S0 0.6.2). A lot earned by transfer starts its own clock at the acceptance time: credit that is earned again after being spent is new credit, so expiry bears on idle holdings, not on credit in circulation [H: this may weaken the expiry incentive; measured by the claim ratio and the share of credit that expires, `P1M`].
+
+### 6.4.3 Lot movements and escrow slices [D][A]
+
+Because a refund must restore original expiry dates (ISS-07), credit held in escrow keeps the identity of the lots it came from. Table `lot_movements` (new entity `LotMovement`, prefix `lmv_`, permanent, append-only; a convention addition, 6.17):
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `id`, `ledger_entry_id` | text | The entry that caused the movement |
+| `lot_id` | text | The lot concerned |
+| `holder_account_id` | text | The member account (the lot's own remaining) or an escrow account (a slice of that lot) |
+| `delta_ucr` | bigint | Non-zero; positive adds to the holder, negative removes |
+
+`lot.remaining_ucr` = sum of `delta_ucr` where the holder is the lot's own account. A slice of lot L held by escrow E = sum of `delta_ucr` where the holder is E. For every entry, the sum of deltas over member holders equals (credit to member accounts minus debit from member accounts) and the sum over escrow holders equals the same for escrow accounts (INV-L05, INV-L06). Reserve, issuance and retired accounts have no lots: credit in the Reserve is fungible.
+
+Spending order [D]:
+
+```
+function pick_lots(account, amount_ucr, now, exclude_grants):
+    rows = SELECT * FROM credit_lots
+           WHERE ledger_account_id = account AND remaining_ucr > 0 AND expires_at > now
+                 AND (NOT exclude_grants OR is_grant = false)
+           ORDER BY expires_at ASC, earned_at ASC, id ASC   -- earliest expiry first
+           FOR UPDATE
+    need = amount_ucr; moves = []
+    for lot in rows:
+        take = min(lot.remaining_ucr, need)
+        moves.append((lot.id, -take)); need -= take
+        if need == 0: return moves
+    raise INSUFFICIENT_CREDIT        -- only unexpired credit can be spent
+
+function pick_slices(escrow_account, amount_ucr):
+    -- same ordering over the escrow's slices (by the lot's expires_at); used by transfer and levy
+```
+
+FD§4.5 says 'oldest-first'. With one lifetime that is the same as earliest-expiry-first; with several lifetimes (a 14-day starter lot, a 60-day lot, the accelerated arm) only earliest-expiry-first achieves what the FD wants, that the least credit expires. The order is therefore by `expires_at`, with `earned_at` and `id` as deterministic tie-breakers (ISS-63). Expired credit (`expires_at <= now`) can never be spent, even before the sweeper has moved it (6.9).
+
+Escrow disbursements (`transfer`, `levy`) drain slices in the same earliest-expiry-first order, so what is left for the final `refund` is the longest-lived part, which is the most favorable restoration for the requester [D]. A `refund` restores each remaining slice to its original lot (`delta_ucr` positive on the lot's own account, negative on the escrow). A restored lot that has already passed `expires_at` is moved to the Reserve by the next sweep (ISS-07); escrow neither extends nor stops expiry.
+
+Lineage [D]: within one `transfer` entry the slices removed from escrow are the parents of the lot created for the donor. These rows are the only per-unit provenance the ledger keeps (6.14 states what that does and does not prove).
+
+### 6.4.4 Escrow record [D]
+
+`escrows` (entity `Escrow`, `esc_`; the ledger-side columns). One row per job or reservation. Counters are caches written only by the posting function and recomputed by INV-L06 and INV-L07.
+
+| Column | Meaning |
+| --- | --- |
+| `ledger_account_id`, `job_id` or `reservation_id`, `state` | State `open`, `settling`, `closed` (S0 0.9.8) |
+| `cells_n` | N, primary cells covered |
+| `quote_p_ucr`, `quote_v_ppm`, `quote_lambda_ppm`, `quote_snapshot_ids` | The price in force when the quote was made (6.11.6); frozen |
+| `funded_ucr` | N x `quote_p_ucr`, set at the hold |
+| `primary_budget_ucr`, `pool_budget_ucr`, `levy_budget_ucr` | N x 1,000,000; N x `quote_v_ppm`; N x `quote_lambda_ppm` |
+| `paid_primary_ucr` | Sum of `transfer` for accepted primary cells |
+| `paid_pool_ucr`, `paid_levy_budget_ucr` | Sum of `transfer` for accepted verification cells, drawn from the pool and then from the levy budget (LD-05) |
+| `levy_posted_ucr`, `refunded_ucr` | Settlement postings |
+| `accepted_primary_cells`, `accepted_verification_cells` | Counts, for settlement |
+
+Identity (INV-L06): `balance = funded_ucr - paid_primary_ucr - paid_pool_ucr - paid_levy_budget_ucr - levy_posted_ucr - refunded_ucr`, and the balance is 0 when `state` = `closed` (INV-L07).
+
+## 6.5 Entries, transactions, sequencing
+
+### 6.5.1 Schema [D]
+
+`ledger_entries` (`LedgerEntry`, `lge_`, permanent, no `updated_at`, no delete path):
+
+| Column | Type | Constraint |
+| --- | --- | --- |
+| `id`, `seq` | text, bigint | `seq` unique, gap-free, starts at 1 |
+| `ledger_transaction_id` | text | not null |
+| `entry_type` | text | CHECK in the 11 types of S0 0.8.5 |
+| `debit_account_id`, `credit_account_id` | text | different accounts; types must match the matrix in INV-L16 |
+| `amount_ucr` | bigint | > 0 |
+| `job_id`, `cell_id`, `escrow_id`, `lot_id` | text | nullable references used for traceability |
+| `reverses_entry_id` | text | Unique where not null (an entry is reversed at most once) |
+| `owned_after_ucr`, `cap_ucr` | bigint | Set on `mint`, `transfer`, `grant`: the member's owned credit after the entry and the effective cap used (6.8) |
+| `month_mint_after_ucr`, `mint_cap_ucr`, `member_day_mint_after_ucr` | bigint | Set on `mint` (6.8) |
+| `reserve_balance_after_ucr`, `reserve_ceiling_ucr` | bigint | Set on `grant` and `retire` |
+| `parameter_versions` | json | Name-to-version map of every parameter the posting read |
+| `prev_hash`, `entry_hash` | text | 6.5.3 |
+| `created_at` | timestamptz | Server time; order is `seq`, never time (S0 0.6.2) |
+
+`ledger_transactions` (`LedgerTransaction`, `txn_`, permanent): `id`, `txn_kind` (CHECK in the S0 0.8.5 list), `natural_key`, `requested_by` (`principal_type` plus opaque id), `admin_action_id` (null unless an admin approved it), `shortfall_ucr` (default 0; used only by `reversal`, 6.6), `created_at`. Unique `(txn_kind, natural_key)`: this is the idempotency barrier. `ledger_head` is a single row `(seq, entry_hash)`.
+
+### 6.5.2 Append-only enforcement [D][A]
+
+1. The database role used by the application can INSERT into `ledger_entries`, `ledger_transactions` and `lot_movements` only through the posting function; it has no UPDATE or DELETE privilege on them. Triggers raise an error on UPDATE or DELETE as a second barrier.
+2. `ledger_accounts.balance_ucr`, `credit_lots` and the `escrows` counters are updated only inside the posting function. Admin tools and the ledger explorer have read-only access; there is no administrative write path to ledger tables (a correction is a `reversal`, 6.6).
+3. Honest limit: a database superuser, or whoever controls the host, can bypass 1 and 2. The hash chain and the published daily checkpoint make such an edit detectable by anyone holding a checkpoint (INV-L14); they do not make it impossible. The threat is carried to `S10.*` (ledger tampering, insider risk).
+
+### 6.5.3 Hash chain [D]
+
+`entry_hash = SHA-256(prev_hash followed by canonical(entry))`, where `canonical(entry)` is the RFC 8785 canonical JSON of every entry column except `entry_hash` (S0 0.6.4); `prev_hash` of the first entry is 64 zero hex digits. Every `ledger.checkpoint_interval_s` (default 86,400 s) the head `(seq, entry_hash)` is stored as a `MetricSnapshot` of kind `ledger_checkpoint` and published on the public ledger page (`S12.*`).
+
+### 6.5.4 The posting function and its guarantees [D][A]
+
+Every change to credit goes through one function; nothing else writes ledger tables.
+
+```
+function post(txn_kind, natural_key, requested_by, build):
+    repeat up to 3 times on SERIALIZATION_FAILURE:
+      BEGIN ISOLATION LEVEL SERIALIZABLE
+        t = SELECT * FROM ledger_transactions WHERE txn_kind = ? AND natural_key = ?
+        if t exists: COMMIT; return stored result of t                -- exactly once
+        head = SELECT * FROM ledger_head FOR UPDATE                    -- single writer, orders seq
+        lock affected accounts FOR UPDATE in ascending account id      -- no deadlocks
+        plan = build(read view)       -- entries, lot moves, escrow counter deltas, shortfall
+        check_guards(plan)            -- the guards of 6.6; failure aborts, nothing is written
+        insert LedgerTransaction
+        for e in plan.entries in order:
+            e.seq = head.seq + 1; e.prev_hash = head.entry_hash
+            e.entry_hash = sha256(e.prev_hash + jcs(e)); head = (e.seq, e.entry_hash)
+            insert e; insert its lot_movements; update balance caches, lots, escrow counters
+        run_commit_checks(plan)       -- INV-L01, L04, L05, L06, L11, L12, L16 on touched rows
+        update ledger_head; insert outbox events ledger.entry_committed (one per entry)
+      COMMIT
+```
+
+Guarantees (stated exactly):
+
+1. **Exactly once.** A transaction with the same `(txn_kind, natural_key)` is posted at most once; a retry or replay returns the stored result and emits no event. Natural keys are deterministic (6.6), so two workers racing on the same cell, job or lot cannot both post.
+2. **Atomic.** All entries, lot movements, counter updates and outbox events of a transaction commit together or not at all. A cell's change to `accepted` and its mint or payout are in the same database transaction (LD-09); the storage choice in `S4.*` must therefore keep ledger and cell state in one transactional store, or give up the rule explicitly [A].
+3. **Serializable and ordered.** Postings are totally ordered by `seq`. The single `ledger_head` lock makes posting a serial section [A]; at the volume this system targets (thousands of cells a day, FD§3.3 scale) that is sufficient, and the throughput limit is measured in `T-load-*` (`S18.*`).
+4. **No partial effects on failure.** A guard failure returns the API error of S0 0.11.3 (`INSUFFICIENT_CREDIT`, `CAP_EXCEEDED`, `LAUNCH_GATE_CLOSED`, `KILL_SWITCH_ENGAGED`, `STATE_CONFLICT`) and changes nothing.
+5. **Clock independence.** Guards that read time use one server timestamp `now` taken at the start of the transaction; `now` is stored in `created_at` of every entry of that transaction.
