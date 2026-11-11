@@ -530,3 +530,90 @@ Operation ids and paths are proposals for `S15.*`; conventions of S0 0.11 apply 
 | `getAdminCapacity` | `GET /v1/admin/capacity` | Operator dashboard: exact counts, backlog, forecast history, error | `403 FORBIDDEN` |
 
 Copy keys used (text in `fa` and `en`, marker `needs_human_and_legal_review`, owned by `S11.*`; intent only here): `copy.admission.window_declared` (the window is a declared estimate, not a promise of completion), `copy.admission.counter_offer` (a later window is available and why, by `limiting_factor`), `copy.admission.waitlisted` (position, reason, expiry; nothing is held or charged), `copy.admission.window_at_risk` (the projection moved; what happens next), `copy.admission.reservation_expiry_warning` (lots that expire before the reserved date), `copy.admission.late_cancel_cooldown`, `copy.admission.cancel_refund_summary`, `copy.admission.supply_gauge_suppressed`. [D]
+
+## 6.36 Worked numeric examples
+
+All inputs are illustrative: the FD§3.3 inputs (WE-1) or inputs chosen here only to exercise the arithmetic (WE-2 to WE-7). None is a measurement. Common settings: φ = 0.5, `h` = 0, `admission.horizon_discount_per_day` = 0, `step` = 43,200 s (12 h), `admission.min_window_s` = 43,200, `admission.max_window_days` = 14 (so `n_max` = 28), `v_ppm` = 100,000, `lambda_ppm` = 50,000, 40 active donors each with 8 accepted cells on each of the last 14 complete days. Then `X(d) = 320`, `B = 320` cells per day, and one 12-hour slot has φ capacity `0.5 × 320 × 0.5 = 80` cells.
+
+| Case | Inputs and arithmetic | Result |
+| --- | --- | --- |
+| WE-1 (FD§3.3) | N = 240; `V = floor(240 × 100,000 / 10^6) = 24`; `R = 264`; `p_ucr = 1,150,000`; `escrow_ucr = 240 × 1,150,000 = 276,000,000`. Feasible window: `264 <= 80 n` gives `n >= 3.3`, so `n = 4` (n = 3 gives 240 < 264). Capacity over 2 days: `0.5 × 320 × 2 = 320 >= 264`. Requested window 2 days | `accept`, declared window 2 days (172,800 s); Sara (300 credits) keeps 24 credits after escrow |
+| WE-1 boundary | Same job, 33 donors: `B = 264`, 2-day capacity `0.5 × 264 × 2 = 264 >= 264` (equality is admitted). 32 donors: `B = 256`, `n = 4` gives 256 < 264, `n = 5` gives `0.5 × 256 × 2.5 = 320` | 33 donors: `accept` 2 days. 32 donors: `counter_offer` 2.5 days |
+| WE-2 counter-offer | A second member, N = 100, immediately after WE-1: `V = 10`, `R = 110`, backlog 264, total 374; `374 <= 80 n` gives `n = 5` (400); n = 4 gives 320 < 374. Requested 2 days | `counter_offer` 2.5 days (216,000 s), `limiting_factor` = `backlog` |
+| WE-3 category supply | Category `P0/L0/S1/M1/svc_x/-` has 12 eligible donors, each 8 cells a day on that service: `B(category) = 96`, slot capacity `0.5 × 96 × 0.5 = 24`. Job R = 110, no other backlog. Global needs `n = 2` (160 >= 110); category needs `110 <= 24 n`, `n = 5` | `counter_offer` 2.5 days, `limiting_factor` = `category_supply` |
+| WE-4 waitlist | Backlog of `ALL` is 2,000 cells; a job with N = 300 (`V = 30`, `R = 330`, `escrow_ucr = 345,000,000`, within `admission.max_job_cells` and under the initial K of 350 credits). Capacity at `n_max`: `80 × 28 = 2,240`; `2,000 + 330 = 2,330 > 2,240`. Also: 8 eligible donors (below `admission.min_forecast_donors`) | `waitlist`, reasons `exceeds_max_window` and `forecast_below_min_donors`; no hold, no escrow |
+| WE-5 forecast drop | WE-1 job admitted; the cohort falls to 28 donors: `B = 224`, φ rate 112 per day. Remaining 264: `projected = 264 / 112 = 2.357` days. Threshold `2 + 0.10 × 2 = 2.2` days. A new job R = 110: `374 <= 56 n` gives `n = 7` | WE-1 job `at_risk`, requester notified, price and window unchanged; hard stop at `2.0 × 2 = 4` days; the new job gets a 3.5-day counter-offer |
+| WE-6 reservation | R = 264 for a future start. Slot capacity 80, share cap `0.25 × 80 = 20` cells per slot. `20 m >= 264` gives `m >= 13.2`, so `m = 14` slots (7 days); 13 slots hold only 260. Plan: `floor(264 / 14) = 18`, remainder 12, so 12 slots of 19 and 2 of 18 (`12 × 19 + 2 × 18 = 264`). Escrow at booking 276,000,000 ucr | A 6.5-day window is refused (`NO_CAPACITY`); a 7-day window is held; a cancel at least 24 h before the start refunds everything with no cooldown |
+| WE-7 claim stretch | Published claim ratio 9 weeks, threshold 6 weeks: `stretch_ppm = 9 × 10^6 / 6 = 1,500,000`. WE-1 with `L_min = 4` steps: `ceil(4 × 1.5) = 6` steps | The earliest quote is 3 days; requested 2 days gives `counter_offer` 3 days, `limiting_factor` = `claim_pressure` |
+
+## 6.37 Acceptance criteria
+
+Ids follow S0 0.5. The `T-*` ids are assigned by `S18.*`; each criterion names the layer it belongs to. `AC-admission-01` is the admission row of the FD§3.3 reproduction and must be implemented as the same fixture as `AC-ledger-01` / `T-unit-01` (S0 0.6.1). [D]
+
+| Id | Layer | Given | When | Then |
+| --- | --- | --- | --- | --- |
+| `AC-admission-01` | unit | **The FD§3.3 admission example.** 40 active donors, 8 accepted cells each on each of 14 complete days; `admission.phi` = 500,000 ppm; haircut 0; discount 0; `v_ppm` = 100,000; `lambda_ppm` = 50,000; Sara holds 300 credits | Sara submits N = 240 with `requested_window_s` = 172,800 and the policy passes | `V` = 24; `R` = 264; `p_ucr` = 1,150,000; `escrow_ucr` = 276,000,000; `B` = 320; `phi_capacity` over 2 days = 320 and `320 >= 264`; `feasible(3)` is false (240 < 264) and `feasible(4)` is true; decision `accept`, `window_s` = 172,800; a hold exists; on confirm the escrow is posted and Sara's balance is 24,000,000 ucr; with `requested_window_s` = 129,600 the decision is `counter_offer` at 172,800 |
+| `AC-admission-02` | unit | As 01 with 33 donors, then 32 donors | The same job is quoted | 33 donors: `accept` at 2 days (264 = 264). 32 donors: `counter_offer` at 216,000 s |
+| `AC-admission-03` | unit | WE-1 job holds capacity; a second job N = 100 | It is quoted with a 2-day request | `counter_offer` at 216,000 s; `limiting_factor` = `backlog` |
+| `AC-admission-04` | unit | WE-3 category with 12 eligible donors | A job R = 110 is quoted | `counter_offer` at 216,000 s; `limiting_factor` = `category_supply` |
+| `AC-admission-05` | unit | WE-4 inputs; also a history of 2 complete days | A job is quoted | Decision `waitlist` with reasons `exceeds_max_window`, `forecast_below_min_donors`, `insufficient_history` respectively; the job ends in `waitlisted` through `quoted`; a `WaitlistEntry` with the next `waitlist_seq` exists; no hold, no `escrow_hold` |
+| `AC-admission-06` | unit | A job N = 240 with 100 primary and 5 verification cells accepted | The job is cancelled | Donors received 105,000,000 ucr, the Reserve 5,000,000, the member 166,000,000; the three sum to 276,000,000; capacity returns when the unstarted cells are cancelled |
+| `AC-admission-07` | fsm | A member with `admission.max_concurrent_jobs_per_member` jobs in capacity-holding states | The member submits another job | `422 CAP_EXCEEDED`; no state change, no hold |
+| `AC-admission-08` | fsm | A funded quote with a hold | `price.quote_ttl_s` elapses | `job.quote_expired`; the hold is released; backlog falls by `R`; the waitlist sweep runs |
+| `AC-admission-09` | fsm | Waiting entries A (seq 1, large, infeasible) and B (seq 2, small, feasible) in one category, and C in another category, feasible | A sweep runs | B is not released (no overtaking); C is released; after capacity rises A and then B are released in that order |
+| `AC-admission-10` | fsm | The WE-6 reservation | A 6.5-day booking, a 7-day booking, a cancel 25 h before the start, a cancel 23 h before the start, a no-show | Refused with `NO_CAPACITY`; held with escrow and a slot plan summing to 264; free cancel with full refund; late cancel with full refund and a cooldown of `reservation.late_cancel_cooldown_days`; `reservation.expired`, full refund, cooldown |
+| `AC-admission-11` | fsm | A reservation with a job at `target_start_at` | The system activates it | One `escrow_release` of `cells_n × p_ucr`, the excess refunded, `reservation.activated`, `job.escrow_confirmed`, the slot plan no longer counted in `reserved_in` |
+| `AC-admission-12` | sim | WE-5 | The cohort falls to 28 donors | The job is `at_risk` within one `admission.reforecast_interval_s`, price and window unchanged, requester notified; at 4 days `job.stop_requested` with `overrun_timeout` and a partial refund |
+| `AC-admission-13` | fsm | `launch.member_jobs_enabled` false, then `kill.all_new_jobs` engaged | A quote is requested | `403 LAUNCH_GATE_CLOSED`, then `503 KILL_SWITCH_ENGAGED`; no hold, no entry, no event beyond the refusal |
+| `AC-admission-14` | adv | Capacity for exactly one of two simultaneous confirms | Both are sent | Exactly one job is `admitted`; the other gets `NO_CAPACITY` with `requote`; no double escrow |
+| `AC-admission-15` | unit | A category with 9 eligible donors and `analytics.min_cohort_k` = 10 | The public gauge is read | The category shows `"<k"` for both counts; no member data |
+| `AC-admission-16` | unit | φ = 0.5, both classes always available | 6 consecutive `offer_class` calls | COMMONS, MEMBER, COMMONS, MEMBER, COMMONS, MEMBER |
+| `AC-admission-17` | adv | A confirm retried with the same `Idempotency-Key` | After a successful confirm | The stored response with `Idempotent-Replayed: true`; no second `escrow_hold`, hold or cell set |
+
+## 6.38 Property-based test properties for admission control
+
+Generators: random sequences of quote, confirm, expire, cancel, complete, reservation and forecast-change commands over random members, categories, N, requested windows and forecasts; parameters drawn inside their validation ranges; integer arithmetic checked against an exact-rational oracle. Each property is a criterion with layer `prop`. [D]
+
+| Id | Property (for all generated inputs) |
+| --- | --- |
+| `AC-admission-20` | **Soundness at admission.** For every job admitted or quoted with a hold, at the moment of the decision `R + backlog(S) <= phi_capacity(...) − reserved_in(...)` holds in both scopes, evaluated by an independent oracle |
+| `AC-admission-21` | **Monotone in capacity.** Raising `B`, raising φ, or lowering the haircut or the discount never lengthens the quoted window and never worsens the decision (`accept` before `counter_offer` before `waitlist`) |
+| `AC-admission-22` | **Monotone in demand.** Raising N, `v_ppm`, the backlog or the reserved cells never shortens the quoted window |
+| `AC-admission-23` | **Tightening cannot invalidate.** Lowering φ changes no admitted job's declared window and cancels nothing; it only changes later decisions |
+| `AC-admission-24` | **Window bounds.** Every `accept` or `counter_offer` window is a multiple of `step` and lies in `[admission.min_window_s, admission.max_window_days × 86,400]`; a quote is never 0 |
+| `AC-admission-25` | **Determinism.** The same snapshot, backlog, parameter versions and inputs give the same quote and `inputs_hash`; a replayed command creates no second hold |
+| `AC-admission-26` | **First come.** Among capacity-holding jobs of one class, service order is ascending `hold_seq`; a waitlist release order is ascending `waitlist_seq` within a category; no entry is released while an earlier entry of its category is infeasible |
+| `AC-admission-27` | **Member caps.** At no point does a member exceed the concurrent-job, waitlist or reservation caps, under any interleaving |
+| `AC-admission-28` | **No leaked capacity.** After every job and reservation is terminal, backlog and reserved totals are 0; a terminal job's `hold_seq` is released |
+| `AC-admission-29` | **Reservation soundness.** For every slot, held non-degraded plans are at most `reservation.capacity_share_cap` of the φ capacity in each scope; every plan sums to its `R`; the escrow released at activation plus the refund equals the reservation's `escrow_ucr` |
+| `AC-admission-30` | **Conservation on cancel.** `payouts + levy + refund = escrow_ucr` exactly for every cancel point, with `refund >= 0` and `refund >=` the unaccepted primary share |
+| `AC-admission-31` | **Commons share.** In any stationary run in which eligible Commons and member cells are both always queued, the member share of leases in every prefix is at most φ (`m <= phi × a`) |
+| `AC-admission-32` | **Forecast is conservative.** Lowering any cohort member's daily counts, or removing a cohort member, never raises `B`; `B <= min(M_W, M_A)`; the clamp never lets one donor contribute more than `admission.donor_daily_clamp_cells` a day |
+| `AC-admission-33` | **Exact arithmetic.** Capacities are never rounded up; every comparison is exact; no int64 overflow at the maximum values of the validation ranges |
+| `AC-admission-34` | **Race safety.** Under concurrent quotes and confirms the admitted set always satisfies `AC-admission-20` at admission time; no two confirms jointly exceed capacity |
+| `AC-admission-35` | **No clawback.** No command or reforecast ever re-prices, cancels or re-orders an admitted job except `job.stop_requested` at `job.max_overrun_ratio`, an operator action, or a policy or service stop |
+| `AC-admission-36` | **Gauge privacy.** A public gauge row never exposes a count below `analytics.min_cohort_k` and never an id |
+
+## 6.39 Hypotheses, calibration and open decisions
+
+| Tag | Statement | Test, and what replaces the default |
+| --- | --- | --- |
+| [H] | The trailing cohort mean predicts next-week verified capacity well enough (6.33.4) | Median and spread of the signed daily forecast error over the pilot; replaces `admission.forecast_haircut`, `admission.horizon_discount_per_day`, `admission.min_forecast_donors` (`P1M`) |
+| [H] | A single global φ suffices (6.26.1) | Per-category committed share and Commons share over the pilot (`P1M`); a per-category φ is the alternative |
+| [H] | No-overtaking costs little utilization (6.29.2) | `hamyar_admission_waitlist_wait_s` and utilization with and without a skipped head, in simulation first and then in the pilot (`OPS`) |
+| [H] | Reservations flatten bursts (6.30) | Share of peak-day cells from reservations; no-show ratio (`P1M`) |
+| [H] | Opt-out fragmentation matters (6.25) | `hamyar_admission_category_supply_ratio` for the most restrictive categories (`P1M`) |
+
+The numeric kill criteria quoted in 6.25, 6.30 and 6.33.4 are suggested starting points, arbitrary and not derived from data; the founders fix them in a `PreRegistration` before launch (`FND`, S13.*). [D]
+
+**Open owner decisions and assumptions introduced** (for S3.*) [A]: (1) a per-category φ instead of one φ; (2) a late-cancel fee versus the cooldown of 6.30.3 (a fee needs a new ledger entry type); (3) a make-good for jobs stopped at `job.max_overrun_ratio`; (4) whether the window clock pauses while a job is `suspended` (`S5.*`); (5) whether the initial `admission.min_forecast_donors` of 10 suits a pilot of 30 to 50 members, since a narrow category with fewer eligible donors is waitlisted entirely; (6) the single global admission lock; (7) self-reported service attribution for M1 supply (6.22).
+
+## Issues raised
+
+Each resolution is already applied in this file; `C-001` consolidates and may record another. Convention additions made by this part (not issues, listed so `C-001` and `C-022` can fold them back): the parameters of 6.23 B and constraints `C9`..`C12`; the events and metric names of 6.34.3; the derived data of 6.22; the `quote` document, `WaitlistEntry` and `Reservation` field requirements of 6.27.4, 6.29.1, 6.30.1; `hold_seq`, `waitlist_seq`, `cancel_reason`; operation ids and copy keys of 6.35; the scheduler contract SC-1..SC-5 for `S5.*`, `S8.*`, `S9.*`.
+
+| id | severity | fd_ref | issue | resolution | status |
+| --- | --- | --- | --- | --- | --- |
+| `ISS-64` | minor | prompt | Part 6 is split over two files (the credit and ledger file and this one) and S0 0.3 gives no rule for heading numbers, so two files could both contain `6.1`; S0 0.13 also proposes the file name `06b-admission-control.md` while the cell's `allowed_paths` name `06b-admission.md` | Headings of this file are `6.20`..`6.39`; the file name of the cell is authoritative (S0 0.13) | proposed |
+| `ISS-65` | major | FD§4.8, FD§3.3 | "Committed cells over its window <= φ × forecast active capacity" is stated for one job only; it does not say how several concurrent jobs, categories with different supply, held reservations and the Commons share combine, nor what a quote is when the window is infeasible | The first-come fluid-queue test of 6.27 over two scopes (global and category), net of held reservations, with backlog ahead counted in full; the smallest feasible window on a grid is the quote; the decisions are `accept`, `counter_offer`, `waitlist` (6.28) | proposed |
+| `ISS-66` | major | FD§4.8, FD§4.5, FD§4.6 | Reservations with escrow at booking are under-specified: escrowed credit can pass its expiry before a cancel or expiry refund (see `ISS-07`), a no-show has no consequence, there is no source for a penalty (credit is never printed), and the price can change between booking and use | Price is locked at booking; no monetary penalty, a cooldown after a late cancel or expiry instead; booking discloses lots that expire before the reserved date; one live reservation per member and a share cap per slot (6.30). Whether to charge a fee is an owner decision | needs_owner |
