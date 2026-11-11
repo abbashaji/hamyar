@@ -571,3 +571,188 @@ Capacity booking for a future date with escrow at booking (FD§4.8). Machine S0.
 | `expires_at` | ts | NN | `admission.waitlist_ttl_days` |
 
 **Indexes** `(state, position_key)`; `(member_id, state)` (`admission.waitlist_max_per_member`).
+
+## 5.8 Cells, leases, submissions and verification
+
+### 5.8.1 `Cell` · `cells` · `cel_` · `MUT` · `job_bound`
+
+One prompt-and-response unit inside the envelope; the unit of credit. The row persists across attempts and carries `attempt` (S0.9.3). States are the 12 of S0.9.3. [D]
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `job_id` | id `job_` | NN, FK | |
+| `cell_kind` | enum | NN | `primary`, `gold`, `audit`, `third`, `review`, `rework`. **Never sent to a volunteer-facing API**: a gold cell must look like any other cell (FD§4.4) |
+| `ordinal` | int | NN iff `primary`, >= 1 | position in the job; unique per job among primary cells |
+| `state` | enum | NN, default `queued` | |
+| `attempt` | int | NN, default 1, `<= cell.max_attempts` | |
+| `template_version_id` | id `tpv_` | NN, FK | copied from the job so a gold or audit cell can use another version of the same template |
+| `purpose`, `license`, `sensitivity`, `service_requirement` | enum | NN | copied from the job for the R8 query; never changed |
+| `pinned_service_ids` | arr | NN | copied |
+| `topic_category_id` | id `top_` | null | |
+| `input_payload` | text | null after purge | the slot data of this cell |
+| `input_hash`, `rendered_prompt_hash` | hash | NN | |
+| `rendered_prompt` | text | null after purge | the exact text a volunteer sees; stored so the card can be re-shown and audited |
+| `input_chars` | int | NN, `<= cell.envelope.max_input_chars` | |
+| `gold_cell_id` | id `gld_` | NN iff `gold` | |
+| `audit_id` | id `aud_` | NN iff `audit` or `third` | |
+| `subject_cell_id` | id `cel_` | NN iff `rework`; the cell that was overturned | |
+| `subject_submission_id` | id `sub_` | NN iff `review`; the output being reviewed | |
+| `priority_key` | int64 | NN | queue order: first-come within a deadline class, then `ordinal` (FD§4.8) |
+| `queued_at` | ts | NN | reset at each requeue |
+| `earliest_lease_at` | ts | null | a requeued cell may wait before it is shown again [A] |
+| `current_lease_id` | id `lse_` | NN iff `leased` | |
+| `accepted_submission_id`, `accepted_at` | id, ts | NN iff `accepted` or `overturned` | |
+| `accept_policy_version_id` | id `plv_` | null until acceptance | R9 re-check result (policy in force at acceptance) |
+| `last_reject_code` | text | null | a `reject.*` code of S0.8.4 |
+| `credit_txn_id` | id `txn_` | null, unique | the `payout` (member job) or `mint` (Commons) transaction; set once, which makes double payment structurally impossible |
+| `payload_purged_at` | ts | null | |
+
+**Keys** PK; FKs to `jobs`, `template_versions`, `gold_cells`, `audits`, `cells` (self), `submissions`, `leases`, `ledger_transactions`. **Unique** `(job_id, ordinal) WHERE cell_kind = 'primary'`; `credit_txn_id`; `accepted_submission_id`. **Indexes** the queue `(priority_key) WHERE state = 'queued' AND (earliest_lease_at IS NULL OR earliest_lease_at <= now())`; `(job_id, state)`; `(subject_cell_id)`; GIN on `pinned_service_ids`. **Stored** envelope-bounded inputs and the rendered prompt until purge, hashes forever. **Not stored** the volunteer's identity on the cell (it is on the `Lease` and `Submission`), the cell's gold status in any column a volunteer API selects.
+
+### 5.8.2 `Lease` · `leases` · `lse_` · `MUT` · `job_bound`
+
+Time-boxed hold of a cell by one member, bound to a nonce (FD§3.4, S0.9.3). Every lease belongs to one attempt of one cell. [D]
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `cell_id` | id `cel_` | NN, FK | |
+| `member_id` | id `mem_` | NN, FK | |
+| `device_id` | id `dev_` | null, FK | the device of the authenticating key; used for rate limits |
+| `attempt` | int | NN | equals `cells.attempt` at issue |
+| `state` | enum | NN, default `active` | `active`, `submitted`, `expired`, `released`, `revoked` |
+| `nonce_hash` | bytes32 | NN | SHA-256 of a `lease.nonce_bytes` = 16 byte nonce; the nonce is returned once and never stored |
+| `issued_at`, `expires_at` | ts | NN, `expires_at > issued_at` | both server clock (S0.6.2) |
+| `timeout_s_applied` | int | NN | `lease.timeout_s` in force; extensions add `lease.extend_s` up to `lease.max_extensions` |
+| `extensions_used` | int | NN, default 0 | |
+| `optin_version` | int | NN | `opt_ins.version` at issue (R8 evidence) |
+| `policy_version_id` | id `plv_` | NN, FK | policy in force at issue |
+| `ended_at`, `end_reason` | ts, text | null | reason is one of `submitted`, `expired`, `declined`, `released`, `revoked_policy`, `revoked_service`, `revoked_job_cancelled`, `revoked_integrity` |
+
+**Unique** `(cell_id, attempt)`; **`(cell_id) WHERE state = 'active'`**, the race guard: at most one active lease per cell, enforced by the database, not only by application code. **Indexes** `(expires_at) WHERE state = 'active'` (reaper, `lease.reap_interval_s`); `(member_id) WHERE state = 'active'` (`lease.max_active_per_member`, checked under a row lock on the member). **Not stored** the nonce, IP, the service the volunteer opened.
+
+### 5.8.3 `Submission` · `submissions` · `sub_` · `IMS` · `job_bound`
+
+One pasted-back result for one lease. Content columns are frozen at insert; only the state columns change. A replay with the same lease and nonce returns the stored outcome and inserts nothing (S0.9.3). [D]
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `lease_id` | id `lse_` | NN, FK, **unique** | one submission per lease |
+| `cell_id`, `member_id` | id | NN, FK | |
+| `volunteer_handle`, `handle_key_version` | text, int | NN | `vol_` + 32 hex (S5.3.2); never in a requester surface |
+| `state` | enum | NN, default `received` | `received`, `schema_failed`, `checks_failed`, `checks_passed`, `quarantined`, `accepted`, `rejected` |
+| `output_text` | text | null after purge | what the volunteer pasted; stored as data, escaped on every display, never executed (FD§10) |
+| `output_hash` | hash | NN | SHA-256 of the raw bytes |
+| `normalized_output_hash` | hash | NN | hash of whitespace- and case-normalized text; exact duplicate detection |
+| `output_simhash` | int64 | NN | locality-sensitive fingerprint for `verify.duplicate_similarity_threshold` [A] |
+| `output_chars`, `output_bytes` | int | NN, `output_bytes <= cell.envelope.max_submission_bytes` | |
+| `reported_service_id` | id `svc_` | null, FK | attested by the volunteer, not proven (FD§5.6) |
+| `reported_model_label` | text | null, <= 80 chars | free text, attested, escaped on display |
+| `submitted_at` | ts | NN | server clock |
+| `elapsed_s` | int | NN | `submitted_at - lease.issued_at`, computed server-side; basis for `verify.timing_min_s` |
+| `reject_code` | text | null | `reject.*` |
+| `quarantine_reason` | enum | null; NN iff `quarantined` | `output_url`, `code_to_run`, `action_request`, `other_flag` |
+| `checks_report` | json | null | per-check results; no copy of the output |
+| `decided_at` | ts | null | |
+| `accept_policy_version_id` | id `plv_` | null | the R9 re-check |
+
+**Unique** `lease_id`. **Indexes** `(cell_id)`; `(member_id, submitted_at)`; `(normalized_output_hash)`; `(output_simhash)`; `(state) WHERE state IN ('received','checks_passed','quarantined')`. **Frozen** every column except `state`, `reject_code`, `quarantine_reason`, `decided_at`, `accept_policy_version_id` and `output_text` (set NULL by purge). **Stored** the paste-back, hashes, attested labels. **Not stored** the chat URL, any page content beyond the pasted text, clipboard history, client timing claims, raw IP.
+
+### 5.8.4 `VerificationRecord` · `verification_records` · `vrf_` · `IMS` · `job_bound`
+
+Outcome of one verification method on one submission. An outcome moves once from `pending` to a final value; after that the row is immutable and a later finding is a new row with `supersedes_id`. [D]
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `submission_id`, `cell_id` | id | NN, FK | |
+| `method` | enum | NN | `auto_check`, `gold`, `audit_second`, `audit_third`, `human_review`, `blanket_redundancy` |
+| `outcome` | enum | NN, default `pending` | `pending`, `pass`, `fail`, `inconclusive` |
+| `check_ref` | text | null | check id inside the template (`auto_check`) or comparator id |
+| `gold_cell_id`, `audit_id` | id | null, FK | set for `gold` and `audit_*` |
+| `related_submission_id` | id `sub_` | null | the other execution compared against |
+| `reviewer_member_id` | id `mem_` | null | set for `human_review`; internal only |
+| `score_ppm` | ppm | null | similarity or rating |
+| `details` | json | null after purge | comparator output; <= 8 KiB |
+| `supersedes_id` | id `vrf_` | null, FK | |
+| `decided_at` | ts | null | set with the final outcome |
+
+**Indexes** `(submission_id)`; `(cell_id, method)`; `(gold_cell_id) WHERE gold_cell_id IS NOT NULL`; `(outcome) WHERE outcome = 'pending'`. These rows feed the donor reliability estimate and the false-accept and false-reject estimates (S8.*); they stay after payload purge with `details` nulled.
+
+### 5.8.5 `GoldCell` · `gold_cells` · `gld_` · `IMS` · `permanent`
+
+Known-answer cells of the hidden library. Answers are access-restricted. [D]
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `template_id` | id `tpl_` | NN, FK | |
+| `status` | enum(`gold_status`) | NN, default `active` | `compromised` when an answer is believed leaked; the cell is no longer served |
+| `input_payload`, `input_hash` | text, hash | NN | |
+| `answer_payload`, `answer_hash` | json, hash | NN; **column grant to `verifier_svc` only** | the expected answer or acceptance spec |
+| `purpose`, `license`, `sensitivity`, `service_requirement` | enum | NN; `sensitivity = 'S0'` (CHECK) | gold cells must pass R8 like any cell |
+| `topic_category_id` | id `top_` | null | |
+| `served_count` | int | NN, default 0 | `DER` |
+| `last_served_at` | ts | null | |
+| `authored_by_admin_id` | id `adm_` | NN, FK | |
+
+**Indexes** `(template_id, status)`. **Not stored** which donors saw it beyond the `Cell` rows (internal); never exposed through any member or requester API.
+
+### 5.8.6 `Audit` · `audits` · `aud_` · `MUT` · `job_bound`
+
+Sampled re-execution of a cell, comparator result, third execution. Machine S0.9.8.
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `primary_cell_id`, `primary_submission_id` | id | NN, FK | |
+| `trigger` | enum(`audit_trigger`) | NN | |
+| `sampling_rate_ppm_applied` | ppm | null | `s` applied when sampled; needed to estimate false accepts without bias |
+| `state` | enum | NN | `pending`, `second_executed`, `matched`, `mismatched`, `third_pending`, `resolved`, `cancelled` |
+| `second_cell_id`, `third_cell_id` | id `cel_` | null, FK | executions by donors different from the primary donor and from each other (enforced when leasing, S9.*) |
+| `second_submission_id`, `third_submission_id` | id `sub_` | null, FK | |
+| `comparator_ref` | text | NN | the template comparator id |
+| `similarity_ppm` | ppm | null | |
+| `verdict` | enum(`audit_verdict`) | null; NN when `resolved` | |
+| `resolved_at` | ts | null | |
+
+**Indexes** `(state)`; `(primary_cell_id)`.
+
+### 5.8.7 `Deliverable` · `deliverables` · `dlv_` · `IMS` · `job_bound`
+
+The assembled output of a job.
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `job_id`, `version` | id, int | NN; `(job_id, version)` unique | an overturned cell after assembly produces version + 1 with a new manifest |
+| `state` | enum(`deliverable_state`) | NN | `assembling`, `ready`, `purged` |
+| `format` | enum(`deliverable_format`) | NN | |
+| `content_hash`, `byte_size` | hash, int | NN once `ready` | |
+| `storage_key` | text | null after purge | |
+| `cell_count` | int | NN | accepted primary cells included |
+| `supersedes_id` | id `dlv_` | null, FK | |
+| `payload_purged_at` | ts | null | `retention.job_payload_days` after the job is terminal |
+
+### 5.8.8 `Manifest` · `manifests` · `mfs_` · `IMM` · `job_bound` (rows stay)
+
+Provenance manifest of a deliverable (FD§5.6). Two renderings of one record: the internal manifest (with volunteer handles) and the requester export (without). Only the internal one is stored in full; the export is derived and its hash is stored. [D]
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `deliverable_id` | id `dlv_` | NN, FK, unique | |
+| `job_id` | id `job_` | NN, FK | |
+| `schema_version` | int | NN | |
+| `manifest_json` | json | NN, <= 1 MiB | internal; shape below |
+| `manifest_hash` | hash | NN | |
+| `export_hash` | hash | NN | hash of the redacted rendering |
+| `no_training_flag` | bool | NN | contractual, not technically enforced (FD§5.6) |
+| `downstream_use_uncontrolled` | bool | NN | true for `P1` |
+
+```json
+{ "schema_version": 1, "job_id": "job_...", "template": { "id": "tpl_...", "version_id": "tpv_...", "content_hash": "sha256:..." },
+  "declared": { "purpose": "P1", "license": "L2", "sensitivity": "S0", "service_requirement": "M0" },
+  "policy": { "policy_version_id": "plv_...", "version_hash": "sha256:..." },
+  "cells": [ { "cell_id": "cel_...", "input_hash": "sha256:...", "output_hash": "sha256:...",
+               "service_reported": "svc_...", "model_reported": "text, attested, not proven",
+               "verification": [ { "method": "auto_check", "outcome": "pass" } ],
+               "accepted_at": "2026-11-12T09:30:00Z",
+               "volunteer_handle": "vol_..." } ] }
+```
+
+The export removes `volunteer_handle` from every cell and states "declared", never "guaranteed". **Not stored** any input or output text (hashes only), any requester identifier other than `job_id`.
