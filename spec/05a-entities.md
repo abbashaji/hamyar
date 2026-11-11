@@ -261,3 +261,172 @@ CONFIGURATION, LAUNCH, MEASUREMENT
 1. The ledger is reached from business entities only through `LedgerTransaction.natural_key` and `Cell.credit_txn_id`, `Escrow.closing_txn_id`, `Referral.bonus_*_txn_id`. No business table stores an amount that it also posts; the amount lives in `LedgerEntry`, and business columns that echo it are caches checked by the invariants.
 2. `AdminAction` is the audit trail for every privileged write. Approvals (template, service, ledger reversal, launch sign-off) are `AdminAction` rows that reference the approved row and its content hash, not columns edited on the approved row (S5.15).
 3. Polymorphic references (`subject_type`, `subject_id`) exist only on `AdminAction`, `Report`, `Appeal`, `Event`, `Alarm` and `ChangeLogEntry`. Every other relationship is a real foreign key. Polymorphic ids are validated by the writing service against the prefix of the id (S0.6.3).
+
+## 5.6 Identity and access entities
+
+### 5.6.1 `Member` · `members` · `mem_` · class `MUT` · retention `member_bound`
+
+A pseudonymous identity. Holds the `donor` and `requester` capabilities (S0.8.2); the `reviewer` and `operator` roles belong to `AdminUser`. Machine: trust tier and status (S0.9.4). [D]
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `status` | enum(`member_status`) | NN, default `active` | orthogonal to the tier |
+| `status_changed_at` | ts | NN | |
+| `trust_tier` | enum | NN, default `new` | `new`, `established`, `trusted`, `restricted` |
+| `tier_before_restriction` | enum | set iff `trust_tier = 'restricted'` | one of the three non-restricted tiers |
+| `restricted_until` | ts | null | `trust.restriction_days` after the restriction |
+| `locale`, `digits`, `calendar` | enum | NN | defaults from `i18n.*`; member can change |
+| `time_zone` | text | null | IANA name chosen by the member; never inferred from an IP |
+| `creating_device_id` | id `dev_` | null, FK | the device that created the identity; used for `ratelimit.device_new_members_per_day` |
+| `invite_id` | id `inv_` | null, FK (deferred) | the invite redeemed, if any |
+| `invite_root_member_id`, `invite_depth` | id `mem_`, int | root null for a founder; depth >= 0 | denormalized tree position for `invite.tree_*` limits |
+| `team_id`, `team_joined_at` | id `tem_`, ts | null | a member is in at most one team [A] |
+| `email_ciphertext`, `email_key_version`, `email_lookup_hash`, `email_verified_at` | bytes, int, bytes32, ts | all null or `ciphertext` and `lookup_hash` both set | optional e-mail (FD§3.2); S5.3.3 |
+| `accepted_cells_count` | int | NN, default 0 | `DER`; counts accepted cells of every kind |
+| `first_accepted_at` | ts | null | set once; the starter-grant and referral condition |
+| `reliability_ppm`, `reliability_obs` | ppm, int | `0..1000000`; obs >= 0 | `DER` cache of the Beta estimate over the last `verify.reliability_window_obs` gold and audit observations |
+| `starter_granted_at` | ts | null | set once with the `grant` entry |
+| `recovery_cooldown_until` | ts | null | `identity.recovery_cooldown_s` after a recovery |
+| `last_active_day` | day | null | day granularity only |
+| `closed_at` | ts | null; NN when `status = 'closed'` | |
+
+**Keys** PK `id`; FKs as above. **Unique** `email_lookup_hash` (where not null). **Indexes** `(status, trust_tier)`; `(team_id)`; `(invite_root_member_id)`; `(creating_device_id, created_at)`; `(last_active_day)`.
+**Stored** status, tier, display preferences, tree position, counters, optional e-mail ciphertext. **Not stored** name, nickname, IP, country, user-agent, provider identifiers, recovery key (only the public key derived from it, in `member_keys`), password.
+**Closure.** On `closed` the retention job deletes the rows of `member_keys`, `sessions`, `invites` (issued), `opt_ins`, `badge_awards`, `referrals`, and sets every nullable column above to NULL, keeping `id`, `created_at`, `status`, `closed_at` and `row_version`. The row is a tombstone so permanent rows that hold the opaque `mem_` id stay valid and point at nothing personal. Credit left on a closed member's lots moves to the Reserve through `expire` entries (S6.* owns the rule) [A]. [D]
+
+### 5.6.2 `MemberKey` · `member_keys` · `mky_` · `MUT` · `member_bound`
+
+Public keys of a member (S0.6.4). Supports rotation, device linking and the recovery key. [A]
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `member_id` | id `mem_` | NN, FK | |
+| `purpose` | enum(`key_purpose`) | NN | `auth` signs challenges; `recovery` is derived from the recovery key and used only to recover |
+| `algorithm` | text | NN, `CHECK = 'ed25519'` | scheme fixed by S0.6.4; a new scheme is a convention edit |
+| `public_key` | bytes | NN, 32 bytes | |
+| `status` | enum(`key_status`) | NN, default `active` | |
+| `device_id` | id `dev_` | null, FK | the device this auth key belongs to (device linking adds a key per device) |
+| `rotated_at`, `not_after` | ts | null | `not_after` = rotation time + `identity.key_rotation_grace_s` for the old key |
+| `replaced_by_key_id` | id `mky_` | null, FK | |
+
+**Unique** `public_key`; one active `recovery` key per member (`(member_id) WHERE purpose='recovery' AND status='active'`). **Indexes** `(member_id, status)`; `(device_id)`. **Stored** public keys only. **Not stored** private keys, the recovery key itself, any seed or passphrase.
+
+### 5.6.3 `Device` · `devices` · `dev_` · `MUT` · `short`
+
+A keyed-hash record of a client installation for rate limits, anti-farming and linking. It is a random token the client generated, not a fingerprint. [D]
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `device_token_hash` | bytes32 | NN | S5.3.3; set to NULL by purge |
+| `hash_key_version` | int | NN | |
+| `status` | enum(`device_status`) | NN, default `active` | `blocked` after a farming finding (S10.*) |
+| `first_seen_day`, `last_seen_day` | day | NN | |
+| `creation_ip_hash`, `ip_hash_key_version`, `creation_ip_hash_expires_at` | bytes32, int, ts | all null or all set | expiry = creation + `retention.ip_hash_ttl_days` |
+| `grants_claimed` | int | NN, default 0 | counts toward `grant.max_per_device` (lifetime) |
+
+**Unique** `device_token_hash`. **Indexes** `(creation_ip_hash, created_at)` where not null; `(last_seen_day)`. **Retention.** After `retention.session_days` without use the row is purged: hashes are set to NULL; a row with `grants_claimed > 0` is kept as a tombstone `(id, grants_claimed)` while any non-closed member has it as `creating_device_id` so the lifetime grant limit cannot be reset by waiting [A].
+**Stored** keyed hashes, day-granular first and last use, a grant counter. **Not stored** raw IP, user-agent, screen size, fonts, canvas or audio fingerprints, hardware ids, anything beyond the list the threat model (S10.*) admits.
+
+### 5.6.4 `Session` · `sessions` · `ses_` · `MUT` · `short`
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `principal_type` | enum | NN, `member` or `admin` | |
+| `member_id` / `admin_user_id` | id | exactly one set, matching `principal_type` | |
+| `key_id` / `credential_id` | id `mky_` / `acr_` | the key or passkey that authenticated | |
+| `token_hash` | bytes32 | NN | SHA-256 of a 256-bit token; the token is shown once |
+| `last_used_at`, `idle_expires_at`, `abs_expires_at` | ts | NN | `session.member_*` / `session.admin_*` TTLs |
+| `revoked_at`, `revoked_reason` | ts, text | null | reason is a code, never free text |
+
+**Unique** `token_hash`. **Indexes** `(member_id)`, `(admin_user_id)`, `(abs_expires_at)`. **Retention** `retention.session_days` after expiry or revocation. **Not stored** the token, IP, user-agent, location.
+
+### 5.6.5 `Invite` · `invites` · `inv_` · `MUT` · `member_bound`
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `issuer_member_id` | id `mem_` | NN, FK | issuing needs `invite.min_accepted_cells_to_issue` accepted cells |
+| `code_hash` | bytes32 | NN | SHA-256 of a 128-bit code; the code is shown once to the issuer |
+| `status` | enum(`invite_status`) | NN, default `issued` | |
+| `expires_at` | ts | NN | `created_at + invite.ttl_days` |
+| `redeemed_by_member_id`, `redeemed_at` | id, ts | null, both set or both null | |
+| `tree_root_member_id`, `tree_depth` | id, int | NN | the new member's position; depth <= `invite.tree_max_depth` |
+
+**Unique** `code_hash`; `redeemed_by_member_id`. **Indexes** `(issuer_member_id, status)` (for `invite.max_active_per_member`); `(tree_root_member_id)` (for `invite.tree_max_members`). **Stored** hash, tree position. **Not stored** the clear code, any note about the invitee, any contact detail.
+
+### 5.6.6 `OptIn` · `opt_ins` · `opt_` · `MUT` · `member_bound`
+
+The volunteer's opt-ins for rule R8, one current row per member. [D]
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `member_id` | id `mem_` | NN, FK, unique | |
+| `purposes` | arr | NN, subset of `P0..P3` | default `optin.default_purposes` |
+| `sensitivities` | arr | NN, subset of `S0`,`S1` | default `optin.default_sensitivities`; `S2` and `S3` are never selectable |
+| `licenses` | arr | NN, subset of `L0..L3` | default `optin.default_licenses` |
+| `service_requirements` | arr | NN, subset of `M0..M2` | default `optin.default_service_requirements` |
+| `allowed_service_ids` | arr of `svc_` | null = every approved service | |
+| `topics_included` / `topics_excluded` | arr of `top_` | NN, default empty | sensitive topics are included only on opt-in (`optin.sensitive_topics_default` = false); other topics are excluded only on opt-out |
+| `version` | int | NN, starts 1 | the lease stores it (S5.8.2) so a later dispute can show what the volunteer had opted into |
+
+**Indexes** GIN on `purposes`, `sensitivities`, `licenses`, `service_requirements`, `topics_included`. **Not stored** the history of every earlier setting (the `member.optin_changed` event carries a hash only).
+
+### 5.6.7 `TopicCategory` · `topic_categories` · `top_` · `MUT` · `permanent`
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `slug` | text | NN, unique, `^[a-z][a-z0-9_]{1,40}$` | |
+| `copy_key` | text | NN | `copy.topic.<slug>`; labels live in copy, not here |
+| `is_sensitive` | bool | NN | sensitive categories are opt-in (R8) |
+| `status` | enum(`topic_status`) | NN, default `active` | |
+| `created_by_admin_id` | id `adm_` | NN, FK | |
+
+Changes are `AdminAction` plus `ChangeLogEntry` (R10: making a category non-sensitive is a loosening). **Not stored** member-level topic statistics.
+
+### 5.6.8 `AdminUser` · `admin_users` · `adm_` · `MUT` · `permanent`
+
+Operator or Reviewer principal, separate from `Member` (S0.8.2). [D]
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `roles` | arr | NN, non-empty, subset of `reviewer`,`operator` | |
+| `status` | enum(`admin_status`) | NN | `invited`, `active`, `disabled` |
+| `label` | text | NN, unique, 2..40 chars | a pseudonymous label such as `founder-1`; not a legal name |
+| `invited_by_admin_id` | id `adm_` | null for the bootstrap admin, FK | |
+| `disabled_at` | ts | null | |
+
+**Not stored** a password, e-mail, phone or any shared secret: admin authentication is passkey-only (S0.6.4). Rows are never deleted because `AdminAction` rows must stay attributable; the label is the only identifying datum and is pseudonymous. [D]
+
+### 5.6.9 `AdminCredential` · `admin_credentials` · `acr_` · `MUT` · `permanent`
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `admin_user_id` | id `adm_` | NN, FK | |
+| `credential_id` | bytes | NN, unique | WebAuthn credential id |
+| `public_key` | bytes | NN | COSE key |
+| `sign_count` | int64 | NN, default 0 | monotonic check (clone detection) |
+| `transports` | arr | null | |
+| `label` | text | null, <= 40 chars | |
+| `status` | enum(`credential_status`) | NN | |
+| `last_used_at`, `revoked_at` | ts | null | |
+
+**Not stored** private keys, biometrics, attestation blobs beyond what S10.* decides to keep.
+
+### 5.6.10 `AdminAction` · `admin_actions` · `act_` · `CHN` · `permanent`
+
+The log of every operator and reviewer action. Named so it does not collide with the sampled `Audit`. It is also the approval record (S5.15). [D]
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `seq` | int64 | NN, unique, gap-free | |
+| `principal_type` | enum | NN, `admin` or `system` | |
+| `admin_user_id` | id `adm_` | null only when `system` | |
+| `action` | text | NN, dotted lowercase | for example `template.approve`, `service.record_flag`, `parameter.change`, `ledger.reversal.approve`, `launch.signoff`, `killswitch.engage` |
+| `subject_type`, `subject_id` | text, id | NN | polymorphic reference |
+| `subject_hash` | hash | null | content hash that was reviewed or approved (binds an approval to exact content) |
+| `reason` | text | NN for sensitive actions (`security.two_person_actions`), <= 1000 chars | |
+| `approves_action_id` | id `act_` | null, FK | the first action of a two-person pair |
+| `payload` | json | NN, <= 16 KiB | non-personal; schema per `action` |
+| `request_id` | text | NN | `req_` id |
+| `prev_hash`, `entry_hash` | hash | NN | chain over the table, S5.15 |
+
+**Keys** PK `id`; unique `seq`; FKs. **Indexes** `(subject_type, subject_id, seq)`; `(admin_user_id, seq)`; `(action, seq)`. **Not stored** admin IP, session token, user-agent.
