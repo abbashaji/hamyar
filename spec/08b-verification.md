@@ -319,3 +319,103 @@ Human review is the verification method for subjective templates (`verification.
 **Review gold.** A separate library (`gold_kind = review`) of candidate outputs with a known verdict. The substitution rule of 8.24.2 applies to review leases with the rate `verify.human_review_gold_rate` (default 0.10) clamped by the same floor and maximum as `g`. The library must keep both polarities: each polarity is at least `verify.review_gold_min_polarity_share` (initial configurable default 0.40, 8.37) of the active review gold, so a reviewer who always answers `acceptable` or always `unacceptable` fails about that share of gold and cannot coast. A review gold fail is `reject.gold_mismatch`; two consecutive review gold fails suspend review eligibility, not the member tier (8.35). [D]
 
 **Subjective templates and audits.** For a subjective template the sampled audit slot is a review panel (R1 to R3), never a comparator audit, so `verification.subjective = true` and a comparator are mutually exclusive in the template half's validation (`ISS-84`). [D]
+
+## 8.28 Donor reliability estimator and how trust tier uses it
+
+### 8.28.1 Observations [D]
+
+Reliability is kept per member and scope (`exec`, `review`). The unit is an observation: one PASS or FAIL about one executor. Subjective templates have no `exec` gold (no comparator exists, 8.27), so `verification.gold_pool_min` is 0 for them and their observations come from review verdicts.
+
+| Source | PASS when | FAIL when | Not an observation |
+| --- | --- | --- | --- |
+| `gold` | Gold comparator `match` | `mismatch`, or an automatic-check failure on the gold cell (8.23) | `inconclusive` (item defect), lease expiry, decline |
+| `audit` | Executor is in the majority of a resolved group (including a matched pair) | Executor is in the minority | `NO_MAJORITY`, cancelled or exhausted audits |
+| `blanket` | As `audit`, for blanket groups | As `audit` | As `audit` |
+| `review` | Accepted determinate verdict `acceptable` about the donor's output | Accepted determinate verdict `unacceptable` | Verdicts from non-accepted review cells |
+| `anomaly` | A forced audit that passes counts as `audit` | A rejection by S9.* for an anomaly counts as one FAIL | Anomaly flags that are not followed by a verdict |
+
+An observation carries `selection` (`random`, `forced`, `blanket`), `observed_at`, `source`, `suspect` (8.24.5) and `corrected_by` (an adjudication or appeal, 8.34). Corrections are new rows; the estimator uses the latest non-suspect value. Forced-selection observations count for the member (they are the cases the system most wants to catch, so the member-level estimate is deliberately conservative) and are excluded from the error-rate estimators (8.30). [D]
+
+### 8.28.2 Exact method: Beta posterior over a recent window [D]
+
+```
+function reliability(m, scope):
+  W = most recent verify.reliability_window_obs observations of (m, scope)      # order by observed_at, then id; drop suspect rows
+  P = count(PASS in W); F = count(FAIL in W)
+  a = verify.reliability_prior_a + P;   b = verify.reliability_prior_b + F       # posterior Beta(a, b)
+  mean_ppm = floor(1_000_000 * a / (a + b))                                      # exact integer arithmetic
+  lcb_ppm  = floor(1_000_000 * beta_quantile(verify.estimator_tail_prob, a, b))  # inverse regularized incomplete beta
+  return (mean_ppm, lcb_ppm, n_obs = P + F)
+```
+
+- Prior: Beta(`verify.reliability_prior_a`, `verify.reliability_prior_b`), default Beta(1, 1), the uniform prior. A member with no observations has mean 500,000 ppm and lower bound 100,000 ppm (at tail 0.10). [D]
+- `beta_quantile(q, a, b)` is the inverse of the regularized incomplete beta function; any library implementation is allowed if it agrees with the fixtures below within 1 ppm (`ISS-84` records the added parameter `verify.estimator_tail_prob`, initial configurable default 0.10). Lower bounds are rounded down and upper bounds (8.30) up, so rounding never flatters a donor or a rate. [A]
+- The window (default 50) makes the estimate follow behavior change; one old failure leaves the window after `verify.reliability_window_obs` further observations. Bayesian updating stays valid under the adaptive sampling of 8.29 because the sampling decision depends only on past observed data, not on the unobserved outcome of the cell being sampled [A]; frequentist coverage of the bounds is not claimed.
+- Fixtures (a = b = 1, tail 0.10; computed from the formula, `AC-verify-06`): P=10, F=0 gives mean 916,666 and lower bound 811,130; P=9, F=0 gives 909,090 and 794,328; P=50, F=0 gives 980,769 and 955,855; P=49, F=1 gives 961,538 and 925,859; P=8, F=1 gives 818,181 and 663,152. For F = 0 and b = 1 the lower bound is `tail^(1 / a)`, a closed form that tests can check independently.
+
+### 8.28.3 Use by trust tier [D]
+
+Promotion needs evidence (the lower bound); demotion needs evidence of harm (the mean). Parameters are S0.10.6 Table B; the statistic each compares against is fixed here.
+
+| Transition (event) | Condition (all) |
+| --- | --- |
+| `new` to `established` (`member.tier_promoted`) | accepted cells ≥ `trust.established_min_cells`; `lcb_ppm` ≥ `trust.established_min_reliability`; `blanket_remaining` = 0; status `active`; not `restricted` |
+| `established` to `trusted` | accepted cells ≥ `trust.trusted_min_cells`; `lcb_ppm` ≥ `trust.trusted_min_reliability` |
+| `established` to `new` (`member.tier_demoted`) | `mean_ppm` < `trust.demote_below_reliability` |
+| `trusted` to `established` | `lcb_ppm` < `trust.established_min_reliability` |
+
+Consequences derived from the defaults (a = b = 1, tail 0.10, window 50), stated so they are not discovered later [H]:
+
+- `established` needs at least **10 clean observations**, because 0.1^(1/10) = 0.794 < 0.80 and 0.1^(1/11) = 0.811 ≥ 0.80. Promotion is limited by observations, not by `trust.established_min_cells` = 10. A new member's 5 blanket cells give about 5 observations; the other 5 arrive at about `g/(1-g) + s` = 0.16 per cell (8.31), so about 31 further cells: roughly 36 cells in all. Whether this is acceptable is a `P1M` finding.
+- `trusted` needs **zero fails in a full window of 50**: P=50, F=0 gives 955,855 ≥ 950,000, while P=49, F=1 gives 925,859. One failure removes `trusted` eligibility until it leaves the window.
+- Tier changes the audit multiplier and the cap multiplier only (`trust.audit_multiplier.*`, `trust.cap_multiplier.*`), never the gold rate and never the floors (8.29).
+
+### 8.28.4 Restriction [D]
+
+`member.restricted` is emitted when (a) `trust.restrict_after_gold_fails` consecutive gold fails in scope `exec` stand after adjudication (8.30.3), or (b) S9.* or S10.* raise an integrity finding. A gold fail that is later overturned does not count and, if it caused a restriction, `member.restriction_lifted` is emitted. Restriction lasts `trust.restriction_days` and then lifts to `tier_before_restriction` unless a new failure occurred. While restricted: audit multiplier 3.0 and cap multiplier 0.25 (S0.10.6), no auditor assignments (8.25.3). Scope `review` has its own suspension (8.35). [D]
+
+### 8.28.5 State, determinism and idempotency [D]
+
+- Per-member verification state is one JSON column `members.verification_state`: for each scope `{ blanket_remaining, adapt_factor_ppm, clean_run, consecutive_gold_fails, review_suspended_until }` (`ISS-84`). It is updated in the same transaction as the `VerificationRecord` that causes it.
+- The state is a **pure function of the ordered stream of verification records** of the member. Processing a record is idempotent (unique `(verification_record_id)` marker). A nightly job rebuilds the state from the stream and raises an alarm on any difference. [D]
+
+## 8.29 Adaptive sampling function with floor
+
+### 8.29.1 Rates [D]
+
+All rates are integer ppm (S0.6.1). Let `f` = `adapt_factor_ppm` of the member in the scope of the cell, `tier_mult` = `trust.audit_multiplier.<tier>` in ppm.
+
+```
+f_lo = ceil(verify.audit_rate_floor_ppm * 1_000_000 / verify.audit_rate_s_ppm)        # = 200_000 at defaults
+f_hi = floor(verify.audit_rate_max_ppm  * 1_000_000 / verify.audit_rate_s_ppm)        # = 5_000_000 at defaults
+
+audit_rate(m)  = clamp( floor( s_ppm * tier_mult * f / 10^12 ),  audit_rate_floor_ppm, audit_rate_max_ppm )
+gold_rate(m)   = clamp( floor( g_ppm * f / 10^6 ),                gold_rate_floor_ppm,  gold_rate_max_ppm )
+review_rate(m) = clamp( floor( human_review_rate_ppm * tier_mult * f / 10^12 ), audit_rate_floor_ppm, audit_rate_max_ppm )
+```
+
+The floor is the last operation, so no multiplier, tier or factor can push a rate below it. The tier multiplier does not apply to the gold rate. For scope `review` the factor and tier multiplier of the member's review state are used; review gold uses `verify.human_review_gold_rate` in place of g with the same clamp. [D]
+
+### 8.29.2 Adaptive factor [D]
+
+```
+function on_observation(state, outcome, selection):       # called for every counted observation and every anomaly signal
+  if outcome in (FAIL, ANOMALY):
+      state.adapt_factor_ppm = min(f_hi, floor(state.adapt_factor_ppm * verify.adapt.step_up_ratio_ppm / 10^6)); state.clean_run = 0
+  else:                                                    # PASS
+      state.clean_run += 1
+      if state.clean_run >= verify.adapt.clean_streak:
+          state.adapt_factor_ppm = max(f_lo, floor(state.adapt_factor_ppm * verify.adapt.step_down_ratio_ppm / 10^6)); state.clean_run = 0
+```
+
+Initial `adapt_factor_ppm` = 1,000,000. Derived properties at the defaults (step-down 0.80, clean streak 20, step-up 2.00):
+
+- From factor 1.0 to the lower limit 0.2 takes `ceil(ln 0.2 / ln 0.8)` = 8 steps = **160 consecutive clean observations**. At about 0.16 observations per cell this is about 1,000 cells (derived, illustrative).
+- A single FAIL doubles the factor; from the lower limit it takes 3 failures to reach 1.0 (0.2, 0.4, 0.8, then 1.6).
+- Fixtures: factor 1,000,000 with 20 clean observations gives 800,000 and, for tier `established` (1.0), `audit_rate` 80,000 ppm; then one FAIL gives 1,600,000 and 160,000 ppm. For tier `trusted` (0.5) at the lower limit the product is 10,000 ppm, below the floor, so the rate is 20,000 (`AC-verify-10`). For tier `restricted` (3.0) and factor 2.0 the product is 600,000, so the rate is capped at 500,000 (`AC-verify-12`).
+
+### 8.29.3 Floor guarantee and what it buys [D]
+
+- **Floors hold for every member in every state**: `verify.audit_rate_floor` (0.02) and `verify.gold_rate_floor` (0.01) are validated parameters (C2) and are applied last. No tier, factor, budget or operator edit of a rate can go below them; only the floor parameter itself can be lowered, as a `loosen` change with notice (R10).
+- Detection exposure of a patient bad actor who stays at both floors (derived, not a measurement): per bad cell the chance that gold or audit sees it is at most `1 - (1 - 0.02)(1 - 0.01) = 0.0298` (using the gold floor per cell as an upper bound), so about `1 / 0.0298` = **34 bad cells accepted in expectation before the first detection**, and `ln 0.05 / ln(1 - 0.0298)` = 99.0, so about **100 bad cells** before the chance of at least one detection reaches 95%. Each accepted bad cell also earns 1 credit. The first detection doubles the factor, and two consecutive gold fails restrict the member (8.28.4). This residual is the price of the floor; 8.40-L8 repeats it.
+- **Budget band.** The random audit draw is `u` in `[0, 1_000_000)` (8.22.2). Before the draw the inclusion probability is fixed: `pi = audit_rate(m)` if the cell's job has verification budget (8.32), else `pi = audit_rate_floor_ppm`. The audit happens iff `u < pi`. Draws in the floor band are always funded; draws above it only while the job's pool lasts. The same rule applies to gold (8.24.2). The actual `pi` is stored (8.22.2), and the share of draws truncated by budget is published beside v as `truncated_extra_share` because truncation censors the measured v (`ISS-85`). [D]
