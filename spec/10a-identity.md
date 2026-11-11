@@ -356,3 +356,98 @@ Reason for no automatic ban cascade: an attacker could join through a victim's i
 | Hidden privilege | No per-member quota overrides exist; changes are global parameters with a change log |
 
 Exposure bound from grants, derived from defaults: per tree per day `grant.max_per_invite_tree_per_day x grant.starter_credits` = 2 x 3 = 6 credits; platform-wide per day `grant.max_per_day x grant.starter_credits` = 20 x 3 = 60 credits, each requiring a verified cell and funded from the Reserve, never minted. [D]
+
+## 10.11 Roles and permission matrix
+
+Roles are the `role` enum of S0.8.2. A `member` principal holds the `donor` and `requester` capabilities together; an `AdminUser` holds `reviewer`, `operator` or both and gets the union. The matrix shows what each role alone grants. Human review cells (FD§6.4 channel 2) are member work, not the `reviewer` role. [D]
+
+Legend: `Y` allowed when the conditions hold; `2P` allowed only with two-person approval (X9); `-` denied. Permission names follow `perm.<area>.<action>`; `S15.*` maps every API operation to exactly one permission here. [D]
+
+| Permission | anon | donor | requester | reviewer | operator | system | Conditions |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `perm.public.read_surfaces` | Y | Y | Y | Y | Y | Y | rate limits |
+| `perm.identity.create_challenge` | Y | - | - | - | - | - | rate limits |
+| `perm.identity.create_member` | Y | - | - | - | - | - | X1, invite (10.10) |
+| `perm.identity.start_session` | Y | - | - | - | - | - | signature (10.13) |
+| `perm.identity.start_recovery` | Y | - | - | - | - | - | 10.8 |
+| `perm.identity.view_own` | - | Y | Y | - | - | - | X7 |
+| `perm.identity.manage_keys` | - | Y | Y | - | - | - | X5, X7 |
+| `perm.identity.link_device` | - | Y | Y | - | - | - | X3, X5 |
+| `perm.identity.set_email` | - | Y | Y | - | - | - | X3, X4, X5 |
+| `perm.identity.close_account` | - | Y | Y | - | - | - | X5 |
+| `perm.identity.export_own_data` | - | Y | Y | - | - | - | X7 |
+| `perm.session.revoke_own` | - | Y | Y | - | - | - | X7 |
+| `perm.invite.issue` | - | Y | Y | - | - | - | X3, X4, X6, quotas |
+| `perm.invite.revoke_own` | - | Y | Y | - | - | - | X7 |
+| `perm.cell.lease` | - | Y | - | - | - | - | X3 |
+| `perm.cell.submit` | - | Y | - | - | - | - | X3, own lease |
+| `perm.cell.decline` | - | Y | - | - | - | - | X3, own lease |
+| `perm.review_cell.execute` | - | Y | - | - | - | - | X3, X10 |
+| `perm.optin.manage` | - | Y | - | - | - | - | X7 |
+| `perm.team.manage` | - | Y | - | - | - | - | X3, `ff.growth.v4_teams` |
+| `perm.job.create` | - | - | Y | - | - | - | X2, X3, X4 |
+| `perm.job.view_own` | - | - | Y | - | - | - | X7 |
+| `perm.job.cancel_own` | - | - | Y | - | - | - | X3, X7 |
+| `perm.deliverable.download_own` | - | - | Y | - | - | - | X7 |
+| `perm.reservation.create` | - | - | Y | - | - | - | X2, X3, X4, `ff.job.reservations` |
+| `perm.balance.view_own` | - | Y | Y | - | - | - | X7 |
+| `perm.report.file` | - | Y | Y | - | - | - | X7, `report.max_per_member_per_day` |
+| `perm.appeal.file` | - | Y | Y | - | - | - | X7, allowed while suspended or banned, inside `appeal.window_days` |
+| `perm.template.author` | - | - | - | Y | - | - | X8 |
+| `perm.template.review` | - | - | - | Y | - | - | X8, X11 |
+| `perm.template.pause` | - | - | - | Y | Y | - | X8 |
+| `perm.service.review` | - | - | - | Y | - | - | X8 |
+| `perm.policy.edit` | - | - | - | Y | - | - | X8; loosening is `parameter.loosen` |
+| `perm.appeal.decide` | - | - | - | Y | - | - | X8, X11; bans need `appeal.ban_min_reviewers` |
+| `perm.report.triage` | - | - | - | Y | - | - | X8 |
+| `perm.gold.manage` | - | - | - | Y | - | - | X8; gold answers are visible to reviewers only |
+| `perm.audit.view_queue` | - | - | - | Y | - | - | X8 |
+| `perm.member.view_basic` | - | - | - | Y | Y | - | X8; id, tier, status, counts; never keys or e-mail |
+| `perm.member.suspend` | - | - | - | Y | Y | - | X8, reason required |
+| `perm.member.ban` | - | - | - | 2P | 2P | - | X8, X9 |
+| `perm.member.reinstate` | - | - | - | Y | - | - | X8, X11 |
+| `perm.invite.view_tree_summary` | - | - | - | Y | Y | - | X8; counts only |
+| `perm.invite.freeze_tree` | - | - | - | Y | Y | - | X8 |
+| `perm.invite.view_tree_edges` | - | - | - | - | Y | - | X8; every read is an `AdminAction` |
+| `perm.invite.unfreeze_tree` | - | - | - | - | Y | - | X8 |
+| `perm.invite.seed_issue` | - | - | - | - | 2P | - | X8, X9 |
+| `perm.parameter.edit` | - | - | - | Y | Y | - | X8; only the owner role of the area (S0.10.5) |
+| `perm.parameter.loosen` | - | - | - | 2P | 2P | - | X8, X9; covers policy-rule loosening (R10) |
+| `perm.killswitch.engage` | - | - | - | Y | Y | - | X8; reviewers only for template, service and member scopes |
+| `perm.killswitch.release` | - | - | - | 2P | 2P | - | X8, X9 |
+| `perm.launch.signoff` | - | - | - | - | 2P | - | X8, X9; `S14.*` may extend |
+| `perm.ledger.explore` | - | - | - | Y | Y | - | X8; read-only |
+| `perm.ledger.reverse` | - | - | - | - | 2P | - | X8, X9 |
+| `perm.capacity.view` | - | - | - | Y | Y | - | X8 |
+| `perm.adminaction.view` | - | - | - | - | Y | - | X8 |
+| `perm.admin.role_grant` | - | - | - | - | 2P | - | X8, X9 |
+| `perm.admin.credential_add` | - | - | - | - | 2P | - | X8, X9 |
+| `perm.admin.credential_lock` | - | - | - | Y | Y | - | X8; emergency lock of another admin, one admin suffices |
+| `perm.admin.credential_unlock` | - | - | - | - | 2P | - | X8, X9 |
+| `perm.disclosure.release` | - | - | - | - | 2P | - | X8, X9, counsel sign-off [V] |
+| `perm.identity.purge_optional_pii` | - | - | - | - | Y | - | X8; engages `kill.optional_pii` (10.15) |
+| `perm.system.run_background_jobs` | - | - | - | - | - | Y | sweeps, retention purge, key-chain check, invite expiry |
+
+**Conditions** [D]
+
+| Id | Condition |
+| --- | --- |
+| X1 | `launch.members_may_join` is true (else `403 LAUNCH_GATE_CLOSED`) |
+| X2 | `launch.member_jobs_enabled` is true |
+| X3 | Member `status` is `active` and no `kill.member.<id>` is engaged. A `suspended` or `banned` member keeps only the permissions without X3: view own identity, export, revoke own sessions, view balance, file appeals, close account |
+| X4 | Not in the recovery cooldown (10.8) |
+| X5 | Step-up: a fresh signature by the session's key no older than `session.step_up_max_age_s` |
+| X6 | `trust_tier` is not `restricted` |
+| X7 | Object-level check: the object belongs to the calling principal; the member id comes from the session, never from the path or body; a foreign object returns `404 NOT_FOUND` (S0.11.3) |
+| X8 | Admin session on the admin origin; writes also need a WebAuthn step-up inside `session.step_up_max_age_s` |
+| X9 | Two-person approval by a different `AdminUser` (10.12) |
+| X10 | `ff.channel.human_review` is on |
+| X11 | Conflict-of-interest exclusion: not the author, not the original decider, and not an admin whose `declared_member_ids` include a party |
+
+**Rules** [D]
+
+1. Deny by default (IC5): a (principal, permission) pair not listed is denied, and a test enumerates every pair (AC-access-01). The matrix is versioned configuration shipped with the code and changed only by a reviewed migration, never from an admin screen; reason: privilege changes are rare and must be reviewed like code.
+2. Separation of powers: reviewers cannot change operator-owned parameters, launch switches or the ledger; operators cannot approve templates or services. Reason: reviewer capture and insider risk (FD§5.7 failure mode 10). An `AdminUser` holding both roles gets the union, but a second approver must always be a different `AdminUser`.
+3. Deliberately absent permissions: no principal can read e-mail addresses, private keys or recovery keys, restore or reassign a member's keys, read a provider credential, or read a volunteer's chat page. Operators cannot create members.
+4. Members who are also admins hold two unlinked principals; `AdminUser.declared_member_ids` is optional, used only by assignment logic to apply X11, and shown only to the admin concerned and to operators approving `admin.role_grant`. Without it X11 rests on honesty [V: process].
+5. One person alone cannot satisfy X9. With a single admin, two-person actions (including launch sign-off) cannot run and there is no bypass; whether to add a second person is an owner decision (`S3.*`, `ISS-102`).
