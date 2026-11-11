@@ -355,3 +355,100 @@ Submission.quarantined --submission.rejected--> Submission.rejected         reas
 | Template pause | `template.autopause_report_count` reports on one template inside `template.autopause_window_s` pauses it (S0.10.6); a spike of quarantines on one template is an input to that decision |
 
 Release and reject decisions on quarantined text are made by one reviewer and sampled by a second as part of the reviewer-capture control in S10.* [A].
+
+## 9.10 Duplicate-submission handling: idempotent resubmit versus conflicting resubmit
+
+Three layers apply in this order: the `Idempotency-Key` layer of S0.11.5, natural idempotency on `(lease_id, nonce)`, and the unique index on `submissions.lease_id`. [D]
+
+| # | Situation | Outcome | Emits |
+| --- | --- | --- | --- |
+| 1 | Same `Idempotency-Key`, same body (network retry) | Stored status and body replayed with `Idempotent-Replayed: true`; no processing | nothing |
+| 2 | Same key, different body | `422 IDEMPOTENCY_KEY_MISMATCH` | nothing |
+| 3 | Same key while the first call is running | `409 IDEMPOTENCY_IN_PROGRESS` with `Retry-After` | nothing |
+| 4 | New key, same lease, nonce matches, `payload_hash` equal to the stored one | **Idempotent resubmit**: `200`, the stored outcome, `"replayed": true` | nothing (S0.9.3) |
+| 5 | New key, same lease, nonce matches, `payload_hash` different | **Conflicting resubmit**: `409 STATE_CONFLICT`, `details.reason` = `conflicting_resubmission`, `details.stored_submission_id`. The stored submission is untouched; the conflict is counted and recorded as signal `signal.conflicting_resubmit` | nothing (a guard rejection is not an event, S0.9.1) |
+| 6 | Lease already `submitted`, nonce does not match | `403 FORBIDDEN`, `reject.nonce_invalid`; the stored outcome is not revealed | nothing |
+| 7 | Two first submissions for one lease arrive together (double tap, two tabs) | The row lock on the lease serializes them: one persists, the other re-reads and becomes case 4 or case 5 | one set of events |
+| 8 | Lease `released`, `expired` or `revoked`, or `now` past `grace_until` | `410 LEASE_EXPIRED`, `reject.lease_expired`, `details.reason` = the lease state or `past_grace` | nothing |
+| 9 | The cell was requeued and re-leased; the previous lease holder submits late | The old lease is `expired`, so case 8; a new lease has its own nonce and its own submission | nothing |
+| 10 | The same text under different leases or cells | Not a duplicate submission; handled by 9.11 | per 9.11 |
+
+**Guarantees** (exact, per S0.1 and prompt scope B) [D]
+
+| # | Guarantee |
+| --- | --- |
+| G1 | At most one `Submission` per `Lease` (unique index), so at most one submission per cell attempt |
+| G2 | `nonce_consumed_at` is set if and only if a `Submission` row was persisted, in the same transaction |
+| G3 | Submit versus lease expiry is serialized by the lease row lock: exactly one of "submission persisted" and "lease expired" happens; both never do |
+| G4 | The three events of one claim (`submission.received`, `lease.submission_received`, `cell.submitted`) are written to the outbox in the same transaction as the state change (S4.*), so a committed submission always has its events and an uncommitted one has none |
+| G5 | A replay never changes state, never emits and never extends any deadline |
+
+**Not guaranteed** [D]: that the client receives the response (it can retry safely under cases 1 and 4), the order of submissions across different leases, or that a late submission within grace beats a requeue the reaper already performed (after `grace_until` the lease is `expired` and wins).
+
+## 9.11 Detecting another donor's output pasted as one's own
+
+### 9.11.1 What is being detected
+
+| Kind | Pattern | Evidence | Treatment |
+| --- | --- | --- | --- |
+| D1 | Same cell, two donors (blanket redundancy, audit second or third execution): outputs equal or near-equal | `dup_key` equal or estimated similarity at least `verify.duplicate_similarity_threshold`, for outputs of at least `verify.duplicate_min_chars` code points | Signal only: both submissions get flag `duplicate_same_cell`, the cell is `flagged_for_audit`, and the pair is passed to the link analysis of S10.* (shared device group, invite tree, same hour). It is never rejected on similarity alone |
+| D2 | One donor, two cells with different inputs, equal or near-equal outputs | Same test, restricted to `ckey` outputs of at least `verify.duplicate_min_chars` code points | `reject.duplicate_of_other_output` (hard), because an honest run on a different input rarely returns the same long text [H] |
+| D3 | Two donors, two cells with different `input_hash`, same `template_version_id`, equal or near-equal outputs | Same test | The later submission is rejected with `reject.duplicate_of_other_output`; the earlier one is flagged `duplicate_source` for audit (it may be the victim of a leak) |
+| D4 | Output equals or nearly equals the cell's own input or prompt (the donor pasted the question back) | Similarity to the cell input | Recorded as `similarity_to_input_ppm` for the automatic checks of S8.*; no reject code here |
+
+The hard cases D2 and D3 apply only to slots whose `slot_context` is `prose` or `code` and whose text reaches the minimum length; short, enumerated or schema-constrained outputs (a class label, a one-word answer) are exactly where honest agreement is expected, so they are excluded from all four kinds. [D]
+
+### 9.11.2 Method
+
+```
+fingerprint(ckey):
+  shingles := set of character 5-grams of ckey (length verify.duplicate_shingle_chars)
+  sig      := MinHash over shingles with verify.duplicate_minhash_perms permutations
+  bands    := split sig into b bands of r rows;  b * r = verify.duplicate_minhash_perms
+  store (submission_id, dup_key, sig, band_hashes[b], template_version_id, input_hash, member_id, cell_id, received_at)
+candidates(new):  rows sharing at least one band hash AND template_version_id AND received_at within verify.duplicate_window_days
+similarity(a,b) = fraction of equal sig positions           (an unbiased estimate of the Jaccard similarity of the shingle sets)
+verdict:  dup_key equal  OR  similarity >= verify.duplicate_similarity_threshold
+```
+
+Character 5-grams are used instead of word tokens because Persian text mixes spaces and ZWNJ unpredictably, and `ckey` already removes ZWNJ. [A][H] With the initial configurable defaults 128 permutations, 32 bands of 4 rows, the probability that a pair with true similarity `s` becomes a candidate is `1 - (1 - s^4)^32`; at `s` = 0.95 this is `1 - (1 - 0.8145)^32`, which is above `1 - 10^-20`, so a genuine near-duplicate is effectively never missed at retrieval; the final decision uses the full signature, not the band match. [D] The candidate window and the index live and die with the job payload: fingerprints are payload-derived and are purged with `retention.job_payload_days` (S0.7, `job_bound`). [D]
+
+### 9.11.3 Limits, stated plainly
+
+- Similarity cannot detect a paraphrase of another donor's output, a copy of another donor's output that was lightly edited below the threshold, or a copy rendered into a different language. [D]
+- Honest runs of the same prompt on the same service at low sampling temperature can legitimately produce identical or near-identical text; whether this happens often enough to matter is unknown and is measured in Phase 1 (`P1M`) as the rate of D1 flags that audits later confirm as honest [H]. Until measured, D1 is a signal and nothing more.
+- A donor can obtain a valid-looking output from a model and still not have run the leased prompt, or can run it and alter the answer. The nonce binds the submission to the lease, not the text to the prompt. The only protection against low-effort or fabricated outputs is verification (gold, audit, automatic checks: S8.*), which estimates quality with stated error rates, not provenance. [D]
+- A donor with two accounts can run one execution per account. Detection of that is link analysis (device, invite tree, timing), which is probabilistic and belongs to S10.*. [D]
+- Published Commons outputs are public by design (`P1`). To prevent copying a published answer into a re-issued audit of the same cell, no output of a job is published or made visible to anyone outside the review queue before the job's cells have reached `accepted` (assembly follows `job.all_cells_accepted`, S0.9.2). [D]
+- Sybil copies across leases are not prevented by hashing alone; the economic defense is that rejected cells earn nothing and the sampling floor never reaches zero (FD§4.4). [P]
+
+## 9.12 Timing anomalies
+
+Only server times are used: `leased_at` is `Lease.created_at` and `received_at` is the server time at SC-17. The client reports no durations (a client-reported duration is a forgeable field, so the schema has none). `lease_to_submit_s = received_at - leased_at`. [D]
+
+| Signal | Rule | Action |
+| --- | --- | --- |
+| `signal.timing_below_floor` | `lease_to_submit_s < verify.timing_min_s` | Hard: `checks_failed`, `reject.timing_anomaly` (SC-18). The floor is meant to catch no-effort submissions that cannot include reading, sending, waiting for a model and copying back |
+| `signal.timing_soft_fast` | Once the template version has at least `calibration.min_samples_per_service` verified submissions, `lease_to_submit_s < verify.timing_soft_ratio x median(lease_to_submit_s)` of those submissions | Flag; the cell is `flagged_for_audit` (a guaranteed audit), no rejection |
+| `signal.timing_regular` | The coefficient of variation of the last `verify.timing_regular_window_obs` values of `lease_to_submit_s` for one member is below `verify.timing_regular_cv` | Flag on the member for S8.* and S10.* (consistent with scripted submission, which the platform forbids as a use but cannot see); no per-submission rejection |
+| `late` | `received_at > expires_at` and `<= grace_until` | Recorded; excluded from the distribution; no penalty |
+
+The distribution is collected per `template_version_id` as the histogram metric `hamyar_submission_lease_to_submit_seconds` over verified submissions only, so the statistic is not poisoned by unverified or rejected ones. Its purpose is dual: it feeds the soft signal, and it is the Phase 0 measurement `CAL` that replaces the initial `verify.timing_min_s` and `lease.timeout_s` (S0.10.4). [D]
+
+**Limits** [D]
+- No fast-path floor is derived from data yet. `verify.timing_min_s` is an initial configurable default and is expected to move after `CAL` (`ISS-97`); a floor set too high rejects honest practiced donors, so it errs low.
+- Honest fast submissions exist (a short cell on a fast service, a donor with several tabs open): that is why only the floor is a hard rule and everything else is a signal. [H]
+- Distributions depend on template, cell size, service speed and the donor's connection; they are estimated per template version, not globally, and are not valid across a template change.
+- A script that waits a plausible random time defeats every timing rule. Timing detects carelessness and crude automation, not a determined adversary.
+- Simulation output (S18.*) is not evidence about the real distribution. [D]
+
+## 9.13 Attested service and model fields
+
+| Field | Rule |
+| --- | --- |
+| `attestation.service_id` | Required. Must be an `approved` registry service (S0.9.6) that this cell may use: for `M0` any approved service; for `M1` one of the pinned ones; for `M2` an entry the registry marks open-weight with a checked license. Otherwise the call fails at SC-15 with `422 UNPROCESSABLE`, `reject.attestation_invalid`, before anything is persisted, so the donor can correct it. The check is re-run at acceptance together with `R9` (S7.*) |
+| `attestation.model_label` | Optional free text, display-only, at most `cell.envelope.max_model_label_chars` code points, normalized with the `prose` rules except that no newline is allowed. It is never matched against anything and never used to gate; it is escaped on every display (9.8.1) |
+| Meaning | A volunteer's own statement. It is stored as `attested_service_id` and `attested_model_label`, shown in manifests under those names, and described to requesters as "declared by the volunteer, not verified" (FD§5.6; FD§5.7 failure mode 7) [P] |
+| Use | Registry membership check (above), audit and incident analysis, and aggregate statistics per service (for calibration, `CAL`). Not proof of anything: a donor can name any permitted service. The platform cannot check which service produced a text, because it never reads the provider page (E1, E6) |
+| Consequence of a false attestation | None is detectable from the text itself. A pattern of attestations that audits contradict (for example systematically different outputs for the same claimed service) is an input to reliability review by a human, not an automatic penalty [H] |
+| Copy | `copy.submit.attestation_note` (9.5, copy table) |
