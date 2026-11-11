@@ -693,3 +693,117 @@ def settle(job_id, mode):                    # mode in ('complete', 'cancel')
 | CK-06 | No terminal job has a non-terminal cell, an `active` lease or a non-`closed` escrow |
 | CK-07 | `entity_seq` is gapless for every entity and the last `to_state` equals the entity's `state` |
 | CK-08 | No submission exists without a lease in `submitted`, and no `submitted` lease without a submission |
+
+## 5.30 Race table
+
+Every row names the scenario, the single outcome the system produces, and the mechanism. Rows are the contract for the tests in 5.31 (`AC-race-<nn>` has the same number as `RC-<nn>`). [D]
+
+| id | Scenario | Outcome | Mechanism |
+| --- | --- | --- | --- |
+| RC-01 | Two donors lease the same `queued` cell at the same moment | One gets `201`; the other gets `409 LEASE_CONFLICT`; one `cell.leased` event | CAS `queued` -> `leased`, partial unique index (GU-01, GU-02) |
+| RC-02 | One donor double-taps lease; same `Idempotency-Key` and body | One lease; the second call replays the response with a rotated nonce; the first nonce is dead | L1 idempotency, nonce rotation (5.29.3) |
+| RC-03 | Same donor retries lease with a new key after the first succeeded | `409 LEASE_CONFLICT` (the cell is no longer `queued`); the donor's UI reloads its active leases | CAS; the cell state |
+| RC-04 | One donor sends parallel lease calls for different cells to exceed `lease.max_active_per_member` | At most `lease.max_active_per_member` succeed; the rest `422 CAP_EXCEEDED` | Member row lock (order 1) with the count inside the lock |
+| RC-05 | A lease is requested while a kill switch for the cell's template is engaged or the job is being paused | If the pause committed first: refusal. If the lease committed first: the lease exists, then `job_fanout_worker` revokes it (CT-13) within one pass; nothing is paid in the window | Guards under shared locks; fan-out; `G-accept` |
+| RC-06 | A submission and the reaper race at `hard_expires_at` | Exactly one wins (submission accepted, or `410 LEASE_EXPIRED` and requeue) | Two disjoint CAS statements on the lease row (GU-05) |
+| RC-07 | A donor submits after the cell was re-leased to someone else | `410 LEASE_EXPIRED`; the other donor's lease is untouched | Old lease is `expired`; nonce and `lease_id` differ |
+| RC-08 | The same content arrives twice for one lease with different keys | The first is processed; the second returns the stored outcome; no second event | `UNIQUE (lease_id)`; lease `submitted`; equal hash |
+| RC-09 | Two different bodies arrive concurrently for one lease (two tabs) | One wins; the other is `409 STATE_CONFLICT` `already_submitted` and its body is discarded | Lease row lock; CAS |
+| RC-10 | A submission carries a wrong nonce, or another member's `lease_id` | Wrong nonce: `403 FORBIDDEN`, lease stays `active`. Other member's lease: `404 NOT_FOUND` | Constant-time hash compare; ownership check |
+| RC-11 | A donor declines while the same lease's submission arrives | One wins: either the cell is `queued` (decline) or `submitted`; never both | CAS on the lease row |
+| RC-12 | A member is suspended or killed while submitting | If the submission committed first it is `submitted` and DEFERred at `G-accept` until reinstatement; if the revocation committed first the submission is `410 LEASE_EXPIRED` (`revoked`) and the cell requeues | Lease CAS; `G-accept` donor check |
+| RC-13 | A lease extension and the reaper race | One wins: extended (reaper skips) or expired (extension `410`) | The extension CAS has `now() <= expires_at` and `state = 'active'` |
+| RC-14 | Two workers accept the same cell | One payment; the other returns `already_accepted` | Cell lock; key `payout:<cell_id>` or `mint:<cell_id>` (GU-07) |
+| RC-15 | `audit_passed` and `audit_failed` arrive for one flagged cell | The first committed verdict stands; the other is `STATE_CONFLICT` and is dropped | CAS from `flagged_for_audit`; `Audit` terminal states |
+| RC-16 | Two `escrow_confirmed` calls for one job | One `hold`, one escrow, N cells once | Job CAS; `hold:<job_id>`; `UNIQUE (job_id)` |
+| RC-17 | Two jobs of one member confirmed together against one balance | Only as many as the balance covers; never a negative balance | Member lock; conditional debit (5.29.7) |
+| RC-18 | `hold` and the expiry sweep take the same lot | One consumes it; the other uses other lots or fails | Account lock; `expires_at > now()`; `expire:<lot_id>` |
+| RC-19 | A payout races a cancel | A payout committed first stands; later cells follow table 5.22.1; settle waits for all cells | `G-accept`; settle precondition |
+| RC-20 | `settle()` runs twice or in two workers | One `settle` transaction; escrow 0; second run returns `already_settled` | Job lock; key `settle:<job_id>` (GU-09) |
+| RC-21 | `settle()` runs while a cell is being accepted | Settle returns `not_yet` until the acceptance commits, then settles with the cell counted | All-cells-terminal precondition |
+| RC-22 | A requester cancels while the last cell is accepted | First commit wins: either `assembling` (cancel is `409 STATE_CONFLICT`) or `cancelling` (JT-13 guard fails) | Job CAS |
+| RC-23 | Many concurrent leases try to take the last Commons mint headroom | Exactly the headroom's worth succeed; the rest `422 CAP_EXCEEDED`; no accepted cell lacks headroom | Conditional counter update (GU-12) |
+| RC-24 | Parallel leases from one donor near the cap K | Never more reserved than the headroom allows | Member lock; derived `reserved_ucr` |
+| RC-25 | A reservation is activated while cancelled or expiring | One terminal state; one escrow movement | `Reservation` CAS; keys `resact`, `rsncancel`, `rsnexpire` |
+| RC-26 | Two reviewers approve the same template version at the same moment, or the author approves | Count is exact; the version reaches `approved` once; the author's approval is refused | Version row lock; unique approval key; author predicate |
+| RC-27 | A policy tightening is published while a cell is being accepted | If the acceptance committed first it is legitimate; otherwise `G-accept` returns VOID `reject.policy_changed`; never accepted under a policy that no longer permits it | Shared lock on the policy pointer vs exclusive on publish |
+| RC-28 | A service is suspended or revoked while submissions that report it are pending | Per `G-accept`: suspended -> REJECT_POLICY, donor not penalized; revoked -> per `inflight_policy` | `G-accept` reads the service state under lock |
+| RC-29 | Two appeals for one decision, or a filing at the window edge | At most `appeal.max_per_decision`; a filing after `appeal.window_days` is `422 UNPROCESSABLE` `window_closed` | `UNIQUE (decision_ref, sequence)`; DB-clock check |
+| RC-30 | The relay crashes after delivering an event and before marking it sent | The event is delivered again; consumers do nothing the second time | `event_id` dedupe (GU-13) |
+| RC-31 | `stop_requested` and `cancel_requested` hit one job together | First commit wins; the other is `STATE_CONFLICT` or skipped | Job CAS |
+| RC-32 | Two pause causes arrive, then one clears | The job stays `suspended` until the last cause clears, then resumes once | `pause_causes` set under the job lock (JT-12) |
+
+## 5.31 Given / When / Then criteria
+
+Concurrency tests use a deterministic interleaving harness with named injection points (`before_cas`, `after_cas_before_commit`, `after_commit_before_ack`) and a randomized-interleaving property run whose oracle is the consistency checks CK-01..CK-08 plus the ledger invariants of S6.*. S18.* maps each criterion to a `T-fsm-*` or `T-adv-*` test; this part owns the criteria. [D]
+
+**Races**
+
+- `AC-race-01` Given a `queued` cell and two donors, When both call lease at the same time, Then exactly one gets `201` and one active `Lease`, the other gets `409 LEASE_CONFLICT`, and `leases` holds one `active` row for the cell.
+- `AC-race-02` Given a lease call that succeeded but whose response was lost, When the client repeats it with the same key and body, Then the response is replayed with `Idempotent-Replayed: true`-equivalent behavior, no second lease exists, and the nonce from the first response no longer validates.
+- `AC-race-03` Given a donor who holds the lease on a cell, When the donor leases it again with a new key, Then `409 LEASE_CONFLICT` and nothing changes.
+- `AC-race-04` Given `lease.max_active_per_member` = 3 and a donor holding 2 leases, When the donor sends 5 parallel lease calls on different cells, Then exactly 1 succeeds and 4 get `422 CAP_EXCEEDED`.
+- `AC-race-05` Given a job whose template has `kill.template` engaged at the same instant as a lease call, When both commit in either order, Then either the lease is refused, or the lease is revoked by fan-out within one pass and no `payout` exists for that cell.
+- `AC-race-06` Given a lease at `hard_expires_at` minus 1 ms, When the submission and the reaper run concurrently, Then exactly one of `lease.submission_received` and `lease.expired` is recorded, never both, and the `StateTransition` rows show one outcome.
+- `AC-race-07` Given a cell re-leased after expiry, When the first donor submits with the old nonce, Then `410 LEASE_EXPIRED`, the second donor's lease is `active`, and no submission is stored for the first.
+- `AC-race-08` Given a `submitted` lease, When the same content arrives with a different key, Then `200` with the stored outcome, no new event, and one `Submission`.
+- `AC-race-09` Given a `submitted` lease, When different content arrives for it, Then `409 STATE_CONFLICT` `already_submitted`, the stored submission is unchanged, and the second body is not stored.
+- `AC-race-10` Given an `active` lease, When a submission has a wrong nonce, Then `403 FORBIDDEN`, the lease is still `active`, and an abuse counter increases; When the `lease_id` belongs to another member, Then `404 NOT_FOUND`.
+- `AC-race-11` Given an `active` lease, When decline and submission arrive together, Then the cell ends either `queued` with the lease `released` or `submitted` with the lease `submitted`, and never a mix.
+- `AC-race-12` Given an `active` lease, When the donor is suspended while submitting, Then either the lease is `revoked` and the cell `queued`, or the cell is `submitted` and its acceptance is deferred until `member.reinstated`; no credit moves meanwhile.
+- `AC-race-13` Given a lease within `lease.extend_s` of `expires_at`, When an extension and the reaper race, Then the lease is either extended once (`extensions` = 1) or expired, never both.
+- `AC-race-14` Given a `submitted` cell that passed checks, When two workers call `accept_cell`, Then exactly one ledger transaction with key `payout:<cell_id>` (or `mint:<cell_id>`) exists and the donor's balance rose by exactly 1,000,000 `ucr`.
+- `AC-race-15` Given a `flagged_for_audit` cell, When `audit_passed` and `audit_failed` are applied concurrently, Then one transition commits, the other is `STATE_CONFLICT`, and the ledger matches the committed one.
+- `AC-race-16` Given a `quoted` job, When `escrow_confirmed` is called twice at once, Then one `hold` transaction, one `Escrow`, N cells, and the member balance is reduced by `escrow_ucr` once.
+- `AC-race-17` Given a balance of 300 credits and two quoted jobs needing 276 each, When both are confirmed at once, Then one is `admitted`, the other gets `422 INSUFFICIENT_CREDIT`, and the balance never goes below 0.
+- `AC-race-18` Given a lot expiring now holding part of the balance, When `escrow_confirmed` and the expiry sweep run together, Then no expired credit is held, the lot is consumed once, and the account balance equals the sum of its lots.
+- `AC-race-19` Given a running job with a cell in `submitted`, When the requester cancels while the cell is accepted, Then the donor is paid once, the job settles only after the cell is terminal, and the closing identity holds.
+- `AC-race-20` Given a `settling` job with all cells terminal, When `settle()` runs twice concurrently, Then one `settle` transaction exists, the escrow balance is exactly 0, and the second call returns `already_settled`.
+- `AC-race-21` Given a `settling` job with one cell mid-acceptance, When `settle()` starts, Then it returns `not_yet` and does not post, and after the acceptance commits a later run settles with that payout counted.
+- `AC-race-22` Given a `running` job with one cell left, When the last cell is accepted and the requester cancels at the same time, Then the job is `assembling` and cancel is `409 STATE_CONFLICT`, or the job is `cancelling` and `job.all_cells_accepted` does not fire; never both.
+- `AC-race-23` Given `mint.monthly_cap_credits` headroom of exactly 5 cells, When 20 donors lease Commons cells at once, Then exactly 5 succeed, 15 get `422 CAP_EXCEEDED`, and after acceptance `minted_ucr + reserved_ucr` never exceeds the cap.
+- `AC-race-24` Given a donor whose headroom to the cap K x multiplier is 2 cells, When 5 parallel leases are sent, Then exactly 2 succeed.
+- `AC-race-25` Given a `held` reservation, When activation and cancellation arrive together, Then one of `activated` or `cancelled` holds, and the escrow moved at most once.
+- `AC-race-26` Given `template.min_reviewers_new` = 2, When two reviewers approve at once, Then the version is `approved` exactly once with 2 approvals; When the author approves, Then the approval is refused and no state changes.
+- `AC-race-27` Given a job stamped under policy version 4, When version 5 tightens the rule it relied on while a cell is being accepted, Then the cell is accepted before the publish commit or voided with `reject.policy_changed`, and no credit is paid in the second case.
+- `AC-race-28` Given a submission that reports a service, When the service is suspended before acceptance, Then the cell is `rejected` with `reject.policy_changed`, the donor's reliability is unchanged, and the cell requeues.
+- `AC-race-29` Given `appeal.max_per_decision` = 1, When two appeals for one decision are filed at once, Then one `Appeal` exists and the other is `409 ALREADY_EXISTS`; When one is filed after `appeal.window_days`, Then `422 UNPROCESSABLE` `window_closed`.
+- `AC-race-30` Given an outbox event delivered but not marked sent, When the relay restarts, Then the event is delivered again and the consumer produces no second effect.
+- `AC-race-31` Given a `running` job, When `stop_requested` and `cancel_requested` arrive together, Then one of `settling` or `cancelling` holds, and the other request is `409 STATE_CONFLICT`.
+- `AC-race-32` Given a job paused by two causes, When one clears, Then it stays `suspended`; When the last clears, Then it resumes exactly once and `paused_total_s` is extended once.
+
+**State-machine properties**
+
+- `AC-fsm-01` Given a cell in `accepted`, When `cell.checks_failed` is applied, Then `409 STATE_CONFLICT` with `transition_not_allowed`, and no event or `StateTransition` row is written.
+- `AC-fsm-02` Given any transition of any table in this part, When it commits, Then exactly one `StateTransition` row and one outbox event with the table's event name exist with consecutive `entity_seq`.
+- `AC-fsm-03` Given an injected failure after the CAS and before the ledger posting, When the transaction ends, Then neither the state change nor any ledger entry exists.
+- `AC-fsm-04` Given every state marked (T) in S0.9, When any event is applied, Then it is refused, except `accepted` -> `overturned` through CT-17 and `banned` -> `active` through MS-05.
+- `AC-fsm-05` Given a restricted member with `trust.restriction_days` elapsed, When `restriction_lifter` runs twice, Then the tier is restored once and `member.restriction_lifted` is emitted once.
+- `AC-fsm-06` Given a template version in `awaiting_second_review` and `template.min_reviewers_new` = 2, When the same reviewer approves again, Then the unique key refuses it.
+- `AC-fsm-07` Given a service with only `unknown` flags, When `service.approved` is attempted, Then it is refused (`unknown` evaluates as `no`) and the state stays `in_review`.
+- `AC-fsm-08` Given the FD§3.3 job (N = 240, price 1.15), When it runs to `completed` with all cells accepted, Then 264 `payout` transactions of 1,000,000 `ucr`, one `levy` of 12,000,000 `ucr`, refund 0, escrow balance 0, and CK-03 and CK-04 pass. The inputs are the FD's illustrative values, not measurements.
+
+## Issues raised
+
+Each resolution is already applied in this file; `C-001` consolidates them into S2.* and may record a different one. [D]
+
+| id | severity | fd_ref | issue | resolution | status |
+| --- | --- | --- | --- | --- | --- |
+| `ISS-54` | major | FD§3.4 | S0.10.6 describes `lease.submit_grace_s` as accepting a late paste-back "if the cell is not yet re-leased", while S0.9.3 and FD§3.4 requeue an expired cell at once. The outcome would depend on reaper timing and on which donor leased first, and two lease CAS statements could race | `hard_expires_at` = `expires_at` + `lease.submit_grace_s` is stored at issue; the cell cannot be re-leased before it; a submission is valid through it and refused after it regardless of reaper timing (5.23.3, 5.29.4) | proposed |
+| `ISS-55` | major | FD§3.4, FD§5.6 | Every transition must be logged with the policy version, but `Event` has retention class `ops` (30 days by default), shorter than an appeal or a provenance question can last | New append-only entity `StateTransition` (`stt_`) with the retention class of the parent entity and a per-entity gapless `entity_seq` (5.21.3) | proposed |
+| `ISS-56` | major | FD§4.4, FD§5.5 | A rejected cell "can appeal", but the FD does not say what pays the donor when a rejection is overturned after the job's escrow is closed, and `mint` is only for accepted Commons cells | An overturned `cell_rejection` (and the lots lost during an overturned suspension or ban) is restituted by a `grant` entry from the Reserve, reason `appeal_restitution`, never from escrow or `mint`; it waits while the Reserve is at or below `grant.reserve_floor_credits` (5.27). Whether the Reserve may be used this way is an owner decision | needs_owner |
+
+Convention additions made by this part (not issues, listed so `C-001` can fold them back):
+
+1. Headings of this file are numbered `5.21`..`5.39` (5.21).
+2. New entities and fields: `StateTransition` (`stt_`, `ISS-55`); `TemplateApproval` (`tap_`, `template_approvals`, `member_bound`-free, `permanent`) for per-reviewer approvals with `content_hash`; `MintBudget` (`mbd_`, `mint_budgets`, `permanent`, S6.* owns: `period`, `minted_ucr`, `reserved_ucr`, `cap_ucr`). Fields this part needs from S5a: `Job.origin`, `quote_expires_at`, `closure_reason`, `pause_causes`, `state_before_pause`, `pause_started_at`, `paused_total_s`, `admitted_at`, `escrow_id`, `levy_reserved_ucr`, `held_ucr`; `Cell.active_lease_id`, `attempt`, `acceptance_deferred_until`; `Lease.member_id`, `attempt`, `nonce_hash`, `expires_at`, `hard_expires_at`, `extensions`, `release_reason`; `Submission.content_hash`, `late`, `time_to_submit_s`, `reported_service_id`; `Member.tier_before_restriction`, `restricted_until`; `ServiceRegistryEntry.approved_at`, `review_due_at`, `grace_deadline_at`, `suspended_cause`; `Appeal.decision_ref`, `sequence`, `due_by`, evidence snapshot.
+3. Transition `screening --job.cancel_requested--> cancelled` (JT-19).
+4. `closure_reason` value `cells_exhausted` (JT-15).
+5. Log-only event `lease.extended` (5.23.3) with no state change.
+6. Transition `banned --member.reinstated--> active`, only through an overturned appeal (MS-05).
+7. Log-only event `template.approval_recorded` for approvals 2..k-1 when `template.min_reviewers_new` or `template.min_reviewers_edit` exceeds 2 (TT-04).
+8. Transition `in_review --service.review_lapsed--> suspended` when the review began from `review_due` and the grace elapsed (SVT-06).
+9. `cell.declined` is also the event for a system revocation not caused by the cell, with `details.initiator` = `system` (CT-18); `cell.cancelled` from `leased` only with `revoke_lease` (CT-15).
+10. `grant` entries with reason `appeal_restitution` (`ISS-56`) and `reserve_donation` on member closure (MS-04).
+11. Metrics `hamyar_bgjob_last_success_seconds` and `hamyar_bgjob_failures_total`, and the worker names of 5.29.10 as `actor_id` values.
+12. Permission names `perm.job.*`, `perm.member.*`, `perm.template.*`, `perm.service.*`, `perm.submission.release` are proposals for S10.* (5.21.1).
