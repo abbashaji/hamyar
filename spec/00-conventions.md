@@ -893,3 +893,58 @@ Build milestones are written `BM0`..`BM9` (see `ISS-01` for why not `M0..Mn`). T
 | `BM9` | `measurement_simulation_hardening` | Event schema and metrics pipeline for every FD§9 Phase 1 measure, expiry-arm assignment, simulation harness with adversarial agents, load and end-to-end suites, backup and restore drill, secret rotation drill, pre-build checklist closure | `BM7`, `BM8` | Every FD§9 Phase 1 measure has a query; simulation reports carry the label "not evidence about human behavior"; the drills are logged |
 
 Rationale for the order [D]: money-like state (`BM1`) and the legal and safety brakes (`BM2`, `BM3`) are built before anything a member can touch; the Phase 0 calibration tool is in `BM2` so the founders can run Phase 0 measurements (`CAL`, 0.10.4) while the remaining milestones are built, because the envelope, lease and sampling defaults can only be replaced by measurement.
+
+## 0.13 Spec files and owner cells
+
+One row per spec file. File names are proposals [A]: the `allowed_paths` of the owning cell are authoritative, and assembly orders files by the number in their top heading (`# <n>. <title>`), never by file name. A file carries one top-level heading unless its owner cell says otherwise. [D]
+
+| Part | Required section (prompt structure) | File | Owner cell | Issue block (0.4) |
+| --- | --- | --- | --- | --- |
+| S0 | Conventions and decisions skeleton | `spec/00-conventions.md`, `spec/00-decisions.md` | `C-000` | `ISS-01`..`ISS-09` |
+| S1 | Purpose, scope, how to read (evidence-tag legend, reusing 0.2) | `spec/01-purpose.md` | `C-001` | `ISS-11`..`ISS-19` |
+| S2 | Issues found in the Founding Document, consolidated from every `## Issues raised` | `spec/02-issues.md` | `C-001` | `ISS-21`..`ISS-29` |
+| S3 | Assumptions [A] and open owner decisions | `spec/03-assumptions.md` | `C-001` | `ISS-31`..`ISS-39` |
+| S4 | System overview and architecture | `spec/04-architecture.md` | `C-002` | `ISS-41`..`ISS-49` |
+| S5 | Domain model: entities | `spec/05a-domain-model.md` | `C-003` | `ISS-51`..`ISS-53` |
+| S5 | State machines, idempotency, concurrency | `spec/05b-state-machines.md` | `C-004` | `ISS-54`..`ISS-56` |
+| S6 | Credit, ledger and pricing | `spec/06a-credit-ledger-pricing.md` | `C-005` | `ISS-61`..`ISS-63` |
+| S6 | Admission control | `spec/06b-admission-control.md` | `C-006` | `ISS-64`..`ISS-66` |
+| S7 | Policy engine and Service Registry | `spec/07-policy-registry.md` | `plan` | `ISS-71`..`ISS-79` |
+| S8 | Templates and verification pipeline | `spec/08-templates-verification.md` | `plan` | `ISS-81`..`ISS-89` |
+| S9 | Result return, anti-forgery and abuse defenses | `spec/09-result-return-abuse.md` | `plan` | `ISS-91`..`ISS-99` |
+| S10 | Identity, access, privacy and safety, with the threat model table | `spec/10-identity-privacy-safety.md` | `plan` | `ISS-101`..`ISS-109` |
+| S11 | Volunteer, Requester, Reviewer and Operator experiences, Persian first | `spec/11-experiences.md` | `plan` | `ISS-111`..`ISS-119` |
+| S12 | Public surfaces and growth experiments | `spec/12-public-growth.md` | `plan` | `ISS-121`..`ISS-129` |
+| S13 | Measurement, experiment support and pre-registration | `spec/13-measurement.md` | `plan` | `ISS-131`..`ISS-139` |
+| S14 | Launch gates G0..G5, exit rule, kill switches | `spec/14-launch-gates.md` | `plan` | `ISS-141`..`ISS-149` |
+| S15 | API specification | `spec/15-api.md` | `plan` | `ISS-151`..`ISS-159` |
+| S16 | Configuration parameter table (completes 0.10.6 without renaming) | `spec/16-parameters.md` | `C-022` | `ISS-161`..`ISS-169` |
+| S17 | Build plan: milestones `BM0`..`BM9` in detail | `spec/17-build-plan.md` | `C-023` | `ISS-171`..`ISS-179` |
+| S18 | Test strategy and simulation harness | `spec/18-tests-simulation.md` | `plan` | `ISS-181`..`ISS-189` |
+| S19 | Risks, what remains unverified, pre-build checklist | `spec/19-risks.md` | `plan` | `ISS-191`..`ISS-199` |
+| S20 | Glossary | `spec/20-glossary.md` | `plan` | `ISS-201`..`ISS-209` |
+| S21 | Short Persian summary (about 10 lines) | `spec/21-persian-summary.md` | `plan` | `ISS-211`..`ISS-219` |
+
+Notes [D]
+
+- `plan` means the owner cell is not named in the text available to `C-000`, and this file does not guess it; `C-001` fills the column at assembly [V]. The ids `C-001`..`C-006` come from the cell engine's dependents listing for this cell, which was truncated, and `C-022` and `C-023` from this cell's goal text [V].
+- A part split over several files uses the issue sub-blocks of 0.4 in file sort order. A part that is not split uses all nine ids.
+- Cross-part ownership of names: entities and enums are owned by `S0` (0.7, 0.8); states and events by `S0` (0.9) with guards and effects in `S5.*`..`S9.*`; parameters by `S0` (0.10.6) and `S16`; API conventions by `S0` (0.11) and operations by `S15`. A part that needs a missing name reports a convention gap (0.1).
+
+## Issues raised
+
+Problems and gaps found while fixing the shared vocabulary. Each resolution is already applied in this file; `C-001` consolidates them into S2.* and may record a different resolution. [D]
+
+| id | severity | fd_ref | issue | resolution | status |
+| --- | --- | --- | --- | --- | --- |
+| `ISS-01` | minor | prompt | The brief and this cell's goal call build milestones `M0..Mn`, but `M0`..`M2` already denote service requirements (FD§5.3), so a bare `M1` would be ambiguous in every part | Build milestones are `BM0`..`BM9` (0.12); `M0`..`M2` stay reserved for service requirements | applied |
+| `ISS-02` | major | FD§5.3, FD§8.3 | "Unknown is treated as no" is safe only for flags whose `yes` is the permissive answer. A flag phrased as a risk (for example "the provider trains on chats") would make `unknown` mean the optimistic reading | All gating flags are phrased as permissions (`yes` = the saved terms permit it). Risk-style flags are `info.*` keys and never gate (0.8.3) | applied |
+| `ISS-03` | major | FD§4.2, FD§4.3 | Gold, audit and review cells inside Commons jobs have no escrow and no requester, yet FD§4.3 pays exactly 1 credit per accepted cell "of any kind". The FD does not say whether those cells mint | Every accepted Commons cell of any `cell_kind` mints exactly 1,000,000 `ucr` and counts against `mint.monthly_cap_credits`; the Commons verification share is measured and published beside v so make-work minting is visible | proposed |
+| `ISS-04` | minor | FD§3.3, FD§4.3 | v is a ratio of cells, so N x v is rarely a whole number of verification cells; the FD example is exact only because 240 x 0.10 = 24 | v is stored in ppm and rounded up (0.6.1); the verification pool is `floor(pool / 10^6)` cells and any remainder is refunded at settlement (S6.* owns the full rule) | proposed |
+| `ISS-05` | minor | FD§4.3 | v counts "rework cells" but FD§3.4 and FD§4.4 never define one | `cell_kind` `rework` is a replacement cell created when an accepted cell is overturned (`cell.overturned`, 0.9.3); it is paid from the verification pool and counts toward v | proposed |
+| `ISS-06` | major | FD§4.6, FD§6.2 V5 | The referral two-sided bonus has no funding source in the FD; the Reserve is defined only as the source of starter grants | Referral bonuses are `grant` entries from the Reserve, never `mint`; they pause when the Reserve is at or below `grant.reserve_floor_credits` (0.8.5) | proposed |
+| `ISS-07` | major | FD§4.5, FD§4.8 | Credit held in escrow for a long job can pass its expiry date, and the FD does not say what a refund does with it | A refund restores the consumed lots with their original expiry; escrow neither extends nor stops expiry; a restored lot already past expiry moves to the Reserve at the next sweep (0.8.5) | proposed |
+| `ISS-08` | minor | FD§4.6 | "The Reserve is seeded by the founders' own verified Commons work" has no ledger operation that moves a member's credit to the Reserve | New entry type `reserve_donation`, `member` to `reserve`, consuming lots oldest-first (0.8.5) | applied |
+| `ISS-09` | major | FD§3.2, FD§3.3, FD§4.2 | FD§3.2 step 8 pays donors at settlement; FD§4.2 says escrow pays "per accepted cell". If payment waited for settlement, a donor's earned credit would sit unusable and could expire, and a failed job would leave accepted cells unpaid | Donors are paid per accepted cell at acceptance (`transfer`, `payout` transaction). Settlement posts only the levy and the refund and closes the escrow at exactly zero (0.8.5) | proposed |
+
+Convention additions made by this part (not issues, listed so `C-001` can fold them back): the entities marked [A] in 0.7, the `rework` cell kind (0.8.6), the `grant`, `reserve_donation` and `reversal` entry types (0.8.5), the flag-key list (0.8.3), the `BM0`..`BM9` ids (0.12) and the `ISS-nn` block rule (0.4).
