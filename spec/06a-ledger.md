@@ -739,3 +739,51 @@ per UTC day: count(grants) <= grant.max_per_day ; per invite tree per UTC day <=
 | `warn` | A gauge or lag (`INV-L18`, `L19`, `ledger.v_cap_hit`, `ledger.eta_below_threshold`, `ledger.mint_utilization_high`, `ledger.mint_cap_above_forecast`, `ledger.claim_ratio_undefined`) | Alarm and ticket; no switch | Acknowledge in the admin tool |
 
 The response stops new credit and new claims, which is the direction that cannot make a corrupt ledger worse. Limits [D]: the checks detect, they do not repair; a checker bug can freeze a healthy ledger, so the checker is itself tested (6.16) and a freeze drill is part of `BM9` (S0 0.12); the alarm path is the monitoring stack of `S4.*`.
+
+## 6.14 Two things the Founding Document cannot promise as written
+
+### 6.14.1 Fractional credit [D]
+
+Where fractions arise. The price p = 1 + v + lambda has up to six decimal places, so escrow, the pool, the levy, refunds and member balances are not whole credits in general (N = 7 gives an escrow of 8.05 credits). Donor earnings and verification cells are whole: one accepted cell pays exactly 1.000000 credit, and a cell cannot be half executed.
+
+| Effect | What this file does | What it does not do |
+| --- | --- | --- |
+| Escrow and refunds are fractional | Exact in ucr; shown exactly (6.3.2); a refund restores the exact fractional amount | No rounding to whole credits, which would move credit systematically between requester, donors and Reserve (S0 0.6.1) |
+| The pool N x v is rarely a whole number of cells (ISS-04) | The pool is a budget in ucr, not a count of cells; verification cells are paid 1 credit each from it; unspent pool is refunded at settlement | It does not promise N x v cells will be run; the number of verification cells is whatever sampling and the budget allow |
+| A small job's pool is below one cell (N = 7: 0.7 credit) | The next verification cell takes the pool and the remainder from the job's levy budget (6.7.2); if the budgets cannot pay, optional verification stops | It does not charge the requester extra after the quote, and it does not mint (ISS-61) |
+| Balances below 1 credit (dust) | Kept as lots; usable in a job escrow, since escrow is in ucr; they expire and move to the Reserve like any lot | No sweeping of dust into the Reserve, no rounding up |
+| v is rounded up | The pool can exceed measured cost by less than 1 ppm per primary cell (under 1 ucr) | The requester is never under-charged relative to the published v |
+| FD§3.3 is whole-numbered | It is exact because 240 x 0.10 = 24 and 240 x 0.05 = 12; the model does not rely on that (6.15 and `AC-ledger-03` test non-integral cases) | |
+
+### 6.14.2 'Every unit traces to an accepted Commons cell' [D][H]
+
+Credit is fungible: when Sara's lot funds an escrow and a donor's lot is created from it, the donor's credit has several parents, and the Reserve mixes everything it receives. A unit-by-unit proof of origin does not exist, and the ledger must not claim one. What does hold, and what is checked:
+
+1. **Conservation.** Only `mint` creates credit and only `retire` destroys it (INV-L16). Therefore the credit in existence at any time equals cumulative net mint minus cumulative net retired (INV-L02), and each `mint` is backed by one distinct cell that was `accepted` in a Commons job at the moment of posting (INV-L08). Every unit in existence is therefore part of a pool created entirely by accepted Commons cells; this is the sense in which FD§4.2 is implementable.
+2. **Lineage where it is well defined.** `lot_movements` record, for each `transfer`, which slices of which lots became the donor's lot (6.4.3), so any lot can be traced back along transfer chains to mint lots, to a grant (whose origin is the Reserve) or to the Reserve boundary. Tracing stops at the Reserve because Reserve credit is pooled; a lineage query reports 'Reserve' there and does not guess.
+3. **What can break it.** (a) A Commons cell that is `overturned` after its credit was minted and spent: the mint can be reversed only up to what the donor still holds (6.6.3); the rest is the unrecovered mint, recorded as `shortfall_ucr`, published, and alarmed (`INV-L19`). Its bound is 1 credit per overturned minted cell. (b) ISS-03: gold, audit and review cells inside Commons jobs mint like any other Commons cell, so a share of minted credit pays for verification of Commons work, not for output a requester wanted; the Commons verification share is published beside v so this is visible. (c) Genesis: the ledger starts at zero with no pre-mint; test or simulation credit lives in a separate database and is never loaded into the production ledger (S18.*).
+4. **What the platform may say publicly.** 'Credit in existence equals credit minted for accepted Commons cells minus credit retired, checked every minute (declared), with the unrecovered amount shown.' It may not say that each credit unit is individually backed or that credit is guaranteed redeemable (FD Principle 11; credit is not money or a promised entitlement, FD§4.1).
+
+This is ISS-62.
+
+## 6.15 Worked example: FD§3.3, line by line
+
+All inputs are the FD's illustrative values, not measurements. This is `AC-ledger-01` (behavior) and `T-unit-01` (`test_fd33_worked_example_exact`, 6.16). The admission step belongs to file 06b (`AC-admission-01`); here it is a test double that returns `admitted`.
+
+**Fixture** (parameters at their `initial configurable default`, S0 0.10.6): `price.v_prior` = 0.10 (= 100,000 ppm) with no snapshot above the minimum sample, so `basis = prior`; `price.levy_lambda` = 0.05 (= 50,000 ppm); `credit.lifetime_days` = 60; `credit.member_cap_credits` = 350; `mint.monthly_cap_credits` = 4,800; `mint.per_member_daily_cap_credits` = 30; `launch.minting_enabled` and `launch.member_jobs_enabled` = true (test fixture only; production default false). Member Sara has `trust_tier` = `established` (K_eff = 350 x 1.00 = 350 credits). Forty donors `D00`..`D39`, tier `established`. The Reserve and every other account start at 0. Clock: Sara's Commons cells are accepted at 12:00 UTC on each of the 30 days `d0`..`d29`, 10 per day; the job is requested on day 30.
+
+| FD§3.3 line | Computation (integers) | Result and assertion |
+| --- | --- | --- |
+| Sara contributes about 10 Commons cells a day for 30 days: 300 credits, none expired (E = 60) | 300 `mint` entries `I -> M(Sara)` of 1,000,000 ucr; lot expiry = acceptance + 60 d, so the oldest lot expires on day 60 | `balance(Sara)` = 300,000,000 ucr; 300 lots; `balance(issuance)` = -300,000,000; `available` = 300,000,000 on day 30 |
+| Price: v = 0.10, lambda = 0.05, price 1.15 | `p_ucr = 1,000,000 + 100,000 + 50,000` | `p_ucr` = 1,150,000 (displayed 1.15) |
+| 276 credits are escrowed | `escrow_ucr = 240 x 1,150,000`; parts 240 x 1,000,000, 240 x 100,000, 240 x 50,000 | 276,000,000 = 240,000,000 + 24,000,000 + 12,000,000 |
+| She keeps 24 | `escrow_hold` `M(Sara) -> E`, 276,000,000; `pick_lots` takes the 276 earliest-expiring lots: all 270 lots of `d0`..`d26` and 6 of the 10 lots of `d27` | `balance(Sara)` = 24,000,000 (4 lots of `d27`, 10 of `d28`, 10 of `d29`); `balance(E)` = 276,000,000; `K` headroom check passes (owned 300 <= 350) |
+| Admission: 40 x 8 x 2 x 0.5 = 320 >= 264 | Test double returns `admitted` with `2 days`; the real computation is `AC-admission-01` | Job reaches `admitted`; not asserted here |
+| 264 will be executed (240 primary + 24 verification and rework) | Pool 24,000,000 / 1,000,000 = 24 verification cells; `free(J)` = 24,000,000 + 12,000,000 at the start, so every one of the 24 is creatable | 24 cells of `cell_kind` `audit` accepted after the 240 `primary` cells; `paid_pool_ucr` = 24,000,000; `paid_levy_budget_ucr` = 0 |
+| Donors earn 264 credits by transfer | 264 `transfer` entries `E -> M(donor)` of 1,000,000, cell `k` (k = 1..264) executed by donor index `(k - 1) mod 40`; each slice drain is earliest expiry first | Donors `D00`..`D23` hold 7,000,000 each, `D24`..`D39` hold 6,000,000 each; sum = 24 x 7 + 16 x 6 = 264 credits = 264,000,000 ucr; `balance(E)` = 12,000,000 |
+| 12 credits (lambda x 240) go to the Reserve | `settle`: `levy_due = 240 x 50,000 = 12,000,000`; `levy_available = 12,000,000 - 0`; `levy_posted` = 12,000,000; `refund = 12,000,000 - 12,000,000 = 0`, so no refund entry | `levy` entry `E -> R` of 12,000,000; `balance(R)` = 12,000,000; `balance(E)` = 0; escrow `closed` |
+| 264 + 12 = 276: nothing is created or lost | Closing identity (`INV-L07`): 240,000,000 + 24,000,000 + 0 + 12,000,000 + 0 = 276,000,000 = `funded_ucr` | Holds exactly |
+| Value to Sara: eta = 1/1.15 = 0.87 | `eta_ppm = floor(10^12 / 1,150,000)` | 869,565 (displayed 0.870) |
+| Value to Sara in time: about 30 days alone versus about 2 | 240 cells / 8 per day = 30 days; the quote is 2 days | Not a ledger quantity; asserted by the pricing and admission pages, not here |
+
+**End state** [D]: Sara 24,000,000; donors 264,000,000; Reserve 12,000,000; escrow 0; issuance -300,000,000; retired 0. Existence: members + escrow + Reserve = 24 + 264 + 0 + 12 = 300 credits = cumulative mint 300 - retired 0. Entries: 566 in total with `seq` 1..300 the mints, 301 the hold, 302..565 the transfers, 566 the levy. Every invariant `INV-L01`..`INV-L17` passes in a `full` run; Sara paid 276 credits, donors received 264 and the Reserve received 12.
