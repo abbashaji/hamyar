@@ -163,3 +163,107 @@ The panel sets no CSP or security headers and its `index.html` loads web fonts f
 | B5 admin origin to member origin | Nothing | Separate origins, session stores and CORS lists |
 | B6 operators to production | Admin actions | Passkeys per `AdminUser`, `AdminAction` log, two-person actions (`security.two_person_actions`) |
 | B7 production to backup sink | Backup artifacts | Encrypted before leaving the host; the sink cannot read them (4.12) |
+
+## 4.4 Components and interfaces
+
+### 4.4.1 Component table [D]
+
+| Component | Responsibility | Owns (entities, S0.7) | Depends on | Detail in |
+| --- | --- | --- | --- | --- |
+| Identity service | Anonymous members, keys, sessions, device linking, recovery, invites, rate-limit decisions, permission checks | `Member`, `MemberKey`, `Device`, `Invite`, `Session`, `AdminUser`, `AdminCredential`, `OptIn` | Transactional store, ephemeral store, clock, random, secrets | S10.* |
+| Ledger service | The only writer of ledger tables: posting, balances, lots, escrow accounts, hash chain, invariant checks, checkpoints | `LedgerAccount`, `LedgerEntry`, `LedgerTransaction`, `CreditLot`, `Escrow`, `Reserve`, `InvariantCheck` | Transactional store, config | S6.* |
+| Job and cell service | Job, cell, lease, submission state machines; leasing; paste-back intake; assembly; settlement orchestration | `Job`, `Cell`, `Lease`, `Submission`, `Upload`, `Glossary`, `Deliverable`, `Manifest`, `Reservation`, `WaitlistEntry` | Ledger, policy engine, templates, verification, admission, stores | S5.*, S8.*, S9.* |
+| Policy engine | Pure evaluator of rules R1..R10 over data; stamping and re-check; policy versioning | `Policy`, `PolicyVersion`, `Rule` | Service registry, template registry, config | S7.* |
+| Service registry | Services, dated flag answers, saved terms copies, review machine, derived Service-adapter descriptors | `ServiceRegistryEntry`, `TermsCopy`, `FlagAnswer` | Blob store, config | S7.*, 4.14 |
+| Template registry | Templates, immutable versions, review machine, deterministic rendering of prompts | `Template`, `TemplateVersion`, `TopicCategory`, `GoldCell` (library) | Config | S8.* |
+| Verification pipeline | Automatic checks, gold insertion, audit selection and comparison, reliability estimates, human-review cells; optional check runner | `VerificationRecord`, `Audit` | Job and cell service, ledger (via job service), check runner port | S8.*, S9.* |
+| Admission control | Capacity forecast, quote, waitlist, reservations, fairness | `Reservation` (with job service), forecast tables | Metrics rollups, config | S6.* |
+| Config service | Parameters, feature flags, kill switches, launch switches and gates, config epoch | `Parameter`, `ParameterVersion`, `FeatureFlag`, `KillSwitch`, `LaunchGateItem`, `Experiment`, `ExperimentAssignment`, `PreRegistration`, `CalibrationRecord`, `ChangeLogEntry`, `AdminAction` | Transactional store | 4.9, S14.* |
+| Moderation | Reports, appeals, bans, template auto-pause | `Report`, `Appeal` | Identity, template registry, job service | S10.* |
+| Analytics pipeline | Projects domain events to analytics events, rolls up metrics, publishes snapshots | `Event`, `MetricSnapshot` | Outbox, transactional store | S13.* |
+| Public projection and public site | Read model for counters, ledger page, parameters, change log, milestones; a static site with no notification channel | `Badge`, `BadgeAward`, `Team`, `Referral` (member side with identity) | Ledger (read), analytics | S12.* |
+| Admin tool | A thin single-page client of `/v1/admin/*`; no business logic, no direct store access | none | API | S11.* |
+| Service-adapter layer | Client-side preparation of copy and open actions from registry descriptors | none | Descriptor from service registry | 4.14 |
+| Scheduler and outbox relay | Run background jobs and deliver events | infrastructure tables (4.7, 4.8) | Stores, clock | 4.7, 4.8 |
+| Check runner | Runs code-executing checks in isolation | none | none (no network, no secrets) | S8.*, `ISS-41` |
+
+**Notification-free public site [D][A].** The public site (S12.*) is static and read-only. It has no cookies, no service-worker push registration, no sign-up or subscribe form, no e-mail capture and no third-party embed. Anything a member needs to know (expiry dates, a changed parameter, a restored service) is shown in the member app when it is next opened, never pushed. Reason: FD Principle 8, FD§8.2 risk 15 (burnout) and `analytics.cookies_enabled` = `false`. The owner decision that could overturn this is a wish for expiry reminders (`ISS-44`, S3.*).
+
+### 4.4.2 Interface contracts
+
+Notation is neutral pseudo-IDL; any language may realize it. `ctx` is a `RequestContext {request_id, principal, idempotency_key?, config: ConfigSnapshot, now, uow?}`. Every operation returns `Ok(value)` or `Err(DomainError{code, details})`, with `code` taken from S0.11.3. Every mutating operation runs in one unit of work and emits the events of the transitions it performs in the same commit (4.7) [D].
+
+```text
+IdentityService                                                    // S10.*
+  createMember(ctx, public_key, invite_token?)         -> Member
+  issueChallenge(ctx, member_key_id)                   -> Challenge
+  verifyChallenge(ctx, challenge_id, signature)        -> Session
+  rotateKey / linkDevice / startRecovery / completeRecovery / revokeSession
+  createInvite / redeemInvite / setOptIn
+  checkRate(ctx, bucket, key_hash)                     -> Allowed | Limited(retry_after_s)
+  authorize(principal, permission)                     -> Allow | Deny      // perm.<area>.<action>
+
+LedgerService                                                      // S6.*
+  post(ctx, draft: LedgerTransactionDraft)             -> LedgerTransaction  // the ONLY write path
+  balance(account_id)                                  -> {balance_ucr, lots[]}
+  listEntries(account_id, cursor)                      -> Page<LedgerEntry>
+  runInvariants(tier)                                  -> InvariantCheck[]
+  verifyChain(from_seq, to_seq)                        -> ChainResult
+  publishCheckpoint()                                  -> {seq, entry_hash}
+
+JobCellService                                                     // S5.*, S8.*, S9.*
+  createJob / submitJob / confirmEscrow / cancel       // Job machine (S0.9.2)
+  leaseNextCell(ctx, member_filters)                   -> {Lease, Cell, rendered_prompt} | NoCell
+  declineLease / extendLease / submitResult(lease_id, nonce, payload)
+  reapExpiredLeases(batch) / requeue / void / assemble / settle
+
+PolicyEngine                                                       // S7.*   (pure)
+  evaluate(rules, facts)                               -> Accepted | Rejected(reasons[])
+  stamp(job)                                           -> policy_version_id
+  recheckOnAccept(job, cell, current_policy)           -> Ok | Err(policy_changed)
+
+ServiceRegistry                                                    // S7.*
+  recordFlagAnswer / saveTermsCopy / startReview / approve / suspend / revoke
+  adapterDescriptor(service_id)                        -> AdapterDescriptor  // derived, read-only (4.14)
+  listApproved(purpose, region)                        -> ServiceRegistryEntry[]
+
+TemplateRegistry                                                   // S8.*
+  createVersion / requestReview / approve / pause / retire
+  render(template_version, slots)                      -> {prompt_text, prompt_hash}  // pure, deterministic
+
+VerificationPipeline                                               // S8.*, S9.*
+  runAutomaticChecks(submission)                       -> VerificationRecord[]   // inline, bounded
+  selectForAudit(cell, member_reliability, config)     -> bool                   // pure
+  createAudit / compare(audit) / estimateReliability(member)
+  CheckRunner.run(check_spec, content, limits)         -> CheckResult | Unavailable
+
+AdmissionControl                                                   // S6.*
+  forecast()                                           -> CapacityForecast      // read of the stored forecast
+  quote(job_draft)                                     -> Accept{price_ucr, window_s} | Waitlist | Reject
+  reserveCapacity / releaseCapacity / promoteWaitlist
+
+ConfigService                                                      // 4.9
+  snapshot()                                           -> ConfigSnapshot{config_epoch, ...}
+  valueAt(name, t) / proposeChange / applyChange / engageKillSwitch / releaseKillSwitch
+
+AnalyticsPipeline                                                  // S13.*
+  project(domain_event)                                -> AnalyticsEvent | null  // allowlist per event name
+  rollup(window) / publishMetricSnapshot() / suppressSmallCohorts(k)
+```
+
+### 4.4.3 Cross-component rules [D]
+
+1. Only the ledger service writes ledger tables. Other services call `LedgerService.post` with a draft built by pure domain functions (mint, hold, payout, settle, expire, retire, grant, reserve_donation, reversal; S0.8.5). Posting is inline in the transaction of the state change that causes it, for example `Cell.accepted` and its `payout` share one commit.
+2. Only the job and cell service writes job, cell, lease and submission tables; only the config service writes parameter, flag, kill-switch and gate tables. Services read each other's data only through interfaces or declared read models, never by joining foreign tables in application code.
+3. The policy evaluator, template rendering, price and admission arithmetic, reliability estimators and sampling decisions are pure. Anything that needs time, randomness or a store receives it as an argument (`Clock`, `Random`), so property tests and the simulation harness can drive it deterministically.
+4. A cross-component call inside one request passes the same unit of work; no component opens its own transaction inside another's.
+5. Every admin write goes through the same service operations as the equivalent system action, adds one `AdminAction` row in the same commit, and honors `security.two_person_actions`.
+
+### 4.4.4 Check runner [D][A]
+
+Prompt E requires automatic checks including tests for code-change jobs, while the abuse rules forbid executing submitted content. Both hold only if code runs somewhere that cannot hurt anything (`ISS-41`):
+
+- The server never executes submitted content. A check of kind `run_tests` is a request to the `CheckRunner` port.
+- The runner has no network, no secrets, no store access, a read-only base image, a fresh working directory per run, and hard limits on CPU time, memory, process count, output size and wall time. It returns a verdict and a bounded log, nothing else.
+- It is off by default (`ff.verify.sandboxed_tests`). While it is off or unreachable, `CheckRunner.run` returns `Unavailable`, and templates whose checks need it cannot be approved or leased (R4 then rejects jobs for them). It never fails open.
+- Whether a runner design is safe enough to turn on is a G1 decision [V: security reviewer, recorded as `LaunchGateItem` evidence].
