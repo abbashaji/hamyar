@@ -590,3 +590,106 @@ def accept_cell(cell_id, via):             # via in ('checks_passed', 'audit_pas
 ```
 
 If two workers run `accept_cell` for the same cell, the loser blocks on the cell lock and then sees `accepted` and returns. If a defect lets both through, the ledger key `payout:<cell_id>` rejects the second posting and the transaction rolls back. The amount is always exactly 1,000,000 `ucr` (FD§4.3, S0.6.1). The mint month for the headroom is the month in which the lease was issued, because that is when the reservation was made. [D]
+
+### 5.29.7 Double-spend of escrow and of balances (GU-10)
+
+Every debit is a conditional update inside the posting transaction, with the account lock held (order 8): `UPDATE ledger_accounts SET balance_ucr = balance_ucr - :amt WHERE id = :a AND balance_ucr >= :amt`. Zero rows affected aborts the transaction (`ledger.allow_negative_balance` is a constant false). Lot consumption happens in the same transaction: lots of the account are selected oldest-first and each is reduced by `UPDATE credit_lots SET remaining_ucr = remaining_ucr - :x WHERE id = :lot AND remaining_ucr >= :x AND expires_at > now()`; the sum of the lots' `remaining_ucr` must equal the account balance after commit (an `INV-L` check of S6.*). [D]
+
+| Attack or accident | Outcome | Mechanism |
+| --- | --- | --- |
+| E1 Two `escrow_confirmed` calls for one job (double click, retry with a new key) | One `hold`; the second is `409 STATE_CONFLICT` (job already `admitted`) or replays the first | CAS `quoted` -> `admitted`; key `hold:<job_id>`; `UNIQUE (job_id)` on `escrows` |
+| E2 Two different jobs of one member confirmed together against one balance | Both succeed only if the balance covers both; otherwise the second is `422 INSUFFICIENT_CREDIT`; the balance never goes negative | Member row lock (order 1) and the conditional debit; `admission.max_concurrent_jobs_per_member` evaluated under the same lock |
+| E3 `hold` against a lot while the expiry sweep expires that lot | Exactly one of them consumes the lot's remaining amount; the other sees `remaining_ucr` = 0 or the lot gone and uses other lots or fails with `INSUFFICIENT_CREDIT`. Expired credit is never held | Account lock; `expires_at > now()` predicate; `expire:<lot_id>` |
+| E4 A reservation activated twice, or activated while cancelled or expired | One terminal state wins; the loser is `409 STATE_CONFLICT`; the escrow moves once | CAS on the `Reservation`; key `resact:<rsn_id>` |
+| E5 Donors paid more than the escrow holds, including through verification cells beyond the pool | Impossible by construction: `pool_ok` at cell creation (CT-01), `payable_ucr >= 1,000,000` at payout, and the levy portion is never payable | `payable_ucr(job)` = escrow balance - `levy_reserved_ucr` |
+| E6 Refund posted twice (settle run twice, cancel then settle) | One `refund`; the second run returns the stored transaction | Keys `settle:<job_id>` and `cancel:<job_id>`, and the job state decides which exists |
+| E7 Payout racing a cancel or stop | A payout posted before the job left `running` stands; a cell not yet accepted is DEFERred, voided or paid as a drain per table 5.22.1; settlement waits until every cell is terminal | `G-accept` under the shared job lock; the settle precondition |
+
+### 5.29.8 Settlement: exactly once (GU-09)
+
+`settle()` is called only by the `settler` worker (and by the cancel path when a job has no in-flight cells). It is a single transaction. The closing identity is checked inside it: amount held at JT-09 = payouts + levy + refund, with zero tolerance, and the escrow balance is exactly 0 afterwards. [D]
+
+```
+def settle(job_id, mode):                    # mode in ('complete', 'cancel')
+    with tx():
+        job = lock_exclusive(Job, job_id)                                # order 3
+        if job.state in TERMINAL_JOB_STATES:  return 'already_settled'   # idempotent no-op, also after a crash
+        expected = 'settling' if mode == 'complete' else 'cancelling'
+        if job.state != expected:             raise Error(409, 'STATE_CONFLICT')
+        if exists(Cell where job_id == job_id and state not in TERMINAL_CELL_STATES):
+            return 'not_yet'                                             # an acceptance may still be in flight; retry later
+        if job.origin == 'commons':
+            transition(job, 'job.settled' if all_primary_accepted(job) else 'job.settled_partial'); return 'ok'
+        esc = lock_exclusive(Escrow, job.escrow_id)                      # order 7
+        require(esc.state == 'settling')
+        acc_n   = count(Cell where job_id == job_id and cell_kind == 'primary' and state == 'accepted')
+        levy    = levy_due_ucr(job, acc_n)               # S6.*: acc_n x lambda_ppm, with the lambda stamped in the quote
+        bal     = ledger.balance(esc.account_id)
+        refund  = bal - levy
+        require(refund >= 0)                                             # else alarm and abort
+        kind    = 'settle' if mode == 'complete' else 'cancel'
+        legs    = [levy_leg(esc.account_id -> reserve, levy)] if levy > 0 else []
+        legs   += [refund_leg(esc.account_id -> job.member_account, refund, restore_lots=True)] if refund > 0 else []
+        ledger.post(kind, kind + ':' + job_id, legs)                     # order 8, 9; idempotent on the key
+        require(ledger.balance(esc.account_id) == 0)
+        require(job.held_ucr == payouts_total(job) + levy + refund)      # closing identity
+        transition(esc, 'escrow.closed')
+        if mode == 'complete':
+            transition(job, 'job.settled' if job.all_primary_accepted else 'job.settled_partial')
+        else:
+            transition(job, 'job.cancel_settled')
+        return 'ok'
+```
+
+- **Run twice or by two workers.** The second sees a terminal job and returns; if both pass the state test, the second blocks on the job lock and then sees the terminal state. If a defect let both post, the key rejects the second posting.
+- **Crash.** A crash before commit leaves the job in `settling` or `cancelling` and the escrow untouched; the next sweep runs `settle()` again. There is no state in which levy is posted and the refund is not.
+- **Late acceptance during settlement.** Settlement refuses to run while any cell is non-terminal, and an acceptance commits the cell as `accepted` atomically with its payout, so the count the settler sees is never between the two.
+- **Overturn after settlement.** A reversal (CT-17) of a cell paid from a closed escrow is a ledger correction between the donor and the Reserve decided by S6.*; it never reopens the escrow (`closed` is terminal). [A]
+
+### 5.29.9 What is not guaranteed [D]
+
+- **Donor effort.** A donor can lose work to a timeout, a lost race at `hard_expires_at`, or a refusal under `reject.policy_changed`. The platform bounds this with the grace period and DEFER, not with a promise.
+- **Prompt state flips.** The stored state of a lease or job can lag its true state by one worker pass (for example an `active` lease past `hard_expires_at`). Guards that matter test the time or the cause directly, so a lagging row never lets work through; only visibility is late.
+- **Event timing and order across entities.** Events are at least once and ordered per entity only (GU-13).
+- **Liveness during an outage.** If the store is unavailable no transition happens; the system fails closed.
+- **Fairness at a boundary.** First commit wins; there is no tie-break by arrival time.
+- **Clock exactness.** Timers fire within one sweep interval of their time; the database clock is authoritative.
+
+### 5.29.10 Background jobs: crash recovery and consistency checks
+
+**Worker protocol** [D]. Every worker is a stateless, convergent sweep: select candidates by predicate (batches with `SKIP LOCKED` or a CAS claim), process each candidate in its own transaction, and re-test the predicate inside it. Any number of copies may run concurrently; the CAS or key makes the loser a no-op. A worker keeps nothing in memory that cannot be rebuilt from the database, so a crash costs only latency. A candidate that fails is skipped with backoff and the run continues. Each worker exports `hamyar_bgjob_last_success_seconds` and `hamyar_bgjob_failures_total` labelled with its name (S4.* and S13.* set alarm thresholds); money-moving workers (`settler`, `credit_expiry_sweeper`, `reserve_retirer`, `restitution_payer`, `accept` retries) alarm on every failure. Timers without their own parameter run on the `lease.reap_interval_s` cadence [A: S16.* may add parameters].
+
+| Worker (`actor_id`) | Schedule | Selects | Action | Crash recovery |
+| --- | --- | --- | --- | --- |
+| `lease_reaper` | `lease.reap_interval_s` | `active` leases with `hard_expires_at < now()` | CT-04 then CT-11, CT-12 or CT-15 | CAS per lease. A crash between CT-04 and the next step leaves `Cell.expired`; `cell_requeuer` finishes it |
+| `cell_requeuer` | `lease.reap_interval_s` | cells in `rejected` or `expired` | CT-11, CT-12 or CT-15 | Idempotent by the cell CAS |
+| `job_fanout_worker` | event-driven, plus sweep | cells whose job is `suspended`, `settling`, `cancelling` and whose state does not match table 5.22.1 | CT-13, CT-15, CT-16, CT-18 | Per-cell CAS; reruns converge; a job's pause or stop is complete only when the sweep finds nothing left |
+| `job_progress` | event-driven, plus sweep | running jobs with all primary accepted (JT-13), assembling jobs (JT-14), jobs past their overrun deadline or with exhausted primaries (JT-15) | the named transition | CAS on the job; no state is held outside the database |
+| `settler` | event-driven, plus sweep | jobs in `settling` or `cancelling` whose cells are all terminal | `settle()` (5.29.8) | Whole transaction or nothing; rerun is a no-op after commit |
+| `acceptance_retry` | on `job.resumed`, `template.resumed`, `member.reinstated`, `killswitch.released`, plus sweep | cells with `acceptance_deferred_until` set | `accept_cell()` (5.29.6) | Key `payout:<cell_id>` / `mint:<cell_id>` |
+| verification pipeline (S8.*, S9.*) | event-driven, plus sweep | submissions in `received` or `checks_passed` with no verdict | SBT-02..05, CT-06..10 | Each step is idempotent on `(submission_id, step)`; a submission with no progress is re-enqueued |
+| `credit_expiry_sweeper` | `credit.expiry_sweep_interval_s` | lots with `expires_at <= now()` and `remaining_ucr > 0` | `expire` txn, `member` -> `reserve`, key `expire:<lot_id>` | Atomic per lot; rerun skips lots already expired. A notice goes out `credit.expiry_notice_days` before |
+| `reserve_retirer` | `reserve.retire_interval_s` | Reserve balance above `reserve.ceiling_credits` by at least `reserve.retire_min_credits` | `retire` txn, key `retire:<utc_date>` | A rerun on the same date is a no-op; any excess still present is retired on the next date |
+| `restitution_payer` | `lease.reap_interval_s` | `pending` appeal restitutions | `grant` txn, key `appealpay:<apl_id>` | Idempotent by key; stays pending while the Reserve is at or below `grant.reserve_floor_credits` |
+| timers: `quote_expirer`, `waitlist_expirer`, `waitlist_releaser`, `reservation_expirer`, `service_review_timer`, `restriction_lifter`, `template_autopause_monitor` | cadence above | rows whose deadline has passed | JT-05, JT-08, JT-07, RT-04, SVT-05/06, MT-07, TT-07 | CAS on each row; a missed run only delays |
+| `tier_evaluator` | event-driven, plus hourly sweep | members with new observations | MT-02..05 | Pure function of stored observations; rerun gives the same tier |
+| `policy_tighten_sweep` | on `policy.version_published` | non-terminal jobs after a `tighten` | JT-11, JT-12, JT-15 | Per-job CAS; rerun converges |
+| `ledger_invariant_checker` | `ledger.invariant_check_interval_s` (sampled), `ledger.full_recompute_interval_s` (full) | read-only | `ledger.invariants_passed` or `ledger.invariant_violated` (S6.*) | Read-only, so a crash changes nothing; a missed run is itself alarmed |
+| `ledger_checkpointer` | `ledger.checkpoint_interval_s` | none | Publish the checkpoint hash, key `checkpoint:<utc_date>` | Idempotent by date |
+| `metric_rollup` | `metrics.rollup_interval_s` | raw events | Upsert by `(metric, window)` | Idempotent upsert |
+| `outbox_relay` | continuous | unsent outbox rows | Deliver, then mark sent | A crash between delivery and marking redelivers; consumers dedupe on `event_id` (GU-13) |
+| `idempotency_purger`, `retention_purger` | hourly [A] | records past `api.idempotency_ttl_s`, rows past their retention class | Delete | Deleting an expired key is safe because L2 and L3 still protect the objects |
+| `fsm_consistency_checker` | `ledger.invariant_check_interval_s` | read-only | Checks CK-01..CK-08 below | Read-only |
+
+**Consistency checks** [D][A: S6.* may register CK-03 to CK-05 as `INV-L` ids]. They run continuously beside the ledger invariants and raise an `Alarm`; CK-03 to CK-05 also emit `ledger.invariant_violated` with `details.check_id`.
+
+| id | Check |
+| --- | --- |
+| CK-01 | No cell has two `active` leases |
+| CK-02 | A cell is `leased` if and only if it has exactly one `active` lease whose id equals `active_lease_id`; an `active` lease past `hard_expires_at` by more than the reaper's lag is a finding |
+| CK-03 | Every `accepted` cell has exactly one `mint` or `payout` transaction of 1,000,000 `ucr`, unless reversed by CT-17; no other cell has one |
+| CK-04 | Every `closed` escrow has exactly one `settle` or `cancel` transaction, balance 0, and the closing identity holds; no `open` escrow belongs to a terminal job |
+| CK-05 | `mint_budget.reserved_ucr` = 1,000,000 x Commons cells in `leased`, `submitted`, `flagged_for_audit`; `minted_ucr` = the sum of `mint` entries of the period |
+| CK-06 | No terminal job has a non-terminal cell, an `active` lease or a non-`closed` escrow |
+| CK-07 | `entity_seq` is gapless for every entity and the last `to_state` equals the entity's `state` |
+| CK-08 | No submission exists without a lease in `submitted`, and no `submitted` lease without a submission |
