@@ -353,3 +353,107 @@ function settle(job):                                    -- post('settle'|'cance
 Properties [D]: the levy is charged on accepted primary cells only, so a job that completes in part pays the levy in part; unspent pool is refunded, so the requester pays for verification actually performed, not for the quoted average; `levy_posted <= levy_due` always, and is lower than `levy_due` only when verification overran its pool (6.7.2). The published gauge `hamyar_pricing_effective_levy_ppm` = levy posted / accepted primary cells over the trailing window keeps that visible. Cancel runs the same function after the drain: unstarted cells cost nothing (their primary, pool and levy shares are in the refund), accepted cells have already been paid at acceptance (LD-03).
 
 Examples (exact; full FD§3.3 case in 6.15): partial, N = 240, 100 primary and 10 verification cells accepted: balance = 276,000,000 - 110,000,000 = 166,000,000; levy = 100 x 50,000 = 5,000,000; refund = 161,000,000. Fractional, N = 7: escrow 8,050,000, pool 700,000, levy budget 350,000; with no verification cell: payouts 7,000,000, levy 350,000, refund 700,000; with one verification cell: it takes the 700,000 pool and 300,000 of the levy budget, so the levy posted is 50,000 and the refund is 0 (ISS-61).
+
+## 6.8 Per-member cap K and mint caps
+
+### 6.8.1 Owned credit and the effective cap [D][A]
+
+FD§4.5: K bounds one claimant's share of future capacity. Credit locked in the member's own escrow is still that member's claim (it returns on refund), so the cap counts it; otherwise a member could hold K, escrow it, earn another K, and receive 2K back as a refund.
+
+```
+K_eff(m)    = div_floor(credit.member_cap_credits x 10^6 x trust.cap_multiplier.<tier of m>_ppm, 10^6)
+owned(m, t) = sum(remaining_ucr of m's lots with expires_at > t)
+            + sum(slices, with lot.expires_at > t, held by escrows of m's jobs and reservations in state open or settling)
+headroom(m, t) = max(0, K_eff(m) - owned(m, t) - 1,000,000 x active_leases(m))
+```
+
+Each active lease counts as one credit that may arrive. The tier multipliers are `trust.cap_multiplier.new` / `.established` / `.trusted` / `.restricted` = 0.50 / 1.00 / 1.50 / 0.25 (initial configurable defaults, S0 0.10.6), so at K = 350 a `new` member holds at most 175, an `established` member 350 and a `trusted` member 525. A new member therefore cannot yet reach the 300 credits of the FD§3.3 example; Sara is `established` (T-unit-01 fixture) [A].
+
+### 6.8.2 Headroom is reserved at lease time [D]
+
+A lease may be issued only if all three hold (the function is `ledger.can_lease(member, cell, now)`, called by `S5.*` inside the leasing transaction, after `SELECT ... FOR UPDATE` on the member's account so concurrent leases cannot both pass):
+
+| Check | Applies to | Condition |
+| --- | --- | --- |
+| Member cap | every cell | `headroom(m, now) >= 1,000,000` (`CAP_EXCEEDED`) |
+| Per-member daily mint cap | Commons cells | `mint.per_member_daily_cap_credits x 10^6 - minted_today_utc(m) - 1,000,000 x active_commons_leases(m) >= 1,000,000` |
+| Monthly mint cap | Commons cells | `mint.monthly_cap_credits x 10^6 - minted_this_utc_month - 1,000,000 x active_commons_leases(all) >= 1,000,000`, and `launch.minting_enabled` true and `kill.all_minting` released |
+
+The lease stores the versions of the parameters it read (`ledger_versions`, a json field required from `S5.*`, 6.17). The later posting copies the resolved caps into the entry (`cap_ucr`, `mint_cap_ucr`) so that INV-L10 and INV-L11 compare an entry with the cap that was in force when headroom was promised. A cap that is tightened after the lease does not void it: in-flight cells are honored, so a tightening can overshoot the new cap by at most the number of leases then active [D]. Day and month boundaries are UTC (S0 0.6.2).
+
+When the monthly check fails the scheduler stops offering Commons cells ('Commons backlog paused until the next UTC month or a cap change') and may still offer member-job cells; mint-cap utilization (6.11.5) shows this coming. Because headroom is reserved up front, a decided cell is never left unpaid for want of headroom; the guards of 6.6.1 re-check it as defense in depth.
+
+What K does not do [D]: it does not stop a member from receiving a refund, a reversal restitution or an expired-lot restoration (all return credit already counted in `owned`); and credit above a cap that was later lowered is not confiscated, it simply stops further earning until the member spends below the cap (prospective change, LD-14).
+
+## 6.9 Expiry, the Reserve and retirement
+
+### 6.9.1 Expiry [D]
+
+Every lot has its own date (6.4.2); the balance view returns the unexpired lots grouped by expiry day (UTC), so a member sees how much expires when. The balance shown as available is the sum of unexpired lots; `expires_at <= now` lots are never spendable (6.4.3) even before they are swept.
+
+```
+every credit.expiry_sweep_interval_s (default 3600 s):
+    for lot in SELECT * FROM credit_lots WHERE remaining_ucr > 0 AND expires_at <= now
+                 ORDER BY expires_at, id LIMIT batch:
+        post('expire', 'expire:' + lot.id):  expire(M(lot) -> R, lot.remaining_ucr); lot -> status 'expired'
+```
+
+Expired credit moves to the Reserve and is never silently deleted (FD§4.5). A lot restored from a refund after its date is swept the same way (ISS-07). One entry per lot keeps the trail exact. Notice: members are told `credit.expiry_notice_days` (default 7) before a lot expires by an in-app notice computed from the same query (no e-mail is required, FD§3.2). A swept lot emits `ledger.lot_expired` (new log event, 6.17).
+
+### 6.9.2 The Reserve [D]
+
+A public account (FD§4.2). Inflows: `levy` (6.7), `expire` (6.9.1), `reserve_donation` (ISS-08). Outflows: `grant` (6.10) and `retire`. Its balance, ceiling and every inflow and outflow total are public (`S12.*`, lagging by `public.ledger_lag_s`). Nothing else may debit it (INV-L12).
+
+### 6.9.3 Retirement above the ceiling [D]
+
+```
+every reserve.retire_interval_s (default 86,400 s), interval_index = floor(now / reserve.retire_interval_s):
+    ceiling = reserve.ceiling_credits x 10^6 ; excess = balance(R) - ceiling
+    if excess >= reserve.retire_min_credits x 10^6:
+        post('retire', 'retire:' + interval_index): retire(R -> X, excess); entry.reserve_balance_after_ucr = ceiling
+        publish a ChangeLogEntry kind 'retirement' with seq, amount and balance after
+```
+
+Retirement is the only way credit leaves existence, so every retirement is public and `retired` equals cumulative retired (INV-L02). Defaults: ceiling 1,000 credits, minimum retirement 10 credits (avoids noise). `reserve.ceiling_credits >= grant.starter_credits` (constraint C5) so the Reserve can always fund at least one grant [D]. Retirement does not look at queued grants: with the defaults the ceiling is 333 times G, and lowering the ceiling is a parameter change with notice (6.12) [A].
+
+## 6.10 Starter grant G and anti-farming limits
+
+### 6.10.1 Conditions [D]
+
+An eligible member is credited `grant.starter_credits` (default 3, 'a few cells', FD§4.6) from the Reserve, once for life. All conditions must hold at the moment of posting:
+
+| # | Condition | Parameter | Reason code on denial |
+| --- | --- | --- | --- |
+| 1 | `launch.member_jobs_enabled` true; member `active`; tier not `restricted` | | `gate`, `status`, `restricted` |
+| 2 | No starter grant ever posted for this member (natural key makes a second post impossible) | | `already_granted` |
+| 3 | At least `grant.required_verified_cells` verified cells (default 1), where a verified cell is an `accepted` cell whose `VerificationRecord` has outcome `pass` by `gold`, `audit_second`, `audit_third`, `human_review` or `blanket_redundancy`; `auto_check` alone does not count, and an `overturned` cell does not count [A] | `grant.required_verified_cells` | `not_verified` |
+| 4 | Grants already posted to members sharing this member's `Device` record < limit | `grant.max_per_device` (default 1, lifetime) | `device_limit` |
+| 5 | Grants posted today (UTC) inside this member's invite tree < limit | `grant.max_per_invite_tree_per_day` (default 2) | `tree_limit` |
+| 6 | Grants posted today (UTC) in total < limit | `grant.max_per_day` (default 20) | `day_limit` |
+| 7 | `balance(R) - G x 10^6 >= grant.reserve_floor_credits x 10^6` (default floor 0) | `grant.reserve_floor_credits` | `reserve_empty` |
+| 8 | `owned(m) + G x 10^6 <= K_eff(m)` | K | `cap` |
+
+The grant lot is non-transferable (`grant.non_transferable` = true, constant): it is spendable only through the member's own `escrow_hold`, is excluded from `reserve_donation`, expires after `grant.starter_lifetime_days` (default 14), and when its escrow is refunded it comes back as the same lot with the same date.
+
+```
+every credit.expiry_sweep_interval_s, and after each accepted cell of a member without a grant:
+    for m in members satisfying 1-3 ordered by (time the qualifying verified cell was accepted, member id):  -- first come, first served
+        denial = first failing of 4-8 ; if none: post('grant', 'grant:starter:' + m.id)
+        elif denial == 'reserve_empty': stop the loop    -- grants pause, they are never printed (FD§4.6)
+        else: record ledger.grant_denied(reason) ; continue
+```
+
+A member denied only for `reserve_empty`, `day_limit`, `tree_limit` or `cap` is not marked; the next run reconsiders them, in the same order, so a pause does not reorder the queue. No ledger path creates credit for a grant.
+
+### 6.10.2 Farming analysis [D][H]
+
+| Attack | Limit | Residual risk |
+| --- | --- | --- |
+| Many fake members, each taking G | Condition 3 needs real verified work per fake member (and a new donor's first cells are blanket-verified, `verify.new_donor_blanket_cells`); conditions 4 to 6 cap the rate | A farm with many real devices can still collect; the loss is bounded below |
+| One person, many devices | `grant.max_per_device`; device records are keyed hashes (S0 0.7), so evasion is possible and is [H] to be measured | Not preventable by this layer alone; invite-tree limits and the trust tiers add friction |
+| Invite-tree rings | Condition 5; `invite.tree_max_members`, `invite.min_accepted_cells_to_issue` (S10.*) | Same |
+| Draining the Reserve | The Reserve never goes below `grant.reserve_floor_credits` (grants pause); daily drain <= `grant.max_per_day` x G = 20 x 3 = 60 credits at the initial defaults (formula) | An attacker can hold grants permanently at the daily maximum until an operator lowers `grant.max_per_day` or pauses grants |
+| Selling or pooling grants | No member-to-member entry exists; grant lots are non-transferable | Account sale is outside the ledger (S10.*) |
+| Referral bonuses as a second channel | Same Reserve floor and the limits `growth.referral.*` (S12.*); a bonus is a `grant` entry (ISS-06) and is checked against `K` | Owned by S12.* |
+
+The ledger exposes `hamyar_ledger_grants_denied_total{reason}` and `hamyar_ledger_grants_paid_total` so that denial rates and a farm signature (many grants, almost no later contribution) are visible to operators and, in aggregate, to the pilot analysis (`S13.*`). Whether the limits deter farming is [H]; the success criterion is that grants per day stay below the limit with a first-job completion rate above the founders' pre-registered threshold (`P1M`, `FND`).
