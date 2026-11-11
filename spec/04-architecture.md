@@ -712,3 +712,40 @@ The encoded URL is ASCII, so character count and byte count agree. Mixed-directi
 | Clean-chat advice is accurate for the service | Reviewer | `copy.*` key text, marked `needs_human_and_legal_review` |
 
 Adding a service is therefore data entry plus review; no code release is needed, and the client bundle contains no provider name or URL (`AC-adapter-03`).
+
+## 4.15 Hosting, storage portability and reachability from Iran [V]
+
+### 4.15.1 Decisions [D]
+
+- Hosting and storage are reached only through the ports of 4.6.1; nothing outside a driver names a host product. Moving host is a driver and bootstrap change plus a restore or import (the portability drill, 4.12.3).
+- Reachability of every origin from Iran is not known [V]. It is measured, not assumed, and no host is chosen for production before the measurement exists (G2). Result storage: `LaunchGateItem` evidence under G2, with the measurement protocol below.
+- The platform has no mandatory third-party runtime dependency. Fonts, scripts and styles are bundled and served from the same origin; no CDN is required (a CDN may be used only as an optional cache in front of a bundle, never as the only copy, and never for the API). The license of any bundled Persian and Latin font must allow self-hosting [V: operator, evidence in `LaunchGateItem`].
+- If an origin is unreachable for members, the response is to change the platform's own host. Relays, tunnels, mirrors aimed at evading blocking, and circumvention advice are excluded (4.2.2).
+- Low bandwidth: static bundles are content-hashed and cacheable; compression is on; API lists are paginated and small (`api.page_size_*`); no render-blocking third-party request exists; size budgets are owned by S11.* and enforced in the pipeline (4.13.3).
+- TLS is required on every origin; OCSP stapling is enabled where the host supports it so clients need not contact a certificate authority's responder [V: host support]. Registrar, DNS provider and certificate authority are dependencies recorded in the G2 hosting checklist.
+
+### 4.15.2 Measurement protocol (G2) [V]
+
+| Step | Detail |
+| --- | --- |
+| What | For each candidate host and each origin: name resolution, TLS handshake, fetch of the public site bundle, a call to `/v1/public/health`, and a full first-contribution run in staging |
+| From where | Several consumer networks and device classes, run by founders and testers who consent; from inside Iran only if that is safe for the tester (G1 decides) |
+| What is recorded | Success, timing class, failure stage, network class. No IP address, location or identity of the tester is stored |
+| Where stored | `LaunchGateItem` evidence under G2 and `CalibrationRecord` rows of type reachability |
+| Decision rule | Pre-registered before the run by the founders (`FND`); a host that fails is not used |
+
+What the host and a network observer can see, and what happens on seizure, is owned by S10.*; this part only guarantees that the architecture lets the host change.
+
+## 4.16 Key flows and transaction boundaries
+
+These show which components act and which writes commit together. States and guards are in S5.*; money rules in S6.*. [D]
+
+**F1. Lease a cell.** Member app calls `leaseNextCell`. One unit of work: read `ConfigSnapshot` and re-check epoch, kill switches and launch switches; select a queued cell whose opt-ins cover it (R8) and whose service is `approved`; compare-and-set `Cell.queued` to `leased`; insert `Lease` with a 128-bit nonce stored as a hash and `expires_at` from the store clock; insert the event rows. Commit. The rendered prompt and nonce are returned once. Two concurrent callers: exactly one commit wins the compare-and-set; the other retries or receives no cell.
+
+**F2. Submit, check, accept, pay.** Member app posts the paste-back with the lease id and nonce and an idempotency key. One unit of work: validate nonce and size; store `Submission` (a replay returns the stored outcome and writes nothing); run inline automatic checks (bounded); decide `accepted`, `rejected` or `flagged_for_audit`; on acceptance, post the `payout` or `mint` transaction through `LedgerService.post` in the same commit; update cell state; insert events. Checks that need the check runner or a second donor make the cell `flagged_for_audit` and finish later in the `audit_sweeper`; the member sees a pending result [D].
+
+**F3. Admit a job.** `submitJob`: policy evaluation (pure) and stamping; template and service checks; `quote` from the stored forecast and the latest v and λ. `confirmEscrow` (separate request, within `price.quote_ttl_s`): one unit of work that re-checks the quote, capacity and kill switches, posts `escrow_hold`, creates the cells, and moves the job to `admitted`. No capacity is promised before this commit.
+
+**F4. Revoke or suspend a service.** An admin action (second approver where required) in one unit of work: change the service state, bump `config_epoch`, engage `kill.service.<id>` if suspending, mark dependent jobs `suspended` or stopped per S7.*, write `AdminAction`, emit events. Because brakes are read inside lease and admission transactions (4.9.4), no new lease is issued after this commit. In-flight leases follow S7.*.
+
+**F5. Settle.** `escrow_settler` finds a `settling` job; one unit of work posts the `settle` transaction (levy, refund) and closes the escrow account at exactly zero, then marks the job `completed` or `failed`. A second run finds nothing to do.
