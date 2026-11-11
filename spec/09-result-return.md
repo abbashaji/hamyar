@@ -115,3 +115,148 @@ These are requirements on the entities owned by S5.*; names follow S0.7.
 | Someone who learned a `lse_` id from a screenshot or log submits | Yes, in addition to authentication | The id is not a capability; the nonce was never logged |
 | An attacker holding a stolen member session token | No | The token already lets the holder lease cells and obtain a nonce; account takeover is S10.* |
 | A donor who submits text that no model produced | No | Nothing in the return path proves provenance (9.11, 9.19) |
+
+## 9.5 What the paste-back form accepts
+
+### 9.5.1 Form contract
+
+The form is part of the volunteer screens (S11.*); this table is the contract that screen must meet. [D]
+
+| Element | Accepts | Refuses |
+| --- | --- | --- |
+| Result field | One multi-line plain-text field. The paste handler reads only the `text/plain` representation of the clipboard; rich or HTML content is reduced to plain text before it reaches the field | Files, images, drag-dropped attachments, HTML, any second field |
+| Paste button (optional) | A tap by the volunteer triggers one clipboard read, if the browser permits it [V: support and permission behavior on the target phones]. Manual paste remains the baseline | Any read without a tap (E3) |
+| Service picker | One value from the list of `approved` registry services allowed for this cell (`M0`: any approved; `M1`: the pinned set) | Free-text service names, unapproved or unknown services |
+| Model label | Optional free text up to `cell.envelope.max_model_label_chars`, plain text | Markup, newlines |
+| Counters | Characters and UTF-8 bytes used against `cell.envelope.max_output_chars` and `cell.envelope.max_submission_bytes`, updated as the volunteer pastes | |
+| Local pre-check | The same normalization routine as the server (shared library, 9.7.3) runs in the browser and shows what it would remove or reject. The server result is the only authority | Treating the local result as binding |
+| Preview | The volunteer's own pasted text is shown back as inert text with invisible characters revealed (9.8.3). It is escaped like any other output (a donor can paste a self-XSS payload) | Rendering Markdown or HTML |
+| After sending | A read-only view of the stored outcome | Editing a persisted submission; a second submission for the same lease |
+| Nonce | Held by client code only | Showing, copying or asking the volunteer to type it |
+
+The form never offers a way to send a URL to be fetched, a file to be parsed, or a conversation link (E2, E5). [D]
+
+### 9.5.2 `submitResult` request
+
+`POST /v1/leases/{lease_id}/submission` (S0.11.1). Headers: `Authorization: Bearer <member token>`, `Content-Type: application/json; charset=utf-8`, `Idempotency-Key` (required, S0.11.5). Operation id `submitResult` [A], final in S15.*.
+
+```json
+{
+  "cell_id": "cel_01j9z6x4k7q2m8v5t3r1w0c9ab",
+  "lease_nonce": "Zk3p0yT9aVb1QxF2mC8rLw",
+  "output_text": "...the pasted answer...",
+  "attestation": { "service_id": "svc_01j9...", "model_label": "optional free text" }
+}
+```
+
+| Field | Type | Rule |
+| --- | --- | --- |
+| `cell_id` | string | Matches S0.6.3 with prefix `cel_`; must equal the lease's cell (SC-10) |
+| `lease_nonce` | string | `^[A-Za-z0-9_-]{22}$` |
+| `output_text` | string | UTF-8, any length at this layer; limits in 9.6; JSON escapes for lone surrogates are rejected at decode |
+| `attestation.service_id` | string | `svc_` id; required |
+| `attestation.model_label` | string or null | Optional; at most `cell.envelope.max_model_label_chars` code points after NFC; no C0 or C1 controls |
+| any other key | | Rejected. Duplicate keys at any depth are rejected, and so are keys named `__proto__`, `constructor` and `prototype` |
+
+### 9.5.3 `submitResult` response
+
+`201 Created` for a new submission, `200 OK` with `Idempotent-Replayed: true` or `"replayed": true` for a replay (9.10). `Cache-Control: no-store`.
+
+```json
+{ "submission_id": "sub_01j9...", "lease_id": "lse_01j9...", "cell_id": "cel_01j9...",
+  "state": "received", "reject_code": null, "replayed": false,
+  "received_at": "2026-11-12T09:30:00Z", "late": false }
+```
+
+`state` is one of `received`, `schema_failed`, `checks_failed`, `quarantined` (names from S0.9.3). The synchronous stages of this part end in one of these. Verification (S8.*) runs afterwards and its outcome is read later; the response never carries `cell_kind`, gold status, audit selection, comparator output or reliability. `reject_code` is a `reject.*` value from S0.8.4 or `null`. When the reason is `reject.duplicate_of_other_output`, the response names neither the other cell nor the other donor. [D]
+
+### 9.5.4 `validateSubmission` (dry run)
+
+`POST /v1/leases/{lease_id}/validations` (operation `validateSubmission` [A]). Same body without `attestation`. It runs SC-01..SC-11, SC-12 (state and clock only), SC-16 and the length bounds, and nothing else: no detectors (9.9), no duplicate or timing logic, no gold or audit logic. It persists nothing, does not consume the nonce, and returns `{ "would_state": "ok" | "schema_failed", "reject_code": string|null, "chars": int, "bytes": int, "normalization": {...counts...} }`. It counts against `lease.max_validations` and `ratelimit.member_api_rpm`. Reason for the restriction: the syntactic rules are public by design, whereas running the flag detectors and signals on request would give an attacker an unlimited evasion oracle. [D]
+
+## 9.6 Limits and rate limits
+
+| Limit | Parameter (S0.10.6 unless marked new) | Enforced at | Failure |
+| --- | --- | --- | --- |
+| Request body bytes | `cell.envelope.max_submission_bytes` | Transport: the body is read as a stream and cut at the limit plus one byte, so an oversized or chunked body is never buffered (SC-02) | `413 PAYLOAD_TOO_LARGE`, `reject.size_exceeded`; nothing persisted |
+| Output characters | `cell.envelope.max_output_chars` | After normalization, counted in Unicode code points of the canonical text (SC-16) | `schema_failed`, `reject.length_out_of_bounds` |
+| Minimum output | at least one non-whitespace code point | SC-16 | `schema_failed`, `reject.length_out_of_bounds` |
+| JSON nesting depth | `cell.envelope.max_json_depth` (new) | Parser (SC-07) | `400 MALFORMED_REQUEST` |
+| Model label length | `cell.envelope.max_model_label_chars` (new) | Envelope (SC-08) | `400 VALIDATION_FAILED` |
+| Run of combining marks | `screen.max_combining_run` (new) | Normalization | `schema_failed`, `reject.schema_invalid` |
+| Gate failures per lease | `lease.max_gate_failures` (new) | Per-lease counter | `429 RATE_LIMITED` |
+| Dry runs per lease | `lease.max_validations` (new) | Per-lease counter | `429 RATE_LIMITED` |
+| Nonce rotations per lease | `lease.max_nonce_rotations` (new) | Per-lease counter | `422 UNPROCESSABLE` |
+| Attempts per cell | `cell.max_attempts` | S5.* (cell machine) | `Cell.exhausted` |
+
+The byte limit applies to the whole request body, so the derived bound is: `max_submission_bytes` is at least `max_output_chars x 3` (UTF-8, at most three bytes per code point in the Persian and Latin range) plus envelope overhead, which is why the default of 32,768 exceeds 18,000 (S0.10.6). Code points outside the Basic Multilingual Plane use four bytes; a submission full of them fails the byte limit before the character limit, which is intended. [D]
+
+**Rate-limit matrix** (key is always the member id or the IP hash, never a raw IP, S0.11.7) [D]
+
+| Scope | Parameter | Applies to | Failure |
+| --- | --- | --- | --- |
+| Member, all member endpoints | `ratelimit.member_api_rpm` | Every call, including `validateSubmission` | `429 RATE_LIMITED` with `Retry-After` |
+| Member, persisted submissions | `ratelimit.member_submissions_per_hour` | Every call that reaches SC-05 on the submit route, so failed attempts count | `429 RATE_LIMITED` |
+| Member, leases | `ratelimit.member_leases_per_hour` | `createLease` | `429 RATE_LIMITED` |
+| Member, concurrent holds | `lease.max_active_per_member` | `createLease` | `422 CAP_EXCEEDED` |
+| Lease | `lease.max_gate_failures`, `lease.max_validations` | Submit and validate | `429 RATE_LIMITED` |
+| Unauthenticated callers | `ratelimit.public_rpm` per IP hash | Requests to the submit route with no valid token, so token guessing is throttled | `429 RATE_LIMITED` |
+
+Rate limiting runs before the body is parsed and before any lease lookup (SC-05), so a flood costs one counter increment. Rate-limit responses are identical whether or not the nonce would have matched, so they leak nothing about it. [D]
+
+## 9.7 Normalization and Unicode policy
+
+### 9.7.1 Slot contexts
+
+Every output slot of a template version declares a `slot_context` of `prose` (free natural-language text), `code` (source code or a diff) or `structured` (a value validated against an enum, pattern or schema). A template version cannot be approved unless every output slot declares its context (S8.* requirement raised here [A]). A submission whose template has one `prose` slot is treated as `prose` as a whole; a multi-slot template is split by the template's own output schema (S8.*) and each part is normalized under its slot's context. [D]
+
+### 9.7.2 Character class table
+
+"Strip" removes the character and counts it in the `normalization_report`. "Reject" ends the submission as `schema_failed` with the stated code and stores no text. "Keep" leaves it unchanged. [D]
+
+| # | Class | Code points | `prose` | `code` | `structured` | Reason |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | C0 and C1 controls except TAB and LF | U+0000..U+0008, U+000B, U+000C, U+000E..U+001F, U+007F..U+009F | reject `reject.schema_invalid` | same | same | Only corrupt pastes and attacks carry them |
+| 2 | Carriage return and separators | U+000D, U+2028, U+2029 | convert to LF | same | same | One newline form; CRLF becomes LF |
+| 3 | TAB, LF | U+0009, U+000A | keep | keep | keep | |
+| 4 | Bidi embeddings, overrides, isolates | U+202A..U+202E, U+2066..U+2069 | strip | reject `reject.forbidden_content` | reject `reject.forbidden_content` | Visual spoofing of text order ("Trojan Source" style). Direction is applied by markup at display (9.8.3), never by characters in stored text |
+| 5 | Implicit direction marks | U+200E, U+200F, U+061C | keep | reject `reject.forbidden_content` | reject `reject.forbidden_content` | Used by Persian typists in prose; invisible and spoofable elsewhere |
+| 6 | ZWNJ and ZWJ | U+200C, U+200D | keep | keep, add flag `invisible_in_code` | reject `reject.forbidden_content` | ZWNJ is part of correct Persian orthography; code strings may need it, so it is flagged and revealed at display instead of rejected |
+| 7 | Other invisible and format characters | U+200B, U+2060, U+00AD, U+180E, U+2061..U+2064, U+FFF9..U+FFFB, U+FEFF | strip | reject `reject.forbidden_content` | reject `reject.forbidden_content` | Hidden text and identifier tricks. A leading U+FEFF (a paste artifact) is stripped in every context |
+| 8 | Tag characters and supplementary variation selectors | U+E0000..U+E007F, U+E0100..U+E01EF | reject `reject.forbidden_content` | same | same | Invisible data smuggling; no legitimate use in a cell output |
+| 9 | Variation selectors | U+FE00..U+FE0D strip everywhere; U+FE0E, U+FE0F | keep U+FE0E and U+FE0F | strip | strip | Emoji presentation only |
+| 10 | Private use, noncharacters | U+E000..U+F8FF, U+F0000..U+10FFFF, U+FDD0..U+FDEF, U+xFFFE and U+xFFFF of each plane | reject `reject.schema_invalid` | same | same | Not text; unassigned code points are not tested because that depends on the Unicode version in use [V: library version] |
+| 11 | Replacement character | U+FFFD | reject `reject.schema_invalid` | same | same | Signals a damaged copy; the donor can paste again |
+| 12 | Run of combining marks longer than `screen.max_combining_run` | Mn, Me | reject `reject.schema_invalid` | same | same | Rendering and storage abuse; Persian vowel marks are short runs |
+| 13 | Mixed-script token | A token mixing Latin with Cyrillic, Greek or Armenian (UTS #39 restriction level check) | keep, add flag `confusable_token` | reject `reject.forbidden_content` | reject `reject.forbidden_content` | Homoglyph spoofing; in prose it is a signal only |
+
+Unicode noncompliant UTF-8 or unpaired surrogates never reach this table: they are rejected at JSON decode (`400 MALFORMED_REQUEST`, SC-07). [D]
+
+### 9.7.3 Normalization procedure
+
+```
+normalizeOutput(raw_text, slot_context) -> (canonical_text | null, report, verdict)
+  1  verdict := ok; report := {counts per class, crlf_converted:false, nfc_changed:false, flags:[]}
+  2  apply class table rows 2, 4..9 for slot_context   # strip / convert / reject; reject sets verdict and stops
+  3  apply rows 1, 10, 11 (reject on first hit)
+  4  t := NFC(t); report.nfc_changed := (t differs from the text before this step)
+  5  apply row 12 (combining-run check) and row 13 (flag or reject)
+  6  trim leading and trailing Unicode White_Space; a trailing newline is not kept
+  7  n := count of code points; if n < 1 or n > cell.envelope.max_output_chars -> reject reject.length_out_of_bounds
+  8  assert NFC(t) = t and t holds no stripped class        # idempotence guard; failure is a defect, alarm
+  9  return (t, report, verdict)
+```
+
+The function is pure, deterministic and shared by the server, the dry run and the browser. It is idempotent: `normalizeOutput(normalizeOutput(x)) = normalizeOutput(x)` (`T-prop-901`). Stripping happens before NFC because removing a ZWJ or a format character can change which marks compose. [D]
+
+### 9.7.4 Hashes and the comparison key
+
+| Name | Definition | Use |
+| --- | --- | --- |
+| `raw_hash` | `sha256:` + SHA-256 over the UTF-8 bytes of `output_text` as decoded from JSON, before any step above | Forensics; proves what arrived; stored even when the text is rejected and not stored |
+| `output_hash` | `sha256:` + SHA-256 over the UTF-8 bytes of the canonical text | The `output_hash` of the provenance manifest (FD§5.6) [D]; resolves `ISS-96` |
+| `payload_hash` | SHA-256 over the RFC 8785 canonical JSON of `{cell_id, output_text, attestation}` (nonce excluded) | Replay versus conflict (9.10) |
+| `ckey` (comparison key) | From the canonical text: NFKC, Unicode default case folding, delete every Cf character and tatweel U+0640, delete Arabic and Persian vowel marks U+064B..U+065F and U+0670, map U+0643 to U+06A9 and U+064A, U+0649 to U+06CC, map digits U+0660..U+0669 and U+06F0..U+06F9 to ASCII `0..9`, map U+060C, U+061B, U+061F to `,` `;` `?`, collapse whitespace runs to one space | Duplicate detection (9.11), flag detection (9.9), comparators in S8.*. Never used for display or storage |
+| `dup_key` | SHA-256 over the UTF-8 bytes of `ckey` | Exact-match index |
+
+The `ckey` folding set is a starting point written by the spec author, to be reviewed by a Persian-speaking reviewer before launch [A][V: reviewer name and date stored in the change log]. Its adequacy for real Persian text is a hypothesis [H]; the test is `T-rtl-905`, the kill criterion is any pair of outputs that a reviewer judges identical and that receive different `ckey` values in the first reviewed sample. Storage preserves what the donor typed apart from table 9.7.2: no Yeh, Kaf or digit rewriting is applied to stored text. [D]
