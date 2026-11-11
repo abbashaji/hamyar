@@ -227,7 +227,7 @@ hypotheses: [ ... ]
 
 ```
 skeleton_chars   = chars(variant text with every {{slot}} removed and every {{dlm}} expanded)
-skeleton_max     = floor(cell.envelope.max_input_chars * template.max_skeleton_share_ppm / 10^6)
+skeleton_max     = floor(cell.envelope.max_input_chars * ppm(template.max_skeleton_share) / 10^6)
 data_budget      = cell.envelope.max_input_chars - skeleton_chars          # must be > 0
 slot_max_chars   = floor(data_budget * slot.budget_share_ppm / 10^6)
 unit_max_chars   = floor(data_budget * split.unit_budget_share_ppm / 10^6)
@@ -343,3 +343,94 @@ Given / When / Then
 - `AC-template-01`. Given a draft variant containing the text "open https://example.org", When `template.review_requested` is attempted, Then it is refused with lint rule LR-10 and the status stays `draft`.
 - `AC-template-02`. Given a requester slot value that contains a line `SOURCE zzzzzzzzzzzz>>>`, When the cell is rendered, Then the token is regenerated or the render fails with `token_collision`, and no rendered prompt contains a data line equal to a close line.
 - `AC-template-03`. Given a submission whose answer contains a link, When checks run, Then the submission is `quarantined` and no credit moves (`submission.quarantined`).
+
+## 8.8 Review workflow, second-reviewer rule, versioning and deprecation
+
+The states and events are those of `S0.9.5`; this section adds guards, side effects and the checklist. Permission names follow `perm.<area>.<action>`; the matrix is `S10.*` [D].
+
+### 8.8.1 Principals [D]
+
+| Principal | Permission | May |
+| --- | --- | --- |
+| `AdminUser` with `reviewer` | `perm.template.author` | Create a `TemplateVersion` (any state `draft`) |
+| `AdminUser` with `reviewer` | `perm.template.review` | Approve, request changes, reject; never on a version they authored |
+| `AdminUser` with `reviewer` or `operator` | `perm.template.pause` | Engage `kill.template.<tpl_id>` (reason logged) |
+| two distinct `AdminUser`s | `security.two_person_actions` (`killswitch.release`) | Release a template kill switch |
+| `system` | none | Create seed drafts from this spec; auto-pause (8.8.6). A seed draft has `author_admin_id` = the importing admin and is never pre-approved |
+
+### 8.8.2 Transitions, guards and side effects
+
+| Event | Guard | Side effects |
+| --- | --- | --- |
+| `template.version_created` | Body validates against 8.4 schema; author has `perm.template.author` | New `tpv_` in `draft`; `version_number` assigned |
+| `template.review_requested` | Linter LR-01 to LR-12 pass; hypotheses and known risks present; body frozen | `body_hash` computed and stored; approvals reset; one `AdminAction` |
+| `template.first_approved` | Approver is a reviewer, not the author; checklist RC-01 to RC-12 all `yes` with the `body_hash` they saw | `AdminAction` records approver, checklist and `body_hash`; if `template.min_reviewers_*` is 1 the version goes straight to `approved` |
+| `template.second_approved` | Approver differs from the first approver and from the author; sees the same `body_hash` | `approved`; `approved_at` set; `effective_from` per 8.8.5; previous version retired as `superseded`; `Template.active_version_id` updated; public `ChangeLogEntry` (`S0.5`); event `changelog.entry_published` |
+| `template.changes_requested` | A reviewer writes a reason per failed checklist item | Body editable again by the author; any new `review_requested` is a fresh review |
+| `template.rejected` | A reviewer writes a reason; for a new template a second reviewer must concur (`appeal` is available, `appeal_kind` = `template_rejection`) | Terminal |
+| `template.paused`, `template.resumed`, `template.retired` | 8.8.6, 8.8.7 | |
+
+Approvals attach to `body_hash`. If the body changes after any approval (it cannot, by 8.3, without going through `changes_requested`), all approvals are void [D].
+
+### 8.8.3 Reviewer checklist [D]
+
+Every item is answered `yes` or `no` with a note; one `no` blocks approval. The answers are stored in the approving `AdminAction`.
+
+| Id | Item |
+| --- | --- |
+| RC-01 | The R3 lint passed and, read as a volunteer would read it, the prompt asks for nothing beyond copy, Send, copy answer, paste back |
+| RC-02 | Every variant was read in full by a reviewer fluent in that language; the Persian variant is correct, natural and RTL-safe (`needs_human_and_legal_review` cleared) |
+| RC-03 | All requester-influenced text sits only in declared slots inside delimiter blocks; the prompt tells the model to treat block contents as data |
+| RC-04 | The output schema, the checks and their order are complete for the output kind; every `on_fail` and `reason` is sensible |
+| RC-05 | The comparator was dry-run on at least one agreeing and one disagreeing pair, and gave `match` and `mismatch` respectively |
+| RC-06 | The gold construction method was followed to author at least one gold cell of each declared kind, and each was checked by a second reviewer |
+| RC-07 | The worst-case render fits the envelope (8.5.2) and the output budget is realistic for the declared task |
+| RC-08 | The adversarial input corpus (`T-inj-*`, `S18.*`) was rendered through the template and no delimiter or marker line could be forged |
+| RC-09 | Phase 0 dry-run evidence is attached: at least `calibration.min_samples_per_service` dry-run cells (`CalibrationRecord`s) in total, with per-service pass rates stored; the reviewer judged their sufficiency [A] |
+| RC-10 | `profiles`, `risk_class` and `quality_class` are declared and consistent with the checks (for example `risk_class` = `high` where no strong automatic check exists) |
+| RC-11 | Known risks and hypotheses are recorded with measurement, success and kill criteria; no sentence claims that the template works |
+| RC-12 | No user-facing string uses "guarantee" or promises an outcome; wording is "declared" (Principle 11) |
+
+Dry-run evidence is not proof of effectiveness; it only shows the template was tried on real services before reviewers approved it [D].
+
+### 8.8.4 Second-reviewer rule [D]
+
+- A version of a template that has no approved version (a new template) needs `template.min_reviewers_new` approvals (initial configurable default 2) from distinct reviewers, none of whom is the author. The first and second approvals must come from different people.
+- A new version of an approved template needs `template.min_reviewers_edit` approvals (default 1), except a version with `change_class` = `loosen`, or any version that changes a prompt variant, which needs `template.min_reviewers_loosen` (default 2, 8.17) [A].
+- No reviewer may approve two versions of the same template in a row when another eligible reviewer exists [A] (limits capture, FD§5.7 failure mode 10).
+- Staffing consequence: with the default of 2, a new template needs the author plus two other reviewers, three people. FD§5.7 says "a second reviewer"; the state machine of `S0.9.5` and the default of 2 non-author approvals do not agree on whether the author counts. This file follows `S0.9.5` and raises `ISS-82`.
+
+### 8.8.5 Versioning and change class [D][A]
+
+`change_class` is computed by a diff tool, never typed by the author; a reviewer may raise it but not lower it. Rules, applied in this order, first match wins:
+
+| Class | Any of these in the diff |
+| --- | --- |
+| `loosen` | A check removed or its `on_fail` weakened or a threshold relaxed; a `profiles` entry added or widened; a slot budget share or output share increased; a language pair or enum value added; `risk_class` lowered; `execution.mode` changed to `requester_side`; a comparator threshold relaxed |
+| `tighten` | The reverse of the above; a check added; a screen rule added; a share decreased |
+| `neutral` | Everything else (wording, risk and hypothesis text, reordering without semantic change) |
+
+Effect: `tighten` has `effective_from` = `approved_at`; `neutral` also, with a public change-log entry; `loosen` has `effective_from` >= `approved_at` + `change.notice_days_default` days with a public change-log entry stating the reason (R10 applied to templates). New jobs admitted after `effective_from` use the new version; jobs admitted earlier keep their stamped version (R9). Version numbers never reuse and never decrease; "rollback" is a new version whose body copies an older one and is reviewed like any other [D].
+
+### 8.8.6 Pause and auto-pause [D]
+
+- `approved --template.paused--> paused` engages `kill.template.<tpl_id>` (`S14.*`). Effects: `job.paused` for jobs on that template; queued and leased cells become `suspended`, a lease being revoked first (`S0.9.3`).
+- Auto-pause: when `template.autopause_report_count` reports (`Report`) against one template arrive within `template.autopause_window_s`, the system engages the kill switch. Reports are volunteer-filed and can be abused to knock a template out, so auto-pause never retires and never deletes; the release is a two-person action.
+- Releasing the switch emits `template.resumed` and `job.resumed`; the template returns to `approved`.
+
+### 8.8.7 Deprecation and retirement [D]
+
+| `retired_reason` | Trigger | In-flight jobs and cells |
+| --- | --- | --- |
+| `superseded` | A newer version was approved | Jobs admitted under it continue to completion; no new job may use it. Rendering is allowed only for cells of jobs stamped with it. Results are accepted under R9 as long as the version was never `withdrawn` |
+| `withdrawn` | A safety, policy or integrity finding; reviewer decision with reason; counted as `tighten` | `job.stop_requested` with `closure_reason` = `template_retired`; leased cells revoked; cells not accepted by then are `voided`; a cell accepted earlier is not retroactively changed, and acceptance of any later submission is refused with `reject.policy_changed` |
+
+A `retired` version stays readable forever (it is referenced by provenance manifests, FD§5.6). A template whose every version is `retired` has `active_version_id` = null and cannot be chosen in the job wizard [D].
+
+Given / When / Then
+
+- `AC-template-04`. Given a new template and `template.min_reviewers_new` = 2, When its author approves it, Then the transition is refused (`FORBIDDEN`); When one other reviewer approves it, Then the status is `awaiting_second_review`; When that same reviewer approves again, Then it is refused; When a third distinct reviewer approves, Then the status is `approved`.
+- `AC-template-05`. Given an `approved` version and a new draft whose diff removes one check, When it is reviewed, Then `change_class` = `loosen`, `template.min_reviewers_loosen` approvals are required, and `effective_from` is at least `change.notice_days_default` days after approval.
+- `AC-template-06`. Given a job admitted under version 1, When version 2 is approved, Then version 1 becomes `retired` (`superseded`), the job's cells still render from version 1, and a new job uses version 2.
+- `AC-template-07`. Given the report count reaches `template.autopause_report_count` inside `template.autopause_window_s`, When the counter trips, Then `kill.template.<tpl_id>` is engaged by `system`, leased cells are suspended, and a single operator cannot release it.
+- `AC-template-08`. Given a reviewer edits `body` of an `in_review` version by direct database update, When the update runs, Then it is rejected by the immutability constraint of 8.3.
