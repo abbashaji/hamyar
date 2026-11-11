@@ -787,3 +787,90 @@ All inputs are the FD's illustrative values, not measurements. This is `AC-ledge
 | Value to Sara in time: about 30 days alone versus about 2 | 240 cells / 8 per day = 30 days; the quote is 2 days | Not a ledger quantity; asserted by the pricing and admission pages, not here |
 
 **End state** [D]: Sara 24,000,000; donors 264,000,000; Reserve 12,000,000; escrow 0; issuance -300,000,000; retired 0. Existence: members + escrow + Reserve = 24 + 264 + 0 + 12 = 300 credits = cumulative mint 300 - retired 0. Entries: 566 in total with `seq` 1..300 the mints, 301 the hold, 302..565 the transfers, 566 the levy. Every invariant `INV-L01`..`INV-L17` passes in a `full` run; Sara paid 276 credits, donors received 264 and the Reserve received 12.
+
+## 6.16 Test specification
+
+Ids follow S0 0.5. The numbers `AC-ledger-01`..`16`, `T-unit-01`..`02`, `T-prop-01`..`07`, `T-adv-01`..`05` and `T-fsm-01` are reserved for this file; `S18.*` keeps them and numbers its own tests from 10 upward within each layer [A]. Inputs are illustrative defaults, not measurements.
+
+### 6.16.1 `T-unit-01` `test_fd33_worked_example_exact` (the FD§3.3 test)
+
+| Part | Specification |
+| --- | --- |
+| Setup | The fixture of 6.15. Ledger empty. Clock controlled by the test. Admission is a double returning `admitted`. Checker implementation is the independent one of 6.13.1 |
+| Step 1 | For each day `d0`..`d29` accept 10 Commons cells for Sara at 12:00 UTC; each call posts `mint:{cell_id}` |
+| Step 2 | On day 30 call `price_quote('translation_glossary', 240, now)`. Assert `p_ucr` = 1,150,000, `v_ppm` = 100,000, `lambda_ppm` = 50,000, `escrow_ucr` = 276,000,000, `pool_ucr` = 24,000,000, `levy_ucr` = 12,000,000, and `eta_ppm` = 869,565 |
+| Step 3 | Post `hold:{job_id}`. Assert exactly one `escrow_hold` entry of 276,000,000 ucr, `balance(Sara)` = 24,000,000, `balance(E)` = 276,000,000, Sara's remaining lots are 4 of `d27`, 10 of `d28`, 10 of `d29`, and the 276 consumed slices are those of `d0`..`d26` (270) and 6 of `d27` |
+| Step 4 | Accept 240 primary cells then 24 `audit` cells; each posts `payout:{cell_id}`; cell `k` goes to donor `(k - 1) mod 40`. Assert 264 `transfer` entries of 1,000,000, `paid_primary_ucr` = 240,000,000, `paid_pool_ucr` = 24,000,000, `paid_levy_budget_ucr` = 0 |
+| Step 5 | Move the job to `settling` and post `settle:{job_id}`. Assert one `levy` entry of 12,000,000 to the Reserve and no `refund` entry; escrow `closed`, balance 0 |
+| Expected entries | 566 entries: 300 `mint`, 1 `escrow_hold`, 264 `transfer`, 1 `levy`; `seq` 1..566 gap-free; hash chain verifies |
+| Expected balances (ucr) | Sara 24,000,000; `D00`..`D23` 7,000,000 each; `D24`..`D39` 6,000,000 each (donor total 264,000,000); Reserve 12,000,000; escrow 0; issuance -300,000,000; retired 0 |
+| Expected checks | A `full` run of `INV-L01`..`INV-L17` passes with zero violations; `INV-L02`: 24 + 264 + 0 + 12 = 300 = 300 - 0 |
+| Replay | Posting every transaction a second time returns the stored results and adds no entry (`T-adv-01` covers the race) |
+
+### 6.16.2 Acceptance criteria (Given / When / Then)
+
+| ID | Given | When | Then |
+| --- | --- | --- | --- |
+| `AC-ledger-01` | The fixture of 6.15 | The sequence of `T-unit-01` runs | Sara pays 276 credits, donors receive 264, the Reserve receives 12, Sara keeps 24, all invariants pass |
+| `AC-ledger-02` | A 240-cell job funded as above; 100 primary and 10 verification cells accepted | The job is stopped (`job.stop_requested`) and settled | Payouts 110,000,000; levy `100 x 50,000` = 5,000,000; refund 161,000,000 restores the unspent slices to their lots; escrow 0 |
+| `AC-ledger-03` | N = 7 (escrow 8,050,000, pool 700,000, levy budget 350,000) | (a) No verification cell; (b) one verification cell is accepted | (a) payouts 7,000,000, levy 350,000, refund 700,000. (b) the cell takes 700,000 from the pool and 300,000 from the levy budget; levy posted 50,000, refund 0; no mint, no Reserve outflow |
+| `AC-ledger-04` | An admitted 240-cell job, no cell accepted | The requester cancels and the drain ends | `cancel` posts a refund of 276,000,000 and no levy; each lot is restored with its original `expires_at`; Sara's balance is 300,000,000 |
+| `AC-ledger-05` | Sara holds a 14-day grant lot, a 60-day lot earned earlier and a 60-day lot earned later | She funds a job needing more than the grant lot | Lots are consumed in order of `expires_at`; a lot with `expires_at <= now` is never consumed even if not yet swept |
+| `AC-ledger-06` | A job escrow includes a slice of a lot that expires while the job runs | The job settles with a refund covering that slice after `expires_at` | The lot is restored with its original date and the next sweep posts `expire` to the Reserve (ISS-07) |
+| `AC-ledger-07` | Reserve balance = ceiling + 25 credits; `reserve.retire_min_credits` = 10 | The retirement run executes twice in the same interval | One `retire` entry of 25 credits (`retire:{interval_index}` makes the second a replay); `balance(retired)` = 25; a public log line exists |
+| `AC-ledger-08` | Member owned 349 credits, K_eff 350 | Two leases are requested concurrently | Exactly one passes (headroom 1 credit); with owned 349.5 neither passes; `owned_after <= cap` on every mint (`T-adv-02`) |
+| `AC-ledger-09` | Reserve at 2 credits, G = 3, floor 0, 5 eligible members | The grant run executes | No grant is posted, `reserve_empty` is the only denial, order is preserved; after the Reserve reaches 3, the earliest-qualified member is granted first. A second grant for the same member, a second member on the same `Device`, or a 21st grant in a UTC day is denied with `already_granted`, `device_limit`, `day_limit` |
+| `AC-ledger-10` | Window with A = 120, V = 13; another with A = 99; another with A = 100, V = 60 | `measure_v` runs | v = `div_ceil(10^6 x 13, 120)` = 108,334 (`measured`); A = 99 gives 100,000 (`prior`); A = 100 and V = 60 gives 500,000 (`capped`) and the alarm `ledger.v_cap_hit` |
+| `AC-ledger-11` | `claims_ucr` = 2,400,000,000; 1,120 accepted cells in 28 days; cap 4,800 credits | The rollup runs | `claim_ratio_ppm` = `floor(2,400,000,000 x 28 / (7 x 1,120))` = 8,571,428 > 6,000,000, so the cap becomes 3,600 credits by principal `system`, `tighten`, effective at once, logged; a second rollup the same day makes no further cut. eta: p = 1,250,000 gives 800,000 (no alarm); p = 1,300,000 gives 769,230 (alarm) |
+| `AC-ledger-12` | Monthly cap 4,800 credits, 4,799 minted, 2 Commons leases wanted | Both are requested | The first is granted (headroom 1), the second is refused; the month rollover restores headroom; a lease granted before a cap cut still mints |
+| `AC-ledger-13` | A running ledger and a test-only role | The role adds 1 ucr to a member's `balance_ucr`; separately edits one `entry_hash` | The next `incremental` run fails `INV-L01` and `INV-L03`, the `full` run fails `INV-L14`; `ledger.invariant_violated` is emitted, `kill.all_minting` and `kill.all_new_jobs` are engaged by `system`, `ledger_head.is_frozen` is set, and `post()` refuses new transactions until two operators release |
+| `AC-ledger-14` | A payout for cell `c` | The same `payout:{c}` is posted twice, sequentially and concurrently | Exactly one entry and one donor lot exist; the replay returns the stored result and emits no event |
+| `AC-ledger-15` | A Commons cell whose minted credit was spent | A reversal is approved by one admin, then by two distinct admins | One approver: refused (`FORBIDDEN`). Two: the held part is reversed, `shortfall_ucr` records the rest, `INV-L19` raises `warn`; a second reversal of the same entry is refused |
+| `AC-ledger-16` | Open escrow quoted at lambda 0.05; lambda raised to 0.08 with 14 days notice | Days pass | The escrow settles at 0.05; quotes made before `effective_from` still show 1.15; after it they show the new price; the change log shows both |
+
+### 6.16.3 Property, adversarial and state-machine tests
+
+| ID | Test |
+| --- | --- |
+| `T-prop-01` | Stateful model-based test: random valid sequences of mint, hold, payout, settle, cancel, expire, retire, grant, donate and reverse with random clock advances; after every step the independent checker finds no violation of `INV-L01`..`INV-L17`; shrinking enabled; failing seeds stored |
+| `T-prop-02` | `pick_lots` consumes exactly the prefix of lots sorted by (`expires_at`, `earned_at`, `id`); never consumes an expired lot; sum equals the request or `INSUFFICIENT_CREDIT` |
+| `T-prop-03` | For any hold followed by any payouts, settlement and refund restore each lot's amount exactly to what the escrow slices still hold; total restored plus levy plus payouts equals the hold |
+| `T-prop-04` | For N, v, lambda in the validated ranges: `escrow_ucr` = primary + pool + levy; `eta_ppm` is monotone non-increasing in v and lambda; `div_ceil` never over-states v by more than 1 ppm |
+| `T-prop-05` | Any single-field mutation, deletion, reordering or insertion in the entry sequence is detected by `INV-L14` |
+| `T-prop-06` | For random cell outcomes in a job, `funded = paid + levy_posted + refunded`, `refund >= 0`, `levy_posted <= levy_due`, balance 0 at close |
+| `T-prop-07` | Static check: no float type or non-helper division in the ledger, pricing and invariant modules |
+| `T-adv-01` | Two workers post the same `(txn_kind, natural_key)` concurrently: exactly one commits its entries |
+| `T-adv-02` | Many concurrent lease requests at the headroom boundary never push owned credit above K_eff (`INV-L11`) |
+| `T-adv-03` | Two concurrent holds by one member for two jobs that together exceed the balance: one succeeds, one gets `INSUFFICIENT_CREDIT` |
+| `T-adv-04` | With `launch.minting_enabled` false or `kill.all_minting` engaged, an accepting transition is refused and the cell stays undecided (LD-09) |
+| `T-adv-05` | The application role cannot UPDATE or DELETE ledger tables, nor write to them outside `post()` |
+| `T-fsm-01` | `Escrow`: `open -> settling -> closed`; a payout in `closed` is `STATE_CONFLICT`; `settle` with a cell still `leased` is `STATE_CONFLICT` |
+| `T-unit-02` | Boundary cases for `div_floor` and `div_ceil` at every site of 6.3.2, including `b <= 0` rejection and exact multiples |
+
+## 6.17 Interfaces, required names and convention gaps
+
+**Provided by this file** [D]: `post(...)` and the posting operations of 6.6; `ledger.can_lease(member, cell, now)`; `price_quote(job_type, n_cells, at)`; `ledger.available_credit(member, now)` (unexpired lots); `ledger.owned_credit(member, now)`; gauges `claim_ratio_ppm`, `mint_utilization_ppm`, `eta_ppm` per job type; the lineage query of 6.14.2. File 06b consumes the quote, the claim ratio and the hold, release and cancel postings; it owns the capacity and window logic. In pseudocode, `x_ppm` is the stored ppm value of the ratio parameter `x` (for example `price.v_prior` is read as `price.v_prior_ppm`).
+
+**Required from other parts** (names are proposals; the owning part's name wins) [A]:
+
+| Needed | From | Why |
+| --- | --- | --- |
+| `Job.is_commons` (bool) | `S5.*` | Mint backing (INV-L08) |
+| `Cell.charged_job_id`, `Cell.charged_job_type` | `S5.*` | Verification cells charged to a job and a type (6.7.2, 6.11.2) |
+| `Lease.ledger_versions` (json) | `S5.*` | Parameter versions read at lease time (6.8.2) |
+| `Escrow` ledger columns of 6.4.4 and the `escrows` counters | `S5.*` | Settlement and INV-L06 |
+| Acceptance and posting in one transaction; undecided cells retried after a switch is released | `S5.*`, `S4.*` | LD-09 |
+| `MetricSnapshot` fields of 6.11.6 | `S13.*` | Price and gauge publication |
+| `tighten_direction` values of 6.12.2 | `S16.*` | Immediate or noticed changes |
+| Reserve, price, claim ratio and retirement public pages | `S12.*` | Publication |
+| Verification scheduler honoring `free(J)` | `S8.*` | 6.7.2 |
+
+**Convention gaps** (to be folded into S0 by C-001) [A]: entity `LotMovement` / `lot_movements` / `lmv_` / permanent; `ledger_head` single-row table with `is_frozen`; `LedgerTransaction` columns `natural_key`, `shortfall_ucr`; log and alarm events `ledger.lot_expired`, `ledger.grant_denied`, `ledger.verification_budget_exhausted`, `ledger.v_cap_hit`, `ledger.eta_below_threshold`, `ledger.mint_utilization_high`, `ledger.mint_cap_above_forecast`, `ledger.claim_ratio_undefined`, `ledger.mint_cap_cut`, `ledger.checks_stale`; `MetricSnapshot` kinds of 6.11.6; metrics `hamyar_ledger_grants_denied_total`, `hamyar_ledger_grants_paid_total`, `hamyar_ledger_last_full_check_age_s`, `hamyar_ledger_verification_unfunded_total`, `hamyar_pricing_effective_levy_ppm`; `CreditLot.origin_kind` values; txn natural-key formats of 6.6. The S6 split over two files shares one number space: this file uses `6.1`..`6.17`, and file 06b should start at `6.20` so that `S6.<m>` references stay unique. The cell text asked for ids `ISS-5x`, but S0 0.4 gives part 6 the block `ISS-61`..`ISS-69` (first file `ISS-61`..`ISS-63`); S0 is followed.
+
+## Issues raised
+
+| id | severity | fd_ref | issue | resolution | status |
+| --- | --- | --- | --- | --- | --- |
+| `ISS-61` | major | FD§3.3, FD§4.3, FD§4.4 | v is a ratio of cells but a verification cell is indivisible and paid 1 credit, so a job's pool N x v is rarely a whole number of cells; a small job's pool can be below one cell while sampling may still require a cell; the FD does not say who pays an overrun or what happens to an underrun | Pool is a budget in ucr; unspent pool is refunded; a verification cell draws from the pool then from the job's levy budget (so the Reserve inflow, not the requester or mint, absorbs overrun); the scheduler cannot create a cell the budgets cannot pay; effective levy is published. Rejected: charging the requester after the quote (breaks the quote promise, FD Principle 10) and funding by mint (breaks FD§4.2). Also: v counts `third` and `review` cells (FD§4.3 lists only audit, gold, rework) | proposed |
+| `ISS-62` | major | FD§4.2 | 'Every unit traces to an accepted Commons cell' cannot hold per unit (credit is fungible and the Reserve is a pool) nor after a Commons cell is overturned when its credit has been spent; a payout reversal after the escrow has closed has no escrow to mirror into | Restate as conservation (only `mint` creates, only `retire` destroys) plus each mint backed by one distinct accepted Commons cell at posting, checked every minute; lineage is kept along transfers and stops at the Reserve; the unrecovered mint is recorded, published and alarmed (`INV-L19`); reversal after close lands on the requester as restitution (6.6.3, 6.14.2) | proposed |
+| `ISS-63` | minor | FD§4.5, FD§4.7, FD§4.2; S0 0.10.6 | Definition gaps: (a) 'oldest-first' differs from earliest-expiry-first when lifetimes differ (starter 14 days, 60 days, accelerated arm); (b) K must count the member's own open escrow or a refund can push a member above K; (c) S0 0.10.6 derives the default mint cap with (1 - phi), which equals phi only at 0.5, while redeemable capacity is phi x capacity; (d) 'unexpired credit' in the claim ratio does not say whether escrow counts | (a) spend by `expires_at`; (b) K bounds unexpired balance plus own open escrow, enforced by headroom reserved at lease; (c) the bound on the cap is phi x forecast capacity, the default 4,800 is unchanged; (d) claims = unexpired member lots plus reservation escrow, escrow of admitted jobs excluded because admission control counts it as committed | proposed |
