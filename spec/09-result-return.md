@@ -260,3 +260,98 @@ The function is pure, deterministic and shared by the server, the dry run and th
 | `dup_key` | SHA-256 over the UTF-8 bytes of `ckey` | Exact-match index |
 
 The `ckey` folding set is a starting point written by the spec author, to be reviewed by a Persian-speaking reviewer before launch [A][V: reviewer name and date stored in the change log]. Its adequacy for real Persian text is a hypothesis [H]; the test is `T-rtl-905`, the kill criterion is any pair of outputs that a reviewer judges identical and that receive different `ckey` values in the first reviewed sample. Storage preserves what the donor typed apart from table 9.7.2: no Yeh, Kaf or digit rewriting is applied to stored text. [D]
+
+## 9.8 Escaping, display and the rule that submitted content is never executed
+
+### 9.8.1 Output contexts
+
+Submitted text (`output_text`, `model_label`, and anything derived from them) is **data in every context**. The defense is structural: submitted text is placed only where the platform's escaping layer treats it as a value, and a list of places it must never go is enforced by tests. [D]
+
+| Context | Rule | Test |
+| --- | --- | --- |
+| HTML text node (volunteer, requester, reviewer, operator screens) | Rendered only through the front-end framework's default text binding (escaping by construction). No `innerHTML`, `dangerouslySetInnerHTML`, `document.write`, `insertAdjacentHTML` or equivalent anywhere in the code base; a lint rule fails the build on them | `T-inj-901`, `T-inj-902` |
+| HTML attribute, `href`, `src`, `style`, `id`, `class`, `name`, `srcdoc`, event handler | Submitted text is never placed in them, not even escaped. Tooltips and labels use fixed copy keys | `T-inj-903` |
+| JavaScript string, JSON embedded in a page, `<script>`, `<style>`, `<template>` | Never. Data reaches the page through the JSON API only | `T-inj-904` |
+| JSON API response | Produced by the serializer (no string concatenation), `Content-Type: application/json; charset=utf-8`, `X-Content-Type-Options: nosniff` | `T-inj-905` |
+| Markdown | **Not rendered.** Outputs are shown as plain text with preserved line breaks. Rendering Markdown or HTML from a submission needs a new decision with a reviewed sanitizer and a security sign-off (`SEC`) | `T-inj-906` |
+| CSV export (requester deliverable) | RFC 4180 quoting. Any cell whose first character, after the normalization of 9.7, is `=`, `+`, `-`, `@`, TAB or CR is prefixed with an apostrophe-style guard character `'` inside the quoted field, so a spreadsheet does not read it as a formula | `T-inj-907` |
+| JSON, JSONL export | Serializer output; no string concatenation | `T-inj-905` |
+| Markdown export (if S15.* offers it) | Output goes inside a fenced code block whose fence is longer than the longest run of backticks in the text; never as live Markdown | `T-inj-908` |
+| Plain-text export | UTF-8, LF newlines, `Content-Disposition: attachment`, `X-Content-Type-Options: nosniff` | `T-inj-909` |
+| File names of exports | Generated from ids and the date only; never from submitted text | `T-inj-909` |
+| Log lines and error messages | Content is never logged; ids, hashes, sizes and codes are. If an error must show a fragment, it is at most 40 code points, JSON-escaped, with all controls rendered as `\uXXXX` | `T-adv-911`, `T-inj-910` |
+| Provenance manifest (FD§5.6) | JSON from the serializer; `attested_service_id` and `attested_model_label` carry the key prefix `attested_` so no reader mistakes them for verified fields | `T-inj-905` |
+| Admin tools (separate origin, S10.*) | Same rules, plus the reveal-invisibles view on by default and a banner "submitted content" on every panel that shows it | `T-inj-911` |
+| E-mail | Submitted content is never placed in an e-mail (e-mail is optional and recovery-only, S0.10.6) | `T-inj-912` |
+
+**Response headers and CSP** [D][V: browser support on the target phones, especially Trusted Types]. Every HTML response carries `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; require-trusted-types-for 'script'`, plus `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`. There are no inline scripts and no third-party script, style or font hosts (prompt scope I: no mandatory third-party dependency). The directive values are initial design values, not configuration in the parameter table; changing one is a spec change reviewed under `SEC`.
+
+### 9.8.2 Never executing submitted content
+
+The platform never interprets submitted text as anything but data. The following are forbidden in the API process, the workers and the admin tier, and each has an adversarial test. [D]
+
+| Forbidden | Instead | Test |
+| --- | --- | --- |
+| `eval`, dynamic `import`, `Function` constructors, shell, `exec`, with submitted text in any argument | Not needed | `T-inj-913` |
+| Interpolating submitted text into a template engine source (server-side template injection, for example `{{7*7}}`, `${...}`) | Submitted text is bound to a data slot only; the template source is fixed code | `T-inj-914` |
+| SQL text built from submitted text | Parameterized statements only; a static check fails the build on string-built SQL | `T-inj-915` |
+| Deserializing submitted text with any format that can instantiate objects (YAML tags, pickle, Java serialization) | JSON only, with the limits of 9.6 | `T-inj-916` |
+| XML or archive parsing with entity expansion, external entities, or unbounded decompression | Not accepted as a format in any slot context (a template may specify JSON, CSV or plain text; S8.*) | `T-inj-917` |
+| Fetching any URL found in submitted text (previews, thumbnails, link checkers) | URLs are inert text; the server never makes an outbound request because of content (no server-side request forgery surface) | `T-inj-918` |
+| Building a file path, command or regular-expression source from submitted text | Regular expressions come only from reviewed template data and run on a linear-time engine or with a time limit [V: engine choice, S4.*]; submitted text is only ever the subject string | `T-inj-919` |
+| Treating submitted text as markup for a downstream tool without its escaping layer | Each export format has its rule in 9.8.1 | `T-inj-907` |
+
+**Code submitted as a result.** For a `code_change_tests` job the submitted code is the deliverable. It is stored and shown as inert text and is never run by the web, API or admin tier. The FD's automatic "unit tests" check (FD§4.4) would run it; that is the one place where execution is needed, so it is confined to an isolated runner that is a separate component: no network, no secrets, no shared file system, hard CPU, memory, process and wall-clock limits, ephemeral per run, and only a pass or fail verdict plus a truncated log (treated as submitted content, 9.8.1) comes back. Until that runner is built and signed off under `SEC` [V], the check returns `verification_outcome` = `inconclusive` and the cell is sent to audit, and the template `code_change_tests` cannot be approved for use (`ISS-91`). [D][A]
+
+### 9.8.3 Mixed-direction text (Persian and English together)
+
+Stored text has no direction characters (9.7.2 rows 4 and 5, prose strips embeddings and keeps only implicit marks), so direction is a display decision. [D]
+
+| Display situation | Rule |
+| --- | --- |
+| A block of output text | The container carries `dir="auto"` and CSS `unicode-bidi: plaintext`, so each paragraph takes its direction from its first strong character, never from the page locale |
+| An inline fragment of submitted text inside interface text (a model label, a short excerpt in a table) | Wrapped in `<bdi>` (or `unicode-bidi: isolate` with `dir="auto"`) so it cannot reorder the surrounding label or number |
+| Code and diffs | `dir="ltr"`, `unicode-bidi: isolate`, monospace stack, never auto direction |
+| Numbers, dates, ids next to Persian text | Wrapped in an isolating element; digits follow the member's `digits` setting only for interface text, never for submitted text, which is shown as stored |
+| Fonts | A system font stack that covers Arabic-script Persian letters and ZWNJ, with a local fallback; no mandatory remote font (prompt scope I). The stack is set in S11.* |
+| Reveal-invisibles view | A toggle that renders ZWNJ, ZWJ, direction marks, NBSP and any retained format character as a visible marker such as `⟦U+200C⟧`; on by default for `code` slots and in the admin tools |
+| Truncation | Excerpts cut on a grapheme-cluster boundary, never inside a combining sequence or a surrogate pair |
+
+## 9.9 Output flagging and quarantine
+
+FD§5.5: outputs containing links, code to run or requests for action are flagged instead of shown as results. This section makes that a pipeline stage. [D]
+
+### 9.9.1 Flag classes and detectors
+
+Detectors run on `ckey` (so fullwidth letters, stripped invisibles and case tricks do not evade them) and on the canonical text. Patterns are **data**, stored and versioned with the policy data (S7.*) so that tightening is immediate and loosening needs a change-log entry (`R10`); this file fixes the classes and the mechanism, not the pattern list. The examples below are illustrative, not exhaustive, and the Persian examples need human review. [D][A]
+
+| Class | Name | What it detects | Illustrative examples | Default action |
+| --- | --- | --- | --- | --- |
+| L | Link | A URL scheme (`scheme://`), `www.` prefix, `mailto:`, `javascript:`, `data:` pseudo-schemes, Markdown link syntax `](`, HTML tags `<a`, `<img`, `<script`, IP literals, obfuscations such as `hxxp`, `[.]`, `(dot)`, and a bare domain-shaped token whose suffix is in the reviewer-maintained public-suffix list [V: list source and update owner] | `https://example.test/x`, `hxxps://a[.]b` | `screen.output_url_action` (`quarantine`), allowed count `screen.output_max_urls` (0) |
+| C | Code to run | Fenced code blocks in a `prose` slot, shell prompt lines (`$ `, `# ` followed by a command), pipe-to-shell shapes, package-manager or download commands, script tags | a fenced block with an install command | `screen.output_code_action` (`quarantine`) |
+| A | Request for action | Second-person imperatives aimed at the reader or at an assistant: open, click, download, install, log in, send, reply with; phrases that address an AI system ("ignore previous instructions", "you must", role markers such as `system:`) | English forms above; Persian forms such as «دانلود کنید», «کلیک کنید», «نصب کنید», «وارد شوید», «دستورهای قبلی را نادیده بگیر» `needs_human_and_legal_review` | `screen.output_request_action` (`quarantine`) |
+
+A template may declare, per output slot, an **exemption list** of classes that are legitimate there (for example class C in the code slot of `code_change_tests`, or class L in a slot whose schema type is `url`). Exemptions are part of the reviewed template version (S8.*), never granted per submission, and never cover class A. Detector hits are recorded as `flags` on the Submission with the class letter and a hit count, never the matched text. [D]
+
+Detectors are heuristics. They produce false positives (a legitimate translation that contains the word "download") and false negatives (any paraphrase or encoding not in the pattern data). The false-positive cost is reviewer time, measured as the share of quarantined submissions that a reviewer releases; the false-negative rate is unknown and is estimated only through reviewer sampling of unflagged outputs (S8.*) [H]. This stage reduces the risk; it does not remove it. [D]
+
+### 9.9.2 Quarantine lifecycle
+
+```
+Submission.received --submission.quarantined--> Submission.quarantined      (Cell: submitted --cell.flagged_for_audit--> flagged_for_audit)
+Submission.quarantined --submission.released_from_quarantine--> back into the S8.* pipeline at its verification stage
+Submission.quarantined --submission.rejected--> Submission.rejected         reason reject.forbidden_content (Cell: --cell.audit_failed--> rejected)
+```
+
+| Rule | Decision |
+| --- | --- |
+| Who decides | A `reviewer` (S0.8.2) in the admin tool, on the admin origin, with the reveal-invisibles view on. The decision is an `AdminAction` and an event |
+| Visibility while quarantined | The text is hidden from the requester, from other donors, from audit and human-review cells, from deliverable assembly and from every public surface. Only reviewers see it |
+| Release | The submission returns to verification as if it had just passed this stage; it still faces gold, audit and automatic checks (S8.*). A release does not accept the cell |
+| Reject | The donor sees `reject.forbidden_content`. A reviewer who finds an attack (an injection attempt) records a `Report` against the member (S10.*); a reviewer who finds an honest false positive releases it and may propose a pattern change (loosening needs a change-log entry, `R10`) |
+| Effect on donor reliability | A quarantine rejection is a reliability observation only if the reviewer marks it `deliberate`; otherwise it has none (a false positive must not lower an honest donor's tier) [A] |
+| Credit | None while quarantined; minting or payout happens only at acceptance (S6.*, S8.*) |
+| Age-out | A submission unreviewed for `screen.quarantine_max_age_days` ends as `submission.rejected` with `reject.forbidden_content`, flagged `no_reliability_effect`; its cell is requeued. The queue age is a metric and an alarm (9.17) so reviewer capacity is visible before age-out happens (`ISS-92`) |
+| Template pause | `template.autopause_report_count` reports on one template inside `template.autopause_window_s` pauses it (S0.10.6); a spike of quarantines on one template is an input to that decision |
+
+Release and reject decisions on quarantined text are made by one reviewer and sampled by a second as part of the reviewer-capture control in S10.* [A].
