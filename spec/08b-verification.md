@@ -239,3 +239,83 @@ function resolve_gold(sub):
 ```
 
 `inconclusive` from a gold comparator is a defect of the item: it is not an observation, the donor is paid, and the item is quarantined. A passing gold cell resets `consecutive_gold_fails`. [D]
+
+## 8.25 Sampled audits, comparator and third execution
+
+### 8.25.1 Comparator contract [D]
+
+`comparator(a, b, ctx) -> match | mismatch | inconclusive`, declared by `TemplateVersion.verification.comparator` and versioned with it. Requirements, each a property test (layer `prop`): deterministic; symmetric (`comparator(a,b) = comparator(b,a)`); reflexive on valid outputs; side-effect free; no execution of content; **no model call and no network access** (8.36). The comparator version is stored on every `VerificationRecord` so a later comparator change never rewrites an old outcome. A comparator that returns `inconclusive` is treated as `mismatch` for the purpose of requesting a third execution. [D]
+
+### 8.25.2 Audit flow [D]
+
+`Audit` states and events are those of S0.9.8; this table gives the transitions.
+
+| From | Event | To | Guard and effect |
+| --- | --- | --- | --- |
+| (none) | `audit.created` | `pending` | Plan AUDIT chosen (8.22.2). A cell of kind `audit` with the **same input** is created for a different member. The auditor never sees the primary output |
+| `pending` | `audit.second_submitted` | `second_executed` | The audit cell passed P1 to P2 |
+| `second_executed` | `audit.matched` | `matched` (T) | comparator = `match`: primary `cell.audit_passed`; audit cell accepted; both executors get a PASS observation |
+| `second_executed` | `audit.mismatched` | `mismatched` | comparator = `mismatch` or `inconclusive` |
+| `mismatched` | `audit.third_requested` | `third_pending` | `verify.third_exec_on_mismatch` = true (constant): a cell of kind `third`, same input, a third member |
+| `third_pending` | `audit.third_submitted` | `third_pending` | Informational, no state change (S0.9.1 allows an event without a change) |
+| `third_pending` | `audit.resolved` | `resolved` (T) | Majority rule below |
+| any non-terminal | `audit.cancelled` | `cancelled` (T) | Job cancelled, cell voided, template paused, or a verification slot exhausted `cell.max_attempts` |
+
+**Majority rule (also used for blanket groups, 8.26).** Let the executions that passed P1 be the nodes of an agreement graph, with an edge where the comparator returns `match`. The majority is the **unique maximum clique** whose size is at least `floor(n / 2) + 1`; a tie between cliques, or no such clique, is `NO_MAJORITY`. [D]
+
+```
+function resolve_group(execs):                    # n = len(execs), n in 2..verify.blanket_redundancy_n (at most 5)
+  G = agreement_graph(execs); need = floor(n/2) + 1
+  C = maximum_cliques(G)                          # brute force is enough for n <= 5
+  if len(C) == 1 and len(C[0]) >= need: return MAJORITY(C[0], minority = execs - C[0])
+  return NO_MAJORITY
+```
+
+| Result | Primary cell | Executors in the majority | Executors in the minority | Observations |
+| --- | --- | --- | --- | --- |
+| Primary in majority | `cell.audit_passed`, accepted, its output is delivered | accepted, paid 1 credit each | rejected `reject.audit_mismatch`, unpaid, single attempt used up (`exhausted`) | majority PASS, minority FAIL |
+| Primary in minority | `cell.audit_failed`, rejected with `reject.audit_mismatch`, then requeued as a fresh attempt | accepted, paid; their outputs are **not** reused for the requeued attempt [A] | rejected as above | same |
+| `NO_MAJORITY` | `cell.audit_failed`, rejected with `reject.audit_mismatch` and `details.inconclusive = true`; requeued; appealable | every execution that passed P1 is accepted and paid (nobody was outvoted) | none | **none**: inconclusive is not an observation |
+| Slot exhausted | `cell.audit_passed` with outcome `inconclusive` and `audit_coverage_gap` if the reason was `sampled`; otherwise held for an operator (8.22.3) | executions that passed P1 are paid | none | none |
+
+Reusing a majority pair's output for the requeued primary would save one attempt but needs a Cell transition that S0.9.3 does not define; it is not specified [A]. Cost of the waste is visible in v (8.31). [D]
+
+### 8.25.3 Auditor assignment [D]
+
+An audit, third or blanket copy is assigned only to a member who: has `status` `active` and tier other than `restricted`; is not the executor of any earlier execution of this cell; is not in the same invite tree or device group as any earlier executor or, for a member job, as the requester; has opt-ins covering the cell (R8); and, when the pool allows, has tier `established` or `trusted`. If no such member exists the assignment falls back to any active non-restricted member meeting the other conditions and the metric `hamyar_verify_1_degraded_auditor_pool_total` counts it (name per S0.5 scheme). Where opt-ins allow, copies prefer different **attested** services; diversity lowers correlated error but raises benign mismatches [H]. [D][A]
+
+## 8.26 Blanket redundancy
+
+Blanket redundancy executes **every** copy up front, in parallel, instead of sampling (FD§4.4: triple redundancy only for new donors' first cells and high-risk templates). [D]
+
+| Trigger | Rule |
+| --- | --- |
+| New executor | The first `verify.new_donor_blanket_cells` (default 5) primary cells that a member submits in scope `exec` are executed as blanket groups. A counter `blanket_remaining` starts at that value in `member_state(m, exec)` and decreases when the group resolves or is cancelled by a content verdict; a lost lease does not consume it |
+| High-risk template | `TemplateVersion.verification.risk_class = high`: every primary cell of the template |
+| Integrity rework | A `rework` cell whose overturned cell had `overturn_reason = integrity` |
+| New reviewer | The first `verify.new_donor_blanket_cells` review cells of a member in scope `review` (8.27) |
+
+- Group size `n = verify.blanket_redundancy_n` (default 3). Copy 2 is a cell of kind `audit`, copies 3..n are kind `third`; every copy's `verification_method` is `blanket_redundancy`. The group is resolved by `resolve_group` (8.25.2) once at least `floor(n/2) + 1` executions passed P1; remaining outstanding copies are cancelled and are not paid. [D]
+- A blanket group **replaces** the random audit draw for that cell. The primary stays `flagged_for_audit` with reason `blanket_redundancy_pending` until it resolves. [D]
+- Assignment follows 8.25.3, and at least `n - 1` copies go to members of tier `established` or `trusted` when available, so new executors do not mainly verify each other. [D][A]
+- **Cost.** A blanket group adds `n - 1` paid verification cells per accepted primary. Expected cost share is in 8.31; blanket redundancy on a whole template makes `v >= n - 1 = 2.0` for that template, which `price.v_cap` (0.50) cannot price (`ISS-85`). No template is `high` by default in Phase 1 [A]. The new-executor rule costs `(n - 1) x verify.new_donor_blanket_cells` verification cells per new donor, charged to the jobs those cells belong to.
+
+## 8.27 Human review cells and their own gold cells
+
+Human review is the verification method for subjective templates (`verification.subjective = true`), where no comparator can decide equivalence, and the unit of work of channel 2 (8.35). [D]
+
+**Review cell (`cell_kind` = `review`).** The reviewer sees the template's input, one candidate output, and a fixed rubric; there is no executor identity, service or other verdict on screen. The verdict is `acceptable` or `unacceptable` plus one reason code from the rubric's closed list. **No free text** is accepted (it could carry instructions, personal data or links). Candidate outputs that were quarantined or flagged are never shown to reviewers. [D]
+
+**Flow for a subjective primary cell** (plan HUMAN_REVIEW, chosen by the random draw at the review sampling rate of 8.29, or forced): an `Audit` row with `verification_method = human_review` is created.
+
+| Step | Rule |
+| --- | --- |
+| R1 | One review cell. `acceptable` = `audit.matched` (the primary is accepted) |
+| R2 | `unacceptable` = `audit.mismatched`; a second review cell is created (`audit.third_requested`) |
+| R3 | If R1 and R2 disagree, a third review cell is created; majority of the three decides. Two `unacceptable` verdicts reject the primary with `reject.review_unacceptable` |
+| Pay | A review cell is accepted and paid when it passes its own checks (closed codes valid, not a gold mismatch) and is not outvoted; outvoted reviewers are rejected unpaid |
+| Observation | Reviewer verdict agreement is a reviewer observation in scope `review`. A verdict about a donor's output is a donor observation (source `review`) **only** when the review cell is accepted and the verdict is determinate |
+
+**Review gold.** A separate library (`gold_kind = review`) of candidate outputs with a known verdict. The substitution rule of 8.24.2 applies to review leases with the rate `verify.human_review_gold_rate` (default 0.10) clamped by the same floor and maximum as `g`. The library must keep both polarities: each polarity is at least `verify.review_gold_min_polarity_share` (initial configurable default 0.40, 8.37) of the active review gold, so a reviewer who always answers `acceptable` or always `unacceptable` fails about that share of gold and cannot coast. A review gold fail is `reject.gold_mismatch`; two consecutive review gold fails suspend review eligibility, not the member tier (8.35). [D]
+
+**Subjective templates and audits.** For a subjective template the sampled audit slot is a review panel (R1 to R3), never a comparator audit, so `verification.subjective = true` and a comparator are mutually exclusive in the template half's validation (`ISS-84`). [D]
