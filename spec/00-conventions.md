@@ -1,6 +1,6 @@
 # 0. Conventions and Shared Vocabulary
 
-*Spec part 0 · owner cell C-000 · binding on every other spec file. Written against Founding Document draft v0.1 (FD). Nothing here is legal advice and nothing here has been verified against any provider's terms or any law.*
+*Spec part 0 · owner cell C-027 (supersedes C-000) · binding on every other spec file. Written against Founding Document draft v0.1 (FD). Nothing here is legal advice and nothing here has been verified against any provider's terms or any law.*
 
 ## 0.1 How to use this file
 
@@ -900,7 +900,7 @@ One row per spec file. File names are proposals [A]: the `allowed_paths` of the 
 
 | Part | Required section (prompt structure) | File | Owner cell | Issue block (0.4) |
 | --- | --- | --- | --- | --- |
-| S0 | Conventions and decisions skeleton | `spec/00-conventions.md`, `spec/00-decisions.md` | `C-000` | `ISS-01`..`ISS-09` |
+| S0 | Conventions and decisions skeleton | `spec/00-conventions.md`, `spec/00-decisions.md` | `C-027` | `ISS-01`..`ISS-09` |
 | S1 | Purpose, scope, how to read (evidence-tag legend, reusing 0.2) | `spec/01-purpose.md` | `C-001` | `ISS-11`..`ISS-19` |
 | S2 | Issues found in the Founding Document, consolidated from every `## Issues raised` | `spec/02-issues.md` | `C-001` | `ISS-21`..`ISS-29` |
 | S3 | Assumptions [A] and open owner decisions | `spec/03-assumptions.md` | `C-001` | `ISS-31`..`ISS-39` |
@@ -927,7 +927,7 @@ One row per spec file. File names are proposals [A]: the `allowed_paths` of the 
 
 Notes [D]
 
-- `plan` means the owner cell is not named in the text available to `C-000`, and this file does not guess it; `C-001` fills the column at assembly [V]. The ids `C-001`..`C-006` come from the cell engine's dependents listing for this cell, which was truncated, and `C-022` and `C-023` from this cell's goal text [V].
+- `plan` means the owner cell is not named in the text available to `C-027`, and this file does not guess it; `C-001` fills the column at assembly [V]. The ids `C-001`..`C-006` come from the cell engine's dependents listing for this cell, which was truncated, and `C-022` and `C-023` from this cell's goal text [V].
 - A part split over several files uses the issue sub-blocks of 0.4 in file sort order. A part that is not split uses all nine ids.
 - Cross-part ownership of names: entities and enums are owned by `S0` (0.7, 0.8); states and events by `S0` (0.9) with guards and effects in `S5.*`..`S9.*`; parameters by `S0` (0.10.6) and `S16`; API conventions by `S0` (0.11) and operations by `S15`. A part that needs a missing name reports a convention gap (0.1).
 

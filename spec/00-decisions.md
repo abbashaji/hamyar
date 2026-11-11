@@ -1,6 +1,6 @@
 # 0. Biggest decisions and challenges to the instructions
 
-*Spec part 0 · owner cell C-000 · the short list the prompt asks for before the spec. Names, enums and numbers are fixed in `spec/00-conventions.md`; references below point there.*
+*Spec part 0 · owner cell C-027 (supersedes C-000) · the short list the prompt asks for before the spec. Names, enums and numbers are fixed in `spec/00-conventions.md`; references below point there.*
 
 ## 0.D.1 Decisions and challenges (ten lines)
 
