@@ -1731,7 +1731,6 @@ CREATE TABLE flag_answers (
   answered_on date NOT NULL,
   reviewer_admin_id text NOT NULL REFERENCES admin_users(id),
   supersedes_id text REFERENCES flag_answers(id),
-  CHECK ((flag_key = 'regional_availability') = (region IS NOT NULL) OR flag_key <> 'regional_availability'),
   CHECK (flag_key <> 'regional_availability' OR region IS NOT NULL),
   CHECK (answer = 'unknown' OR terms_copy_id IS NOT NULL)
 );
@@ -1822,3 +1821,97 @@ CREATE VIEW launch_gate_items_current AS
 ```
 
 The guard that sets `launch.members_may_join`, `launch.member_jobs_enabled` or `launch.minting_enabled` to true (S14.*) reads `launch_gate_items_current` for every gate in `launch.required_gate_ids` and requires `signed_off`, at least `launch.min_approved_services` approved registry entries, and locked pre-registrations. This part fixes only the data it reads. [D]
+
+## 5.15 Append-only guarantees and how corrections are modelled
+
+### 5.15.1 Guarantees [D]
+
+| Id | Guarantee | Enforced by |
+| --- | --- | --- |
+| `AO-1` | Rows of `ledger_entries`, `ledger_transactions` and `admin_actions` are never updated or deleted by any application role, migration or operator tool | privileges (S5.2.4), `BEFORE UPDATE OR DELETE OR TRUNCATE` trigger, sole writer `ledger_post()` |
+| `AO-2` | Every `IMM` table (S5.4) accepts inserts only | privileges and trigger |
+| `AO-3` | An `IMS` table changes only its named state columns, and the content columns of an approved or reviewed row never change | column-level triggers (`frozen_column`) |
+| `AO-4` | The ledger order is the gap-free `seq`; each `entry_hash` commits to the previous hash, so an edit, deletion or reordering of any past entry changes every later hash | chain, `UNIQUE (ledger_id, seq)`, daily checkpoint |
+| `AO-5` | A correction is always a new row that references the old one; nothing that was once visible to a member, requester or the public is silently altered | the correction models of S5.4 |
+| `AO-6` | Approvals are bound to content: an approval stored in `admin_actions` carries `subject_hash`, and a changed subject no longer matches it | `subject_hash` comparison in the guards |
+| `AO-7` | Parameter, policy, template, terms-copy and flag history is never lost: a value in force at any past time can be reproduced from the stamped version ids | `ParameterVersion`, `PolicyVersion`, `TemplateVersion`, `TermsCopy`, `FlagAnswer` are `IMM` or `IMS` |
+| `AO-8` | Retention removes payload and personal columns only, never an `IMM`/`CHN` row, except the `moderation` and `ops` rows listed in S5.15.4 | `retention_svc` column and table grants |
+
+`AO-1` to `AO-8` are guarantees of the data layer. They do not protect against an actor who controls the database superuser, the secrets and the backups together; that residual risk (insider and operator risk) is carried by the threat model in S10.* and is not claimed away here. [D]
+
+### 5.15.2 Chain verification and checkpoint [D]
+
+```
+verify_chain(from_seq, to_seq):
+  prev := entry(from_seq - 1).entry_hash  (genesis: 'sha256:' + 64 zeros)
+  FOR e IN ledger_entries WHERE seq BETWEEN from_seq AND to_seq ORDER BY seq:
+      ASSERT e.seq = previous seq + 1                      -- gap-free
+      ASSERT e.prev_hash = prev
+      ASSERT e.entry_hash = sha256(prev || rfc8785(e without entry_hash))
+      prev := e.entry_hash
+  RETURN prev
+
+checkpoint():                                              -- every ledger.checkpoint_interval_s
+  h := verify_chain(last_checkpoint_seq + 1, head.last_seq)
+  INSERT invariant_checks(run_kind = 'checkpoint', checkpoint_hash = h, ...)   -- exempt from purging
+  publish h on the public ledger page (S12.*) so an outsider can detect a rewrite of past entries
+```
+
+The same procedure runs after every restore (S5.2.4) and in the `full_recompute` run, together with the recomputation of every `DER` cache (account balances, lot remainders, escrow and Reserve totals, member counters). A mismatch inserts an `InvariantCheck` with `result = 'violated'` and raises the `Alarm` `ledger.invariant_violated`. The invariant list `INV-L<nn>` is owned by S6.*. [D]
+
+### 5.15.3 Corrections by entity group [D]
+
+| Group | Model |
+| --- | --- |
+| Ledger | A `reversal` transaction posts, for each entry of the original transaction, an entry in the opposite direction with `reverses_entry_id` set and the mirrored lot effect. It needs two distinct `AdminAction` approvals (`ledger.reversal_min_approvers` = 2). The original rows stay and remain visible; the public ledger shows both. Reversal is the only way to change a past balance. A reversal that would drive any account below its sign limit is refused and is handled by a further, explicit posting chosen by S6.* |
+| Cell acceptance found wrong (appeal, fraud) | `cell.overturned` (S0.9.3): the cell's state changes, the credit effect is a `reversal`, and a new `rework` cell is created; the `Submission` text is not edited |
+| Verification | A new `VerificationRecord` with `supersedes_id`; the earlier record stays for the false-accept and false-reject estimates |
+| Registry | A changed reading of a term is a new `FlagAnswer`; a changed document is a new `TermsCopy`; the entry's state moves through its machine |
+| Policy, template, parameter | A new `PolicyVersion`, `TemplateVersion` or `ParameterVersion`, stamped on what it governs from then on (prospective only, FD Principle 5) |
+| Launch gate | A new revision (`reopened`); earlier evidence and sign-offs remain |
+| Public record | A new `ChangeLogEntry` or `MetricSnapshot` with `supersedes_id`; the earlier one is never deleted |
+| Member data | Retention reduces rows; closure tombstones the member (S5.6.1) |
+
+### 5.15.4 Retention jobs [D]
+
+All jobs run as `retention_svc`, are idempotent, log one `Event` per run with counts only, and raise `retention.job_failed` when a run misses its schedule.
+
+| Class | What the job does | Parameter |
+| --- | --- | --- |
+| `job_bound` | `retention.job_payload_days` after the job is terminal: set to NULL `cells.input_payload`, `cells.rendered_prompt`, `submissions.output_text`, `uploads.storage_key` (and delete the object), `glossaries.terms`, `deliverables.storage_key` (and delete the object), `verification_records.details`; set the matching `payload_purged_at`. Hashes, states, manifests and ledger rows stay | `retention.job_payload_days` |
+| `member_bound` | On `closed` (member-initiated, or inactive for `retention.member_inactive_days`): tombstone the member, delete its keys, sessions, opt-ins, badge awards, referrals and teams-owned data (S5.6.1) | `retention.member_inactive_days` |
+| `moderation` | `retention.moderation_days` after resolution: add counts to a `MetricSnapshot`, then null the personal columns and delete the `Report` or `Appeal` row | `retention.moderation_days` |
+| `short` | Delete `sessions` past `retention.session_days`; null `devices.creation_ip_hash` after `retention.ip_hash_ttl_days`; purge devices as in S5.6.3 | `retention.session_days`, `retention.ip_hash_ttl_days` |
+| `ops` | Delete `events` after `retention.event_raw_days`; `invariant_checks` and `alarms` after `retention.ops_log_days` except `violated` and `checkpoint` rows | `retention.event_raw_days`, `retention.ops_log_days` |
+| `permanent` | Never touched | |
+
+If a retention parameter is lowered, the next run applies it to existing rows (shortening retention is a tightening, R10); raising it applies only to rows not yet purged, because purged data cannot be recovered. [D]
+
+## 5.16 Acceptance criteria for the data model
+
+Given / When / Then, to be implemented as tests by S18.* (`T-unit`, `T-prop`, `T-adv`). [D]
+
+- **`AC-data-01`** Given an application database role, when it issues `UPDATE`, `DELETE` or `TRUNCATE` on `ledger_entries`, then the statement fails with `immutable_row` and no row changes.
+- **`AC-data-02`** Given a committed ledger, when one historical entry is altered by a superuser in a test copy, then `verify_chain` returns a mismatch at that `seq` and the checkpoint check raises `ledger.invariant_violated`.
+- **`AC-data-03`** Given a transaction with `natural_key = 'payout:cel_x'` already posted, when `ledger_post()` is called again with the same key, then no entry is written and the stored result is returned.
+- **`AC-data-04`** Given a member account with balance 0, when an `escrow_hold` of any amount is posted, then the transaction fails and no `seq` is consumed.
+- **`AC-data-05`** Given a cell with an active lease, when a second lease for the same cell is inserted, then the unique index `leases_one_active_per_cell` rejects it and `LEASE_CONFLICT` is returned.
+- **`AC-data-06`** Given a lease with one submission, when a second row is inserted for the same `lease_id`, then it is rejected by uniqueness and the API replays the stored outcome (S0.9.3).
+- **`AC-data-07`** Given a `ServiceRegistryEntry` in `unreviewed`, when any job is moved to `quoted` for it, then `jobs_service_guard` refuses with `POLICY_REJECTED`; and given a service without a `TermsCopy`, when its status is set to `approved`, then `svc_approval_guard` refuses.
+- **`AC-data-08`** Given a `PolicyVersion` with `change_class = 'loosen'`, when it is inserted without a `changelog_entry_id`, then the `CHECK` rejects it (R10).
+- **`AC-data-09`** Given a `LaunchGateItem` revision with `status = 'signed_off'` and one distinct signer while `launch.min_signoffs` is 2, when it is inserted, then the trigger rejects it.
+- **`AC-data-10`** Given a database dump, when it is searched for IPv4 and IPv6 patterns, clear e-mail patterns and the bytes of any test provider credential, then there are no matches (S5.3.1).
+- **`AC-data-11`** Given the FD§3.3 example posted through `ledger_post()`, when the escrow of 276,000,000 `ucr` is settled, then `paid_ucr` = 264,000,000, `levy_ucr` = 12,000,000, `refunded_ucr` = 0, the escrow account balance is 0, and the sum of all account balances is 0.
+- **`AC-data-12`** Given a closed member, when the retention job has run, then the `members` row holds only `id`, `created_at`, `status`, `closed_at` and `row_version`, and every permanent row that referenced the member still resolves.
+
+## Issues raised
+
+Problems and gaps found while fixing the stored shape of the domain model. Resolutions are already applied in this file; C-001 consolidates them. This file uses `ISS-51`..`ISS-53` (the first of the part's files, S0.4). [D]
+
+| id | severity | fd_ref | issue | resolution | status |
+| --- | --- | --- | --- | --- | --- |
+| `ISS-51` | minor | prompt | Convention gaps: S0.8 lacks the enums listed in S5.2.5; S0.7 gives no table for team membership (the prompt needs teams), no recovery-key storage, no optional e-mail storage and no `ledger_heads` or rate-limit counter storage; `InvariantCheck` is `ops` yet daily checkpoints must outlive 30 days | Local enums added as [A] in S5.2.5; team membership is `members.team_id`; the recovery key is a `MemberKey` with `purpose = 'recovery'`; optional e-mail is `email_ciphertext` plus a keyed lookup hash on `members`; `ledger_heads` is infrastructure; `checkpoint` and `violated` `InvariantCheck` rows are exempt from `ops` purging; secret names in S5.3.3 are proposals for S10.* | proposed |
+| `ISS-52` | minor | prompt | S0.13 proposes `spec/05a-domain-model.md` for this part; the owning cell's path is `spec/05a-entities.md`. Both the entity part and the state-machine part carry a top-level `# 5.` heading, so `## 5.<m>` numbers can collide at assembly | The cell path is authoritative (S0.13). This file numbers its sections `5.1`..`5.16`; the state-machine part should continue from `5.17` or C-001 renumbers at assembly. References to this file use `S5.<m>` with the numbers above | needs_owner |
+| `ISS-53` | major | FD§5.6, FD§8.3, FD§5.7 | Four places where "permanent, never edited" and a changing state conflict: (1) `LaunchGateItem` has the states `open`, `evidence_attached`, `signed_off`, `reopened` but evidence and sign-offs must stay as history; (2) a kill switch has a state history; (3) approvals of templates, services and ledger reversals need a store but S0.7 has no approval entity; (4) FD§5.6 puts the volunteer id in the manifest but requesters must never see it | (1) revision rows with a current view; (2) `KillSwitch` rows are state changes, the latest wins; (3) approvals are `AdminAction` rows with `subject_hash`, counted by guards; (4) the manifest has an internal form with `volunteer_handle` and a redacted export; only the export reaches requesters | proposed |
+
+Convention additions made by this part (not issues, listed so C-001 can fold them back): the local enums of S5.2.5; the columns `members.team_id`, `members.team_joined_at`, `members.email_*`, `cells.credit_txn_id`, `ledger_entries.lot_effect`, `leases.optin_version`; the reference table `ledger_entry_type_rules`; the views `effective_flag_answers`, `kill_switch_current`, `launch_gate_items_current`; the infrastructure table `ledger_heads`; the abbreviations `IMM`, `CHN`, `IMS`, `MUT`, `DER` and `AO-1`..`AO-8`; and the acceptance ids `AC-data-01`..`AC-data-12`.
