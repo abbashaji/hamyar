@@ -1306,3 +1306,199 @@ Result of one run of a ledger invariant (prompt C). [D]
 | `acknowledged_by_admin_id`, `acknowledged_at`, `resolved_at` | id, ts, ts | null | |
 
 **Retention** `retention.ops_log_days` after `resolved_at`. A `critical` ledger alarm also engages `kill.all_minting` and `kill.all_new_jobs` by policy (S14.*); that is an `AdminAction` by `system`, not a column here.
+
+## 5.14 DDL for the critical entities
+
+SQL-like (PostgreSQL dialect) [A]. It is normative for names, types, nullability, keys and constraints; the migration tool and exact syntax belong to S4.*. `is_id(v, p)` returns true when `v ~ '^' || p || '_[0-9a-hjkmnp-tv-z]{26}$'`; `is_hash(v)` checks `sha256:` plus 64 hex; `set_row_version()` is the `BEFORE UPDATE` trigger of S5.2.2. Check constraints on enum columns repeat the values of S0.8 and S5.2.5; the lists are abbreviated `-- enum(...)` where they are long. All foreign keys are `ON DELETE RESTRICT` (S5.2.6). [D]
+
+### 5.14.1 Member and Device
+
+```sql
+CREATE TABLE devices (
+  id text PRIMARY KEY CHECK (is_id(id,'dev')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  row_version int NOT NULL DEFAULT 1,
+  device_token_hash bytea UNIQUE CHECK (octet_length(device_token_hash) = 32),  -- NULL after purge
+  hash_key_version int NOT NULL,
+  status text NOT NULL DEFAULT 'active' CHECK (status IN ('active','blocked')),
+  first_seen_day date NOT NULL,
+  last_seen_day date NOT NULL,
+  creation_ip_hash bytea CHECK (octet_length(creation_ip_hash) = 32),
+  ip_hash_key_version int,
+  creation_ip_hash_expires_at timestamptz,
+  grants_claimed int NOT NULL DEFAULT 0 CHECK (grants_claimed >= 0),
+  CHECK ((creation_ip_hash IS NULL) = (creation_ip_hash_expires_at IS NULL))
+);
+CREATE INDEX devices_ip ON devices (creation_ip_hash, created_at) WHERE creation_ip_hash IS NOT NULL;
+
+CREATE TABLE members (
+  id text PRIMARY KEY CHECK (is_id(id,'mem')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  row_version int NOT NULL DEFAULT 1,
+  status text NOT NULL DEFAULT 'active' CHECK (status IN ('active','suspended','banned','closed')),
+  status_changed_at timestamptz NOT NULL DEFAULT now(),
+  trust_tier text NOT NULL DEFAULT 'new' CHECK (trust_tier IN ('new','established','trusted','restricted')),
+  tier_before_restriction text CHECK (tier_before_restriction IN ('new','established','trusted')),
+  restricted_until timestamptz,
+  locale text CHECK (locale IN ('fa','en')),            -- NULL only on a closed tombstone
+  digits text CHECK (digits IN ('latin','persian')),
+  calendar text CHECK (calendar IN ('jalali','gregorian')),
+  time_zone text,
+  creating_device_id text REFERENCES devices(id),
+  invite_id text REFERENCES invites(id) DEFERRABLE INITIALLY DEFERRED,
+  invite_root_member_id text REFERENCES members(id),
+  invite_depth int NOT NULL DEFAULT 0 CHECK (invite_depth >= 0),
+  team_id text REFERENCES teams(id) DEFERRABLE INITIALLY DEFERRED,
+  team_joined_at timestamptz,
+  email_ciphertext bytea, email_key_version int,
+  email_lookup_hash bytea UNIQUE CHECK (octet_length(email_lookup_hash) = 32),
+  email_verified_at timestamptz,
+  accepted_cells_count int NOT NULL DEFAULT 0,
+  first_accepted_at timestamptz,
+  reliability_ppm bigint CHECK (reliability_ppm BETWEEN 0 AND 1000000),
+  reliability_obs int NOT NULL DEFAULT 0,
+  starter_granted_at timestamptz,
+  recovery_cooldown_until timestamptz,
+  last_active_day date,
+  closed_at timestamptz,
+  CHECK ((trust_tier = 'restricted') = (tier_before_restriction IS NOT NULL)),
+  CHECK (status <> 'closed' OR closed_at IS NOT NULL),
+  CHECK ((email_ciphertext IS NULL) = (email_lookup_hash IS NULL)),
+  CHECK (status = 'closed' OR (locale IS NOT NULL AND digits IS NOT NULL AND calendar IS NOT NULL))
+);
+CREATE INDEX members_status ON members (status, trust_tier);
+CREATE INDEX members_team ON members (team_id) WHERE team_id IS NOT NULL;
+CREATE INDEX members_tree ON members (invite_root_member_id);
+CREATE INDEX members_device ON members (creating_device_id, created_at);
+```
+
+### 5.14.2 Cell
+
+```sql
+CREATE TABLE cells (
+  id text PRIMARY KEY CHECK (is_id(id,'cel')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  row_version int NOT NULL DEFAULT 1,
+  job_id text NOT NULL REFERENCES jobs(id),
+  cell_kind text NOT NULL CHECK (cell_kind IN ('primary','gold','audit','third','review','rework')),
+  ordinal int CHECK (ordinal >= 1),
+  state text NOT NULL DEFAULT 'queued' CHECK (state IN ('queued','leased','submitted','flagged_for_audit',
+    'accepted','rejected','expired','suspended','cancelled','voided','exhausted','overturned')),
+  attempt int NOT NULL DEFAULT 1 CHECK (attempt >= 1),            -- upper bound is parameter cell.max_attempts
+  template_version_id text NOT NULL REFERENCES template_versions(id),
+  purpose text NOT NULL CHECK (purpose IN ('P0','P1','P2','P3')),
+  license text NOT NULL CHECK (license IN ('L0','L1','L2','L3')),
+  sensitivity text NOT NULL CHECK (sensitivity IN ('S0','S1')),   -- S2 and S3 never reach a cell
+  service_requirement text NOT NULL CHECK (service_requirement IN ('M0','M1','M2')),
+  pinned_service_ids text[] NOT NULL DEFAULT '{}',
+  topic_category_id text REFERENCES topic_categories(id),
+  input_payload text, input_hash text NOT NULL CHECK (is_hash(input_hash)),
+  rendered_prompt text, rendered_prompt_hash text NOT NULL CHECK (is_hash(rendered_prompt_hash)),
+  input_chars int NOT NULL CHECK (input_chars >= 0),
+  gold_cell_id text REFERENCES gold_cells(id),
+  audit_id text REFERENCES audits(id) DEFERRABLE INITIALLY DEFERRED,
+  subject_cell_id text REFERENCES cells(id),
+  subject_submission_id text REFERENCES submissions(id) DEFERRABLE INITIALLY DEFERRED,
+  priority_key bigint NOT NULL,
+  queued_at timestamptz NOT NULL DEFAULT now(),
+  earliest_lease_at timestamptz,
+  current_lease_id text REFERENCES leases(id) DEFERRABLE INITIALLY DEFERRED,
+  accepted_submission_id text UNIQUE REFERENCES submissions(id) DEFERRABLE INITIALLY DEFERRED,
+  accepted_at timestamptz,
+  accept_policy_version_id text REFERENCES policy_versions(id),
+  last_reject_code text CHECK (last_reject_code ~ '^reject\.[a-z_]+$'),
+  credit_txn_id text UNIQUE REFERENCES ledger_transactions(id),
+  payload_purged_at timestamptz,
+  CHECK ((cell_kind = 'primary') = (ordinal IS NOT NULL)),
+  CHECK ((cell_kind = 'gold') = (gold_cell_id IS NOT NULL)),
+  CHECK ((cell_kind IN ('audit','third')) = (audit_id IS NOT NULL)),
+  CHECK ((cell_kind = 'rework') = (subject_cell_id IS NOT NULL)),
+  CHECK ((cell_kind = 'review') = (subject_submission_id IS NOT NULL)),
+  CHECK ((state = 'leased') = (current_lease_id IS NOT NULL)),
+  CHECK (state NOT IN ('accepted','overturned') OR accepted_submission_id IS NOT NULL),
+  CHECK (credit_txn_id IS NULL OR state IN ('accepted','overturned'))
+);
+CREATE UNIQUE INDEX cells_primary_ordinal ON cells (job_id, ordinal) WHERE cell_kind = 'primary';
+CREATE INDEX cells_queue ON cells (priority_key) WHERE state = 'queued';
+CREATE INDEX cells_job_state ON cells (job_id, state);
+CREATE INDEX cells_subject ON cells (subject_cell_id) WHERE subject_cell_id IS NOT NULL;
+CREATE INDEX cells_services ON cells USING gin (pinned_service_ids);
+-- Trigger cells_frozen: purpose, license, sensitivity, service_requirement, pinned_service_ids,
+-- template_version_id, input_hash, rendered_prompt_hash, job_id and cell_kind never change after insert.
+```
+
+### 5.14.3 Lease
+
+```sql
+CREATE TABLE leases (
+  id text PRIMARY KEY CHECK (is_id(id,'lse')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  row_version int NOT NULL DEFAULT 1,
+  cell_id text NOT NULL REFERENCES cells(id),
+  member_id text NOT NULL REFERENCES members(id),
+  device_id text REFERENCES devices(id),
+  attempt int NOT NULL CHECK (attempt >= 1),
+  state text NOT NULL DEFAULT 'active' CHECK (state IN ('active','submitted','expired','released','revoked')),
+  nonce_hash bytea NOT NULL CHECK (octet_length(nonce_hash) = 32),
+  issued_at timestamptz NOT NULL,
+  expires_at timestamptz NOT NULL,
+  timeout_s_applied int NOT NULL CHECK (timeout_s_applied > 0),
+  extensions_used int NOT NULL DEFAULT 0 CHECK (extensions_used >= 0),
+  optin_version int NOT NULL,
+  policy_version_id text NOT NULL REFERENCES policy_versions(id),
+  ended_at timestamptz,
+  end_reason text,   -- enum(submitted, expired, declined, released, revoked_policy, revoked_service, revoked_job_cancelled, revoked_integrity)
+  CHECK (expires_at > issued_at),
+  CHECK ((state = 'active') = (ended_at IS NULL)),
+  UNIQUE (cell_id, attempt)
+);
+CREATE UNIQUE INDEX leases_one_active_per_cell ON leases (cell_id) WHERE state = 'active';   -- the race guard
+CREATE INDEX leases_reaper ON leases (expires_at) WHERE state = 'active';
+CREATE INDEX leases_member_active ON leases (member_id) WHERE state = 'active';
+```
+
+### 5.14.4 Submission
+
+```sql
+CREATE TABLE submissions (
+  id text PRIMARY KEY CHECK (is_id(id,'sub')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  row_version int NOT NULL DEFAULT 1,
+  lease_id text NOT NULL UNIQUE REFERENCES leases(id),            -- one submission per lease
+  cell_id text NOT NULL REFERENCES cells(id),
+  member_id text NOT NULL REFERENCES members(id),
+  volunteer_handle text NOT NULL CHECK (volunteer_handle ~ '^vol_[0-9a-f]{32}$'),
+  handle_key_version int NOT NULL,
+  state text NOT NULL DEFAULT 'received' CHECK (state IN ('received','schema_failed','checks_failed',
+    'checks_passed','quarantined','accepted','rejected')),
+  output_text text,                                              -- NULL after purge
+  output_hash text NOT NULL CHECK (is_hash(output_hash)),
+  normalized_output_hash text NOT NULL CHECK (is_hash(normalized_output_hash)),
+  output_simhash bigint NOT NULL,
+  output_chars int NOT NULL CHECK (output_chars >= 0),
+  output_bytes int NOT NULL CHECK (output_bytes >= 0),           -- upper bound is cell.envelope.max_submission_bytes
+  reported_service_id text REFERENCES service_registry_entries(id),
+  reported_model_label text CHECK (char_length(reported_model_label) <= 80),
+  submitted_at timestamptz NOT NULL,
+  elapsed_s int NOT NULL CHECK (elapsed_s >= 0),
+  reject_code text CHECK (reject_code ~ '^reject\.[a-z_]+$'),
+  quarantine_reason text CHECK (quarantine_reason IN ('output_url','code_to_run','action_request','other_flag')),
+  checks_report jsonb,
+  decided_at timestamptz,
+  accept_policy_version_id text REFERENCES policy_versions(id),
+  CHECK ((state = 'quarantined') = (quarantine_reason IS NOT NULL OR state = 'quarantined' AND false)),
+  CHECK (state NOT IN ('rejected','schema_failed','checks_failed') OR reject_code IS NOT NULL)
+);
+CREATE INDEX submissions_cell ON submissions (cell_id);
+CREATE INDEX submissions_member ON submissions (member_id, submitted_at);
+CREATE INDEX submissions_dup ON submissions (normalized_output_hash);
+CREATE INDEX submissions_simhash ON submissions (output_simhash);
+CREATE INDEX submissions_open ON submissions (state) WHERE state IN ('received','checks_passed','quarantined');
+-- Trigger submissions_frozen: every column except state, reject_code, quarantine_reason, decided_at,
+-- accept_policy_version_id, checks_report, output_text (only to NULL) is immutable after insert.
+```
