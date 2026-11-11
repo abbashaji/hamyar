@@ -337,3 +337,256 @@ The small machines of S0.9.8 that move credit are specified here because settlem
 | RT-02 | Reservation | held | `reservation.activated` | activated (T) | The member confirms the job for the booked day (JT-09 for that job) | `reservation_activate`, entry `escrow_release` reservation escrow -> job escrow, key `resact:<rsn_id>`; JT-09 then posts no `hold` |
 | RT-03 | Reservation | held | `reservation.cancelled` | cancelled (T) | The member cancels; fees or none by `reservation.free_cancel_notice_s` (S6.*) | `cancel`, entry `refund`, key `rsncancel:<rsn_id>` |
 | RT-04 | Reservation | held | `reservation.expired` | expired (T) | Timer `reservation_expirer`: booked day passed unused | `cancel`, entry `refund`, key `rsnexpire:<rsn_id>` |
+
+## 5.29 Idempotency, concurrency and race handling
+
+This section states what the system guarantees, exactly, and the mechanism behind each guarantee. A guarantee holds at every instant, including during a crash, unless it says otherwise. Any mechanism that provides the same guarantee is allowed; the mechanisms written here are the reference. [D]
+
+### 5.29.1 Storage requirements and the guarantee list
+
+S4.* chooses the concrete store; it MUST provide all of the following, because without them the guarantees below cannot hold and the ledger cannot be hosted. [D]
+
+| id | Requirement |
+| --- | --- |
+| SR-1 | Atomic multi-row transactions covering state tables, ledger tables, outbox and idempotency records together |
+| SR-2 | Exclusive and shared row locks, or an equivalent CAS on `row_version` with retry |
+| SR-3 | Unique constraints, including partial unique indexes (`UNIQUE (cell_id) WHERE state = 'active'`) |
+| SR-4 | Isolation of at least read committed with the lock rules of 5.29.2; serializable is allowed if serialization failures are retried |
+| SR-5 | One authoritative clock, read inside the statement (5.21.4) |
+| SR-6 | Durable commit: an acknowledged commit survives a crash (replication mode chosen by S4.*) |
+
+| id | Guarantee (exact) | Mechanism | Sections |
+| --- | --- | --- | --- |
+| GU-01 | At every instant a cell has at most one `active` lease | Partial unique index on `leases(cell_id)` where `state = 'active'`, plus the CAS on the cell | 5.29.3 |
+| GU-02 | Among any number of concurrent lease attempts on one cell, at most one succeeds, and exactly one succeeds if the cell is leasable; the others receive `409 LEASE_CONFLICT` and change nothing | CAS `queued` -> `leased` with `active_lease_id IS NULL` | 5.29.3 |
+| GU-03 | A nonce is valid for exactly one lease and one member; only the holder who presents it can submit; the server stores only its SHA-256 | 128-bit CSPRNG nonce, hash compare in constant time, binding to `(lease_id, member_id)` | 5.29.4 |
+| GU-04 | A lease has at most one `Submission`; a replay of the same submission returns the stored outcome and emits nothing | `UNIQUE (lease_id)` on `submissions`; CAS on the lease | 5.29.4 |
+| GU-05 | For one lease, exactly one of `lease.submission_received` and `lease.expired` (or `released`, `revoked`) happens, never two; the winner is the first CAS on the lease row | Both transitions are `UPDATE ... WHERE state = 'active'` with disjoint clock predicates | 5.29.4 |
+| GU-06 | No lease is issued when its guards forbid it at the commit instant; a pause or stop is cleaned up by fan-out within one worker pass, and nothing is paid in that window | Guards read under shared locks; `G-accept` re-checks at acceptance | 5.23.2, 5.29.3 |
+| GU-07 | Every accepted cell has exactly one `mint` or `payout` ledger transaction, and every cell that is not accepted has none | Acceptance and ledger posting in one transaction; key `mint:<cell_id>` or `payout:<cell_id>` | 5.29.6 |
+| GU-08 | A rejected, voided, cancelled, exhausted or overturned-and-reversed cell leaves no net credit with the donor | No payment before acceptance; `reversal` for overturned cells | 5.23.1 |
+| GU-09 | A job is settled exactly once; its escrow ends at exactly 0; payouts + levy + refund = the amount held, with zero tolerance | Key `settle:<job_id>` or `cancel:<job_id>`; CAS on job and escrow | 5.29.8 |
+| GU-10 | No double-spend: a member balance never goes below 0, a job has at most one `hold`, a reservation at most one `hold` and one activation | Conditional balance update, lot consumption in the same transaction, unique keys | 5.29.7 |
+| GU-11 | Crash atomicity: after any crash a transition is either fully applied or not at all | 5.21.2 | 5.21.2 |
+| GU-12 | Credit earned never exceeds the member cap K x tier multiplier, and Commons minting never exceeds `mint.monthly_cap_credits` or `mint.per_member_daily_cap_credits` | Headroom reserved at lease, consumed at acceptance | 5.29.3 |
+| GU-13 | Events are delivered at least once, in order per entity, and every consumer is idempotent on `event_id` | Outbox in the same transaction, relay, consumer dedupe | 5.29.10 |
+| GU-14 | An API call with an `Idempotency-Key` takes effect at most once per key within `api.idempotency_ttl_s`, and its stored response is replayed | S0.11.5 | 5.29.5 |
+
+### 5.29.2 Lock order [D]
+
+Every transaction acquires locks in this order and never goes back; two rows of the same kind are taken in ascending id. This removes deadlocks between request paths and workers.
+
+| Order | Row | Taken by |
+| --- | --- | --- |
+| 1 | `Member` (exclusive) | `lease()` (serializes one member's lease cap), JT-09, MS-* |
+| 2 | Policy pointer row (shared; exclusive for publish) | `G-accept`, JT-09; `policy.version_published` |
+| 3 | `Job` (shared on request paths; exclusive for JT-11 to JT-20 and workers) | all |
+| 4 | `Cell` (exclusive) | lease, submit, accept, fan-out |
+| 5 | `Lease` (exclusive) | submit, reaper, extension |
+| 6 | `Submission` | verification pipeline |
+| 7 | `Escrow` | accept (payout), settle |
+| 8 | `LedgerAccount` rows, ascending id | any ledger posting |
+| 9 | Ledger head (sequence and hash chain) | the last step of any ledger posting, held only for the append |
+
+The ledger head serializes ledger commits to keep one hash chain (S0.6.4) [A]; because it is taken last and held only for the append, contention is bounded by the append time, not by the length of the transaction.
+
+### 5.29.3 Leasing
+
+**Offer is not a hold.** A card shown to a donor reserves nothing; only a successful `lease()` does. Candidate selection for a server-chosen card uses `SELECT ... FOR UPDATE SKIP LOCKED` (or a CAS loop) on `queued` cells and then runs the same `lease()` transaction, so two donors are never handed the same cell by the selector, and the CAS below remains the authority. [D]
+
+**`G-leasable`** (all must hold; the error is returned for the first failure):
+
+| Check | Error |
+| --- | --- |
+| Member `status` = `active` | `403 FORBIDDEN` |
+| `launch.members_may_join` true | `403 LAUNCH_GATE_CLOSED` |
+| `kill.member.<mem_id>` and `kill.template.<tpl_id>` released | `503 KILL_SWITCH_ENGAGED` |
+| Job `admitted` or `running`; template version `approved` | `409 STATE_CONFLICT`, `details.reason` = `job_not_leasable` |
+| Commons job: `launch.minting_enabled` true and `kill.all_minting` released | `403 LAUNCH_GATE_CLOSED` / `503 KILL_SWITCH_ENGAGED` |
+| R8: the cell's purpose, sensitivity, license, service requirement and topic are covered by the member's `OptIn` | `422 UNPROCESSABLE`, `details.reason` = `optin_mismatch` |
+| No self-dealing: the member is not the job's requester, nor linked to the requester by S9.* rules | `403 FORBIDDEN` |
+| Independence: the member is not in `independence_set(cell)` (below) | `409 STATE_CONFLICT`, `details.reason` = `not_independent` |
+| The member's `active` leases < `lease.max_active_per_member` | `422 CAP_EXCEEDED`, `details.cap` = `lease.max_active_per_member` |
+| Rate: `ratelimit.member_leases_per_hour` | `429 RATE_LIMITED` |
+| Earning headroom: `cap_ucr(member) - balance - reserved_ucr(member) >= 1,000,000`, where `cap_ucr` = `credit.member_cap_credits` x the tier's `trust.cap_multiplier.*` x 1,000,000 and `reserved_ucr` = 1,000,000 x the member's cells in `leased`, `submitted`, `flagged_for_audit` (derived from state under the member lock, so it cannot drift) | `422 CAP_EXCEEDED`, `details.cap` = `credit.member_cap_credits` |
+| Commons job: mint headroom, one conditional update: `UPDATE mint_budget SET reserved_ucr = reserved_ucr + 1,000,000 WHERE period = :utc_month AND minted_ucr + reserved_ucr + 1,000,000 <= cap_ucr` (and the same for the member's UTC day under `mint.per_member_daily_cap_credits`); 0 rows means no headroom | `422 CAP_EXCEEDED`, `details.cap` = `mint.monthly_cap_credits` |
+
+The mint-headroom reservation is the answer to a cap that is reached while cells are in flight: no Commons cell is leased unless its mint is already covered, so acceptance can never find the cap exhausted (GU-12). The reservation is released by every transition that leaves `leased`, `submitted` or `flagged_for_audit` without paying (CT-04, CT-05, CT-08, CT-10, CT-13, CT-15, CT-16, CT-18) and consumed by CT-06 and CT-09 in the same transaction as the `mint`. S6.* owns the counter's table and the reconciliation check CK-05. [D][A]
+
+**`independence_set(cell)`** [D]: the members who submitted any earlier attempt of this cell; for an `audit` or `third` cell also the member who submitted the audited cell and every earlier executor in its chain; for a `gold` cell also every member who already received this gold cell on any attempt (answer harvesting); S9.* adds linked devices and invite-tree relatives. A member who only declined, let a lease expire or was revoked is not excluded.
+
+**At most one active lease per cell, and linearizable acquisition (GU-01, GU-02).** Two independent mechanisms: the CAS on the cell row (`state = 'queued' AND active_lease_id IS NULL AND row_version = :seen`) and the partial unique index on `leases`. If the first is bypassed by a defect, the second still refuses the insert and the transaction fails; `ledger_invariant_checker` also checks GU-01 as CK-01 (5.29.10).
+
+```
+def lease(principal, cell_id, idem_key, body):
+    check_auth(principal, scheme='member')
+    rate_limit(principal.member_id, 'ratelimit.member_leases_per_hour')
+    rec = idempotency.begin(principal.id, 'POST', '/v1/cells/{id}/leases', idem_key, body_hash(body))
+    if rec.is_replay:                                   # same key, same body (S0.11.5)
+        return replay_lease_response(rec)               # rotates the nonce, see below
+    # IDEMPOTENCY_IN_PROGRESS and IDEMPOTENCY_KEY_MISMATCH are raised inside begin()
+    with tx():
+        m    = lock_exclusive(Member, principal.member_id)              # order 1
+        job0 = read(Job, read(Cell, cell_id).job_id)
+        job  = lock_shared(Job, job0.id)                               # order 3
+        cell = lock_exclusive(Cell, cell_id)                           # order 4
+        if cell.state != 'queued' or cell.active_lease_id is not None:
+            raise Error(409, 'LEASE_CONFLICT')                         # race lost, nothing written
+        g_leasable(m, job, cell)                                       # table above; may raise
+        lse = new_id('lse')
+        nonce = csprng_bytes(lease.nonce_bytes)                        # 16 bytes
+        n = sql('UPDATE cells SET state=:leased, active_lease_id=:lse, row_version=row_version+1 '
+                'WHERE id=:id AND state=:queued AND active_lease_id IS NULL AND row_version=:seen')
+        if n != 1: raise Error(409, 'LEASE_CONFLICT')
+        sql('INSERT INTO leases(id, cell_id, attempt, member_id, state, nonce_hash, '
+            'issued_at, expires_at, hard_expires_at, extensions) VALUES (:lse, :id, :attempt, :m, :active, '
+            'sha256(:nonce), now(), now()+:timeout, now()+:timeout+:grace, 0)')   # partial unique index
+        if cell.job.origin == 'commons': mint_headroom.reserve(utc_month(), m.id, 1_000_000)
+        record_transition(cell, 'cell.leased'); record_transition(lease, 'lease.issued')
+        if job.state == 'admitted': transition(job, 'job.started')     # JT-10, same transaction
+        response = lease_response(lse, cell, nonce_omitted_in_store=True)
+        idempotency.complete(rec, 201, response_without_nonce)
+    return 201, response_with(nonce)                                    # the only time the nonce is sent
+```
+
+`timeout` = `lease.timeout_s`, `grace` = `lease.submit_grace_s` (initial configurable defaults 1,200 s and 120 s). **Replay and the nonce.** The nonce is never stored, so a replayed acquisition response cannot repeat it. `replay_lease_response` rotates it: `UPDATE leases SET nonce_hash = sha256(:new_nonce) WHERE id = :lse AND state = 'active'`, returns the lease with the new nonce, and the lost first nonce is dead. If the lease is no longer `active` it returns the stored response without a nonce and the current state. Only the same principal with the same key and body can reach this path. [D]
+
+### 5.29.4 Nonce, submission, duplicates and the expiry race
+
+**Nonce rules** [D]. 128 bits from the OS CSPRNG; stored as SHA-256 only; compared in constant time; valid only with its `lease_id` and the member who holds the lease; never reused after rotation; never logged. S9.* may add a per-lease marker inside the wrapped prompt; this part requires only the binding above. A submission whose lease is missing or belongs to another member is `404 NOT_FOUND` (existence does not leak); a correct lease with a wrong nonce is `403 FORBIDDEN` with `details.reason` = `nonce_invalid`, changes no state, leaves the lease `active`, and is counted as an abuse signal (S9.*; `reject.nonce_invalid` names it for the donor-facing history).
+
+**Pre-checks that consume nothing** [D]: a body over `cell.envelope.max_submission_bytes` is `413 PAYLOAD_TOO_LARGE` (`reject.size_exceeded` is shown to the donor) and an empty body is `400 VALIDATION_FAILED`; in both cases the lease stays `active` and the donor may paste again until `hard_expires_at`. Schema and quality failures of a received body are not pre-checks: they follow SBT-02 and CT-08.
+
+```
+def submit(principal, lease_id, nonce, body, idem_key):
+    check_auth(principal, scheme='member')
+    if bytes(body.content) > cell.envelope.max_submission_bytes: raise Error(413, 'PAYLOAD_TOO_LARGE')
+    if is_blank(body.content): raise Error(400, 'VALIDATION_FAILED')
+    rate_limit(principal.member_id, 'ratelimit.member_submissions_per_hour')
+    rec = idempotency.begin(principal.id, 'POST', '/v1/leases/{id}/submission', idem_key, body_hash(body))
+    if rec.is_replay: return rec.stored_response
+    lse0 = read(Lease, lease_id)
+    if lse0 is None or lse0.member_id != principal.member_id: raise Error(404, 'NOT_FOUND')
+    if not ct_equal(sha256(nonce), lse0.nonce_hash): abuse.count('nonce_invalid', principal); raise Error(403, 'FORBIDDEN')
+    with tx():
+        cell = lock_exclusive(Cell, lse0.cell_id)                       # order 4
+        lse  = lock_exclusive(Lease, lease_id)                          # order 5
+        if lse.state == 'submitted':                                    # natural replay
+            sub = read(Submission, lease_id=lease_id)
+            if sub.content_hash == sha256(body.content): return 200, outcome_of(sub)    # no event
+            raise Error(409, 'STATE_CONFLICT', reason='already_submitted')              # body discarded
+        n = sql('UPDATE leases SET state=:submitted, submitted_at=now() '
+                'WHERE id=:id AND state=:active AND hard_expires_at >= now()')
+        if n != 1:
+            raise Error(410, 'LEASE_EXPIRED', reason=lse.state if lse.state != 'active' else 'expired')
+        n = sql('UPDATE cells SET state=:submitted, row_version=row_version+1 '
+                'WHERE id=:cell AND state=:leased AND active_lease_id=:lse')
+        if n != 1: alarm('invariant: active lease on a non-leased cell'); raise Error(500, 'INTERNAL')
+        sql('INSERT INTO submissions(id, lease_id, cell_id, state, content, content_hash, bytes, '
+            'reported_service_id, reported_model, time_to_submit_s, late) VALUES (...)')   # UNIQUE(lease_id)
+        record_transition(lease, 'lease.submission_received'); record_transition(cell, 'cell.submitted')
+        record_transition(submission, 'submission.received')
+        enqueue_verification(submission)                                 # through the outbox
+        idempotency.complete(rec, 202, submission_resource)
+    return 202, submission_resource
+```
+
+**Duplicate submission handling** [D]
+
+| Case | Outcome | Mechanism |
+| --- | --- | --- |
+| D1 Same `Idempotency-Key`, same body, within `api.idempotency_ttl_s` | The stored response is replayed with `Idempotent-Replayed: true`; nothing is written or emitted | S0.11.5 |
+| D2 Same key, different body | `422 IDEMPOTENCY_KEY_MISMATCH` | S0.11.5 |
+| D3 Same key while the first call still runs | `409 IDEMPOTENCY_IN_PROGRESS` with `Retry-After` | S0.11.5 |
+| D4 New key, same lease, same content (a client retry that lost its key) | `200` with the stored outcome; no event | lease `submitted` and equal `content_hash` |
+| D5 New key, same lease, different content (two tabs, an edited paste) | `409 STATE_CONFLICT`, `already_submitted`; the second body is discarded, never stored; an abuse counter is incremented (S9.*) | lease `submitted`, hash differs |
+| D6 Any submission after the lease left `active` by expiry, release or revocation | `410 LEASE_EXPIRED` with `details.reason` in `expired`, `released`, `revoked`; the donor's UI explains; nothing is stored | CAS finds `state` != `active` |
+| D7 Content identical or near-identical (>= `verify.duplicate_similarity_threshold`) to another donor's output for the same cell or audit chain | The first is judged on its merits; the later one is `reject.duplicate_of_other_output` at CT-08, and S9.* raises a copy-paste finding (MT-06 trigger) | S9.* comparator, not a concurrency matter |
+| D8 The same content for two different leases of the same member on different cells | Allowed; two independent submissions | no constraint |
+
+**Lease expiry while a submission is arriving** [D]. The two competing statements are `UPDATE leases SET state = 'submitted' ... WHERE id = :id AND state = 'active' AND hard_expires_at >= now()` and the reaper's `UPDATE leases SET state = 'expired' ... WHERE id = :id AND state = 'active' AND hard_expires_at < now()`. Both need the lease row lock and both test `state = 'active'`, so exactly one succeeds (GU-05).
+
+| Interleaving | Outcome |
+| --- | --- |
+| Submit commits first | Lease `submitted`; the reaper's update affects 0 rows and the candidate is skipped. The donor is paid if the work passes |
+| Reaper commits first | The submit's update affects 0 rows: `410 LEASE_EXPIRED`; the donor's work is lost, the cell requeues (CT-11) |
+| Submit arrives within `[expires_at, hard_expires_at]` | Accepted, `late` = true (the grace period exists for this) |
+| Submit arrives after `hard_expires_at` but before the reaper ran | Refused: the clock predicate is false even though the row still says `active`. The result does not depend on reaper timing |
+| Submit arrives after the cell was re-leased to another donor | Refused, as above: the old lease is `expired` and has a different `lease_id` and nonce |
+
+The guarantee is mutual exclusion, not boundary fairness: a submission arriving within the commit latency of `hard_expires_at` can lose. The documented margin is `lease.submit_grace_s`. [D][H: 120 s is enough for copy-paste delay; replaced by the `CAL` measurement of copy-paste timing]
+
+### 5.29.5 Idempotency: layers, natural keys and ledger keys
+
+Four layers, from the outside in. Each layer alone is enough to prevent a double effect on its own object; together they cover a client that loses its key. [D]
+
+| Layer | Mechanism | Covers |
+| --- | --- | --- |
+| L1 HTTP | `Idempotency-Key` on every state-changing call that affects jobs, leases, submissions, escrow, ledger, grants, referrals, reports, appeals and every admin write (S0.11.5); scope (principal, method, path); stored with the SHA-256 of the canonical body | client retries, double taps, flaky networks |
+| L2 Natural keys | Unique constraints below | a missing or reused key, a second client, a bug |
+| L3 Ledger keys | `ledger_transactions.idempotency_key` UNIQUE; `ledger_entries.entry_key` = key plus leg number, UNIQUE | any repeated posting, including by a worker |
+| L4 Events | `event_id` unique in the outbox; consumers record processed ids | duplicate delivery |
+
+**L2 natural keys**
+
+| Object | Constraint | Prevents |
+| --- | --- | --- |
+| `cells` | `UNIQUE (job_id, ordinal, cell_kind)` | duplicate cell creation on a retried JT-09 |
+| `leases` | `UNIQUE (cell_id) WHERE state = 'active'`; `UNIQUE (cell_id, attempt)` | two active leases; two leases for one attempt |
+| `submissions` | `UNIQUE (lease_id)` | two submissions per lease |
+| `escrows` | `UNIQUE (job_id)` | two escrows per job |
+| `state_transitions` | `UNIQUE (entity_type, entity_id, entity_seq)` | lost or duplicated transitions |
+| template approvals | `UNIQUE (template_version_id, reviewer_id, content_hash)` | one reviewer approving twice |
+| `appeals` | `UNIQUE (decision_ref, sequence)` | double filing beyond `appeal.max_per_decision` |
+| outbox | `UNIQUE (event_id)` | duplicate events |
+
+**L3 ledger idempotency keys** [D][A: S6.* owns the final table and may rename keys, not remove them]
+
+| `ledger_txn_kind` | Key | Written by |
+| --- | --- | --- |
+| `mint` | `mint:<cell_id>` | CT-06, CT-09 (Commons) |
+| `payout` | `payout:<cell_id>` | CT-06, CT-09 (member job) |
+| `hold` | `hold:<job_id>` or `hold:<rsn_id>` | JT-09, RT-01 |
+| `settle` | `settle:<job_id>` | JT-16, JT-17 |
+| `cancel` | `cancel:<job_id>`, `rsncancel:<rsn_id>`, `rsnexpire:<rsn_id>` | JT-20, RT-03, RT-04 |
+| `reservation_activate` | `resact:<rsn_id>` | RT-02 |
+| `expire` | `expire:<lot_id>` | `credit_expiry_sweeper` |
+| `retire` | `retire:<utc_date>` | `reserve_retirer` |
+| `grant` | `grant:starter:<mem_id>`, `grant:referral:<ref_id>:<side>`, `appealpay:<apl_id>` | S6.*, S12.*, APT-07 |
+| `reserve_donation` | `donate:<principal_id>:<Idempotency-Key>`, `closedonate:<mem_id>` | member action, MS-04 |
+| `reversal` | `reversal:<original_txn_id>` | CT-17 |
+
+`ledger.post(kind, key, legs)` first looks the key up. If it exists with the same canonical hash of legs, it returns the stored transaction and writes nothing (success, idempotent). If it exists with different legs, that is a defect: the call fails and an `Alarm` is raised, because two different postings were intended under one key. A job gets exactly one of `settle` and `cancel`, decided by the job state, so the keys cannot both exist for it. [D]
+
+### 5.29.6 Acceptance: exactly-once payment (GU-07)
+
+Acceptance is where credit is created or moved, so it is one transaction in which the cell state, the submission state, the headroom and the ledger posting commit together or not at all.
+
+```
+def accept_cell(cell_id, via):             # via in ('checks_passed', 'audit_passed'); called by the verification pipeline
+    with tx():
+        pol  = lock_shared(PolicyPointer)                                # order 2
+        cell = read(Cell, cell_id); job = lock_shared(Job, cell.job_id)  # order 3
+        cell = lock_exclusive(Cell, cell_id)                             # order 4
+        if cell.state == 'accepted': return 'already_accepted'           # idempotent no-op
+        require(cell.state == ('submitted' if via == 'checks_passed' else 'flagged_for_audit'))
+        sub = lock(Submission, cell_id=cell_id, attempt=cell.attempt)    # order 6
+        verdict = g_accept(cell, job, sub, pol)                          # 5.23.2
+        if verdict == 'DEFER':         mark_deferred(cell); return 'deferred'
+        if verdict == 'VOID':          transition(cell, 'cell.voided'); return 'voided'
+        if verdict == 'REJECT_POLICY': transition(cell, 'cell.checks_failed', reason='reject.policy_changed'); return 'rejected'
+        donor = sub.member_id
+        if job.origin == 'commons':
+            mint_headroom.consume(utc_month(donor_lease_issued_at), donor, 1_000_000)   # reserved -> minted
+            ledger.post('mint', 'mint:' + cell_id, legs=[mint(issuance -> donor.account, 1_000_000)], new_lot=True)
+        else:
+            esc = lock_exclusive(Escrow, job.escrow_id)                  # order 7
+            require(esc.state in ('open', 'settling') and payable_ucr(job) >= 1_000_000)
+            ledger.post('payout', 'payout:' + cell_id, legs=[transfer(esc.account -> donor.account, 1_000_000)], new_lot=True)
+        transition(cell, 'cell.checks_passed' if via == 'checks_passed' else 'cell.audit_passed')
+        transition(sub, 'submission.accepted')
+        enqueue(tier_evaluator, donor); enqueue(job_progress, job.id)
+        return 'accepted'
+```
+
+If two workers run `accept_cell` for the same cell, the loser blocks on the cell lock and then sees `accepted` and returns. If a defect lets both through, the ledger key `payout:<cell_id>` rejects the second posting and the transaction rolls back. The amount is always exactly 1,000,000 `ucr` (FD§4.3, S0.6.1). The mint month for the headroom is the month in which the lease was issued, because that is when the reservation was made. [D]
