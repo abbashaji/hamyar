@@ -351,3 +351,79 @@ function release_waitlist(now)                                   # holds admissi
       if q.decision == waitlist: blocked.add(e.category_key); continue
       mark_released(e); transition(e.job, job.waitlist_released); issue(q, ttl=params.waitlist_quote_ttl_s)
 ```
+
+## 6.30 Capacity reservations for future dates
+
+A requester may book capacity for a future date (exam week, a deadline) with credit escrowed at booking (FD§4.8). Effectiveness in flattening bursts is [H]; test: share of peak-day committed cells coming from reservations and the no-show rate; kill criterion: no-show rate above 0.30 of reservations over the pilot, in which case `ff.job.reservations` is switched off. [H]
+
+### 6.30.1 `Reservation` fields required by admission [D][A]
+
+(`S5.*` owns the DDL; prefix `rsn_`, retention `job_bound`, states `held`, `activated` (T), `cancelled` (T), `expired` (T) and events `reservation.*` as in S0 0.9.8.)
+
+| Field | Rule |
+| --- | --- |
+| `member_id`, `category_key`, `job_type` | Declared at booking; the job later created must have the same `category_key` and `job_type` |
+| `cells_n`, `verification_cells_v`, `committed_cells_r` | As in 6.22; `R` is what is reserved |
+| `v_ppm`, `lambda_ppm`, `p_ucr`, `escrow_ucr`, `escrow_id` | **Price lock**: stamped at booking, used at activation. A lock is at most `reservation.max_horizon_days` stale and `change.notice_days_price` is shorter than that horizon only by design: price changes are announced in advance, so the locked price can be older than a change but never hidden [D][A] |
+| `target_start_at`, `window_s` | `target_start_at` on the absolute grid (a multiple of `step` since the UTC epoch); `window_s` a multiple of `step` in `[admission.min_window_s, admission.max_window_days × 86,400]` |
+| `activation_deadline_at` | `target_start_at + reservation.activation_grace_s` |
+| `slot_plan` | Integer cells per absolute slot, below |
+| `degraded` | Boolean; true when a forecast drop removed its priority (6.33) |
+| `job_id`, `cancel_reason`, `late_cancel` | Set at activation or end; `cancel_reason` in `member_requested`, `expired`, `operator`, `policy_stopped`, `degraded_release` |
+
+### 6.30.2 Booking [D]
+
+Guards, in order: 6.28.1 guards 1 to 3 and `ff.job.reservations` (else `403 FORBIDDEN`); the member has fewer than `reservation.max_active_per_member` `held` reservations (else `422 CAP_EXCEEDED`); no cooldown is running (`now` is at least `late_cancel_at + reservation.late_cancel_cooldown_days × 86,400 s` for the member's latest late cancel or expiry, else `422 CAP_EXCEEDED` with `details.copy_key` = `copy.admission.late_cancel_cooldown`); `now + reservation.min_lead_s <= target_start_at <= now + reservation.max_horizon_days × 86,400 s` (else `400 VALIDATION_FAILED`); unexpired balance at least `escrow_ucr` (else `422 INSUFFICIENT_CREDIT`).
+
+**Slot plan.** The window covers `m = window_s / step` absolute slots `k0 .. k0+m-1`. Cells are spread by largest remainder: slot `k0+i` gets `floor(R / m) + (1 if i < R mod m else 0)`. The plan always sums to `R`.
+
+**Share cap.** For every slot `k` and for both scopes (`ALL` and the category) the booking is accepted only if `held_plan(S, k) + plan[k] <= reservation.capacity_share_cap × phi_capacity(fc(S), slot_k) `, evaluated with the forecast at booking time (exact rational comparison). A forecast that is not `ok` refuses the booking with `422 NO_CAPACITY`. Reservations are not queued on a waitlist. [D]
+
+**Escrow at booking.** In one transaction: `escrow_hold` of `escrow_ucr` from the member into a new `Escrow` bound to the reservation (S0 0.8.5), the `Reservation` row in `held`, event `reservation.held`. Lots are consumed oldest-first as for any `escrow_hold`.
+
+### 6.30.3 Activation, release and expiry [D]
+
+| Situation | Effect |
+| --- | --- |
+| The member creates a job with `reservation_id` (any time after booking) | The job goes through `draft`, `screening` and policy as usual (R1..R10, R9 stamp). It passes `job.policy_passed` into `quoted` with a quote of decision `accept`, no admission test, the locked price, `reservation_id` set and `expires_at = activation_deadline_at`. It must satisfy `cells_n <= reservation.cells_n`, the same `category_key` and `job_type`, else `422 UNPROCESSABLE`. Extra cells beyond the reservation are a separate job through normal admission |
+| `now >= target_start_at` | The system re-checks policy (R9), then in one transaction posts `escrow_release` of `cells_n × p_ucr` from the reservation escrow to the job escrow, refunds the difference to the member (`refund`), emits `reservation.activated` and `job.escrow_confirmed`; the job becomes `admitted`; `window_end_at = target_start_at + window_s`. The reserved slot plan stops counting in `reserved_in` and the job's `remaining` joins the backlog; priority per slot is SC-3 |
+| Policy now rejects the job | The system cancels the job (`cancel_reason` = `policy_stopped`) and the reservation (`cancel_reason` = `policy_stopped`) with a full refund and no cooldown |
+| No admitted job by `activation_deadline_at` | Event `reservation.expired`; full refund; the cooldown applies (`late_cancel` = true); capacity returns at once |
+| Member cancels (`cancelReservation`) at or before `target_start_at − reservation.free_cancel_notice_s` | `reservation.cancelled`; full refund; no cooldown |
+| Member cancels after that moment | Same refund; `late_cancel` = true; the cooldown applies. There is **no monetary penalty**: a fee needs a new ledger entry type, and the FD says credit is never printed or created (FD§4.6); a fee is an open owner decision (`ISS-66`, 6.39) |
+| Degraded by a forecast drop (6.33) | The holder is told and may cancel at once; such a cancel never sets `late_cancel` |
+
+A refund restores the consumed lots with their original expiry (`ISS-07`). A reservation made far ahead can therefore be funded by lots that expire before a cancellation or expiry refund; a restored lot already past expiry moves to the Reserve at the next sweep. The booking confirmation must say so for every consumed lot that expires before `target_start_at + window_s` (`copy.admission.reservation_expiry_warning`), and the screen shows the expiry dates (`ISS-66`). Escrowed credit that is *spent* on activated cells is unaffected. [D]
+
+## 6.31 Fairness rules
+
+| Id | Rule | Enforced where |
+| --- | --- | --- |
+| FR-1 | At most `admission.max_concurrent_jobs_per_member` jobs in the capacity-holding states of 6.28.1 guard 4, per member | `job.submitted`, again under the lock |
+| FR-2 | First come within a deadline class: order by `hold_seq` (and by `waitlist_seq` for waiting entries). A re-quote of a job takes a new `hold_seq` only if its earlier hold was released | 6.27, SC-1 |
+| FR-3 | No overtaking within a category on the waitlist (6.29.2) | `release_waitlist` |
+| FR-4 | No queue jumping by credit: price is not a bid, a larger balance or a higher escrow buys no position | by construction |
+| FR-5 | Deadline classes: `R = ceil((N + V) × m_class)` and classes are served in rank order. In Phase 1 only `standard` exists and `admission.deadline_multiplier_standard` is validated equal to 1.0; the code path reads the parameter. A multiplier other than 1.0 affects capacity accounting only; its effect on price is not specified and needs a spec change [D] | 6.22, SC-2 |
+| FR-6 | Job size is bounded by `admission.max_job_cells`; the size is part of the guard, not a priority input | 6.28.1 |
+| FR-7 | A waitlist cap per member (`admission.waitlist_max_per_member`) and one live reservation (`reservation.max_active_per_member`) | 6.28.2, 6.30.2 |
+| FR-8 | Reserved capacity of any slot is at most `reservation.capacity_share_cap` of its φ capacity | 6.30.2 |
+| FR-9 | Only members with `status` = `active` can quote, book or confirm; `suspended`, `banned` and `closed` members cannot. `restricted` tier changes only the credit cap (`trust.cap_multiplier.restricted`), not queue position | guards |
+
+## 6.32 Cancellation and refunds
+
+Posting mechanics belong to `S6.*`; the table states what is refundable and when capacity returns. [D]
+
+| State at `job.cancel_requested` | Effect | Refund |
+| --- | --- | --- |
+| `draft`, `waitlisted` | Job `cancelled`; a waiting entry is `cancelled` | none (no escrow) |
+| `quoted` | Hold released; job `cancelled` | none |
+| `admitted` (no cell leased) | `cancelling`; every cell `cancelled`; `job.cancel_settled` | the whole escrow |
+| `running`, `suspended` | `cancelling`. Cells in `queued` or `suspended` are `cancelled` at once. Leased cells drain: each lease may still be submitted until `lease.timeout_s + lease.submit_grace_s` after the request; an accepted cell is paid, a rejected or expired one is `cancelled`. Then `job.cancel_settled` | the unspent part below |
+
+Capacity returns when the cells are cancelled, not when settlement ends; the waitlist sweep (6.29.2) is triggered at that moment.
+
+**Unspent part.** Let `a` be accepted primary cells, `b` accepted verification, audit and rework cells, `N`, `v_ppm`, `lambda_ppm` as stamped in the quote. Donors are paid `(a + b) × 1,000,000 ucr` by `transfer` at acceptance; the Reserve receives the levy `a × lambda_ppm`; the rest returns to the requester:
+
+`refund_ucr = escrow_ucr − (a + b) × 1,000,000 − a × lambda_ppm`, with `escrow_ucr = N × (1,000,000 + v_ppm + lambda_ppm)`.
+
+Since `b <= V = floor(N × v_ppm / 1,000,000)`, the unused verification pool `N × v_ppm − b × 1,000,000` is not negative. With the FD§3.3 inputs and `a = 240`, `b = 24` the refund is 0 and the identity closes (264,000,000 + 12,000,000 = 276,000,000); with `a = 100`, `b = 5` the refund is `276,000,000 − 105,000,000 − 5,000,000 = 166,000,000 ucr`, which equals the unaccepted primary share (140,000,000) plus the unused pool (19,000,000) plus the unused levy (7,000,000). The formula is the arithmetic check of `AC-admission-06`; if `S6.*` states the settlement rule differently, `S6.*` wins and this check is updated. [D][A]
