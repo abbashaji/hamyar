@@ -860,3 +860,111 @@ Singleton: the public Commons Reserve; holds the ceiling state (FD§4.2, FD§4.6
 | `cum_levy_in_ucr`, `cum_expired_in_ucr`, `cum_grants_out_ucr`, `cum_retired_ucr`, `cum_donated_in_ucr` | ucr | NN, default 0 | `DER`, checked by the invariants |
 
 A unique index on `((true))` keeps the table to one row. Retirement amounts are public (`ledger.entry_committed`).
+
+## 5.10 Policy and Service Registry entities
+
+### 5.10.1 `Policy` · `policies` · `pol_` · `MUT` · `permanent`
+
+Named policy profile (FD§5.4 default profile). Phase 1 uses two active profiles (`P0`/`P1` x `S0`/`S1` x `M0`/`M1`, FD§5.7 failure mode 5) as allowlist entries of one version, not as separate rows. [D]
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `slug` | text | NN, unique | `default_profile` is the first row |
+| `description_key` | text | NN | copy key |
+| `active_version_id` | id `plv_` | null, FK (deferred) | the version stamped on new jobs; must belong to this policy |
+
+### 5.10.2 `PolicyVersion` · `policy_versions` · `plv_` · `IMM` · `permanent`
+
+Immutable rule set plus allowlist; stamped on jobs at admission and re-checked at acceptance (R9). Rules are data (prompt D). [D]
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `policy_id`, `version` | id, int | NN; unique pair; version >= 1 | |
+| `allowlist` | json | NN | array of permitted `{purpose, license, sensitivity, service_requirement}` tuples; anything not listed is rejected (FD§5.1) |
+| `allowlist_hash`, `rules_hash`, `version_hash` | hash | NN | `version_hash = SHA-256(rules_hash \|\| allowlist_hash)`; the value shown in provenance |
+| `change_class` | enum(`change_class`) | NN | relative to the superseded version: `tighten`, `loosen`, `neutral` |
+| `changelog_entry_id` | id `chg_` | **NN when `change_class = 'loosen'`** (CHECK) | R10; tightening may publish its entry afterwards |
+| `supersedes_id` | id `plv_` | null, FK | |
+| `effective_from` | ts | NN | `>= created_at + policy.loosen_min_notice_days` for `loosen`; `created_at` for `tighten` |
+| `created_by_admin_id`, `approval_action_ids` | id, arr | NN | |
+
+**Indexes** `(policy_id, version)`. **Not stored** edits: a rule change is a new version with all its `Rule` rows.
+
+### 5.10.3 `Rule` · `rules` · `rul_` · `IMM` · `permanent`
+
+One row per policy rule `R1`..`R10` inside a `PolicyVersion` (S0.8.4).
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `policy_version_id` | id `plv_` | NN, FK | |
+| `policy_rule_id` | enum | NN | `R1`..`R10` |
+| `ordinal` | int | NN | evaluation order; the first failing rule rejects (FD§5.4) |
+| `slug` | text | NN | `metadata_missing_or_inconsistent`, ... as in S0.8.4 |
+| `evaluator` | text | NN | a name from the fixed evaluator registry of S7.* (for example `meta_complete`, `sensitivity_max`, `purpose_flag_gate`); no code is stored |
+| `params` | json | NN | for example `{"purpose":"P2","requires_flag":"commercial_use_of_output"}` |
+| `reason_code` | text | NN | `policy.<policy_rule_id>.<slug>` |
+| `enabled` | bool | NN, default true | rows with `enabled = false` are recorded but skipped; turning one off is a `loosen` |
+
+**Unique** `(policy_version_id, policy_rule_id)`; `(policy_version_id, ordinal)`.
+
+### 5.10.4 `ServiceRegistryEntry` · `service_registry_entries` · `svc_` · `MUT` · `permanent`
+
+A service with review state, adapter capabilities and dated flags. Every row starts `unreviewed`, which counts as `no`. No provider name, URL or limit is a constant of the system. [D][V]
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `slug` | text | NN, unique | reviewer-entered label |
+| `display_name` | text | NN, <= 80 chars | |
+| `service_kind` | enum(`service_kind`) | NN | `general_chat`, `open_weight_hosted`, `open_weight_local` |
+| `review_status` | enum | NN, default `unreviewed` | the 7 states of S0.9.6; only `approved` allows new jobs |
+| `suspension_cause` | enum | null; NN when `suspended` | `kill_switch` or `review_lapsed`; `service.resumed` is allowed only for `kill_switch` |
+| `current_terms_copy_id` | id `tcp_` | NN when `approved` | |
+| `reviewed_at` | ts | null | |
+| `review_due_at` | ts | null | `reviewed_at + service.review_max_age_days * 86400 s` |
+| `adapter_supports_prefill` | bool | NN, default false | |
+| `adapter_prefill_url_template` | text | NN when supports prefill; must contain `{prompt}` (CHECK) | reviewer-entered [V] |
+| `adapter_max_url_chars` | int | NN when supports prefill | reviewer-entered [V] |
+| `adapter_copy_only` | bool | NN, default true | true unless prefill is supported and `prefilled_link_use` is `yes`; a guard keeps it consistent with the flags |
+| `adapter_clean_chat_hint_key` | text | null | copy key |
+| `open_weight_license_ref` | text | NN when `service_kind` is `open_weight_*` and status `approved` | pointer to the `TermsCopy` holding the checked model license (`M2`) |
+
+**Keys** FK `current_terms_copy_id` (deferred). **Indexes** `(review_status)`; `(review_due_at) WHERE review_status = 'approved'`. **Approval guard (trigger, S5.14.8)** a row may enter `approved` only if the effective `third_party_task_use` and `prohibited_content_compatible` answers are `yes`, `current_terms_copy_id` is set and at least `service.min_approvers` distinct admins recorded `service.approve` for that `TermsCopy` hash. **Not stored** an account, key, cookie, login or any credential of any provider or volunteer; no scraped page; no pricing or quota number except as a reviewer's dated flag note.
+
+### 5.10.5 `TermsCopy` · `terms_copies` · `tcp_` · `IMM` · `permanent`
+
+Saved copy of a document: bytes, hash, source reference, capture date (FD§5.3). A reviewer supplies it; the platform does not crawl providers. [D]
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `service_id` | id `svc_` | NN, FK | |
+| `document_kind` | enum(`document_kind`) | NN | `terms`, `usage_policy`, `written_permission` (`info.written_permission`) |
+| `media_type` | enum(`terms_media_type`) | NN | |
+| `content_hash` | hash | NN | SHA-256 of the stored bytes |
+| `byte_size` | int | NN, `<= service.terms_copy_max_bytes` | |
+| `storage_key` | text | NN | content-addressed object key `terms/<hex>` behind the storage interface; the bytes are verified against `content_hash` on every read |
+| `source_ref` | text | NN, <= 500 chars | where the reviewer obtained it (a URL or a document title); recorded as text, never fetched by the system |
+| `provider_version_label` | text | null | a version or date the provider states, if any |
+| `captured_on` | day | NN | capture date entered by the reviewer; `created_at` is the server time |
+| `captured_by_admin_id` | id `adm_` | NN, FK | |
+| `language` | text | null | BCP 47 |
+| `supersedes_id` | id `tcp_` | null, FK | |
+
+**Unique** `(service_id, content_hash)`. **Indexes** `(service_id, document_kind, captured_on DESC)`. A copy is never edited or deleted; a changed document is a new copy that supersedes. **Not stored** private correspondence beyond a reviewer-uploaded `written_permission` document.
+
+### 5.10.6 `FlagAnswer` · `flag_answers` · `fla_` · `IMM` · `permanent`
+
+One dated yes / no / unknown answer for one flag of one entry (S0.8.3). [D]
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `service_id` | id `svc_` | NN, FK | |
+| `flag_key` | enum | NN | the 13 keys of S0.8.3 (9 gate keys, 4 `info.*` keys) |
+| `region` | text | NN iff `flag_key = 'regional_availability'`; otherwise null or an ISO 3166-1 alpha-2 code | one answer per region |
+| `answer` | enum(`flag_answer`) | NN | `yes`, `no`, `unknown`; **`unknown` is evaluated as `no` everywhere** |
+| `terms_copy_id` | id `tcp_` | NN unless `answer = 'unknown'` (CHECK) | the copy the answer was read from |
+| `evidence_note` | text | null, <= 2000 chars | clause reference, for example a section number; no legal conclusion |
+| `answered_on` | day | NN | reviewer-dated |
+| `reviewer_admin_id` | id `adm_` | NN, FK | |
+| `supersedes_id` | id `fla_` | null, FK | |
+
+The **effective answer** for `(service, flag_key, region)` is the row with the latest `(answered_on, created_at)`; if none exists it is `unknown`, so evaluated `no`. The view `effective_flag_answers` implements this and is what every guard reads. **Indexes** `(service_id, flag_key, region, answered_on DESC)`. A flag answer is never edited; a changed reading is a new row, and a change that moves a gate flag from `yes` to `no` or `unknown` is a tightening that takes effect at once (R10).
