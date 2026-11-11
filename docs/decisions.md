@@ -28,3 +28,8 @@ Heading format: top-level heading of each file is `# <section number>. <title>` 
 ## Mechanics
 - A file over ~150 lines is written in several appends/commits. Spec files are long; that is expected.
 - Acceptance runs `python scripts/check_spec.py` (stdlib only). Meeting it is necessary, not sufficient: the content must be complete for the cell's goal.
+
+## Seeded draft (owner note)
+`spec/00-conventions.md` (950 lines) and `spec/00-decisions.md` were drafted on branch `cell/C-000` and copied to main so the work is not lost. The cell that owns them is C-027. Its job: check them against its goal and the ground rules above, fix gaps with small edits (do not rewrite, do not pad `00-decisions.md`, which stays a short list), then submit. Milestone IDs are `BM0`..`BM9` (see conventions 0.12); other parts use these, not `M0..Mn`.
+## Checker notes
+`scripts/check_spec.py --require` is case-insensitive. Acceptance commands only prove structure; the cell's goal defines completeness.
