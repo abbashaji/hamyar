@@ -99,3 +99,60 @@ Server checks, in this order; the first failure stops the request: [D]
 | 8 | Issue a session (10.13) and return `{member_id, key_id, session}` | |
 
 `Idempotency-Key` is REQUIRED on registration [A]: a lost response would otherwise leave an identity whose recovery key the person never saw. In `open` mode (no invite) the new member is the root of a new tree whose `invite_tree_id` is a fresh opaque `inv_` ULID with no `Invite` row. The member's ledger account is created by `S6.*` on `member.created`. [D]
+
+## 10.4 Recovery key
+
+### 10.4.1 Format, entropy source, derivation [D]
+
+| Item | Decision | Reason |
+| --- | --- | --- |
+| Payload | `identity.recovery_key_bits` bits (default 128, validation at least 128, multiple of 8) from the OS CSPRNG (`crypto.getRandomValues`); if that API is absent the client refuses to create an identity, it never falls back to `Math.random` or time | A guessable key defeats the design |
+| Checksum | C bits, the first C bits of SHA-256(`hamyar/v1/recovery-checksum` followed by the payload), where C is the smallest value at least 22 that makes (payload bits + C) divisible by 5 | Detects typos locally before any request; for 128 bits C = 22, so an undetected random typo has probability 2^-22, about 2.4 in 10 million |
+| Encoding | Crockford base32 (digits and letters without I, L, O, U), groups of 5 characters joined by hyphens, upper case; 128 + 22 = 150 bits = 30 characters = 6 groups | Easy to copy by hand; case-insensitive |
+| Example (format only, not a key) | `7M4QX-9PT2D-HZ8E6-K3VBA-0WYN5-R1CGF` | |
+| Input normalization | Upper-case; strip spaces and hyphens; map I and L to 1 and O to 0; map Persian and Arabic-Indic digits to Latin digits; reject any other character; verify the checksum on the device | Persian keyboards and digit habits; typos never cost a request |
+| Derivation | `seed = HKDF-SHA-256(ikm = payload, salt = 'hamyar/v1/recovery', info = 'ed25519-seed', L = 32)`; the recovery keypair is the Ed25519 keypair of `seed` | High-entropy input needs no slow hash (S0.6.4) |
+| Guessing odds | 2^-128 per guess. Exhaustive search at an assumed 10^12 guesses per second (an illustrative upper bound for one very large attacker, not a measurement) takes 2^128 / 10^12 = 3.4 x 10^26 s, about 1.1 x 10^19 years [A] | Why no lockout, KDF or CAPTCHA is needed on the key itself |
+
+Word lists were rejected for Phase 1: a vetted Persian list of 2048 words does not exist in this project and an unvetted one risks ambiguous or offensive words [V]. A QR rendering of the same string is offered for moving the key to another device by camera.
+
+### 10.4.2 Display and offline backup [D]
+
+1. One full-screen step at the end of registration (FD§3.2 step 1), shown in Latin script inside a `dir=ltr`, `unicode-bidi: isolate` block so Persian text around it cannot reorder the characters.
+2. Options offered: write it on paper (a print stylesheet renders a card locally); copy to the clipboard (warning: clipboard managers and cloud clipboards); save as a text file (warning: cloud backup of downloads); show a QR code (rendered locally). Not offered: e-mail it, send it to the server, store it in the browser.
+3. The key is never sent to the server, never put in a URL, never written to analytics, logs or error reports, and the page that shows it makes no network request while it is open (tested, AC-identity-04).
+4. The step is one screen, not a quiz, so the sub-60-second first contribution (FD§6.2 V1) is not blocked; time spent on it is an instrumented measure [H: the step does not lower V1 conversion; test: median step time and landing-to-first-verified-cell conversion in Phase 1; kill criterion: the pre-registered V1 bar is missed because of this step].
+5. Optional confirmation: the member retypes the key; the client derives the keypair and signs a `confirm_recovery` challenge; the server sets `recovery_confirmed_at`. Settings nudge until confirmed and never block.
+
+Reason for not forcing a backup: credit is small, capped by K and expires, so the cost of losing an identity is bounded; forced friction costs conversion and teaches people to photograph the key into cloud albums. [D]
+
+### 10.4.3 Verification without storing the secret [D]
+
+The server holds `recovery_pub` only. Verification is a signature over a fresh challenge (purpose `recover` or `confirm_recovery`); the secret never leaves the device, so a database leak yields nothing replayable. The client sends `recovery_pub` (derived on the device) with the signature; an unknown key and a wrong signature return the identical `401 AUTH_INVALID` after identical work (a dummy verification is performed), so there is no enumeration oracle.
+
+### 10.4.4 Rotation of the recovery key [D]
+
+| Case | Rule |
+| --- | --- |
+| Recovery key never confirmed | Replaceable with a device-key step-up alone; the old key was never proven held |
+| Recovery key confirmed | Replacing it needs a device-key step-up AND a signature by the current recovery key, so a thief holding only an unlocked phone cannot lock the owner out |
+| Effect | New key `active` and unconfirmed; old key `retiring` for `identity.key_rotation_grace_s`, then `revoked`; a `SecurityNotice` on every device |
+| After a recovery (10.8) | The key used is revoked at once and a new one is mandatory in the same request (it was typed on a device that may be hostile) |
+
+## 10.5 Optional e-mail
+
+**Purpose** [D]: generic notices the member opts into (job finished, credit about to expire per `credit.expiry_notice_days`, security notices). Nothing else. **E-mail is never a recovery factor and never a login** (`ISS-102`): a mailbox takeover would otherwise become an identity takeover, and the address links the pseudonym to a person. `identity.email_optional` is true and constant (FD§3.2).
+
+| Aspect | Decision |
+| --- | --- |
+| Storage | Never clear text (S0.7). `email_ciphertext` = AES-256-GCM with a per-row random nonce under `secret.email_enc_key[version]`; `email_index` = HMAC-SHA-256 of the normalized address under `secret.email_index_key[version]` (one address maps to one member; no address can be looked up without the key) [A] |
+| Verification | A one-time code of 8 Crockford base32 characters, stored as SHA-256, valid `identity.email_code_ttl_s`, burned after `identity.code_max_attempts` wrong tries; proves the member controls the address |
+| Change and removal | Setting or changing needs a device step-up and is blocked during the recovery cooldown (10.8); removal deletes ciphertext and index at once; the sender integration receives the plain address only at send time |
+| Content of mail | Neutral subject, no member id, no handle, no job details, no links carrying tokens; the mail says only that something happened and to open the app |
+| Notices default | Off. Each purpose is a separate opt-in in `email_purposes` |
+| Decryption access | Only the notification worker holds the decryption key at runtime; no admin screen shows an address (there is no `perm.member.view_email`) |
+| Enumeration | Setting an address that another member holds returns the same success-shaped response and sends nothing new [A] |
+
+**Risks, stated plainly** [D]: (1) the mail provider and any relay see the address and the fact that Hamyar wrote to it; (2) an operator, or a seizure that obtains the database and the secret store, can decrypt addresses; (3) an address can be tied to a real person by whoever controls the mailbox provider; (4) delivery to and from Iran-facing mailboxes may be blocked or filtered [V]; (5) phishing mail that imitates Hamyar. Responses: optional and off by default, neutral content, `kill.optional_pii` (10.15) purges every address at once, and `copy.identity.email_optional_notice` tells members to leave the field empty if a link to a real person matters to them.
+
+**Deletion and backups** [D]: a deleted address still exists in backups until they expire. Backup retention is set in `S4.*` and MUST be a published number; a restore re-applies a deletion tombstone list (member id, field, deleted_at) kept for the backup horizon so deleted e-mail does not return [V: the horizon number].
