@@ -74,3 +74,142 @@ Constraints [D]
 - At most one `TemplateVersion` per template is `approved` at a time; approving a newer version retires the older one with `retired_reason` = `superseded` in the same transaction.
 - A `Job` stamps `template_id`, `version_number` and `body_hash` at admission (FD§5.2, R9) and keeps rendering from that version even after it is superseded (8.8.7).
 - No template row is ever deleted; a template that must never run again is `retired` with `retired_reason` = `withdrawn`.
+
+## 8.4 Template document format
+
+The document is authored as YAML and stored and hashed as canonical JSON. This is its schema (JSON Schema, draft 2020-12 subset: no remote `$ref`, no `format`, patterns must be RE2-safe) [D].
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:hamyar:template_version_body:1",
+  "type": "object", "additionalProperties": false,
+  "required": ["format_version","job_type","title","profiles","risk_class","quality_class","volunteer_steps","envelope","slots","split","prompt","delimiters","output","checks","comparator","gold","claims","known_risks","hypotheses"],
+  "properties": {
+    "format_version": { "const": 1 },
+    "job_type": { "enum": ["translation_glossary","classify_extract","summarize_schema","code_change_tests","format_convert_validator","human_review"] },
+    "title": { "$ref": "#/$defs/i18n" },
+    "profiles": { "type": "array", "minItems": 1, "items": { "type": "object", "additionalProperties": false,
+      "required": ["purposes","sensitivities","service_requirements"],
+      "properties": { "purposes": { "type": "array", "items": { "enum": ["P0","P1","P2","P3"] } },
+        "sensitivities": { "type": "array", "items": { "enum": ["S0","S1"] } },
+        "service_requirements": { "type": "array", "items": { "enum": ["M0","M1","M2"] } } } } },
+    "risk_class": { "enum": ["standard","high"] },
+    "quality_class": { "enum": ["objective","mixed","subjective"] },
+    "volunteer_steps": { "const": ["copy_prompt","press_send","copy_answer","paste_back"] },
+    "envelope": { "type": "object", "additionalProperties": false, "required": ["input_ref","output_ref","expected_time_ref"],
+      "properties": { "input_ref": { "const": "cell.envelope.max_input_chars" },
+        "output_ref": { "const": "cell.envelope.max_output_chars" },
+        "expected_time_ref": { "const": "cell.envelope.expected_time_s" },
+        "output_budget_share_ppm": { "type": "integer", "minimum": 1, "maximum": 1000000 } } },
+    "slots": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/slot" } },
+    "split": { "$ref": "#/$defs/split" },
+    "prompt": { "type": "object", "additionalProperties": false, "required": ["canonical","variants"],
+      "properties": { "canonical": { "const": "en" },
+        "variants": { "type": "object", "required": ["en"], "additionalProperties": false,
+          "properties": { "en": { "type": "string", "maxLength": 4000 }, "fa": { "type": "string", "maxLength": 4000 } } } } },
+    "delimiters": { "type": "object", "additionalProperties": false, "required": ["blocks","result_block"],
+      "properties": { "blocks": { "type": "array", "items": { "type": "string", "pattern": "^[A-Z_]{3,16}$" } },
+        "result_block": { "const": "RESULT" }, "echo_token": { "type": "boolean" } } },
+    "output": { "$ref": "#/$defs/output" },
+    "checks": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/check" } },
+    "comparator": { "$ref": "#/$defs/comparator" },
+    "gold": { "$ref": "#/$defs/gold" },
+    "claims": { "type": "array", "items": { "$ref": "#/$defs/i18n" } },
+    "known_risks": { "type": "array", "minItems": 1, "items": { "type": "object", "required": ["id","text","mitigation"],
+      "properties": { "id": { "type": "string" }, "text": { "type": "string" }, "mitigation": { "type": "string" } } } },
+    "hypotheses": { "type": "array", "minItems": 1, "items": { "type": "object", "required": ["id","claim","measurement","success","kill"],
+      "properties": { "id": { "type": "string" }, "claim": { "type": "string" }, "measurement": { "type": "string" },
+        "success": { "type": "string" }, "kill": { "type": "string" } } } },
+    "execution": { "type": "object", "additionalProperties": false, "required": ["mode"],
+      "properties": { "mode": { "enum": ["none","server_sandbox","requester_side"] }, "runner_profile": { "type": "string" } } }
+  },
+  "$defs": {
+    "i18n": { "type": "object", "required": ["en"], "properties": { "en": { "type": "string" }, "fa": { "type": "string" } } },
+    "slot": { "type": "object", "additionalProperties": false, "required": ["id","kind","source","visibility"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,31}$" },
+        "kind": { "enum": ["text","enum","int","bool","rows","glossary","code","system"] },
+        "source": { "enum": ["requester","upload_split","system"] },
+        "visibility": { "enum": ["prompt","server_only"] },
+        "required": { "type": "boolean" },
+        "values": { "type": "array", "items": { "type": "string" } },
+        "block": { "type": "string" },
+        "budget_share_ppm": { "type": "integer", "minimum": 1, "maximum": 1000000 },
+        "max_items": { "type": "integer", "minimum": 1 },
+        "multiline": { "type": "boolean" },
+        "screen": { "type": "array", "items": { "enum": ["urls","pii","instruction_patterns","delimiter_collision","marker_collision","bidi_controls"] } } } },
+    "split": { "type": "object", "required": ["strategy"],
+      "properties": { "strategy": { "enum": ["paragraph_pack","row_pack","single_unit","file_unit"] },
+        "unit_budget_share_ppm": { "type": "integer" }, "id_prefix": { "type": "string" } } },
+    "output": { "type": "object", "required": ["kind"],
+      "properties": { "kind": { "enum": ["json","jsonl","marked_segments","text"] },
+        "schema": { "type": "object" }, "max_chars_share_ppm": { "type": "integer" } } },
+    "check": { "type": "object", "additionalProperties": false, "required": ["id","type","on_fail"],
+      "properties": { "id": { "type": "string" }, "type": { "type": "string" }, "params": { "type": "object" },
+        "on_fail": { "enum": ["reject","quarantine","flag_for_audit","note"] },
+        "reason": { "type": "string", "pattern": "^reject\\.[a-z_]+$" },
+        "calibration_source": { "enum": ["CAL","P1M","FND","SEC","TEC","OPS","CON"] } } },
+    "comparator": { "type": "object", "required": ["type"],
+      "properties": { "type": { "type": "string" }, "params": { "type": "object" }, "calibration_source": { "type": "string" } } },
+    "gold": { "type": "object", "required": ["kinds","construction"],
+      "properties": { "kinds": { "type": "array", "items": { "enum": ["exact","property","reference_tolerant"] } },
+        "construction": { "type": "array", "items": { "type": "string" } } } }
+  }
+}
+```
+
+Field rules the schema cannot express (enforced by the template linter, which runs on `template.review_requested` and again at every render; a failure blocks the transition) [D]
+
+| Rule | Statement |
+| --- | --- |
+| LR-01 | `volunteer_steps` equals the constant; no field anywhere may add a volunteer action (R3) |
+| LR-02 | Every placeholder `{{id}}` in a prompt variant names a declared slot or the reserved `{{dlm}}`; every slot with `visibility` = `prompt` is used at least once; `server_only` slots appear in no variant |
+| LR-03 | A slot with `source` = `requester` or `upload_split` and `kind` in `text`, `rows`, `glossary`, `code` MUST declare a `block` listed in `delimiters.blocks`, and its placeholder MUST be inside that block's open and close lines |
+| LR-04 | All variants have the same placeholder multiset and the same delimiter lines (variant parity) |
+| LR-05 | `size`: slot budgets are shares of the data budget (8.5.2); the sum of `budget_share_ppm` of prompt slots is at most 1,000,000; `max_items` and shares are checked against a worst-case render |
+| LR-06 | Every `check.type` and `comparator.type` exists in the registries of 8.6; every `reason` is in `S0.8.4` or in 8.17 |
+| LR-07 | `checks` contains the checks required by `output.kind` (8.6.1 column "required for") in the mandatory order of 8.6.2 |
+| LR-08 | `execution.mode` other than `none` is allowed only for `job_type` = `code_change_tests`; `risk_class` = `high` is required when `mode` = `requester_side` |
+| LR-09 | `claims` and every user-facing string contain no word of the forbidden list ("guarantee", "guaranteed", "guarantees", and the Persian equivalents held in the lint data) (Principle 11) |
+| LR-10 | The R3 lint of 8.7 passes on every variant |
+| LR-11 | `hypotheses` ids are unique and each has non-empty `measurement`, `success`, `kill` |
+| LR-12 | `profiles` only lists combinations that the active `PolicyVersion` allowlist contains; a template cannot widen policy (R8, `S7.*`) |
+
+### 8.4.1 Slot semantics [D]
+
+| Kind | Meaning | Charset and sanitation |
+| --- | --- | --- |
+| `text` | Requester or split data, free text | NFC normalized; C0 and C1 controls removed except `\n` and `\t`; bidi embedding and override controls (U+202A to U+202E) removed; ZWNJ (U+200C), LRM, RLM kept because Persian orthography needs them [A] |
+| `enum` | One of `values` | Exact match; shown verbatim |
+| `int`, `bool` | Scalar | Canonical decimal or `true`, `false` |
+| `rows` | Ordered records, each `id<TAB>text`, ids assigned by the platform | As `text` per field; tab and newline escaped inside a field |
+| `glossary` | Rendered subset of a `Glossary` (8.9) | As `text`; one entry per line |
+| `code` | Source code text | As `text` but tabs kept; no normalization of whitespace; NFC not applied to identifiers [A] |
+| `system` | Value computed by the platform (language names, label list rendering, id lists) | Taken from a template `values` table or the job metadata, never from free text |
+
+`visibility` = `server_only` means the value is stored with the cell and used by checks (for example hold-out tests) but is never placed in any rendered prompt [D].
+
+### 8.4.2 Annotated skeleton (authoring form)
+
+```yaml
+format_version: 1
+job_type: translation_glossary
+title: { en: "Translation with a shared glossary", fa: "ترجمه با واژه‌نامهٔ مشترک" }
+profiles: [ { purposes: [P0, P1], sensitivities: [S0, S1], service_requirements: [M0, M1] } ]
+risk_class: standard          # high => blanket redundancy per verify.blanket_redundancy_n
+quality_class: mixed          # subjective or mixed => verify.human_review_rate applies
+volunteer_steps: [copy_prompt, press_send, copy_answer, paste_back]
+envelope: { input_ref: cell.envelope.max_input_chars, output_ref: cell.envelope.max_output_chars, expected_time_ref: cell.envelope.expected_time_s }
+slots:    [ ... ]             # 8.4.1
+split:    { strategy: paragraph_pack }
+prompt:   { canonical: en, variants: { en: "...", fa: "..." } }
+delimiters: { blocks: [GLOSSARY, SOURCE], result_block: RESULT, echo_token: true }
+output:   { kind: marked_segments }
+checks:   [ { id: c01, type: extract_result, on_fail: reject } ]   # 8.6.1
+comparator: { type: segment_overlap, params: { ... } }            # 8.6.3
+gold:     { kinds: [property], construction: [ ... ] }            # 8.10.7 etc.
+claims: []                    # user-facing statements; must say "declared", never "guaranteed"
+known_risks: [ ... ]
+hypotheses: [ ... ]
+```
