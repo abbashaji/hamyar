@@ -745,3 +745,122 @@ The list below is the FULL set of parameter names; names are stable and C-022 co
 | `appeal.ban_min_reviewers` | int | 2 | 1..5 | `FND` |
 | `report.triage_sla_days` | days | 3 (target, published) | 1..30 | `OPS` |
 | `report.max_per_member_per_day` | int | 20 | 1..1000 | `OPS` |
+
+**Table C: launch, analytics, experiment, growth, team, public, api, ui, i18n, security, calibration, metrics**
+
+| Name | Type | Initial configurable default | Validation | Replaced by |
+| --- | --- | --- | --- | --- |
+| `launch.members_may_join` | bool | false (global switch; stays off until the gate checklist is signed off in the admin tool) | only settable when the gate rule in S14.* passes | `CON` default; flipped by sign-off |
+| `launch.member_jobs_enabled` | bool | false | as above | flipped by sign-off |
+| `launch.minting_enabled` | bool | false | as above | flipped by sign-off |
+| `launch.required_gate_ids` | json | `["G0","G1"]` (FD§8.3 exit rule) | subset of G0..G5 that always contains G0 and G1 | `FND` |
+| `launch.min_signoffs` | int | 2 distinct admins [A]; an owner decision if the team has one person | 1..5 | `FND` |
+| `launch.min_approved_services` | int | 1 (FD§8.3 exit rule; or a documented fallback) | 0..20 | `FND` |
+| `analytics.third_party_trackers` | bool | false | constant | `CON` |
+| `analytics.cookies_enabled` | bool | false | constant | `CON` |
+| `analytics.min_cohort_k` | int | 10 (cohorts smaller than this are suppressed in aggregates) | 1..1000 | `SEC` |
+| `experiment.expiry_arm.fraction` | ratio | 0.50 of Phase 1 members (FD§9 "part of the group") | 0..1 | `FND` |
+| `experiment.assignment_seed_version` | int | 1 | >= 1 | `OPS` |
+| `experiment.assignment_log_enabled` | bool | true | constant | `CON` |
+| `growth.referral.bonus_referrer_credits` | credits | 1 | 0..100 | `FND`, `P1M` |
+| `growth.referral.bonus_newcomer_credits` | credits | 1 | 0..100 | `FND`, `P1M` |
+| `growth.referral.min_newcomer_verified_cells` | int | 1 (FD§6.2 V5) | 1..50 | `FND` |
+| `growth.referral.max_per_referrer_per_30d` | int | 5 | 0..1000 | `OPS` farming flags |
+| `growth.referral.hold_s` | duration_s | 86,400 (bonus paid after this delay) | 0..2592000 | `OPS` |
+| `team.max_members` | int | 50 | 2..10000 | `OPS` |
+| `team.min_public_members` | int | 5 (a team is not shown publicly below this size) | 1..1000 | `SEC` |
+| `team.create_min_tier` | enum | `established` | `new`, `established`, `trusted` | `OPS` |
+| `public.counter_refresh_s` | duration_s | 60 | 5..3600 | `OPS` |
+| `public.ledger_lag_s` | duration_s | 300 (public ledger page trails the ledger by this much) | 0..86400 | `SEC` |
+| `public.location_display` | enum | `never` (FD§6.1 row 5) | `never`, `opt_in` | `SEC` |
+| `api.idempotency_ttl_s` | duration_s | 86,400 | 3600..604800 | `OPS` |
+| `api.page_size_default` | int | 50 | 1..api.page_size_max | `OPS` |
+| `api.page_size_max` | int | 200 | 1..1000 | `OPS` |
+| `api.cursor_ttl_s` | duration_s | 3600 | 60..86400 | `OPS` |
+| `api.max_body_bytes` | int | 1,048,576 (uploads use `job.max_upload_bytes`) | 1024..104857600 | `TEC` |
+| `api.request_timeout_s` | duration_s | 30 | 1..300 | `TEC` |
+| `ui.card.expand_required_first_use` | bool | true (FD§5.5) | constant | `CON` |
+| `ui.comprehension_check_rate` | ratio | 0.00 (FD§5.7 failure mode 6 is a hypothesis [H]) | 0..1 | `P1M` |
+| `ui.fast_contribution_threshold_s` | duration_s | 60 (FD§6.2 V1) | 1..600 | `FND` |
+| `i18n.default_locale` | enum | `fa` | `fa`, `en` | `FND` |
+| `i18n.supported_locales` | json | `["fa","en"]` | subset of `locale` | `CON` |
+| `i18n.digits_default_fa` | enum | `persian` [A][H]; the member can switch to `latin` | `latin`, `persian` | `P1M` interviews |
+| `i18n.dual_calendar_detail` | bool | true (FD§10: Jalali and Gregorian) | | `FND` |
+| `security.secret_rotation_days` | int | 90 | 1..365 | `SEC` |
+| `security.rotate_before_public_exposure` | bool | true (FD§10) | constant | `CON` |
+| `security.two_person_actions` | json | `["ledger.reversal","launch.signoff","parameter.loosen","killswitch.release"]` [A] | subset of the action names in S10.* | `SEC` |
+| `calibration.min_samples_per_service` | int | 30 cells per service before a `CAL` value may replace a default | 1..10000 | `FND` |
+| `metrics.rollup_interval_s` | duration_s | 3600 | 60..86400 | `OPS` |
+
+**Kill switches** (entity `KillSwitch`, default `released`, engaged by an operator with a logged reason; S14.*): `kill.all_minting`, `kill.all_new_jobs`, `kill.template.<tpl_id>`, `kill.service.<svc_id>`, `kill.member.<mem_id>`. **Feature flags** (entity `FeatureFlag`, default off): `ff.growth.v1_fast_path`, `ff.growth.v2_live_counter`, `ff.growth.v3_share_card`, `ff.growth.v4_teams`, `ff.growth.v5_referral`, `ff.growth.v6_milestones`, `ff.channel.human_review`, `ff.job.reservations`, `ff.public.ledger_page`, `ff.experiment.expiry_arm`. Each experiment-capable flag has an `Experiment` with a logged assignment (S12.*, S13.*). [D]
+
+## 0.11 API conventions
+
+### 0.11.1 Transport and shape [D]
+
+- Base path `/v1`. HTTPS only. JSON only (`application/json; charset=utf-8`); other media types return 415. Field names `snake_case`; enum values as in 0.8; ids as in 0.6.3; timestamps RFC 3339 UTC; amounts `*_ucr` as integer strings; ratios as integer `*_ppm` fields (the display decimal is computed by the client).
+- Resource paths are plural kebab-case nouns: `/v1/<resources>[/{id}[/<sub-resource>]]`. No verbs in paths; a non-CRUD command is a `POST` that creates a sub-resource: `POST /v1/cells/{cell_id}/leases`, `POST /v1/leases/{lease_id}/submission`, `POST /v1/jobs/{job_id}/cancellation`. Operation ids are in S15.* (0.5).
+- A single resource is returned as the object itself; a list is `{ "data": [...], "page": { "next_cursor": string|null, "limit": int } }`. `PATCH` uses JSON Merge Patch (RFC 7396). No XML, no cookies, no query-string secrets.
+- Breaking changes require `/v2`; additive fields are allowed within `/v1`; clients ignore unknown fields.
+
+### 0.11.2 Surfaces and prefixes [D]
+
+| Surface | Path prefix | `auth_scheme` |
+| --- | --- | --- |
+| Public (counter, public ledger, parameters, change log, milestones) | `/v1/public/*` | `none` |
+| Member (identity, cells, leases, submissions, jobs, balance, settings, teams, appeals) | `/v1/*` except the two other prefixes | `member` |
+| Admin (templates, services, policy, parameters, audits, appeals, abuse, ledger explorer, launch gates, kill switches) | `/v1/admin/*` | `admin` |
+
+Anonymous identity creation, recovery start and the public surface are the only `none` endpoints outside `/v1/public/*`; they are rate-limited per IP hash. [D]
+
+### 0.11.3 Error model [D]
+
+Every non-2xx response has this body (the `error` object is the only top-level key):
+
+```json
+{ "error": { "code": "STATE_CONFLICT", "message": "developer-facing English text", "details": { }, "request_id": "req_01j9z..." } }
+```
+
+`code` is `UPPER_SNAKE` and stable; `message` is for developers and never shown to members; user-facing text comes from `details.copy_key` (a `copy.*` key, 0.5) rendered client-side in `fa` or `en`. `details` is an object, possibly empty; `details.fields` is a list of `{path, code, message}` for validation errors. `request_id` also appears in the `X-Request-Id` header and in logs. [D]
+
+| HTTP | `code` | Use |
+| --- | --- | --- |
+| 400 | `MALFORMED_REQUEST`, `VALIDATION_FAILED` | Syntax; field rules; missing `Idempotency-Key` where required |
+| 401 | `AUTH_REQUIRED`, `AUTH_INVALID`, `AUTH_EXPIRED` | Missing, wrong-scheme or expired token |
+| 403 | `FORBIDDEN`, `LAUNCH_GATE_CLOSED` | Permission missing; a launch switch (0.10.6 table C) is off |
+| 404 | `NOT_FOUND` | Also returned instead of 403 when existence must not leak |
+| 409 | `STATE_CONFLICT`, `LEASE_CONFLICT`, `ALREADY_EXISTS`, `IDEMPOTENCY_IN_PROGRESS` | A guard of a state machine failed; race lost |
+| 410 | `LEASE_EXPIRED` | The lease or nonce is no longer valid |
+| 412 | `PRECONDITION_FAILED` | `If-Match` does not match |
+| 413 | `PAYLOAD_TOO_LARGE` | Body or submission over its limit |
+| 415 | `UNSUPPORTED_MEDIA_TYPE` | Not JSON |
+| 422 | `POLICY_REJECTED` (`details.reasons` = `policy.<rule>.<slug>` list), `INSUFFICIENT_CREDIT`, `CAP_EXCEEDED`, `NO_CAPACITY`, `IDEMPOTENCY_KEY_MISMATCH`, `UNPROCESSABLE` | Semantically valid request refused by a business rule |
+| 429 | `RATE_LIMITED` | With `Retry-After` |
+| 500 / 503 | `INTERNAL`, `UNAVAILABLE`, `KILL_SWITCH_ENGAGED` | `Retry-After` when known |
+
+### 0.11.4 Authentication schemes [D][A]
+
+| Scheme | Credential | Rules |
+| --- | --- | --- |
+| `member` | `Authorization: Bearer <member session token>` obtained by a signed challenge with a `MemberKey` (S10.*) | Valid only on member endpoints; no cookies, so no CSRF surface; CORS allows the one front-end origin |
+| `admin` | `Authorization: Bearer <admin session token>` obtained by WebAuthn for an `AdminUser`; no shared password anywhere | Valid only on `/v1/admin/*`, served from a separate origin [A]; shorter session TTLs (`session.admin_*`); sensitive actions need a second admin (`security.two_person_actions`) |
+| `none` | nothing | Public and anonymous-bootstrap endpoints only |
+
+A token of one scheme sent to an endpoint of another is `AUTH_INVALID` and is counted by the rate limiter. [D]
+
+### 0.11.5 Idempotency-Key [D]
+
+- Header `Idempotency-Key`: 16 to 64 characters matching `^[A-Za-z0-9_-]+$`, generated by the client (a ULID or random UUID). **Required** on every `POST`, `PUT`, `PATCH` and `DELETE` that creates or changes jobs, leases, submissions, escrow, ledger-affecting state, grants, referrals, reports or appeals, and on every admin write; optional elsewhere.
+- Scope: (principal id, method, path with ids substituted). The server stores the SHA-256 of the canonical request body (0.6.4) with the stored response for `api.idempotency_ttl_s`.
+- Same key and same body: the stored status and body are replayed with `Idempotent-Replayed: true`. Same key, different body: `422 IDEMPOTENCY_KEY_MISMATCH`. Same key while the first request is running: `409 IDEMPOTENCY_IN_PROGRESS` with `Retry-After`. Only 2xx and deterministic 4xx outcomes are stored; 5xx outcomes are not.
+- Natural idempotency still applies underneath (one submission per lease and nonce, one `escrow_hold` per job), so a missing or reused key cannot double-spend. [D]
+
+### 0.11.6 Cursor pagination [D]
+
+Query `?limit=` (default `api.page_size_default`, maximum `api.page_size_max`) and `?cursor=`. The cursor is an opaque base64url string that encodes the sort key `(created_at, id)` and a keyed MAC; a tampered or expired (`api.cursor_ttl_s`) cursor is `400 VALIDATION_FAILED`. Default order is newest first; lists that need another order say so. No total counts by default (they are expensive and can leak). [D]
+
+### 0.11.7 Concurrency, caching, rate-limit headers [D]
+
+- Mutable admin resources return an `ETag` (their `row_version`) and require `If-Match` on `PUT` and `PATCH`; a mismatch is `412 PRECONDITION_FAILED`.
+- Authenticated responses carry `Cache-Control: no-store`. Public resources carry an `ETag` and a `Cache-Control: max-age` no larger than their refresh parameter.
+- Every response on a rate-limited route carries `RateLimit-Limit`, `RateLimit-Remaining` and `RateLimit-Reset` (seconds until the window resets) [A: modeled on the IETF draft fields; the names are fixed here even if the draft changes]; a `429` also carries `Retry-After`. The limit key is the member id, admin id, or IP hash, never a raw IP (0.6.4).
