@@ -156,3 +156,109 @@ The server holds `recovery_pub` only. Verification is a signature over a fresh c
 **Risks, stated plainly** [D]: (1) the mail provider and any relay see the address and the fact that Hamyar wrote to it; (2) an operator, or a seizure that obtains the database and the secret store, can decrypt addresses; (3) an address can be tied to a real person by whoever controls the mailbox provider; (4) delivery to and from Iran-facing mailboxes may be blocked or filtered [V]; (5) phishing mail that imitates Hamyar. Responses: optional and off by default, neutral content, `kill.optional_pii` (10.15) purges every address at once, and `copy.identity.email_optional_notice` tells members to leave the field empty if a link to a real person matters to them.
 
 **Deletion and backups** [D]: a deleted address still exists in backups until they expire. Backup retention is set in `S4.*` and MUST be a published number; a restore re-applies a deletion tombstone list (member id, field, deleted_at) kept for the backup horizon so deleted e-mail does not return [V: the horizon number].
+
+## 10.6 Key rotation
+
+`MemberKey` states: `active`, `retiring`, `revoked`. Events: `member.key_rotated` (a successor was added, the old key moves to `retiring`), `member.key_revoked` [A] (any move to `revoked`). Signature algorithm changes are treated as rotation (the `alg` column exists for this). Rotation never changes `mem_` id, balances, trust tier or the recovery key. [D]
+
+```
+planned rotation of device key K_old -> K_new            # step-up required (10.13)
+  client: generate K_new; persist it locally as 'pending' BEFORE sending anything
+  POST /v1/members/me/keys {device_pub: K_new.pub, replaces_key_id: K_old.id}
+        signed by K_old (purpose rotate_device_key) AND by K_new (proof of possession)
+  server: txn { K_new = MemberKey(active, authorized_by = K_old);
+                K_old.state = retiring, K_old.not_after = now + identity.key_rotation_grace_s;
+                SecurityNotice; emit member.key_rotated }
+  client: authenticates once with K_new (purpose session) -> 'confirmed'
+  server: on that first K_new session: K_old.state = revoked, its sessions revoked, emit member.key_revoked
+          if never confirmed: sweep revokes K_old at not_after
+```
+
+Why a grace period: a lost response or a crash between the two sides must not lock a device out; the retry window is `identity.key_rotation_grace_s` (default 604,800 s = 7 days, `SEC`). Only the old key of the same device is affected; other linked devices keep their own keys. [D]
+
+| Case | Rule |
+| --- | --- |
+| Compromise of a device key (lost or stolen phone) | `revoke_key` from another device or by recovery: immediate `revoked`, no grace, sessions bound to it die at once |
+| Limits | At most `identity.max_devices_per_member` active or retiring device keys; at most one pending rotation per key |
+| Recovery key | Rules in 10.4.4 |
+| Server-side secrets | Rotation of `secret.*` is in the secrets part of `S10.*`; nothing in this part needs a member to act when a server secret rotates |
+
+## 10.7 Device linking
+
+Purpose: add a second device (new phone, desktop) to the same member without moving any private key. Every device holds its own keypair; no key export, no identity file and no session copying exists, because an exportable identity is a theft target. [D]
+
+```
+Offer states: open --claim--> claimed --approval--> approved (T)
+              open|claimed --ttl--> expired (T);  open|claimed --cancel or attempts exhausted--> cancelled (T)
+
+A (signed in, step-up):  POST /v1/device-link-offers
+    -> {offer_id, link_secret (128 random bits, QR and 26-character Crockford text),
+        expires_at = now + identity.device_link_code_ttl_s}
+    server stores SHA-256(link_secret) only
+B (new device, no session): generate device key and device token;
+    POST /v1/device-link-offers/{offer_id}/claims {link_secret, device_pub, device_token,
+        platform_class, key_storage}  signed by B's key (purpose link_claim)
+    server: constant-time compare of the secret hash; attempts += 1; state claimed;
+            claimed_key_hash = SHA-256(device_pub); only the first valid claim wins
+    B and A both display  sas = (first 4 bytes of SHA-256(offer_id || device_pub) as uint32) mod 1,000,000, 6 digits
+A: shows platform_class and the 6 digits; the person confirms they match B's screen;
+    POST /v1/device-link-offers/{offer_id}/approval signed by A's key
+        (purpose link_approve, context_hash covers offer_id and claimed_key_hash)
+server: txn { MemberKey(device, active, authorized_by_key_id = A.key, authorization_signature);
+              upsert Device; SecurityNotice to all devices; emit member.device_linked }
+B: next step is an ordinary session by challenge (10.13); B inherits nothing
+```
+
+| Limit | Value | Reason |
+| --- | --- | --- |
+| Offer lifetime | `identity.device_link_code_ttl_s` (300 s) | A shoulder-surfed or photographed QR dies quickly |
+| Wrong-secret attempts per offer | `identity.code_max_attempts`, then `cancelled` | Online guessing of a 128-bit secret is already infeasible; this bounds noise |
+| Open offers per member | 1 | No stacking |
+| Offers per member per day | `ratelimit.device_link_offers_per_day` | Spam and probing |
+| Devices per member | `identity.max_devices_per_member` | Bounds one member running many parallel contributors; rate limits are per member anyway (10.9) |
+
+The 6-digit SAS (short authentication string) lets the person check that the key that claimed is the key their new device generated. It is not a secret and adds 10^-6 per-try assurance only; the real protection is single-claim: if an attacker claims first, the real device's claim fails visibly and the person cancels. [D]
+
+**Key chain** [D]: every `MemberKey` row stores the key that authorized it and that key's signature (the first two keys are self-signed at registration; keys added by recovery are signed by the recovery key). `GET /v1/members/me/keys` returns the chain; the client verifies it and warns on any key without a valid authorization. A server job re-verifies every active key and raises the alarm `identity.key_chain_invalid` (metric `hamyar_identity_key_chain_invalid_total`) on any row whose signature does not verify, which detects a key row inserted directly into the database. Limit, stated honestly: the server can still deny service, observe metadata and act inside its own ledger; the chain makes unauthorized key additions detectable by the member's clients, it does not make the operator powerless [H: detection works; test: `T-adv` seeded forged row].
+
+## 10.8 Account recovery and its abuse risks
+
+```
+client (new device, no session): person types the recovery key; normalize; verify checksum locally
+  ch   = POST /v1/auth-challenges {purpose: 'recover'}
+  new_dk, new_rs -> new_rk generated as in 10.3.3
+  body = {recovery_pub, new_device_pub, new_recovery_pub, device_token, platform_class, key_storage}
+  POST /v1/recoveries body + {challenge_id, recovery_signature (old recovery key),
+        device_signature (new_dk), new_recovery_signature (new_rk)}
+server:
+  1. rate limits: ratelimit.recovery_attempts_per_day per IP hash and per device token
+  2. verify challenge and all three signatures; find MemberKey(kind recovery, state active|retiring)
+     by public_key; unknown key and bad signature give the same 401 AUTH_INVALID
+  3. count completed RecoveryRequest of this member in the last 90 days;
+     if >= identity.recovery_max_per_90d: 422 CAP_EXCEEDED, details.copy_key copy.identity.recovery_limit
+  4. txn { revoke all MemberKeys of the member (reason 'recovery') and all sessions;
+           insert new device key and new recovery key (authorized_by = the old recovery key);
+           recovery_cooldown_until = now + identity.recovery_cooldown_s;
+           recovery_confirmed_at = null; RecoveryRequest(completed); SecurityNotice; emit member.recovered }
+  5. return a session for the new device key
+```
+
+Status is never changed by recovery: a `suspended` or `banned` member stays so, `trust_tier` and `restricted` carry over, and a `closed` member cannot recover because closing deletes the keys (10.14). [D] Reason: recovery must not be a reset button.
+
+**Cooldown** (`identity.recovery_cooldown_s`, default 86,400 s) [D]: while `recovery_cooldown_until` is in the future the member can lease, submit, view balance and file appeals, but cannot create jobs, hold escrow, book reservations, change or add e-mail, or issue invites. Reason: a thief who just recovered cannot cash out stolen credit before the owner can notice.
+
+A device whose key was revoked by recovery gets `401 AUTH_INVALID` with `details.reason` = `key_revoked_by_recovery` and shows `copy.identity.recovered_elsewhere`. There is no contest or arbitration process [D]: Hamyar has no identity evidence with which to decide between two claimants, so any rule would be a coin flip an attacker could game.
+
+| # | Risk | Attack | Mitigation | Residual |
+| --- | --- | --- | --- | --- |
+| 1 | Takeover with a stolen recovery key (paper found, photo in cloud album, shoulder-surf) | Attacker recovers and revokes the owner | Cooldown; cap of `identity.recovery_max_per_90d`; value bounded by K and expiry; notice on revoked devices | Takeover succeeds; the owner loses the pseudonym and its credit, at most K credits |
+| 2 | Phishing of the key | Fake site asks for the key | The key is never asked for by any Hamyar message, chat or support channel; recovery screen shows the exact origin; signatures bind `audience` but cannot stop a typed key | Human error; copy `copy.identity.recovery_phishing_warning` |
+| 3 | Guessing | Online or offline search of the key space | 2^-128 per guess; `ratelimit.recovery_attempts_per_day`; no per-account lockout | Negligible |
+| 4 | Enumeration of members | Probe recovery or challenges for existing keys | Uniform responses and equal work (10.4.3) | None known |
+| 5 | Lockout denial of service | Spam failed recoveries to lock a victim | There is no lockout: the target is not named and limits key on IP hash and device token | Attacker can only exhaust their own budget |
+| 6 | Farming by repeated recovery: reset limits | Recover to get fresh per-session or per-device counters | Counters are keyed by member id and persist across keys; recovery is capped per 90 days | None |
+| 7 | Farming by repeated recovery: launder standing | Recover to shed a ban, restriction or low tier | Recovery never changes status or tier (above) | New identity instead: handled by invites and device limits (10.9, 10.10) |
+| 8 | Farming by repeated recovery: second starter grant | Recover and claim again | `grant.max_per_device` and one grant per member; recovery creates no grant | None |
+| 9 | Account renting or selling | Hand the recovery key to a buyer | Cannot be detected without identity; caps bound the value | Accepted, monitored via anomalies |
+| 10 | Operator social engineering | Someone asks support to restore access | No operator or reviewer permission can restore or reassign a key (matrix, 10.11) | Members who lose everything start over |
+| 11 | Insider writes a key row into the database | DBA inserts a `MemberKey` | Key-chain verification job and client verification (10.7) | A DBA can still disrupt service |
