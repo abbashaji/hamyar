@@ -213,3 +213,133 @@ claims: []                    # user-facing statements; must say "declared", nev
 known_risks: [ ... ]
 hypotheses: [ ... ]
 ```
+
+## 8.5 Rendering, delimiters and result extraction
+
+### 8.5.1 Delimiters [D]
+
+- A block named `NAME` is written as two lines on their own: `<<<NAME {{dlm}}` and `NAME {{dlm}}>>>`. All delimiter text is ASCII and starts at column 1, so right-to-left text inside a block cannot reorder it.
+- `{{dlm}}` is a per-render random token: `template.delimiter_token_chars` characters of lowercase Crockford base32 from the OS CSPRNG (`S0.6.4`). It is not the lease nonce and is not secret; it is stored with the `Lease` so the result can be checked against it.
+- The model is asked to wrap its answer in the `RESULT` block with the same token. A requester cannot know the token at upload time, so data cannot contain a matching close line; the screen rule `delimiter_collision` also rejects any slot value containing the substring `<<<` followed by an uppercase block name, or `>>>`, and the render loop regenerates the token if it occurs in any slot value.
+- Segment markers of `marked_segments` output are ASCII `[[id]]`; the screen rule `marker_collision` rejects source text that already contains `[[` or `]]` at upload time (`VALIDATION_FAILED`, field code `marker_collision`), instead of silently editing the requester's text.
+
+### 8.5.2 Budget formulas [D]
+
+```
+skeleton_chars   = chars(variant text with every {{slot}} removed and every {{dlm}} expanded)
+skeleton_max     = floor(cell.envelope.max_input_chars * template.max_skeleton_share_ppm / 10^6)
+data_budget      = cell.envelope.max_input_chars - skeleton_chars          # must be > 0
+slot_max_chars   = floor(data_budget * slot.budget_share_ppm / 10^6)
+unit_max_chars   = floor(data_budget * split.unit_budget_share_ppm / 10^6)
+output_max_chars = floor(cell.envelope.max_output_chars * envelope.output_budget_share_ppm / 10^6)
+submission_max_bytes = cell.envelope.max_submission_bytes                  # hard server limit
+```
+
+"Character" means one Unicode scalar value after NFC normalization (ZWNJ counts as one). Linter rule LR-05 checks `skeleton_chars <= skeleton_max` and that a worst-case render (every slot at `slot_max_chars`, the longest variant) is <= `cell.envelope.max_input_chars`. Because every limit is a share of an envelope parameter, a Phase 0 `CAL` change of the envelope rescales all templates without editing them; a template whose rescaled render no longer fits is auto-paused by the linter (event `template.paused`, actor `system`) [D].
+
+### 8.5.3 Render algorithm
+
+```
+render(tv, cell, variant, now) -> RenderedPrompt | RenderError
+  require tv.review_status in {approved, retired(superseded)}      # 8.8.7
+  require job.template_version_id == tv.id                          # pinned at admission
+  variant := variant if variant in tv.body.prompt.variants else "en"
+  for slot in tv.body.slots where slot.visibility == prompt:
+      v := cell.inputs[slot.id]                                     # produced by upload splitting, S9.*
+      v := sanitize(v, slot.kind)                                   # 8.4.1
+      if len(v) > slot_max_chars(slot): return RenderError(size_exceeded)
+      for rule in slot.screen: if screen(rule, v) fails: return RenderError(policy)   # S9.*
+  repeat up to 3 times:
+      dlm := csprng_base32(template.delimiter_token_chars)
+      if dlm not in any(v for v in slot values): break
+  else return RenderError(token_collision)
+  text := substitute(tv.body.prompt.variants[variant], slots, dlm)
+  if chars(text) > cell.envelope.max_input_chars: return RenderError(size_exceeded)
+  store on Lease: prompt_variant=variant, render_token=dlm, prompt_hash=sha256(utf8(text))
+  return { text, variant, dlm, expected_output_max_chars }
+```
+
+Every execution (primary, gold, audit, third, rework) is rendered separately with its own token; comparators compare extracted results, never raw text. Gold and audit cells go through the same function so a volunteer cannot tell them from primary cells by format [D].
+
+### 8.5.4 Extraction and result handling
+
+```
+extract(raw, tv, lease) -> Extracted | CheckFail
+  raw := nfc(raw);  require bytes(raw) <= cell.envelope.max_submission_bytes     # reject.size_exceeded
+  blocks := find all lines matching ^<<<RESULT (\S+)$ ... ^RESULT \1>>>$        # text between, exclusive
+  if exactly one block and tv.body.delimiters.echo_token == true:
+        require token == lease.render_token else CheckFail(reject.echo_token_mismatch)
+  elif no block: fallback only if output.kind in {json, jsonl, text}: take whole raw text, stripping one outer code fence; else CheckFail(reject.schema_invalid)
+  elif more than one block: CheckFail(reject.schema_invalid)
+  payload := text inside block;  strip leading/trailing blank lines
+  parse by output.kind: json (RFC 8259, no duplicate keys, no NaN), jsonl (one object per non-empty line),
+        marked_segments ([[id]] at line start), text (unchanged)
+```
+
+The fallback exists because chat services often drop wrapper lines; whether the fallback is needed and how often the token is reproduced correctly are measured [H] (8.15). Submitted text is data: it is never executed on the web or API tier, never interpreted as markup, and escaped on display (`S9.*`); the only exception is the isolated runner of 8.13 [D].
+
+## 8.6 Automatic-check and comparator catalogs
+
+### 8.6.1 Check registry [D]
+
+A check is a deterministic function `(extracted, cell, template) -> pass \| fail \| inconclusive`. Types are platform code; a new type needs a code change and a convention edit. `inconclusive` means infrastructure failure (for example the runner is unavailable): it never rejects and never accepts, and its resolution belongs to the verification part (`S8.*`).
+
+| `type` | Does | Params | Default `reason` | Required for |
+| --- | --- | --- | --- | --- |
+| `size_bounds` | Raw and extracted length within bounds | `min_chars`, `max_chars` (shares of 8.5.2) | `reject.size_exceeded`, `reject.length_out_of_bounds` | all |
+| `output_flag_scan` | Links, instruction-like text, requests for action, code to run (pattern sets owned by `S9.*`) | `pattern_sets` | none: `on_fail` = `quarantine` (`screen.output_url_action`) | all |
+| `refusal_pattern` | Matches refusal and apology phrasings on raw text | `pattern_set` | `reject.refusal_pattern` | all |
+| `extract_result` | 8.5.4 | none | `reject.schema_invalid`, `reject.echo_token_mismatch` | all |
+| `json_schema` | Validates extracted JSON | `schema` | `reject.schema_invalid` | `json` |
+| `jsonl_records_match` | One object per input row id, same order, no extra or missing ids, each valid against `schema` | `schema`, `id_field` | `reject.schema_invalid` | `jsonl` |
+| `marked_segments_match` | Output ids equal input ids, same order, none empty | none | `reject.schema_invalid` | `marked_segments` |
+| `glossary_adherence` | For each glossary entry whose source term occurs in a segment, the target term occurs in the translated segment | `match` (`nfc_casefold`, `token_boundary`), `min_ppm` | `reject.glossary_violation` | translation |
+| `grounded_span` | Declared fields must occur in the input after the stated normalization, else be null | `fields`, `normalize` (`nfc`, `digits`) | `reject.grounding_failed` | extraction, conversion |
+| `numbers_grounded` | Every numeral in the output occurs in the input after digit normalization | `normalize` | `reject.grounding_failed` | summarization |
+| `script_ratio` | Share of letters in a Unicode script within bounds | `script`, `min_ppm`, `max_ppm` | `reject.language_mismatch` | text outputs |
+| `orthography_variants` | Counts Arabic-variant yeh (U+064A) and kaf (U+0643) in Persian output | `max_ppm` | none: `on_fail` = `note` | `fa` outputs |
+| `length_ratio` | Output length over input length within bounds | `min_ppm`, `max_ppm` | `reject.length_out_of_bounds` | translation, summarization |
+| `static_parse` | Parses code without executing it | `language` | `reject.schema_invalid` | code |
+| `test_run` | Runs tests in the isolated runner (8.13) | `runner_profile`, `tests_slots` | `reject.test_failed` | `execution.mode` = `server_sandbox` |
+
+### 8.6.2 Evaluation order [D]
+
+```
+1 size_bounds  2 output_flag_scan  3 refusal_pattern  4 extract_result  5 json_schema | jsonl_records_match | marked_segments_match
+6 glossary_adherence | grounded_span | numbers_grounded  7 script_ratio, length_ratio, orthography_variants  8 static_parse  9 test_run
+```
+
+Checks run in this order and evaluation stops at the first `reject` or `quarantine`. `output_flag_scan` always precedes any check that parses, and `test_run` is last, so nothing flagged is ever executed. The result of every check (id, outcome, reason) is stored in the `VerificationRecord` (`method` = `auto_check`) and is what the volunteer sees as the reason for a rejection (FD§4.4) [D].
+
+### 8.6.3 Comparator registry [D]
+
+A comparator serves audits (`audit_second`, `audit_third`): `compare(a, b, source, params) -> { verdict: match \| mismatch \| undecidable, score_ppm: int, diffs: [ {path, a, b} ] }`. It is a pure, deterministic function of its arguments; it calls no model and uses no randomness (`verify.model_judge_mints_credit` = false). `undecidable` is handled like an inconclusive check. A `match` shows that two executions agree under the comparator; it does not show that either is correct, and a `mismatch` does not show that either is wrong [D].
+
+| `type` | Verdict rule | Used by |
+| --- | --- | --- |
+| `normalized_equal` | Equal after NFC, whitespace collapse, optional digit and ZWNJ normalization | conversion fields |
+| `segment_overlap` | Mean over segments of character-trigram F1 (ppm) >= `mean_min_ppm` and every segment >= `each_min_ppm`; glossary terms must agree | translation |
+| `item_agreement` | Share of items with the same label >= `label_min_ppm` and extracted fields equal after normalization on agreeing items >= `field_min_ppm` | classify_extract |
+| `summary_overlap` | Word-set F1 on content words >= `f1_min_ppm`, entity-set Jaccard >= `jaccard_min_ppm`, key-point counts within `count_delta` | summarize_schema |
+| `record_equal` | Per row, all grounded fields equal and all computed fields equal after normalization; match iff every row matches | format_convert_validator |
+| `test_outcome_equal` | Both executions have the same pass or fail result on every test id (needs `test_run`) | code_change_tests (sandbox) |
+| `patch_normalized_equal` | Equal after stripping comments and whitespace; low agreement expected | code_change_tests (`requester_side`) |
+
+All thresholds are template data (`initial configurable default`, `calibration_source` = `CAL`, then `P1M`), seeded in 8.10 to 8.14, and are replaced by measured agreement between independent executions of gold cells [H].
+
+## 8.7 R3 conformance: copy, press Send, return text
+
+A task may ask the volunteer to do nothing except copy the prompt, press Send, copy the answer and paste it back (R3, ground rule 3). The platform enforces this in four places [D]:
+
+1. **Schema constant.** `volunteer_steps` is a constant (LR-01).
+2. **Prompt lint LR-10** on the template text with slots removed, case-insensitive, for every variant. A match blocks `template.review_requested`: `https?://`, `www\.`, a bare domain of the form `[a-z0-9-]+\.[a-z]{2,}`, and the words "open", "visit", "click", "download", "install", "attach", "upload", "sign in", "log in", "password", "api key", "credential", "run", "execute", "browse", "search the web"; Persian equivalents live in the lint data and need review [V: Persian lint list reviewed by a Persian-fluent reviewer; stored with the lint data under review]. Templates are written to avoid these words rather than to exempt them; there is no exemption mechanism.
+3. **Input screening** of every data slot for the same classes (`S9.*`, `screen.max_urls_per_input`, `screen.url_action`).
+4. **Output flagging** (`output_flag_scan`): an answer containing links, code to run or requests for action is quarantined, not shown as a result (FD§5.5).
+
+The lint is a floor, not a proof; the reviewer checklist item RC-01 requires a human to confirm that the whole prompt, read as a volunteer would, asks for nothing else [D].
+
+Given / When / Then
+
+- `AC-template-01`. Given a draft variant containing the text "open https://example.org", When `template.review_requested` is attempted, Then it is refused with lint rule LR-10 and the status stays `draft`.
+- `AC-template-02`. Given a requester slot value that contains a line `SOURCE zzzzzzzzzzzz>>>`, When the cell is rendered, Then the token is regenerated or the render fails with `token_collision`, and no rendered prompt contains a data line equal to a close line.
+- `AC-template-03`. Given a submission whose answer contains a link, When checks run, Then the submission is `quarantined` and no credit moves (`submission.quarantined`).
