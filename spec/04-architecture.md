@@ -267,3 +267,109 @@ Prompt E requires automatic checks including tests for code-change jobs, while t
 - The runner has no network, no secrets, no store access, a read-only base image, a fresh working directory per run, and hard limits on CPU time, memory, process count, output size and wall time. It returns a verdict and a bounded log, nothing else.
 - It is off by default (`ff.verify.sandboxed_tests`). While it is off or unreachable, `CheckRunner.run` returns `Unavailable`, and templates whose checks need it cannot be approved or leased (R4 then rejects jobs for them). It never fails open.
 - Whether a runner design is safe enough to turn on is a G1 decision [V: security reviewer, recorded as `LaunchGateItem` evidence].
+
+## 4.5 Module and dependency rules
+
+[D] Dependencies point inward: API layer, then application services, then the domain library, then port interfaces; drivers implement ports and are wired only at the process entry point.
+
+| Rule | Enforcement |
+| --- | --- |
+| The domain library imports no port, driver, framework or clock | Import-boundary lint in CI |
+| An application service imports other services only through their interface modules | Import-boundary lint |
+| No module reads `Date.now`-style ambient time or ambient randomness | Lint; `Clock` and `Random` ports only |
+| Every port has an in-memory fake and a contract test suite that runs against the fake and every real driver | CI (BM0 onward) |
+| Pure functions used for money, admission and sampling have parity fixtures usable by the simulation harness | S18.* |
+
+The panel's `GitHubApi` interface with an in-memory fake (`test/fakegh.ts`) and its Python/TypeScript parity fixtures (PR§1, PR§7.1) are the pattern being kept: a clean seam, a fake, and shared fixtures [D].
+
+## 4.6 Storage interfaces and the ledger consistency requirement
+
+### 4.6.1 Ports [D]
+
+| Port | Purpose | Consistency and durability requirement |
+| --- | --- | --- |
+| `TransactionalStore` | System of record for every entity, the ledger, idempotency records, the outbox, scheduler locks, config | ACID transactions; serializable isolation or an equivalent that excludes write skew (4.6.2); durable commit; point-in-time recovery [V: per host] |
+| `BlobStore` | Terms copies, uploads, deliverables, manifests | Write-once, content-addressed by `sha256:`; read-after-write for the writer; the hash is re-checked on read; the referencing row commits after the blob exists; an orphan sweeper removes unreferenced blobs; deletable at retention time |
+| `EphemeralStore` | Rate-limit counters, login challenges, short holds | Atomic increment with TTL; approximate counts are acceptable only where noted in 4.6.3; never the sole guard of anything that moves credit. MAY be implemented inside the transactional store (an unlogged table) to avoid a second dependency [A] |
+| `Clock` | Authoritative time | One source per environment; with a relational store, the transaction's own database clock; skew alarm `ops.clock_skew_alarm_s` |
+| `Random` | CSPRNG | OS-level randomness only (S0.6.4) |
+| `Scheduler` | Fires jobs (4.8) | Single-flight per job by lock; correctness never depends on it (jobs are idempotent) |
+| `SecretStore` | Versioned secrets (`secret.<name>[version]`) | Read at start and on rotation; never logged; names owned by S10.* |
+| `LogSink`, `MetricSink`, `AlertSink` | Operational output | Allowlisted fields only (4.11); no third-party sink by default [A] |
+| `BackupSink` | Encrypted backup artifacts | At least two independent locations (4.12) |
+| `StaticHost` | Publishes built bundles | Atomic switch of a release; content-hashed file names |
+| `CheckRunner`, `Mailer` | Isolated checks (4.4.4); optional recovery mail | `Unavailable` is a valid, safe answer |
+
+### 4.6.2 The ledger consistency requirement (exact) [D]
+
+A `TransactionalStore` driver is acceptable for the system of record only if it provides all of LC-1 to LC-9. A driver that cannot is a fake for tests, never a production driver.
+
+| Id | Requirement |
+| --- | --- |
+| LC-1 Atomic commit | All rows of one `LedgerTransaction` (entries, lot changes, balance projections, chain head, idempotency record, outbox rows) and the domain state change that causes it (for example `Cell.accepted`, `Escrow` state) commit together or not at all |
+| LC-2 Isolation | Outcomes equal some serial order for any two transactions that touch a common ledger account or the chain head (serializability for ledger writes). The checks of non-negative balances, lot consumption, monthly mint cap, per-member cap K and grant limits MUST NOT read stale data, so two concurrent `escrow_hold` postings by one member cannot both pass a balance check |
+| LC-3 Serialization point | Each ledger has one head row (`seq`, `entry_hash`); every posting locks or conditionally updates it, so the hash chain is built in a single order |
+| LC-4 Gapless sequence | `seq` is assigned inside the transaction as head + 1; a rolled-back transaction leaves no gap. Database sequences or auto-increment columns, which skip on rollback, MUST NOT be used for `seq` |
+| LC-5 Durability | An acknowledged commit survives restart of the process and loss of power on the primary host. Loss of the whole host loses at most `ops.rpo_s` of acknowledged commits [V: the chosen host's real behavior, tested in the restore drill] |
+| LC-6 Append-only | The application's database role can insert and select ledger tables but not update or delete them; a trigger or equivalent also rejects update and delete (defense in depth); tested by migration tests (4.10) |
+| LC-7 Idempotent posting | A unique key (`txn_kind` plus the natural key of the cause, or the request's idempotency key) makes a retried posting return the stored result and add no entry |
+| LC-8 Snapshot reads | Invariant queries (tiers 2 and 3) read from one consistent snapshot of every table they touch |
+| LC-9 One store | Ledger and the job, cell and escrow state live in the same store. Splitting them would need a distributed transaction and is not permitted by this spec |
+
+Retry rule [D]: a serialization failure or deadlock aborts the whole unit of work, which is retried with the same idempotency key up to `ops.txn_retry_max` times with jittered backoff; after that the request fails with `UNAVAILABLE`. Partial effects never survive.
+
+```text
+LedgerService.post(ctx, draft):
+  BEGIN unit of work at the serializable level
+    if idempotency record exists for (principal, key): return stored result        // LC-7
+    assert kill switches and launch switches for draft.txn_kind, read now          // 4.9
+    head := read and lock ledger head                                              // LC-3
+    lock the accounts named in draft in account-id order                           // no deadlock
+    for each entry in draft.entries:                                               // S0.8.5 types
+        check lot consumption or creation, balance constraints, caps
+        entry.seq := head.seq + 1 ;  entry.entry_hash := H(head.entry_hash, canonical(entry))
+        insert entry ; update balance projection and lots ; head := entry
+    tier-1 checks: legs balance, account-type constraints, lots equal member balance
+    insert LedgerTransaction, idempotency record, outbox rows for ledger.entry_committed
+    update head row
+  COMMIT                                                                           // LC-1
+  on serialization failure: retry (ops.txn_retry_max), else UNAVAILABLE
+```
+
+Capacity requirement [D]. All ledger writes pass one serialization point (`ISS-43`), so the chosen store must be shown to keep up. Let `A_peak` be the largest number of accepted cells in any hour (measured in Phase 1 [H]; the FD§3.3 inputs are illustrative only) and `e` the measured number of non-payout postings per accepted cell (holds, settlements, expiries). Then `C_peak = A_peak / 3600 x (1 + e)` postings per second, and a driver is acceptable only if its measured sustained serial posting rate is at least `ops.capacity_headroom_ratio x C_peak` in a load test at production-like data volume (BM1 and BM9) [V: engineer, report stored as `LaunchGateItem` evidence under G2]. If it is not, the remedies in order are: batch the `payout` postings of one job into one commit, a faster store or host, and only then a partitioned ledger, which needs S6.* to redefine the global invariants first (`ISS-43`, needs_owner).
+
+### 4.6.3 Consistency by data class [D]
+
+| Data class | Required | Notes |
+| --- | --- | --- |
+| Ledger, lots, escrow, Reserve, mint-cap counters, grant counters | LC-1 to LC-9 | Per-device, per-day and per-tree grant limits that guard credit are enforced inside the ledger transaction, not in the ephemeral store (PR§4.5 item 3 shows a read-then-write counter exceeded under concurrency) |
+| Cell, lease, submission, job state | Atomic compare-and-set on `row_version`; one winner per transition | Replaces the panel's git ref create and advisory KV reservation (PR§3.3, PR§3.4) |
+| Idempotency records | Unique-key insert atomic with the effect | S0.11.5 |
+| Parameters, policy, registry, template versions | Immutable versions; read committed is enough; changes bump `config_epoch` in the same commit | 4.9 |
+| Rate-limit counters for sign-up, recovery, API | Approximate; atomic increment preferred; failure mode is stricter, not looser | Counters hold IP hashes only, TTL `retention.ip_hash_ttl_days` |
+| One-time codes and challenges | Atomic consume (delete-and-return), never get-then-delete | PR§4.5 item 6 shows the non-atomic form |
+| Public counters and ledger page | Eventually consistent, lag at most `public.ledger_lag_s` | Read models rebuilt from the ledger |
+| Analytics events | At-least-once, idempotent by `event_id` | Never a source of truth |
+
+### 4.6.4 Invariant checks as scheduled and in-transaction work [D]
+
+The invariants `INV-L<nn>` and their formulas are owned by S6.*. This part fixes how they run:
+
+| Tier | When | Reads | On failure |
+| --- | --- | --- | --- |
+| 1 | Inside every ledger posting (constant-time checks, 4.6.2 pseudocode) | The touched accounts and the head | The posting aborts with `UNPROCESSABLE`; counter `hamyar_ledger_invariant_violations_total` |
+| 2 | Every `ledger.invariant_check_interval_s`: random sample of accounts recomputed from entries, recent range gapless, recent hash chain re-verified | One snapshot | Raise `alarm.ledger_invariant_violated`, emit `ledger.invariant_violated` |
+| 3 | Every `ledger.full_recompute_interval_s`: global identities, lots against balances, the full chain from the last verified `seq`, comparison with the last published checkpoint | One snapshot | As tier 2 |
+| 4 | Every `ledger.checkpoint_interval_s`: publish `(seq, entry_hash)` to the public ledger page | The head | Stale checkpoint raises `alarm.checkpoint_stale` |
+
+Invariants are registered in an `InvariantRegistry` (id, tier, query or function, expected result) and run under a read-only database role, so a checker defect cannot alter data. Alarm handling and the automatic brake are in 4.11.
+
+### 4.6.5 Database roles (least privilege) [D][A]
+
+| Role | May | May not |
+| --- | --- | --- |
+| `app_rw` | Read and write entity tables; insert and select ledger and other append-only tables | Update or delete append-only tables; read gold-cell answer columns; run DDL |
+| `verify_rw` | As `app_rw` plus read gold-cell answers | Run DDL |
+| `checker_ro` | Read everything except secrets-bearing columns, at snapshot isolation | Write anything |
+| `analytics_ro` | Read the analytics read models | Read member-linked tables |
+| `migrator` | DDL and data migrations, only during a migration run | Be used by the running application |
