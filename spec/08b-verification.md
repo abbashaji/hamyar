@@ -505,3 +505,97 @@ v_exp = g/(1-g) + (1 - beta) * s * (1 + mu) + beta * (n - 1) + rho            # 
 ```
 
 Illustrative inputs (not measurements): g = 0.05, s = 0.10, mu = 0.10, rho = 0.005. With beta = 0: `v_exp` = 0.0526 + 0.1100 + 0.005 = **0.1676**, so v = 167,632 ppm, p = 1.217632 and `eta = floor(10^12 / 1,217,632)` = 821,266 ppm. With beta = 0.05: `v_exp` = 0.2621, p = 1.312132, eta = 762,118 ppm, below the suggested 0.80. At both floors (g = 0.01, s = 0.02): 0.0321. Two consequences (`ISS-85`): the default `price.v_prior` = 0.10 is below what the default `g` and `s` imply, and adaptive sampling is the main lever on eta. **Floor funding check** (parameter-editor warning, proposed `C9`): `g_floor/(1-g_floor) + s_floor * (1 + mu)` must not exceed `price.v_prior + price.levy_lambda`; at the defaults 0.0321 ≤ 0.15. [A]
+
+## 8.32 Who is paid what, and from where
+
+Donor earn is exactly 1,000,000 `ucr` per **accepted** cell of any kind (FD§4.3, S0.6.1). Nothing else is paid and nothing is paid twice for one cell. [D]
+
+| Cell and outcome | Donor paid | Observation | Funding (S6.* posts it) |
+| --- | --- | --- | --- |
+| Primary or rework, accepted without a group (`cell.checks_passed`) | 1 credit at acceptance | none | Member job: `transfer` from escrow (primary pay `N x 1,000,000`, rework from the pool). Commons: `mint` |
+| Primary, `flagged_for_audit` | 0 until resolved | | |
+| Primary accepted after audit or blanket (`cell.audit_passed`) | 1 credit at acceptance | PASS | as above |
+| Primary rejected (any reason) | 0 | per 8.28.1 | |
+| Gold cell, passed | 1 credit | PASS | Sponsor job's verification pool (member job) or `mint` (Commons, ISS-03) |
+| Gold cell, failed | 0, no penalty beyond the observation | FAIL | |
+| Audit, third or blanket copy, accepted (in the majority, matched, or no vote held) | 1 credit | PASS or none | Verification pool of the **audited cell's** job |
+| Audit, third or blanket copy, outvoted | 0 | FAIL | |
+| Review cell, accepted | 1 credit | reviewer observation | Pool of the reviewed cell's job (8.35 for channel 2) |
+| Cell overturned later (appeal or fraud) | the original payout is reversed by S6.* (`reversal`, two approvers); a `rework` cell is created | corrected | `INV-L*` owned by S6.* |
+| Appeal overturns a rejection | 1 credit through the appeal-award path (8.34) | corrected | Verification pool; counted as one `rework` cell in v |
+
+The requester pays only `p = 1 + v + lambda` per primary cell (S0.6.1); verification events never add a charge. Payment waits for acceptance, so a cell under audit shows "awaiting verification" and earns nothing yet; because every cell's draw is independent, the delay reveals nothing a donor can exploit after submission. [D]
+
+**Verification budget.** A job's verification pool is `floor(N x v_ppm / 10^6)` cells (S0.6.1, ISS-04); `budget_remaining = pool - verification cells accepted or pending for that job`. Gold and audit draws above the floor band need `budget_remaining > 0` (8.29.3). Floor-band events and mandatory ones (forced audits, third executions, blanket groups) are never skipped for budget reasons; an overrun is absorbed first by the unspent pool remainder, then by the job's levy share, so a requester never pays more than quoted and donors are always paid. The floor funding check (8.31) keeps the levy sufficient at the defaults. What S6.* does if even the levy share is exhausted is open (`ISS-85`, `needs_owner`). [D][A]
+
+## 8.33 Rejection reasons shown to donors
+
+Every rejection stores a machine `reason_code` (S0.8.4 seed list plus `reject.review_unacceptable`, `ISS-84`) and a `details` object. The donor sees, in history (S11.*), the code's copy text (`copy.verify.<code>`, `fa` and `en`, `needs_human_and_legal_review`), the stage that produced it, whether it is appealable and the appeal deadline (`appeal.window_days`). Wording says what happened, never that the donor cheated. [D]
+
+| Code | Stage | Shown to donor | Never shown | Observation |
+| --- | --- | --- | --- | --- |
+| `reject.schema_invalid` | P0 | the field path that failed | | none (FAIL on gold) |
+| `reject.refusal_pattern`, `reject.length_out_of_bounds`, `reject.language_mismatch` | P1 | the rule and the limit | | none (FAIL on gold) |
+| `reject.test_failed` | P1 | names of the failing checks | hidden test content | none (FAIL on gold) |
+| `reject.forbidden_content` | P1, P1b | the category | the detection rule internals | none |
+| `reject.gold_mismatch` | gold | "did not match the reviewed reference for this cell" | the reference, the diff, any other member's result | FAIL |
+| `reject.audit_mismatch` | audit, blanket | "differed from independent results"; `inconclusive` flag when there was no majority | other outputs, how many executions, who | FAIL, or none if inconclusive |
+| `reject.review_unacceptable` | review panel | the rubric reason code | reviewer identities and verdicts | FAIL |
+| `reject.duplicate_of_other_output`, `reject.timing_anomaly` | P2 (S9.*) | that it matched or was too fast | whose output, the threshold values beyond the public parameters | FAIL (anomaly) |
+| `reject.nonce_invalid`, `reject.lease_expired`, `reject.size_exceeded` | P0 | the cause | | none |
+| `reject.policy_changed` | P5 | that a published rule changed (R9) | | none |
+
+The donor also sees own tier, `mean_ppm` and observation count (rules are public, FD Principle 5), but never whether a given unresolved cell is gold or audited. [D]
+
+## 8.34 Appeals: handoff to the Appeal machine
+
+The Appeal machine and screens are S10.* and S11.*; kind `cell_rejection` (S0.9.7). This part defines what verification supplies and what an outcome changes. [D]
+
+- **Eligibility.** A rejected cell with a reason in 8.33 is appealable within `appeal.window_days`, at most `appeal.max_per_decision` times, never against `reject.nonce_invalid` or `reject.lease_expired` (S9.* may allow a grace via `lease.submit_grace_s`). Filing creates `appeal.filed` with `subject_cell_id`, `reason_code` and an `evidence_hash`.
+- **Evidence package** built by verification, visible only to the assigned reviewer (never the original decider; for an automated rejection the decider is `system`): submission hash and output, automatic-check results with codes, comparator version and verdict, and for gold the reference, for audits the other executions **anonymized**. Access requires `perm.verify.read_gold` where a reference is included.
+- **Upheld.** No change.
+- **Overturned.** (1) A correcting `VerificationRecord` sets the outcome to `pass` (records are append-only); (2) the observation is corrected and the reliability state recomputed (8.28.5); (3) if the item was gold, the gold fail is adjudicated `overturned_*` (8.30.3) and the cascade of 8.24.1 applies; (4) payment: if the cell is still `queued` it is accepted on the original submission; otherwise the donor is paid exactly 1,000,000 `ucr` through an **appeal award** posted by S6.* (a `transfer` for member jobs, a `mint` under the monthly cap for Commons, keyed to the appeal id and counted as one `rework` cell in v); the later accepted submission remains the deliverable. The exact ledger path is S6.*'s decision (`ISS-85`).
+- Rejections caused by a defective gold item, a comparator later changed for a defect, or a policy change are queued for **automatic re-adjudication** of the affected donors without waiting for appeals; donors are told in history. [D]
+
+## 8.35 Channel 2: human review as an experimental arm
+
+FD§6.4: channel 2 needs no provider account, and its accuracy and fraud profile are untested [H]. Phase 1 runs it only as an arm. [D]
+
+| Rule | Decision |
+| --- | --- |
+| Gate | Feature flag `ff.channel.human_review` (default off) with an `Experiment` and logged random assignment (S13.*). Off means no review cell is offered to any member, but review cells created by subjective templates (8.27) can then only be served by arm members; if none exist the subjective template is paused |
+| Work item | Review cells of 8.27: closed verdict, closed reason codes, no free text, blind to the executor |
+| Credit | Exactly 1 credit per accepted review cell, same expiry rules as other credit, no bonus. It is paid from the reviewed cell's job pool (member jobs) or minted for Commons verification cells (ISS-03). Review credit is never minted for a cell that has no reviewed job |
+| Cap | At most `verify.review_channel_daily_cap_cells` accepted review cells per member per UTC day (initial configurable default 20, 8.37) |
+| Separation | Reliability, adaptive factor and blanket counter are separate in scope `review` (8.28, 8.29). Review reliability never promotes the member's execution tier and vice versa |
+| New reviewers | First `verify.new_donor_blanket_cells` review cells are blanket groups of 3 reviewers (8.26) |
+| Gold | Review gold at `verify.human_review_gold_rate`, balanced polarity (8.27). Two consecutive review gold fails set `review_suspended_until = now + trust.restriction_days`; the member keeps the execution tier |
+| Conflicts | A reviewer cannot review a cell executed by their own invite tree or device group, a job they requested, or their own output; verdicts are independent (no member sees another verdict) |
+| Authority | A review verdict can accept a subjective primary only if it passed P0 to P2; it can never override a gold, audit or automatic-check failure, and never accepts a cell that is quarantined |
+| Measures (pre-registered in S13.*, thresholds set by founders) | Review gold pass reliability (lower bound, 8.28.2) per reviewer; inter-reviewer agreement on panels; false-accept status (8.30.2) of review-verified templates; reviewer share of capacity. Kill input: `alarm` status of false-accept on a template verified mainly by channel 2 |
+
+Channel 2 is **not** a way around the provider-terms gate: review work reads outputs of other members, so it carries the same sensitivity limits (`S0` and `S1` only) and the same privacy notice duties (S10.*). [D][V]
+
+## 8.36 No model-based judging to mint credit in Phase 1
+
+- `verify.model_judge_mints_credit` is a constant `false` (S0.10.6); a write is refused with `VALIDATION_FAILED`. [D]
+- No model output is an input to any accept or reject decision, observation, payout, reliability estimate or error-rate estimate. Automatic checks, comparators and gold comparators are deterministic code (8.23, 8.25.1); a template whose check or comparator declares a model call fails template review. The verification worker has no provider credentials and no egress to model endpoints. [D]
+- Models *as the donors' tools* are the whole point of the product; this rule is about the **judge**. A later test of model judging is a spec change with a pre-registered design and a [V] check of provider terms and privacy before any member content leaves the platform; no hook for it is specified here. [H]
+
+## 8.37 Parameters used here and parameters added
+
+Existing names (S0.10.6 Table B, used exactly): `verify.gold_rate_g`, `verify.gold_rate_floor`, `verify.gold_rate_max`, `verify.audit_rate_s`, `verify.audit_rate_floor`, `verify.audit_rate_max`, `verify.blanket_redundancy_n`, `verify.new_donor_blanket_cells`, `verify.adapt.clean_streak`, `verify.adapt.step_down_ratio`, `verify.adapt.step_up_ratio`, `verify.reliability_prior_a`, `verify.reliability_prior_b`, `verify.reliability_window_obs`, `verify.human_review_rate`, `verify.human_review_gold_rate`, `verify.timing_min_s`, `verify.duplicate_similarity_threshold`, `verify.false_accept_alarm`, `verify.false_reject_alarm`, `verify.third_exec_on_mismatch`, `verify.model_judge_mints_credit`, `trust.established_min_cells`, `trust.established_min_reliability`, `trust.trusted_min_cells`, `trust.trusted_min_reliability`, `trust.demote_below_reliability`, `trust.restrict_after_gold_fails`, `trust.restriction_days`, `trust.cap_multiplier.*`, `trust.audit_multiplier.*`, `appeal.window_days`, `appeal.max_per_decision`, `cell.max_attempts`, `price.v_window_days`, `price.v_min_sample_cells`, `price.publish_period_days`.
+
+**Added by this part** (convention gap, `ISS-84`; area `verify`, owner `operator`, public true; each default is an `initial configurable default`):
+
+| Name | Type | Initial configurable default | Validation | Replaced by |
+| --- | --- | --- | --- | --- |
+| `verify.estimator_tail_prob` | ratio | 0.10 (one-sided tail for every Beta bound in 8.28 and 8.30) | 0 < x < 0.5 | `FND`, pre-registered |
+| `verify.gold_max_exposures` | int | 20 | 1..1000 | `P1M` leak and library-cost data |
+| `verify.gold_leak_alpha` | ratio | 0.01 | 0 < x < 0.5 | `P1M` false-quarantine rate |
+| `verify.gold_adjudication_rate` | ratio | 1.0 (adjudicate every gold fail; rare at Phase 1 volume) | 0 < x <= 1 | `OPS` reviewer load |
+| `verify.comparator_calibration_rate` | ratio | 0.05 | 0 <= x <= 1 | `OPS` reviewer load |
+| `verify.review_gold_min_polarity_share` | ratio | 0.40 | 0 < x <= 0.5 | `P1M` |
+| `verify.review_channel_daily_cap_cells` | int | 20 (twice the FD§3.2 habit of about 10 cells a day) | 1..1000 | `P1M` |
+
+Other names added: template field object `TemplateVersion.verification` (8.20); `GoldCell.status` and events `gold_cell.drafted`, `gold_cell.activated`, `gold_cell.quarantined`, `gold_cell.reactivated`, `gold_cell.retired`; `Lease.gold_cell_id`; cell columns `sampling_pi_ppm`, `sampling_draw_ppm`; `members.verification_state`; reason code `reject.review_unacceptable`; permission `perm.verify.read_gold`; copy keys `copy.verify.*`; proposed warning constraint `C9` (8.31). Rates `g` and `s` are fractions of **leases** and of **eligible submissions** respectively (8.24.2, 8.22.2). [A]
