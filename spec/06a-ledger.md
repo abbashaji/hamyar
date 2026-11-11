@@ -586,3 +586,156 @@ Tighten directions required from `S16.*` for the parameter record (`tighten_dire
 ### 6.12.3 Content of the public log line [D]
 
 Parameter name, old and new value, versions, `change_class`, `effective_from`, notice days, a mandatory reason, the approvers' pseudonymous admin handles, and an impact line computed by the system: for price, old and new `p_ucr` and eta per job type; for K, the count of members above the new cap (published only if >= `analytics.min_cohort_k`); for lifetimes, 'existing lots affected: 0'; for the mint cap, the new utilization. Automatic changes (6.11.5) are labeled with the principal `system` and the gauge value that triggered them.
+
+## 6.13 The FD§4.2 invariants as continuous automated checks
+
+FD§4.2 states the ledger invariant: total credit in existence = cumulative mint - cumulative retired; member balances + escrow + Reserve always sum to that total; every unit traces to an accepted Commons cell. This section turns it, and the rules around it, into checks that run without a human. IDs `INV-L<nn>` are those of S0 0.5. [D]
+
+### 6.13.1 How checks run [D][A]
+
+| Run kind | When | Scope | Source of truth |
+| --- | --- | --- | --- |
+| `commit` | Inside every `post()` (constant, not a parameter) | Rows touched by the transaction | The plan and the rows themselves |
+| `incremental` | Every `ledger.invariant_check_interval_s` (default 60 s) | Entries with `seq` above the last checked | Entries, recomputed |
+| `full` | Every `ledger.full_recompute_interval_s` (default 3,600 s) | Whole ledger | Entries only; caches (`balance_ucr`, lots, escrow counters) are compared against recomputation, never trusted |
+| `checkpoint` | Every `ledger.checkpoint_interval_s` (default 86,400 s) | Hash chain head | Published hash |
+
+The checker is a separate process with a read-only database role and its own code path: it does not call `post()` code and does not read a cache as truth (a check that shares a bug with the writer proves nothing). Each run writes an `InvariantCheck` row (`ivc_`: `invariant_id`, `run_kind`, `from_seq`, `to_seq`, `status`, `observed`, `expected`, `detail`, `started_at`, `finished_at`) and emits `ledger.invariants_passed`; a failure writes an `Alarm` (`alm_`), emits `ledger.invariant_violated` and increments `hamyar_ledger_invariant_violations_total{invariant_id}`. A dead-man alarm `ledger.checks_stale` (`critical`) fires when no `full` run has passed for twice `ledger.full_recompute_interval_s`; `hamyar_ledger_last_full_check_age_s` exposes it. Exact integer equality, zero tolerance (S0 0.6.1).
+
+### 6.13.2 The checks [D]
+
+| ID | Statement (formula) | Runs | Severity |
+| --- | --- | --- | --- |
+| `INV-L01` | Zero-sum: `sum(balance_ucr over all accounts) = 0`; every entry has `amount_ucr > 0` and different debit and credit accounts | commit, incremental, full | critical |
+| `INV-L02` | Conservation (FD§4.2): `sum(member) + sum(escrow) + balance(R) = cum_mint_net - cum_retired_net`, with `-balance(issuance) = cum_mint_net` and `balance(retired) = cum_retired_net` | incremental, full | critical |
+| `INV-L03` | Every cached `balance_ucr` equals credits minus debits recomputed from entries | full (touched accounts at commit) | critical |
+| `INV-L04` | Signs: member, escrow, Reserve, retired >= 0; issuance <= 0; closed escrow = 0 | commit, incremental, full | critical |
+| `INV-L05` | Lots: member balance = sum of its lots' `remaining_ucr`; `0 <= remaining <= initial`; `remaining` = sum of movements; per entry, member-holder deltas equal the entry's net effect on member accounts | commit, full | critical |
+| `INV-L06` | Escrow: balance = `funded - paid_primary - paid_pool - paid_levy_budget - levy_posted - refunded`; counters equal sums of entries; slices sum to the balance; no budget exceeded | commit, full | critical |
+| `INV-L07` | Closing identity: a closed escrow has balance 0 and `funded = paid_primary + paid_pool + paid_levy_budget + levy_posted + refunded`; `levy_posted <= accepted_primary x quote_lambda` | incremental, full | critical |
+| `INV-L08` | Mint backing: each `mint` entry has amount 1,000,000, a `cell_id` of a Commons cell that was `accepted` when posted (now `accepted` or `overturned`), and no second mint for that cell | incremental, full | high |
+| `INV-L09` | Payout backing: each `transfer` has amount 1,000,000, debits the escrow of the cell's job, a cell `accepted` or `overturned`, and at most one per cell | incremental, full | high |
+| `INV-L10` | Mint caps: for each `mint`, `month_mint_after_ucr <= mint_cap_ucr` and `member_day_mint_after_ucr <=` the daily cap of the recorded version; running sums equal recomputed sums | incremental, full | high |
+| `INV-L11` | Member cap: for each `mint`, `transfer`, `grant`, `owned_after_ucr <= cap_ucr` | incremental, full | high |
+| `INV-L12` | Reserve: only `grant`, `retire` and `reversal` debit it; after a `grant` the balance >= `grant.reserve_floor_credits`; after a `retire` the balance >= the ceiling used | commit, incremental, full | high |
+| `INV-L13` | Expiry: no unexpired-spend (no `escrow_hold` or `reserve_donation` movement from a lot with `expires_at <=` entry time); no `expire` before `expires_at`; no lot with `remaining > 0` older than `expires_at` plus twice `credit.expiry_sweep_interval_s` | incremental, full | high |
+| `INV-L14` | Chain: `seq` gap-free from 1; `prev_hash` equals the previous `entry_hash`; each `entry_hash` recomputes; head equals the last entry; the published checkpoint equals the recomputed prefix hash | incremental, checkpoint, full | critical |
+| `INV-L15` | Transactions: every entry has a transaction; `settle` and `cancel` leave their escrow at 0; every `reversal` mirrors (or, for restitution, matches amount and reason) an entry reversed at most once, and `shortfall_ucr = original - reversed` | incremental, full | high |
+| `INV-L16` | Entry-type matrix: each entry's (type, debit account type, credit account type) is one of the S0 0.8.5 rows; no entry other than a `reversal` moves credit member to member | commit, incremental, full | critical |
+| `INV-L17` | Grants: at most one starter grant per member; per device, per invite tree per UTC day and per UTC day within the limits of the version recorded on the entry | incremental, full | high |
+| `INV-L18` | Reserve ceiling lag: the Reserve is not above ceiling plus `reserve.retire_min_credits` for longer than twice `reserve.retire_interval_s` | full | warn |
+| `INV-L19` | Unrecovered mint: `sum(shortfall_ucr)` of reversals of `mint` entries is published and alarmed when it increases | full | warn |
+
+### 6.13.3 SQL and pseudocode [D]
+
+PostgreSQL-style SQL; the storage engine is chosen in `S4.*`, and the checks are required in whatever form it supports [A]. Each query returns violating rows; an empty result is a pass.
+
+```
+-- INV-L01
+SELECT SUM(balance_ucr) FROM ledger_accounts;                                    -- must be 0
+SELECT id FROM ledger_entries WHERE amount_ucr <= 0 OR debit_account_id = credit_account_id;
+
+-- INV-L02 (cum_mint_net = sum(mint) - sum(reversal of a mint); cum_retired_net likewise)
+held     = SELECT SUM(balance_ucr) FROM ledger_accounts WHERE account_type IN ('member','escrow','reserve');
+expected = cum_mint_net - cum_retired_net ;  assert held = expected
+assert -balance(issuance) = cum_mint_net  AND  balance(retired) = cum_retired_net
+
+-- INV-L03
+SELECT a.id FROM ledger_accounts a
+ LEFT JOIN (SELECT credit_account_id id, SUM(amount_ucr) c FROM ledger_entries GROUP BY 1) cr ON cr.id = a.id
+ LEFT JOIN (SELECT debit_account_id  id, SUM(amount_ucr) d FROM ledger_entries GROUP BY 1) db ON db.id = a.id
+ WHERE a.balance_ucr <> COALESCE(cr.c,0) - COALESCE(db.d,0);
+
+-- INV-L04
+SELECT id FROM ledger_accounts
+ WHERE (account_type IN ('member','escrow','reserve','retired') AND balance_ucr < 0)
+    OR (account_type = 'issuance' AND balance_ucr > 0)
+    OR (account_type = 'escrow' AND balance_ucr <> 0 AND escrow_id IN (SELECT id FROM escrows WHERE state = 'closed'));
+
+-- INV-L05
+SELECT l.id FROM credit_lots l
+ LEFT JOIN (SELECT lot_id, holder_account_id, SUM(delta_ucr) s FROM lot_movements GROUP BY 1,2) m
+        ON m.lot_id = l.id AND m.holder_account_id = l.ledger_account_id
+ WHERE l.remaining_ucr <> COALESCE(m.s,0) OR l.remaining_ucr < 0 OR l.remaining_ucr > l.initial_ucr;
+SELECT a.id FROM ledger_accounts a WHERE a.account_type = 'member'
+   AND a.balance_ucr <> COALESCE((SELECT SUM(remaining_ucr) FROM credit_lots WHERE ledger_account_id = a.id), 0);
+per entry: sum(delta_ucr where holder is a member account) = credit_to_members - debit_from_members
+
+-- INV-L06
+SELECT e.id FROM escrows e JOIN ledger_accounts a ON a.id = e.ledger_account_id
+ WHERE a.balance_ucr <> e.funded_ucr - e.paid_primary_ucr - e.paid_pool_ucr - e.paid_levy_budget_ucr
+                        - e.levy_posted_ucr - e.refunded_ucr
+    OR e.funded_ucr <> e.primary_budget_ucr + e.pool_budget_ucr + e.levy_budget_ucr
+    OR e.paid_primary_ucr > e.primary_budget_ucr OR e.paid_pool_ucr > e.pool_budget_ucr
+    OR e.paid_levy_budget_ucr + e.levy_posted_ucr > e.levy_budget_ucr;
+recompute paid_primary = sum(transfer of primary cells), paid_pool + paid_levy_budget = sum(transfer of verification cells),
+          levy_posted = sum(levy), refunded = sum(refund) from entries; compare; and sum(slices of E) = balance(E)
+
+-- INV-L07 (closed escrows)
+SELECT e.id FROM escrows e JOIN ledger_accounts a ON a.id = e.ledger_account_id
+ WHERE e.state = 'closed' AND (a.balance_ucr <> 0
+   OR e.funded_ucr <> e.paid_primary_ucr + e.paid_pool_ucr + e.paid_levy_budget_ucr + e.levy_posted_ucr + e.refunded_ucr
+   OR e.levy_posted_ucr > e.accepted_primary_cells * e.quote_lambda_ppm);
+
+-- INV-L08
+SELECT e.id FROM ledger_entries e LEFT JOIN cells c ON c.id = e.cell_id LEFT JOIN jobs j ON j.id = c.job_id
+ WHERE e.entry_type = 'mint'
+   AND (c.id IS NULL OR j.is_commons IS NOT TRUE OR e.amount_ucr <> 1000000 OR c.state NOT IN ('accepted','overturned'));
+SELECT cell_id FROM ledger_entries WHERE entry_type = 'mint' GROUP BY cell_id HAVING COUNT(*) > 1;
+
+-- INV-L09
+SELECT e.id FROM ledger_entries e JOIN cells c ON c.id = e.cell_id JOIN escrows s ON s.job_id = c.job_id
+ WHERE e.entry_type = 'transfer'
+   AND (e.amount_ucr <> 1000000 OR e.debit_account_id <> s.ledger_account_id OR c.state NOT IN ('accepted','overturned'));
+SELECT cell_id FROM ledger_entries WHERE entry_type = 'transfer' GROUP BY cell_id HAVING COUNT(*) > 1;
+
+-- INV-L10 / INV-L11
+SELECT id FROM ledger_entries WHERE entry_type = 'mint' AND month_mint_after_ucr > mint_cap_ucr;
+recompute month_mint_after and member_day_mint_after as running sums over UTC month and day; compare with stored; compare with cap of the recorded version
+SELECT id FROM ledger_entries WHERE entry_type IN ('mint','transfer','grant') AND owned_after_ucr > cap_ucr;
+
+-- INV-L12
+SELECT e.id FROM ledger_entries e JOIN ledger_accounts a ON a.id = e.debit_account_id
+ WHERE a.account_type = 'reserve' AND e.entry_type NOT IN ('grant','retire','reversal');
+SELECT id FROM ledger_entries WHERE entry_type = 'retire' AND reserve_balance_after_ucr < reserve_ceiling_ucr;
+SELECT id FROM ledger_entries WHERE entry_type = 'grant' AND reserve_balance_after_ucr < grant_floor_of_recorded_version;
+
+-- INV-L13
+SELECT id FROM credit_lots WHERE remaining_ucr > 0 AND expires_at < now() - 2 * (credit.expiry_sweep_interval_s) * interval '1 second';
+SELECT m.id FROM lot_movements m JOIN credit_lots l ON l.id = m.lot_id JOIN ledger_entries e ON e.id = m.ledger_entry_id
+ WHERE m.delta_ucr < 0 AND e.entry_type IN ('escrow_hold','reserve_donation') AND l.expires_at <= e.created_at;
+SELECT e.id FROM ledger_entries e JOIN credit_lots l ON l.id = e.lot_id WHERE e.entry_type = 'expire' AND e.created_at < l.expires_at;
+
+-- INV-L14
+assert min(seq) = 1 AND max(seq) - min(seq) + 1 = count(*)
+for each e in order of seq: assert e.prev_hash = previous.entry_hash AND e.entry_hash = sha256(e.prev_hash + jcs(e))
+assert head.entry_hash = last.entry_hash ; for each published checkpoint (seq, h): assert prefix_hash(seq) = h
+
+-- INV-L15
+SELECT e.id FROM ledger_entries e LEFT JOIN ledger_transactions t ON t.id = e.ledger_transaction_id WHERE t.id IS NULL;
+SELECT t.id FROM ledger_transactions t WHERE t.txn_kind IN ('settle','cancel') AND escrow_balance_after(t) <> 0;
+for each reversal r: o = reversed entry; assert amount(r) <= amount(o) AND shortfall(r) = amount(o) - amount(r) AND r.accounts mirror o.accounts (or landing rule 6.6.3)
+
+-- INV-L16
+SELECT e.id FROM ledger_entries e JOIN ledger_accounts d ON d.id = e.debit_account_id JOIN ledger_accounts c ON c.id = e.credit_account_id
+ WHERE e.entry_type <> 'reversal' AND (e.entry_type, d.account_type, c.account_type) NOT IN
+  (VALUES ('mint','issuance','member'), ('grant','reserve','member'), ('escrow_hold','member','escrow'),
+          ('transfer','escrow','member'), ('escrow_release','escrow','escrow'), ('levy','escrow','reserve'),
+          ('refund','escrow','member'), ('expire','member','reserve'), ('retire','reserve','retired'),
+          ('reserve_donation','member','reserve'));
+
+-- INV-L17
+SELECT member_id FROM starter_grants GROUP BY 1 HAVING COUNT(*) > 1;
+per device: count(starter grants of members sharing a Device record) <= grant.max_per_device
+per UTC day: count(grants) <= grant.max_per_day ; per invite tree per UTC day <= grant.max_per_invite_tree_per_day
+```
+
+### 6.13.4 Alarm and automatic response [D][A]
+
+| Severity | Meaning | Automatic response (principal `system`) | Release |
+| --- | --- | --- | --- |
+| `critical` | Integrity of balances or of the chain (`INV-L01` to `L07`, `L14`, `L16`, `ledger.checks_stale`) | Engage `kill.all_minting` and `kill.all_new_jobs` with reason `invariant:<id>`; set `ledger_head.is_frozen`, after which `post()` refuses every transaction except a `reversal`; page operators; publish a status line on the public surface without detail | Fix the cause, then a `full` run passes; two operators release (`killswitch.release` in `security.two_person_actions`) |
+| `high` | A rule was broken but balances are consistent (`INV-L08` to `L13`, `L15`, `L17`) | Engage `kill.all_minting` and `kill.all_new_jobs`; page operators; postings continue so donors are still paid | Two operators release after review |
+| `warn` | A gauge or lag (`INV-L18`, `L19`, `ledger.v_cap_hit`, `ledger.eta_below_threshold`, `ledger.mint_utilization_high`, `ledger.mint_cap_above_forecast`, `ledger.claim_ratio_undefined`) | Alarm and ticket; no switch | Acknowledge in the admin tool |
+
+The response stops new credit and new claims, which is the direction that cannot make a corrupt ledger worse. Limits [D]: the checks detect, they do not repair; a checker bug can freeze a healthy ledger, so the checker is itself tested (6.16) and a freeze drill is part of `BM9` (S0 0.12); the alarm path is the monitoring stack of `S4.*`.
