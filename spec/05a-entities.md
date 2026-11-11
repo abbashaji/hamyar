@@ -174,7 +174,7 @@ One row per entity of S0.7 (57 rows). `Class` is S5.2.3. `Retention` is the S0.7
 | `VerificationRecord` | S5.8.4 | `IMS` | `job_bound` | a superseding record (`supersedes_id`) |
 | `GoldCell` | S5.8.5 | `IMS` | `permanent` | `retired` or `compromised`; a new gold cell |
 | `Audit` | S5.8.6 | `MUT` | `job_bound` | state machine; `cancelled` |
-| `Deliverable` | S5.8.7 | `IMS` | `job_bound` | a new deliverable row is not allowed; reassembly is a new job state, see S5.8.7 |
+| `Deliverable` | S5.8.7 | `IMS` | `job_bound` | a new version row (`version` + 1, `supersedes_id`) with a new manifest |
 | `Manifest` | S5.8.8 | `IMM` | `job_bound` (rows stay) | superseding manifest row |
 | `LedgerAccount` | S5.9.1 | `DER` | `permanent` | never edited except its cached balance |
 | `LedgerEntry` | S5.9.2 | `CHN` | `permanent` | a `reversal` entry (two approvers) |
@@ -792,7 +792,7 @@ One balanced pair of legs, append-only, hash-chained (S0.8.5). Never updated, ne
 | `job_id`, `cell_id` | id | null | references for explorers; the transaction is authoritative |
 | `prev_hash`, `entry_hash` | hash | NN | `entry_hash = SHA-256(prev_hash \|\| canonical(entry))` (S0.6.4); genesis `prev_hash` is `sha256:` followed by 64 zeros |
 
-`canonical(entry)` is the RFC 8785 serialization of every column except `entry_hash` and `created_at`'s sub-second digits are kept (full `ts`). **Entry shape.** Credit consumed from several lots is posted as several entries in one transaction, one per lot, so each entry stays a single balanced pair with one lot. **Direction rule (trigger)** `(entry_type, debit account type, credit account type, lot_effect)` must appear in the reference table `ledger_entry_type_rules`, seeded from S0.8.5 by a migration (constants, not a domain entity): for example `mint` is `issuance` to `member` with `create`; `levy` is `escrow` to `reserve` with `none`. **Indexes** `(debit_account_id, seq)`; `(credit_account_id, seq)`; `(txn_id)`; `(job_id) WHERE job_id IS NOT NULL`; `(entry_type, seq)`. **Not stored** a member identity (accounts carry opaque ids), a memo field, any free text.
+`canonical(entry)` is the RFC 8785 serialization of every column except `entry_hash`; `created_at` is included at microsecond precision. **Entry shape.** Credit consumed from several lots is posted as several entries in one transaction, one per lot, so each entry stays a single balanced pair with one lot. **Direction rule (trigger)** `(entry_type, debit account type, credit account type, lot_effect)` must appear in the reference table `ledger_entry_type_rules`, seeded from S0.8.5 by a migration (constants, not a domain entity): for example `mint` is `issuance` to `member` with `create`; `levy` is `escrow` to `reserve` with `none`. **Indexes** `(debit_account_id, seq)`; `(credit_account_id, seq)`; `(txn_id)`; `(job_id) WHERE job_id IS NOT NULL`; `(entry_type, seq)`. **Not stored** a member identity (accounts carry opaque ids), a memo field, any free text.
 
 ### 5.9.3 `LedgerTransaction` · `ledger_transactions` · `txn_` · `IMM` · `permanent`
 
@@ -1491,7 +1491,7 @@ CREATE TABLE submissions (
   checks_report jsonb,
   decided_at timestamptz,
   accept_policy_version_id text REFERENCES policy_versions(id),
-  CHECK ((state = 'quarantined') = (quarantine_reason IS NOT NULL OR state = 'quarantined' AND false)),
+  CHECK (state <> 'quarantined' OR quarantine_reason IS NOT NULL),
   CHECK (state NOT IN ('rejected','schema_failed','checks_failed') OR reject_code IS NOT NULL)
 );
 CREATE INDEX submissions_cell ON submissions (cell_id);
@@ -1502,3 +1502,169 @@ CREATE INDEX submissions_open ON submissions (state) WHERE state IN ('received',
 -- Trigger submissions_frozen: every column except state, reject_code, quarantine_reason, decided_at,
 -- accept_policy_version_id, checks_report, output_text (only to NULL) is immutable after insert.
 ```
+
+### 5.14.5 Ledger tables
+
+```sql
+CREATE TABLE ledger_accounts (
+  id text PRIMARY KEY CHECK (is_id(id,'lac')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  row_version int NOT NULL DEFAULT 1,
+  account_type text NOT NULL CHECK (account_type IN ('member','escrow','reserve','issuance','retired')),
+  member_id text UNIQUE REFERENCES members(id),
+  escrow_id text UNIQUE REFERENCES escrows(id) DEFERRABLE INITIALLY DEFERRED,
+  balance_ucr bigint NOT NULL DEFAULT 0,
+  last_entry_seq bigint NOT NULL DEFAULT 0,
+  CHECK ((account_type = 'member') = (member_id IS NOT NULL)),
+  CHECK ((account_type = 'escrow') = (escrow_id IS NOT NULL)),
+  CHECK ((account_type = 'issuance' AND balance_ucr <= 0) OR (account_type <> 'issuance' AND balance_ucr >= 0))
+);
+CREATE UNIQUE INDEX ledger_accounts_singletons ON ledger_accounts (account_type)
+  WHERE account_type IN ('reserve','issuance','retired');
+
+CREATE TABLE ledger_heads (                -- infrastructure, not a domain entity; one row, locked FOR UPDATE by ledger_post()
+  ledger_id text PRIMARY KEY CHECK (ledger_id = 'main'),
+  last_seq bigint NOT NULL DEFAULT 0,
+  last_hash text NOT NULL CHECK (is_hash(last_hash))   -- initial value 'sha256:' || repeat('0',64)
+);
+
+CREATE TABLE ledger_transactions (
+  id text PRIMARY KEY CHECK (is_id(id,'txn')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  txn_kind text NOT NULL CHECK (txn_kind IN ('mint','grant','hold','payout','settle','cancel',
+    'reservation_activate','expire','retire','reserve_donation','reversal')),
+  natural_key text NOT NULL UNIQUE,
+  member_id text REFERENCES members(id), job_id text REFERENCES jobs(id), cell_id text REFERENCES cells(id),
+  reversal_of_txn_id text UNIQUE REFERENCES ledger_transactions(id),
+  entry_count int NOT NULL CHECK (entry_count >= 1),
+  total_ucr bigint NOT NULL CHECK (total_ucr > 0),
+  actor_type text NOT NULL CHECK (actor_type IN ('member','admin','system')),
+  actor_ref text,
+  approval_action_ids text[] NOT NULL DEFAULT '{}',
+  parameter_versions jsonb NOT NULL,
+  CHECK ((txn_kind = 'reversal') = (reversal_of_txn_id IS NOT NULL)),
+  CHECK (txn_kind <> 'reversal' OR cardinality(approval_action_ids) = 2)
+);
+
+CREATE TABLE ledger_entries (
+  id text PRIMARY KEY CHECK (is_id(id,'lge')),
+  created_at timestamptz NOT NULL,
+  ledger_id text NOT NULL CHECK (ledger_id = 'main'),
+  seq bigint NOT NULL,
+  txn_id text NOT NULL REFERENCES ledger_transactions(id),
+  entry_type text NOT NULL CHECK (entry_type IN ('mint','grant','escrow_hold','transfer','escrow_release',
+    'levy','refund','expire','retire','reserve_donation','reversal')),
+  debit_account_id text NOT NULL REFERENCES ledger_accounts(id),
+  credit_account_id text NOT NULL REFERENCES ledger_accounts(id),
+  amount_ucr bigint NOT NULL CHECK (amount_ucr > 0),
+  lot_id text REFERENCES credit_lots(id) DEFERRABLE INITIALLY DEFERRED,
+  lot_effect text NOT NULL CHECK (lot_effect IN ('create','consume','restore','none')),
+  restores_entry_id text REFERENCES ledger_entries(id),
+  reverses_entry_id text UNIQUE REFERENCES ledger_entries(id),
+  job_id text REFERENCES jobs(id), cell_id text REFERENCES cells(id),
+  prev_hash text NOT NULL CHECK (is_hash(prev_hash)),
+  entry_hash text NOT NULL UNIQUE CHECK (is_hash(entry_hash)),
+  UNIQUE (ledger_id, seq),
+  CHECK (debit_account_id <> credit_account_id),
+  CHECK ((entry_type = 'reversal') = (reverses_entry_id IS NOT NULL)),
+  CHECK ((lot_effect = 'none') = (lot_id IS NULL))
+);
+CREATE INDEX ledger_entries_debit  ON ledger_entries (debit_account_id, seq);
+CREATE INDEX ledger_entries_credit ON ledger_entries (credit_account_id, seq);
+CREATE INDEX ledger_entries_txn    ON ledger_entries (txn_id);
+CREATE INDEX ledger_entries_type   ON ledger_entries (entry_type, seq);
+-- Triggers: ledger_entries_no_mutation (BEFORE UPDATE OR DELETE OR TRUNCATE -> raise immutable_row);
+--           ledger_entries_via_post_only (BEFORE INSERT: raise unless current_setting('hamyar.in_ledger_post') = 'on').
+
+CREATE TABLE credit_lots (
+  id text PRIMARY KEY CHECK (is_id(id,'lot')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  row_version int NOT NULL DEFAULT 1,
+  member_id text NOT NULL REFERENCES members(id),
+  origin_entry_id text NOT NULL UNIQUE REFERENCES ledger_entries(id) DEFERRABLE INITIALLY DEFERRED,
+  original_ucr bigint NOT NULL CHECK (original_ucr > 0),
+  remaining_ucr bigint NOT NULL CHECK (remaining_ucr >= 0 AND remaining_ucr <= original_ucr),
+  earned_at timestamptz NOT NULL,
+  expires_at timestamptz NOT NULL CHECK (expires_at > earned_at),
+  lifetime_days_applied int NOT NULL CHECK (lifetime_days_applied > 0),
+  expiry_arm text,
+  is_starter bool NOT NULL DEFAULT false
+);
+CREATE INDEX credit_lots_spend ON credit_lots (member_id, expires_at) WHERE remaining_ucr > 0;
+CREATE INDEX credit_lots_sweep ON credit_lots (expires_at) WHERE remaining_ucr > 0;
+
+CREATE TABLE escrows (
+  id text PRIMARY KEY CHECK (is_id(id,'esc')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  row_version int NOT NULL DEFAULT 1,
+  job_id text UNIQUE REFERENCES jobs(id) DEFERRABLE INITIALLY DEFERRED,
+  reservation_id text UNIQUE REFERENCES reservations(id) DEFERRABLE INITIALLY DEFERRED,
+  owner_member_id text NOT NULL REFERENCES members(id),
+  ledger_account_id text NOT NULL UNIQUE REFERENCES ledger_accounts(id) DEFERRABLE INITIALLY DEFERRED,
+  state text NOT NULL DEFAULT 'open' CHECK (state IN ('open','settling','closed')),
+  escrow_ucr bigint NOT NULL CHECK (escrow_ucr > 0),
+  planned_primary_ucr bigint NOT NULL CHECK (planned_primary_ucr >= 0),
+  planned_pool_ucr bigint NOT NULL CHECK (planned_pool_ucr >= 0),
+  planned_levy_ucr bigint NOT NULL CHECK (planned_levy_ucr >= 0),
+  paid_ucr bigint NOT NULL DEFAULT 0, levy_ucr bigint NOT NULL DEFAULT 0,
+  refunded_ucr bigint NOT NULL DEFAULT 0, released_ucr bigint NOT NULL DEFAULT 0,
+  closing_txn_id text REFERENCES ledger_transactions(id),
+  closed_at timestamptz,
+  CHECK ((job_id IS NULL) <> (reservation_id IS NULL)),
+  CHECK (planned_primary_ucr + planned_pool_ucr + planned_levy_ucr = escrow_ucr),
+  CHECK (state <> 'closed' OR (closing_txn_id IS NOT NULL AND closed_at IS NOT NULL
+         AND paid_ucr + levy_ucr + refunded_ucr + released_ucr = escrow_ucr))
+);
+```
+
+### 5.14.6 The single ledger writer
+
+Pseudocode of `ledger_post(txn jsonb)`, the only code path that writes the five tables above. It runs as `ledger_svc` inside one database transaction at `SERIALIZABLE` isolation; S6.* defines the callers. [D]
+
+```
+ledger_post(txn):
+  SET LOCAL hamyar.in_ledger_post = 'on'
+  IF exists(ledger_transactions WHERE natural_key = txn.natural_key):
+        RETURN stored result of that transaction          -- idempotent replay, nothing written
+  head := SELECT * FROM ledger_heads WHERE ledger_id = 'main' FOR UPDATE   -- serializes all postings
+  FOR e IN txn.entries IN ORDER:
+      rule := ledger_entry_type_rules[e.entry_type]
+      ASSERT type(e.debit_account) = rule.debit_type AND type(e.credit_account) = rule.credit_type
+      ASSERT e.lot_effect = rule.lot_effect                -- reversal: mirrors the reversed entry
+      seq := head.last_seq + 1
+      prev := head.last_hash
+      hash := sha256(prev || rfc8785(e with seq, txn_id, created_at))
+      INSERT ledger_entries(... seq, prev_hash = prev, entry_hash = hash)
+      UPDATE ledger_accounts SET balance_ucr = balance_ucr - e.amount WHERE id = e.debit_account      -- CHECK enforces sign rules
+      UPDATE ledger_accounts SET balance_ucr = balance_ucr + e.amount WHERE id = e.credit_account
+      APPLY lot effect: create / consume oldest-first by expires_at / restore with original expiry
+      head := (seq, hash)
+  ASSERT sum(e.amount) = txn.total_ucr AND count(entries) = txn.entry_count
+  ASSERT sum(balance_ucr over all accounts) = 0           -- the double-entry identity
+  UPDATE ledger_heads SET last_seq, last_hash
+  INSERT ledger_transactions(...)  ;  emit event ledger.entry_committed for each entry in the outbox
+  COMMIT
+```
+
+Structural guarantees that hold without any application check: no balance below zero (except `issuance` at or below zero); every entry balanced and between permitted account types; `seq` gap-free and unique; `entry_hash` chained; one business key posts once; a second caller cannot write around the function. The sum of all five account types is zero, which restates FD§4.2: member balances + escrow + Reserve = cumulative mint − cumulative retired. [D]
+
+### 5.14.7 Entry-type rules (reference data)
+
+Seeded by a migration; read by `ledger_post()` and by the invariant checks. Changing a row is a spec change, not a configuration edit. [D]
+
+| `entry_type` | `debit_type` | `credit_type` | `lot_effect` |
+| --- | --- | --- | --- |
+| `mint` | `issuance` | `member` | `create` |
+| `grant` | `reserve` | `member` | `create` |
+| `escrow_hold` | `member` | `escrow` | `consume` |
+| `transfer` | `escrow` | `member` | `create` |
+| `escrow_release` | `escrow` | `escrow` | `none` |
+| `levy` | `escrow` | `reserve` | `none` |
+| `refund` | `escrow` | `member` | `restore` |
+| `expire` | `member` | `reserve` | `consume` |
+| `retire` | `reserve` | `retired` | `none` |
+| `reserve_donation` | `member` | `reserve` | `consume` |
+| `reversal` | credit side of the reversed entry | debit side of the reversed entry | mirror of the reversed entry's effect |
