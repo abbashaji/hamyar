@@ -211,3 +211,129 @@ DEFER changes no state and emits no event; it records `acceptance_deferred_until
 | SBT-09 | checks_passed | `submission.rejected` | rejected (T) | Same transaction as CT-10 or CT-16 | none | none | `submission.rejected {reason_code}` |
 
 A submission in `quarantined` that no reviewer decides is bounded by the job's `overrun_timeout` and by the alert on `report.triage_sla_days`; it never auto-releases. [D]
+
+## 5.24 Member trust tiers and status
+
+Trust tier (`new`, `established`, `trusted`, `restricted`) and status (`active`, `suspended`, `banned`, `closed`) are two independent columns (S0.9.4). Tier is computed by the system from verified work; status is set by people or by the member. [D]
+
+**Reliability estimate used by the guards.** `r = (a + p) / (a + b + p + f)`, with `a` = `verify.reliability_prior_a`, `b` = `verify.reliability_prior_b`, `p` and `f` the passes and fails among the member's most recent `verify.reliability_window_obs` gold and audit observations (S8.* owns the estimator and its limits). With the initial configurable defaults (a = b = 1) and no failures, `r >= x` needs `p >= (2x - 1) / (1 - x)` clean observations: 3 for `trust.established_min_reliability` (0.80) and 18 for `trust.trusted_min_reliability` (0.95). A tier therefore cannot be reached on cell count alone. [D][H: the defaults are priors, replaced by `P1M` measurement]
+
+```
+ new --tier_promoted--> established --tier_promoted--> trusted
+ trusted --tier_demoted--> established --tier_demoted--> new
+ new, established, trusted --restricted--> restricted --restriction_lifted--> tier_before_restriction
+ STATUS: active --suspended--> suspended --reinstated--> active ; active, suspended --banned--> banned ; active, suspended --closed--> closed (T)
+         banned --reinstated--> active  (only through an overturned appeal; convention addition 6)
+```
+
+| id | from | event | to | guard | side effects | ledger effects | audit-log entry |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| MT-01 | (none) | `member.created` | new (status `active`) | `launch.members_may_join` true, else `403 LAUNCH_GATE_CLOSED`; the per-device, per-IP-hash and per-invite-tree creation limits of `ratelimit.*` and `invite.*` hold (S10.*) | Create `Member`, `MemberKey`, `Device`, and the member's `ledger_account` of type `member` | none (an account starts at zero; the starter grant is a separate `grant` txn, S6.*) | `member.created {invite_id?}` |
+| MT-02 | new | `member.tier_promoted` | established | Status `active`; accepted cells >= `trust.established_min_cells`; `r >= trust.established_min_reliability`; not restricted | Cap multiplier `trust.cap_multiplier.established`; audit multiplier `trust.audit_multiplier.established` | none | `member.tier_promoted {accepted, r_ppm}` |
+| MT-03 | established | `member.tier_promoted` | trusted | Accepted cells >= `trust.trusted_min_cells`; `r >= trust.trusted_min_reliability` | Caps and sampling per the `trusted` multipliers | none | as MT-02 |
+| MT-04 | trusted | `member.tier_demoted` | established | `r < trust.demote_below_reliability` | Multipliers of `established`; existing balance above the new cap is kept (no clawback); earning pauses until the balance is under the cap (headroom guard, 5.29.3) | none | `member.tier_demoted {r_ppm}` |
+| MT-05 | established | `member.tier_demoted` | new | As MT-04 | As MT-04 | none | as MT-04 |
+| MT-06 | new, established, trusted | `member.restricted` | restricted | `trust.restrict_after_gold_fails` consecutive failed gold cells, or an anomaly finding of S9.* (forged nonce attempts, timing anomalies, duplicate-of-other-output), or an `admin` with `perm.member.restrict` | Store `tier_before_restriction` and `restricted_until` = now + `trust.restriction_days` x 86,400 s; multipliers of `restricted`; leases already held are kept | none | `member.restricted {trigger}`; +AA when an admin |
+| MT-07 | restricted | `member.restriction_lifted` | `tier_before_restriction` | Timer `restriction_lifter`: now >= `restricted_until`, or an admin lifts early | The `tier_evaluator` then runs at once, so a member whose `r` is under `trust.demote_below_reliability` is demoted immediately (MT-04, MT-05) | none | `member.restriction_lifted {tier}` |
+| MS-01 | active | `member.suspended` | suspended | `admin` with `perm.member.suspend`, or `kill.member.<mem_id>` engaged | Revoke active leases (CT-18); end sessions; pause the member's jobs with cause `kill_member` (JT-11); cells already `submitted` are DEFERred at `G-accept`. Credit lots keep expiring [A]; an overturned suspension appeal restitutes lots that expired meanwhile (APT-07) | none | `member.suspended {reason_code}`; +AA |
+| MS-02 | suspended | `member.reinstated` | active | `admin` with `perm.member.suspend`, kill switch released (two admins, `killswitch.release`), or an overturned appeal | Resume paused jobs; re-enqueue deferred acceptances | none | `member.reinstated {via}`; +AA |
+| MS-03 | active, suspended | `member.banned` | banned | `admin` with `perm.member.ban` and a reason code; appealable | As MS-01; the member's non-terminal jobs get `job.stop_requested` with `operator_killed`; the balance is frozen (no spending, no earning, expiry continues). The member may still use the appeal endpoint only (S10.*) [A] | none | `member.banned {reason_code}`; +AA |
+| MS-04 | active, suspended | `member.closed` | closed (T) | Member-initiated or inactive for `retention.member_inactive_days`; no job, reservation or lease is non-terminal; balance is 0 or the member confirms donating it | Release leases; delete or reduce rows per the retention classes (S0.7); sessions and keys revoked | If balance > 0: `reserve_donation` txn, `member` -> `reserve` of the whole balance, key `closedonate:<mem_id>`. A closure by inactivity always has balance 0 because `retention.member_inactive_days` (365) exceeds `credit.lifetime_days` (60) [D] | `member.closed {via}` |
+| MS-05 | banned | `member.reinstated` | active | Only an `Appeal` `overturned` with `appeal.ban_min_reviewers` agreeing reviewers (APT-07) | As MS-02 | none | `member.reinstated {via: appeal}` |
+
+Other member events (`member.key_rotated`, `member.device_linked`, `member.recovered`, `member.optin_changed`) change no tier or status and are log-only events owned by S10.*. `identity.recovery_cooldown_s` after `member.recovered` blocks JT-09 and every spend, but not earning. [D]
+
+## 5.25 Template review (second-reviewer rule)
+
+Applies to `TemplateVersion.review_status` (S0.9.5). A version is mutable only in `draft` and `changes_requested`; from `in_review` on its content is frozen and every approval is bound to its `content_hash`. [D]
+
+```
+ (none) --version_created--> draft --review_requested--> in_review --first_approved--> awaiting_second_review --second_approved--> approved
+ in_review, awaiting_second_review --changes_requested--> changes_requested --review_requested--> in_review
+ in_review, awaiting_second_review --rejected--> rejected (T)
+ approved --paused--> paused --resumed--> approved          approved, paused --retired--> retired (T)
+```
+
+| id | from | event | to | guard | side effects | ledger effects | audit-log entry |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| TT-01 | (none) | `template.version_created` | draft | `admin` with `perm.template.author`; version number = previous + 1 (unique per `Template`) | A new `Template` row if none; `author_id` recorded | none | `template.version_created {version, parent_version?}`; +AA |
+| TT-02 | draft, changes_requested | `template.review_requested` | in_review | Template lint passes (slots, delimiters, output schema, checks, comparator, envelope inside `cell.envelope.*`; S8.*) | Freeze content, store `content_hash`; clear approvals of earlier rounds | none | `template.review_requested {content_hash, round}`; +AA |
+| TT-03 | in_review | `template.first_approved` | awaiting_second_review, or approved when the required count is 1 | Approver is an `admin` with the `reviewer` role; approver is not the author; approver has not approved this `content_hash` before (unique `(template_version_id, reviewer_id, content_hash)`); required count k = `template.min_reviewers_new` for a new `Template`, `template.min_reviewers_edit` for a new version of an approved one; after inserting the approval, the count of distinct approvals under the version row lock is < k (-> awaiting) or >= k (-> approved) | Insert the approval row with its checklist; if the target is `approved`, run the approval side effects below | none | `template.first_approved {reviewer, count, k}`; +AA |
+| TT-04 | awaiting_second_review | `template.second_approved` | approved | As TT-03 for a second, different reviewer; count >= k under the row lock. Approvals 2..k-1 when k > 2 only insert a row and emit the log-only event `template.approval_recorded` (convention addition 7) | Approval side effects below | none | `template.second_approved {reviewer, count, k}`; +AA |
+| TT-05 | in_review, awaiting_second_review | `template.changes_requested` | changes_requested | A reviewer who is not the author gives a comment | Approvals of this round are voided | none | `template.changes_requested {reviewer}`; +AA |
+| TT-06 | in_review, awaiting_second_review | `template.rejected` | rejected (T) | A reviewer who is not the author gives a reason code | Appeal path `template_rejection` opens | none | `template.rejected {reviewer, reason_code}`; +AA |
+| TT-07 | approved | `template.paused` | paused | `kill.template.<tpl_id>` engaged by an operator with a logged reason, or the autopause: `template.autopause_report_count` reports inside `template.autopause_window_s` (system) | Pause every non-terminal job that uses the template (JT-11, cause `kill_template` or `template_paused`); no new job may be quoted or admitted on it (guards JT-04, JT-09) | none | `template.paused {cause}`; +AA when an admin |
+| TT-08 | paused | `template.resumed` | approved | Kill switch released by two distinct admins (`killswitch.release`); after an autopause, a reviewer has triaged the reports | Clear the pause cause on each job; jobs resume when their last cause clears (JT-12) | none | `template.resumed {}`; +AA |
+| TT-09 | approved, paused | `template.retired` | retired (T) | `cause` = `superseded` (automatic when a newer version of the same `Template` reaches `approved`) or `withdrawn_for_cause` (an admin with a reason) | `superseded`: nothing happens to jobs; they finish on the version stamped at admission. `withdrawn_for_cause`: `job.stop_requested` with `template_retired` for every non-terminal job on it | none | `template.retired {cause}`; +AA |
+
+**Approval side effects** (inside the TT-03 or TT-04 transaction that reaches `approved`): freeze the version permanently; CAS `Template.active_version_id` from the previous version to this one (the previous `approved` version is retired with cause `superseded` through TT-09 in the same transaction, so a template never has two active versions); write a public `ChangeLogEntry` (S12.*); write the `AdminAction` rows. Concurrent approvals by two reviewers serialize on the version row lock, so the count is exact (RC-26). The second-reviewer rule is enforced three times: the unique key above, the `reviewer is not the author` predicate in the guard, and a database check at insert. [D]
+
+## 5.26 Service review
+
+Applies to `ServiceRegistryEntry` (S0.9.6). Only `approved` allows new jobs; every service is created `unreviewed` and counts as no. [D]
+
+```
+ (none) --created--> unreviewed ; unreviewed, rejected, review_due, revoked --review_started--> in_review
+ in_review --approved--> approved --review_due--> review_due --review_lapsed--> suspended
+ in_review --rejected--> rejected ; approved, review_due --suspended--> suspended --resumed--> approved
+ approved, review_due, suspended --revoked--> revoked
+```
+
+| id | from | event | to | guard | side effects | ledger effects | audit-log entry |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| SVT-01 | (none) | `service.created` | unreviewed | `admin` with `perm.service.create`; every flag starts as `unknown` | none | none | `service.created {}`; +AA |
+| SVT-02 | unreviewed, rejected, review_due, revoked | `service.review_started` | in_review | `admin` with the `reviewer` role; no other review of this entry is open (CAS) | From `review_due`: keep `grace_deadline_at`; the lapse timer still applies (convention addition 8) | none | `service.review_started {from_state}`; +AA |
+| SVT-03 | in_review | `service.approved` | approved | `third_party_task_use` = `yes` and `prohibited_content_compatible` = `yes`, each a dated `FlagAnswer` with the reviewer recorded and pointing at a saved `TermsCopy` (bytes, `sha256:` hash, source reference, capture date, <= `service.terms_copy_max_bytes`) captured during this review; at least `service.min_approvers` distinct reviewers; every other gate flag has an answer (`unknown` evaluates as `no`) | Set `approved_at`, `review_due_at` = `approved_at` + `service.review_max_age_days` x 86,400 s; publish a `ChangeLogEntry` (class `loosen`, `effective_from` per S7.*); a job may use the service only when `effective_from` <= now | none | `service.approved {terms_copy_id, flag_answer_ids[]}`; +AA |
+| SVT-04 | in_review | `service.rejected` | rejected | A reviewer with a reason code | none | none | `service.rejected {reason_code}`; +AA |
+| SVT-05 | approved | `service.review_due` | review_due | Timer `service_review_timer`: now >= `review_due_at` | New jobs blocked at once (guards JT-04, JT-09); in-flight cells continue; `grace_deadline_at` = now + `service.review_grace_days` x 86,400 s; reviewer queue entry | none | `service.review_due {grace_deadline_at}` |
+| SVT-06 | review_due, or in_review entered from review_due | `service.review_lapsed` | suspended | Timer: now >= `grace_deadline_at` and no approval has happened | As SVT-07 with cause `review_lapsed` | none | `service.review_lapsed {}` |
+| SVT-07 | approved, review_due | `service.suspended` | suspended | `kill.service.<svc_id>` engaged by an operator with a logged reason | Jobs pinned (M1) to the service: JT-11 with `kill_service`; the card stops offering the service; a submission that reports the service is REJECT_POLICY at `G-accept` | none | `service.suspended {cause}`; +AA |
+| SVT-08 | suspended | `service.resumed` | approved | Only when `suspended_cause` = `kill_switch`; kill switch released by two admins. A lapse (`review_lapsed`) is resolved only through a new review | Clear the pause cause on jobs (JT-12); if `review_due_at` has passed the timer moves the entry to `review_due` again | none | `service.resumed {}`; +AA |
+| SVT-09 | approved, review_due, suspended | `service.revoked` | revoked | `admin` with a reason code, and the field `inflight_policy` in `drain` or `void` | Public `ChangeLogEntry` (class `tighten`, published within `change.tighten_publish_within_s`); jobs pinned only to this service get `job.stop_requested` with `service_revoked`; M0 jobs continue on other approved services; attested-service cells in flight follow `inflight_policy` at `G-accept` (the choice and its wording belong to S7.*; this part only fixes the two hooks) | none | `service.revoked {reason_code, inflight_policy}`; +AA |
+
+## 5.27 Appeal
+
+States and events are S0.9.7. `appeal_kind` is `cell_rejection`, `member_suspension`, `member_ban`, `job_rejection`, `template_rejection` or `report_outcome`. [D]
+
+```
+ (none) --filed--> filed --assigned--> assigned --review_started--> in_review --upheld--> upheld (T)
+ assigned --reassigned--> assigned ; in_review --second_review_requested--> awaiting_second_review
+ in_review, awaiting_second_review --upheld--> upheld (T) ; in_review, awaiting_second_review --overturned--> overturned (T)
+ filed, assigned, in_review --withdrawn--> withdrawn (T)
+```
+
+| id | from | event | to | guard | side effects | ledger effects | audit-log entry |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| APT-01 | (none) | `appeal.filed` | filed | Caller is the affected principal for the kind; the decision exists and now <= decision time + `appeal.window_days` x 86,400 s, else `422 UNPROCESSABLE` with `details.reason` = `window_closed`; appeals on this decision < `appeal.max_per_decision` (unique `(decision_ref, sequence)` closes the double-filing race, RC-29); `Idempotency-Key` present | Freeze an evidence snapshot (hashes, states, `StateTransition` ids, policy version) in the `Appeal` so the 30-day purge of job data cannot destroy it; `due_by` = now + `appeal.reviewer_sla_days` x 86,400 s (a published target, not a state) | none | `appeal.filed {kind, decision_ref}` |
+| APT-02 | filed | `appeal.assigned` | assigned | Assignee is an `admin` with the `reviewer` role and is not the admin who made the original decision; no conflict recorded | Assignment row | none | `appeal.assigned {reviewer}`; +AA |
+| APT-03 | assigned | `appeal.reassigned` | assigned | A conflict of interest is declared | New assignment row | none | `appeal.reassigned {from, to}`; +AA |
+| APT-04 | assigned | `appeal.review_started` | in_review | Caller is the assignee | none | none | `appeal.review_started {}`; +AA |
+| APT-05 | in_review | `appeal.second_review_requested` | awaiting_second_review | Mandatory for `member_ban` and `template_rejection`; optional for other kinds | Second assignee distinct from the first and from the original decider | none | `appeal.second_review_requested {}`; +AA |
+| APT-06 | in_review, awaiting_second_review | `appeal.upheld` | upheld (T) | Reviewer decision with a reason; for kinds that need two reviewers, anything short of `appeal.ban_min_reviewers` agreeing to overturn is `upheld` [D][A] | Notify; the original decision stands | none | `appeal.upheld {reviewers[], reason_code}`; +AA |
+| APT-07 | in_review, awaiting_second_review | `appeal.overturned` | overturned (T) | Reviewer decision with a reason; for `member_ban` and `template_rejection`, at least two distinct reviewers agree, neither the original decider | Effects by kind in the table below | Effects by kind in the table below | `appeal.overturned {reviewers[], reason_code, effects[]}`; +AA |
+| APT-08 | filed, assigned, in_review | `appeal.withdrawn` | withdrawn (T) | Caller is the appellant | none | none | `appeal.withdrawn {}` |
+
+**Effects of `appeal.overturned` by kind** [D][A]
+
+| `appeal_kind` | State effect | Ledger effect |
+| --- | --- | --- |
+| `cell_rejection` | The rejected `Submission` is marked overridden; the `VerificationRecord` is excluded from reliability estimates and from consecutive-gold-failure counts (so MT-06 can be undone by MT-07); the cell is not reopened, it follows its own course | Restitution of 1,000,000 `ucr` to the donor: a `grant` txn, entry `grant` reserve -> member with reason `appeal_restitution`, key `appealpay:<apl_id>`. It is paid by the Reserve, never by escrow (the job may be settled) and never by `mint` (not an accepted Commons cell). If the Reserve is at or below `grant.reserve_floor_credits` the payment stays `pending` and the `restitution_payer` job retries; grants pause rather than overdraw (FD§4.6). See `ISS-56` |
+| `member_suspension` | `member.reinstated` (MS-02) | Restitution `grant` equal to the lots that expired during the suspension, key `appealpay:<apl_id>`, same Reserve rule |
+| `member_ban` | `member.reinstated` (MS-05), jobs stopped by the ban stay settled | As `member_suspension` |
+| `job_rejection` | The rejected job stays `rejected`; the system creates a new job in `draft` with the stored upload (if still retained), the same declarations, and `waived_rules` listing only input-screening findings (R1, R3 detections, R4 mistakes); rules driven by the declarations themselves (R2, R5, R6, R7) cannot be waived by appeal | none |
+| `template_rejection` | The version stays `rejected`; a new version is created as a copy in `in_review` with the appeal reference; reviewers must be distinct from the one who rejected it | none |
+| `report_outcome` | The action taken on the report is reversed through its own machine (for example `template.resumed`, `member.restriction_lifted`); a dismissed report is reopened as a new `Report` linked to the old one (`report` states are terminal) | none |
+
+## 5.28 Escrow and Reservation machines (the ledger-touching small machines)
+
+The small machines of S0.9.8 that move credit are specified here because settlement and double-spend protection depend on them. `Audit`, `Report`, `LaunchGateItem` and kill-switch machines are owned by S8.*, S10.* and S14.*. [D]
+
+| id | machine | from | event | to | guard | ledger effects (kind, key) |
+| --- | --- | --- | --- | --- | --- | --- |
+| ET-01 | Escrow | (none) | `escrow.opened` | open | Same transaction as JT-09; unique `(job_id)` | `hold`, `hold:<job_id>` |
+| ET-02 | Escrow | open | `escrow.settling_started` | settling | Same transaction as JT-14, JT-15 or JT-18. In `settling` no new cell may be created, but payouts for cells that already exist are allowed (drain) | none |
+| ET-03 | Escrow | settling | `escrow.closed` | closed (T) | Same transaction as JT-16, JT-17 or JT-20; escrow balance is exactly 0 after the entries | `settle:<job_id>` or `cancel:<job_id>` |
+| RT-01 | Reservation | (none) | `reservation.held` | held | `ff.job.reservations` on; `reservation.max_active_per_member`; horizon <= `reservation.max_horizon_days`; capacity share <= `reservation.capacity_share_cap`; balance >= escrow | `hold`, `hold:<rsn_id>` |
+| RT-02 | Reservation | held | `reservation.activated` | activated (T) | The member confirms the job for the booked day (JT-09 for that job) | `reservation_activate`, entry `escrow_release` reservation escrow -> job escrow, key `resact:<rsn_id>`; JT-09 then posts no `hold` |
+| RT-03 | Reservation | held | `reservation.cancelled` | cancelled (T) | The member cancels; fees or none by `reservation.free_cancel_notice_s` (S6.*) | `cancel`, entry `refund`, key `rsncancel:<rsn_id>` |
+| RT-04 | Reservation | held | `reservation.expired` | expired (T) | Timer `reservation_expirer`: booked day passed unused | `cancel`, entry `refund`, key `rsnexpire:<rsn_id>` |
