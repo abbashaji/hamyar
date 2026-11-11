@@ -14,7 +14,7 @@ This part specifies rules `R1`..`R10` as data, the evaluator, policy versioning,
 4. A service that is not `approved` never appears in any eligible set. `R5`, `R6`, `R7` are sequential filters on the set of eligible services; the rule that empties the set is the rule that rejects; the surviving set is stamped on the job (`eligible_service_ids`).
 5. Two policy stamps: `screened_policy_version_id` at `job.policy_passed` and the binding `policy_version_id` at `job.escrow_confirmed` (admission), after a fresh evaluation under the then-current version (`ISS-74`).
 6. Tightening takes effect at once, stops in-flight work and never un-accepts a cell that was legitimately accepted. Work that is not accepted under a valid policy earns no credit; the volunteer carries no penalty (7.7).
-7. Loosening needs a public `ChangeLogEntry` with a stated reason, a notice period (`policy.loosen_min_notice_days`, 7 initial configurable default) and two distinct approvers. A version may not mix tightening and loosening.
+7. Loosening needs a public `ChangeLogEntry` with a stated reason, a notice period (`policy.loosen_min_notice_days`, 7 initial configurable default) and two distinct admins (the author counts as one). A version may not mix tightening and loosening.
 8. Volunteer opt-ins are materialized as explicit `OptIn` rows at member creation, so a later change of defaults never widens an existing member's consent.
 9. Registry answers are versioned by `review_round`; only answers of the round that produced the current `approved` state are effective.
 10. Screening never edits stored input; it reads a normalized view and records findings. Persian text keeps its zero-width non-joiner.
@@ -362,3 +362,244 @@ The training flag is required by `R6` (purpose), not by a license, so `P3` with 
 ### 7.6.3 Unlocking a locked row [D]
 
 Two independent changes are both required: (1) a new `PolicyVersion` with the row `status` set to `active` (a loosening: 7.8, public change-log entry, notice, two approvers); (2) a service in `approved` state whose recorded flag for the purpose is `yes` with a saved `TermsCopy`. Neither alone unlocks anything, and neither is implied by the other. Outputs produced before the unlock are never re-labeled. [D]
+
+## 7.7 Policy versioning, stamping and re-check (R9)
+
+### 7.7.1 Stamps and what they prove [D]
+
+| Stamp | Set when | Stored on | Meaning |
+| --- | --- | --- | --- |
+| `screened_policy_version_id` + `policy_decision` (stage `screen`) | `job.policy_passed` | `Job` | The version under which the input was screened and the quote computed |
+| `policy_version_id` + `registry_snapshot_hash` + `eligible_service_ids` (stage `admit`) | `job.escrow_confirmed` | `Job` | The binding stamp (FD§5.4 R9, "stamped at admission"); every later check compares against it |
+| `policy_checked_version_id`, `policy_checked_snapshot_hash` | after every successful `R9` run, sweep or inline | `Job` | Last version and registry state under which the job was known to pass |
+| `accept_decision` | acceptance | `Cell` | The `policy_decision` of stage `accept`; kept with the provenance (FD§5.6 "policy profile and version") |
+
+A stamp is never rewritten to look newer: re-checks add `policy_checked_*` and leave `policy_version_id` untouched, because R9 says a change "never retroactively legitimizes" work (FD§5.4). [D]
+
+### 7.7.2 Admission (stage `admit`) [D]
+
+1. Guard of `job.escrow_confirmed`, in the same transaction as the `escrow_hold`: run `evaluate("admit", facts, current_version)`.
+2. If `current_version != screened_policy_version_id` or the registry snapshot differs from the quote's, `R9` wraps the result: a failure is reported as `policy.R9.policy_version_stale` with `details.underlying` = the specific reason (for example `policy.R7.license_exceeds_service_flags`) and `details.cause` in `policy_version_changed`, `registry_changed`, `both`.
+3. On failure: `422 POLICY_REJECTED`, no escrow is posted (the guard and the hold are one transaction), the job stays `quoted` and its quote can only expire or be cancelled. The requester may create a new job pre-filled from it (S11.*).
+4. On pass: the binding stamp is written, `eligible_service_ids` is replaced by the new (possibly smaller) set, and the quote is re-validated by S6.* if the set shrank (a smaller supply can lengthen the window; S6.* decides whether the quote still holds).
+
+### 7.7.3 Procedure `stale_recheck` (R9) [D]
+
+```
+procedure stale_recheck(stage, subject):            # stage in {admit, accept}; subject = job or cell
+  stamp = subject.binding_stamp                      # admit: screened stamp; accept: job.policy_version_id + snapshot
+  cur   = current_version(policy_of(subject))       # read inside the deciding transaction; never from a process cache without a version check
+  snap  = registry_snapshot(subject.eligible_service_ids + subject.service_id_if_any)
+  cause = diff_cause(stamp.policy_version_id != cur.id, stamp.registry_snapshot_hash != hash(snap))
+  if cause == none and params.policy.recheck_on_accept:   # constant true
+      record(subject, fast_path=true); return pass       # nothing changed: identical inputs give an identical decision
+  d = evaluate_core(stage, build_facts(stage, subject), cur)   # R1..R7 only
+  if d.result == pass and stage == accept:
+      if subject.service_id not in d.eligible_service_ids: return reject("service_not_eligible")
+  if d.result == pass:
+      subject.policy_checked_* = (cur.id, hash(snap)); narrow_eligible(subject, d.eligible_service_ids); return pass
+  return reject(sub_code = d.sub_code, details = {underlying: d.reason, cause: cause})
+```
+
+`evaluate_core` is `evaluate` without `R9`, so there is no recursion. An `accept` failure is reported to the requester as `policy.R9.policy_version_stale` and to the volunteer as `reject.policy_changed` (service attested as outside the eligible set: `reject.service_not_eligible`, `ISS-76`). [D]
+
+### 7.7.4 Acceptance (stage `accept`) [D]
+
+Before a cell becomes `accepted` (and therefore before any `mint` or `transfer`, S6.*), `recheckAtAcceptance(cell)` runs inside the acceptance transaction. Outcome table:
+
+| Situation | Result | Credit | Cell | Volunteer-visible reason | Trust and reliability |
+| --- | --- | --- | --- | --- | --- |
+| Nothing changed | pass (fast path) | as designed | `accepted` | none | normal |
+| Changed, still passes, attested service still eligible | pass (full check) | as designed | `accepted` | none | normal |
+| Changed and fails, job continues with other eligible services | reject | none | `rejected`, then `requeued` without incrementing `attempt` | `reject.policy_changed` | not touched (no gold/audit observation is recorded) |
+| Changed and fails, job stops (`policy_stopped`, `service_revoked`) | reject | none | `voided` | `reject.policy_changed` | not touched |
+| Attested service was never in the eligible set | reject | none | `rejected` (counts as an attempt) | `reject.service_not_eligible` | recorded as a check failure (S9.*) |
+
+Why no credit: credit exists only for cells accepted under a valid policy; a ledger entry for a cell that was not accepted has no type in S0.8.5 and would be unbacked. The cost falls on the volunteer; it is limited by showing the reason, by never penalizing it, and by the rarity of tightening. An owner may prefer a goodwill mechanism; none is specified here (`ISS-76`). [D][A]
+
+### 7.7.5 Tightening in flight: what happens to what [D]
+
+Trigger: `policy.version_effective` of a `tighten` version, or any registry event that removes a service (7.10.5), or a `KillSwitch` on `kill.service.<svc_id>` / `kill.template.<tpl_id>` (S14.*). Immediacy is by construction: `admit`, `lease` and `accept` consult the current version inline (7.7.3); the sweep below supplies state transitions, notices and counters.
+
+```
+procedure policy_sweep(trigger):                    # idempotent; also run every policy.reconcile_interval_s
+  for job in jobs where state not terminal and (policy_checked_version_id != cur.id or snapshot differs):
+      if trigger.diff touches screening_rules or prohibited_categories: re-run screening on stored input (job_bound)
+      d = evaluate_core("accept" if job.state in (admitted, running, suspended) else "screen", build_facts(job), cur)
+      apply(job, d)                                 # table below
+```
+
+| Job state | Still passes | Passes with a smaller eligible set | Fails |
+| --- | --- | --- | --- |
+| `draft`, `screening` | no action | no action | evaluated at the next stage; no transition |
+| `quoted`, `waitlisted` | mark checked | mark checked; S6.* re-validates the quote | `job.cancel_requested` by `system`, reason `policy_stopped`, to `cancelled`; no escrow exists, so nothing is refunded |
+| `admitted`, `running`, `suspended` | mark checked | replace `eligible_service_ids`; handle cells per 7.10.5 | `job.stop_requested`, `closure_reason` = `policy_stopped`, to `settling` |
+
+Cells of a stopped job (`policy_stopped`): [D]
+
+| Cell state | Action |
+| --- | --- |
+| `queued`, `suspended` | `cell.voided` |
+| `leased` | lease revoked (`lease.revoked`), then `cell.voided`; a late submission returns `reject.policy_changed` and earns nothing |
+| `submitted`, `flagged_for_audit` | the `accept` re-check fails, `cell.voided` |
+| `accepted` | unchanged: acceptance was valid when it happened; paid credit stays paid; an investigation that finds the original acceptance wrong goes through `Report` and a two-operator `reversal` (S6.*), never through the sweep |
+| `exhausted`, `cancelled`, `voided`, `overturned` | unchanged |
+
+After `settling`, unspent escrow is refunded by S6.*; the job ends `failed` (`job.settled_partial`) unless every cell was already accepted. Outputs of accepted cells of a job stopped for `policy_stopped` are withheld from download until a reviewer records `release_partial_deliverable` (logged `AdminAction`); the default is withheld because the tightening may concern the outputs themselves [A]. The requester sees `policy.R9.policy_version_stale` and the change-log reference. [D]
+
+### 7.7.6 Versions in force [D]
+
+`current_version(policy)` = the `PolicyVersion` with `status = effective` and the highest `version`. Version rows are immutable, so a process may cache a parsed version by id; it MUST re-read `Policy.current_version_id` inside every deciding transaction and compare. The version in force is recorded in every event's envelope (S0.9.1). [D]
+
+## 7.8 Tighten immediately, loosen with change-log (R10)
+
+### 7.8.1 Change classes [D]
+
+| Class | Definition | Effective | Public record | Who |
+| --- | --- | --- | --- | --- |
+| `tighten` | Strictly narrows what is accepted or strictly strengthens a defense; widens nothing | at approval, same transaction | `ChangeLogEntry` created at once, made public within `change.tighten_publish_within_s` (86,400 s initial configurable default); detail may be delayed when disclosure would help an attacker, never the existence of the change | one admin holding `reviewer` (author counts) |
+| `loosen` | Widens anything: an allowlist set, a pairing, a flag requirement removed, a prohibited category or screening rule removed or weakened, a check removed or edited | `approved_at + policy.loosen_min_notice_days * 86,400 s` (7 days initial configurable default, FD Principle 5) | public `ChangeLogEntry` with reasons in `fa` and `en`, published when approved, before the version is effective | at least `policy.loosen_min_approvers` distinct admins counting the author (2 initial configurable default), at least one holding `operator` [A] |
+| `neutral` | No effect on any decision (copy text, titles, ordering of equal rules) | at approval | public entry, one line | one admin |
+
+A version is exactly one class. A diff that contains both a tightening and a loosening is refused with sub-code `mixed_change`; the author publishes the tightening first and the loosening afterwards. [D]
+
+### 7.8.2 Classifier `classifyChange(old, new)` [D]
+
+The differ works structurally on the data columns of 7.2.1; the class is never typed in. Elements the differ cannot compare mechanically are classified `loosen` (the conservative direction).
+
+| Element | Tighten when | Loosen when |
+| --- | --- | --- |
+| `allowlist` rows | a row `active` becomes `locked` or `rejected`; a value leaves a set of an active row; an active row is removed | a row becomes `active`; a value enters a set of an active row; an active row is added |
+| `pairing` | a pair is removed | a pair is added |
+| `license_required_flags` | a required flag is added | a required flag is removed |
+| `required_acks` | an ack or a `required_when` condition is added or widened | one is removed or narrowed |
+| `prohibited_categories` | a category is added | a category is removed |
+| `screening_rules`, `output_rules` | a rule or an element of `patterns` is added; an `action` moves toward `reject` (order: `pass` < `flag_for_review` < `quarantine` < `reject`) | a rule or pattern element is removed; an action moves the other way |
+| `wrapper_templates` | a `required_clauses` id is added and present in every variant | a clause id is removed, or a variant lacks a listed clause; text edits that keep all clauses are `neutral` |
+| `Rule.checks`, `post_checks` | a check is added | a check is removed |
+| `Rule.fail_when`, `keep_where`, `applies_when` | never (cannot be proven) | any edit |
+| copy keys, titles | | (`neutral`) |
+
+A pattern element that is edited counts as one removal plus one addition, hence `mixed_change`. Safety net: before approval the server runs the policy test table (7.13) under old and new; if any case moves from reject to pass the version cannot be `tighten` or `neutral`, and if any case moves from pass to reject it cannot be `loosen` or `neutral` (`classification_mismatch`). Only a human reviewer can fix the data, never the class. [D]
+
+### 7.8.3 Publication procedure `publish_guard` (rule `R10`) [D]
+
+```
+procedure publish_guard(version):                    # stage publish; returns pass or reject(sub_code)
+  cls = classifyChange(version.parent, version)
+  if cls == mixed:                                    reject("mixed_change")
+  if differential_test(version) contradicts cls:      reject("classification_mismatch")
+  if version.parent != current_version:               reject("parent_not_current")
+  if cls == loosen:
+      if no changelog_entry or not public_ready(entry):           reject("changelog_required")
+      if len(entry.reason.fa) < params.policy.loosen_reason_min_chars
+         or len(entry.reason.en) < params.policy.loosen_reason_min_chars:  reject("reason_required")
+      if count_distinct_admins(version.author, version.approvals) < params.policy.loosen_min_approvers
+         or not any(a.role == operator): reject("approvers_insufficient")
+      eff = approved_at + params.policy.loosen_min_notice_days * 86400
+      if is_exact_revert(version, window=params.policy.revert_window_s): eff = approved_at   # 7.8.5
+      version.effective_from = eff
+  if cls == tighten:   version.effective_from = approved_at
+  if cls == neutral:   version.effective_from = approved_at
+  return pass
+```
+
+Sub-codes appear as `422 POLICY_REJECTED`, `details.reasons = ["policy.R10.loosen_without_changelog"]`, `details.sub_code` as above. Every approval, rejection of an approval and publication writes an `AdminAction`. Approvals by the author do not count toward the distinctness of a loosening. [D]
+
+### 7.8.4 Version life cycle [D]
+
+```
+(none)               --policy.version_created-->    draft              copy of the effective version
+draft                --policy.version_proposed-->   awaiting_approval  frozen: content_hash computed, class computed, differential test run
+awaiting_approval    --policy.version_approved-->   approved           guard publish_guard passes; ChangeLogEntry linked; effective_from set
+approved             --policy.version_published-->  approved           changelog.entry_published emitted (loosen: now; tighten: within change.tighten_publish_within_s)
+approved             --policy.version_effective-->  effective          at effective_from; the previous effective version becomes superseded in the same transaction
+draft|awaiting_approval|approved --policy.version_withdrawn--> withdrawn     any admin may withdraw a scheduled loosening; the reason is logged
+```
+
+A scheduled loosening whose `parent_version_id` is no longer the current version when its `effective_from` arrives is withdrawn automatically with reason `parent_changed` (a tightening published during the notice period always wins; the author re-derives the loosening from the new parent). [D]
+
+### 7.8.5 Reverting a mistaken tightening, emergencies and registry changes [D]
+
+- **Revert.** A version whose data hash equals that of the version before the latest tightening, proposed within `policy.revert_window_s` (86,400 s initial configurable default) of that tightening becoming effective, is an exact revert: notice is waived, the rest of the `loosen` requirements (public entry with reasons, two distinct admins) still apply. Without it a mistaken tightening would bind for the whole notice period.
+- **Emergency.** The fast path to stop something is a kill switch (S14.*), not a policy edit; kill switches are not policy and are released by two admins (`security.two_person_actions`).
+- **Registry changes are rule inputs and follow R10.** `service.approved` and `service.resumed` are loosenings: public `ChangeLogEntry` with reason at the moment of approval; no notice period [A]; approvals per `service.min_approvers`. `service.rejected`, `service.review_due`, `service.suspended`, `service.revoked` are tightenings: effective at once, public entry within `change.tighten_publish_within_s`.
+- **Parameters** keep their own `owner`, `tighten_direction` and notice (S0.10.3); `policy.*` and `screen.*` parameters follow the same classes. A parameter change never edits a `PolicyVersion`.
+
+### 7.8.6 Change-log entry content [D]
+
+`ChangeLogEntry` (S12.* renders it): `kind` (`policy`, `service`), `subject_id` (`plv_` / `svc_`), `change_class`, `reason.fa`, `reason.en`, `diff_summary` (generated from `PolicyVersion.diff`, element names only), `effective_from`, `published_at`, `approver_handles` (admin display names chosen by the admin; no e-mail), `supersedes`. No member data is ever in an entry. [D]
+
+## 7.9 Volunteer opt-in model (R8)
+
+### 7.9.1 Data model [D]
+
+One `OptIn` row per `(member_id, axis, value)`; `axis` in `purpose`, `license`, `sensitivity`, `service_requirement`, `topic`, `service`. Fields: `state` (`granted`, `revoked`), `source` (`default`, `member`), `changed_at`, `row_version`. `service` rows hold the `svc_` ids the member declares they can use; the declaration is attested, never verified, and no credential or session of any service is ever stored (ground rule 3). Every change emits `member.optin_changed` (no history table). A member may revoke any opt-in at any time with no effect on credit or trust (FD§5.5). [D]
+
+### 7.9.2 Defaults and materialization [D]
+
+| Axis | Granted at member creation | Source parameter | FD |
+| --- | --- | --- | --- |
+| `purpose` | `P0`, `P1` | `optin.default_purposes` | FD§5.4 R8 |
+| `sensitivity` | `S0`, `S1` | `optin.default_sensitivities` | FD§5.4 R8 |
+| `license` | `L0`, `L1`, `L2` [A] | `optin.default_licenses` | |
+| `service_requirement` | `M0`, `M1`, `M2` [A] | `optin.default_service_requirements` | |
+| `topic` | every `TopicCategory` with `is_sensitive = false` | `optin.sensitive_topics_default` = false (constant) | FD§5.4 R8 |
+| `service` | none; the member declares the services they use | | |
+
+Defaults are copied into explicit rows at `member.created`; later edits of the defaults affect only members created afterwards. This is why a loosening of a default can never silently widen anyone's consent. [D]
+
+**Granting a non-default value** (a `purpose`, `license` or `sensitivity` outside the defaults, or a sensitive `topic`) requires an explicit acknowledgement with the full-text notice for that category (`copy.optin.<axis>.<value>.notice`, S11.*) stored as the `source` = `member` row with the notice version. **Grantable values** are only those that appear in some `active` allowlist row of the current version (`S2`/`S3` are never grantable; `P2`, `P3`, `L3` become grantable only after an unlock, 7.6.3). Revocation is always allowed. [D]
+
+### 7.9.3 Topic categories (data) [D][A]
+
+`TopicCategory`: `key` (natural, `^[a-z][a-z0-9_]{1,31}$`), `title_key`, `is_sensitive`, `status` (`active`, `retired`), `hint_patterns` (alternatives, same format as screening rules, group `topic`), `introduced_in_version`. Editing is a reviewer action in `optin.*` / `policy` ownership (S0.10.5); adding a sensitive category is a tightening for volunteers (opt-in required), removing one is a loosening. The initial set is a starting proposal for reviewers, not a taxonomy claim:
+
+| `key` | `is_sensitive` | Intent |
+| --- | --- | --- |
+| `general` | false | no special topic |
+| `education_study` | false | coursework, study material |
+| `science_technology` | false | science and technology texts |
+| `software_code` | false | code, documentation |
+| `language_literature` | false | linguistic and literary material |
+| `business_admin` | false | non-confidential routine business text |
+| `health_medical_public` | true | public health information (never personal health data, which is `S3`) |
+| `politics_current_affairs` | true | politics and current affairs; framing stays on knowledge access (FD§6.1 rank 2) |
+| `religion_belief` | true | religious and belief material |
+| `law_regulation` | true | legal and regulatory text (never privileged material, which is `S3`) |
+| `adult_mature_themes` | true | mature but lawful themes |
+| `violence_conflict` | true | conflict, violence, war reporting |
+
+A job carries the union of: topics the requester declares, the template's default topics (`job_type`), and categories a reviewer adds during screening or that match `hint_patterns` (the latter only as a `flag_for_review` finding that prompts the reviewer to add the category). Categories are only ever added after submission, never removed. Every `Cell` copies `topic_keys` at creation; `gold`, `audit`, `third`, `review` and `rework` cells inherit purpose, license, sensitivity, service requirement, eligible set and topics of the cell they accompany, so that a volunteer cannot tell them apart by policy tuple and R8 holds for them too (requirement on S8.*). [D]
+
+### 7.9.4 How R8 filters cells [D]
+
+```sql
+-- visibleCellsFilter(v): the candidate list; stage lease re-runs R8 and R9 fast path on the chosen cell
+SELECT c.id
+FROM cells c JOIN jobs j ON j.id = c.job_id
+WHERE c.state = 'queued' AND j.state IN ('admitted','running')
+  AND j.purpose              = ANY(:v_purposes)
+  AND j.license              = ANY(:v_licenses)
+  AND j.sensitivity          = ANY(:v_sensitivities)
+  AND j.service_requirement  = ANY(:v_service_requirements)
+  AND j.eligible_service_ids && :v_declared_service_ids      -- at least one service the member declared
+  AND c.topic_keys          <@ :v_topics;                    -- every topic of the cell is opted in
+```
+
+The SQL is an index-friendly prefilter only; the authority is the evaluator at stage `lease` (the same `R8` rows) plus the staleness check of 7.7.3, run when the lease is issued. A cell that fails R8 at lease time is answered `404 NOT_FOUND`. The service the member will use is chosen from `eligible_service_ids ∩ declared services` and is recorded on the lease; a different service cannot be attested at submission (S9.*). [D]
+
+### 7.9.5 Per-category supply gauge [D]
+
+```
+function supplyGauge(tuple t):                        # t = (purpose, license, sensitivity, service_requirement, eligible_service_ids, topic_keys)
+  D   = { m in active_volunteers(window = params.admission.active_donor_window_days) where R8(t, optins(m)) passes }
+  est = sum(throughput_estimate(m) for m in D)        # cells per day; formula owned by S6.*
+  for axis in axes: D_wo[axis] = { m active where R8 passes ignoring the checks of that axis }
+  bottleneck = argmax over axis of |D_wo[axis]| - |D|  # the axis whose relaxation would add most volunteers
+  return { covered_donors: |D|, est_cells_per_day: est, bottleneck_axis: bottleneck }
+```
+
+- The gauge is computed per distinct tuple at job screening, at quote time and at each `metrics.rollup_interval_s`; the per-member list is never exposed. Public and requester views show a band (`none`, `fewer_than_k`, `ok`) using `analytics.min_cohort_k`; the Operator dashboard shows exact counts and the bottleneck axis. Metric: `hamyar_policy_category_supply_donors` (labels: axis, value). [D]
+- **Feeding the quote.** S6.* uses `capacity_t = min(global_capacity, est_cells_per_day * window_days)` for the tuple; `covered_donors = 0` yields `422 NO_CAPACITY` with `details.reasons = ["policy.R8.volunteer_optin_mismatch"]` and the bottleneck axis. A tuple with low coverage lengthens the quoted window instead of failing (FD§5.7(8)). [D]
+- **Fragmentation guard.** The Operator dashboard shows the weekly share of active volunteers that have revoked each default axis value; a drop is an input to `P1M` measures (decline and opt-out rates by category, FD§9). [H] Opt-out fragmentation starves some categories; tested by that share and by quote-versus-actual windows; kill criterion set in the pre-registration (S13.*).
