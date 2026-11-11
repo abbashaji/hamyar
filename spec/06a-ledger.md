@@ -236,3 +236,120 @@ Guarantees (stated exactly):
 3. **Serializable and ordered.** Postings are totally ordered by `seq`. The single `ledger_head` lock makes posting a serial section [A]; at the volume this system targets (thousands of cells a day, FD§3.3 scale) that is sufficient, and the throughput limit is measured in `T-load-*` (`S18.*`).
 4. **No partial effects on failure.** A guard failure returns the API error of S0 0.11.3 (`INSUFFICIENT_CREDIT`, `CAP_EXCEEDED`, `LAUNCH_GATE_CLOSED`, `KILL_SWITCH_ENGAGED`, `STATE_CONFLICT`) and changes nothing.
 5. **Clock independence.** Guards that read time use one server timestamp `now` taken at the start of the transaction; `now` is stored in `created_at` of every entry of that transaction.
+
+## 6.6 Posting rules
+
+One row per operation. Entry types and transaction kinds are those of S0 0.8.5; 'M' is the member account, 'E' an escrow account, 'R' the Reserve, 'I' issuance, 'X' retired. Amounts are ucr. [D]
+
+| Operation | Trigger (S0 event) | `txn_kind` | Entries (debit -> credit, amount) | Lot effect | Natural key |
+| --- | --- | --- | --- | --- | --- |
+| Mint | `cell.checks_passed` or `cell.audit_passed` on a Commons cell of any `cell_kind` (ISS-03) | `mint` | `mint` I -> M, 1,000,000 | creates lot, `earned_at` = now | `mint:{cell_id}` |
+| Payout | the same events on a member-job cell, any `cell_kind` charged to that job | `payout` | `transfer` E -> M, 1,000,000 | drains escrow slices, creates donor lot | `payout:{cell_id}` |
+| Hold | `job.escrow_confirmed` | `hold` | `escrow_hold` M -> E, N x `p_ucr` | consumes lots (`pick_lots`), creates slices | `hold:{job_id}` |
+| Reservation booking | `reservation.held` | `hold` | `escrow_hold` M -> E(reservation), N x `quote_p_ucr` | as hold | `hold:{reservation_id}` |
+| Reservation activation | `reservation.activated` | `reservation_activate` | `escrow_release` E(reservation) -> E(job), N' x `quote_p_ucr`; `refund` E(reservation) -> M for the unused rest | slices move; refund restores | `activate:{reservation_id}` |
+| Settlement | `job.settled`, `job.settled_partial`, or `job.stop_requested` after drain | `settle` | `levy` E -> R, `levy_posted`; `refund` E -> M, rest (6.7) | levy drains slices; refund restores lots | `settle:{job_id}` |
+| Cancel | `job.cancel_settled`; `reservation.cancelled`; `reservation.expired` | `cancel` | as settlement; for a reservation only the `refund` | as settlement | `cancel:{job_or_reservation_id}` |
+| Expiry | sweeper (6.9) | `expire` | `expire` M -> R, lot remaining | lot remaining to 0, status `expired` | `expire:{lot_id}` |
+| Retirement | scheduler (6.9) | `retire` | `retire` R -> X, excess over ceiling | none | `retire:{interval_index}` |
+| Starter grant | eligibility check (6.10) | `grant` | `grant` R -> M, `grant.starter_credits` | creates lot, `grant_starter` | `grant:starter:{member_id}` |
+| Referral bonus | S12 event after the newcomer's verified cell and `growth.referral.hold_s` | `grant` | `grant` R -> M, bonus (ISS-06) | creates lot, `grant_referral` | `grant:referral:{referral_id}:{referrer_or_newcomer}` |
+| Reserve donation | member request (ISS-08) | `reserve_donation` | `reserve_donation` M -> R, amount | `pick_lots` excluding grant lots | `donate:{member_id}:{idempotency_key}` |
+| Reversal | two operators approve (6.6.3) | `reversal` | mirror of the reversed entry, up to what can be recovered | mirrors | `reversal:{reversed_entry_id}` |
+
+There is no other way to create or move credit. No row moves credit from member to member except through an escrow (`escrow_hold` then `transfer`), so there is no peer-to-peer transfer to farm or launder [D].
+
+### 6.6.1 Guards (every one must hold, otherwise nothing is written) [D]
+
+| Operation | Guards and error |
+| --- | --- |
+| Mint | `launch.minting_enabled` true (`LAUNCH_GATE_CLOSED`); `kill.all_minting`, `kill.template.<tpl_id>`, `kill.service.<svc_id>`, `kill.member.<mem_id>` all `released` (`KILL_SWITCH_ENGAGED`); the cell is `accepted` in this same transaction, belongs to a job with `is_commons`, has no earlier `mint` entry, and the R9 re-check passed; member `status` = `active`; amount is exactly 1,000,000; the three headroom checks of 6.8 hold against the versions stored on the lease (`CAP_EXCEEDED`) |
+| Payout | Escrow `state` in (`open`, `settling`); the cell is `accepted`, charged to this job and unpaid; the budget rule of 6.7 holds; headroom of 6.8 (lease-time reservation); the donor is not `banned` at lease time |
+| Hold and booking | `launch.member_jobs_enabled` true; `kill.all_new_jobs`, template and service switches released; member `active` and past `identity.recovery_cooldown_s`; the quote is unexpired (`price.quote_ttl_s`) and its snapshots are those it was made under; the admission result of file 06b is `admitted` (or a reservation slot); unexpired credit >= escrow (`INSUFFICIENT_CREDIT`); `admission.max_concurrent_jobs_per_member` not exceeded |
+| Settlement and cancel | Escrow `state` = `settling`; no cell of the job is in `leased`, `submitted` or `flagged_for_audit` (S5.* drains or voids them first; `STATE_CONFLICT` otherwise) |
+| Expiry | `expires_at <= now` and `remaining_ucr > 0` |
+| Retirement | `reserve_balance_ucr - reserve.ceiling_credits x 10^6 >= reserve.retire_min_credits x 10^6`; the amount is exactly that excess |
+| Grant | 6.10 |
+| Reserve donation | member `active`; amount <= unexpired non-grant credit; irrevocable; never shown per member on public pages |
+| Reversal | 6.6.3 |
+
+If a mint is refused by a switch after the cell was decided, the cell's acceptance rolls back with it (LD-09): the cell stays `submitted` (or `flagged_for_audit`) and is retried by `S5.*` when the switch is released. No cell is ever `accepted` without its payment [D][A].
+
+### 6.6.2 Pseudocode of the two hot paths [D]
+
+```
+function post_mint(cell, now):                            -- inside post('mint', 'mint:'+cell.id)
+    m = account_of(cell.donor); lot_expiry = now + lifetime_days(m) * 86400
+    check switches, cell, member as in 6.6.1
+    check_headroom(m, now, versions_of(cell.lease))       -- 6.8
+    entry = mint(I -> m, 1_000_000); lot = new_lot(m, 1_000_000, now, lot_expiry, 'mint')
+    entry.month_mint_after_ucr = minted_in_utc_month(now) + 1_000_000
+    entry.owned_after_ucr = owned(m, now) + 1_000_000
+
+function post_payout(cell, now):                          -- inside post('payout', 'payout:'+cell.id)
+    e = escrow_of(cell.job); assert e.state in ('open','settling')
+    if cell.cell_kind == 'primary':
+        assert e.paid_primary_ucr + 1_000_000 <= e.primary_budget_ucr ; e.paid_primary_ucr += 1_000_000
+    else:                                                 -- verification cell: pool first, then levy budget
+        from_pool = min(e.pool_budget_ucr - e.paid_pool_ucr, 1_000_000)
+        from_levy = 1_000_000 - from_pool
+        assert from_levy <= e.levy_budget_ucr - e.paid_levy_budget_ucr
+        e.paid_pool_ucr += from_pool ; e.paid_levy_budget_ucr += from_levy
+    moves = pick_slices(e.account, 1_000_000)
+    entry = transfer(e.account -> account_of(cell.donor), 1_000_000)
+    lot = new_lot(donor, 1_000_000, now, now + lifetime_days(donor) * 86400, 'transfer')
+```
+
+### 6.6.3 Reversal [D]
+
+A reversal corrects an earlier entry without editing it (S0 0.8.5). Reasons: `cell_overturned`, `fraud_finding`, `appeal_upheld`, `posting_error`. It needs `ledger.reversal_min_approvers` = 2 distinct `AdminUser`s (`ledger.reversal` is in `security.two_person_actions`), is logged as an `AdminAction`, and is idempotent per reversed entry (`reverses_entry_id` is unique).
+
+| Reversed entry | Mirror posted | If the recipient no longer holds enough |
+| --- | --- | --- |
+| `mint` | M -> I, taken from the minted lot first, then from the member's other lots earliest expiry first | Reverse what the member holds; record `shortfall_ucr` on the transaction. Credit already spent stays in existence (6.14) |
+| `transfer`, escrow `open` or `settling` | M -> E (the original escrow); the cell is then replaced by a `rework` cell paid from the pool (ISS-05) | As above |
+| `transfer`, escrow `closed` | M -> requester's member account. Escrow accounts never reopen, so this is a restitution, not a mirror; no rework cell is created (the job is closed) | As above |
+| `grant`, `expire`, `levy`, `retire`, `refund`, `escrow_hold` | Mirror along the original accounts | Only for `posting_error`, never for reasons about cells |
+
+A reversal never creates credit and never drives an account below zero. Reversal entries are excluded from the cap checks of 6.8 (they return credit that was already counted) [D][A].
+
+## 6.7 Escrow, settlement, refunds on cancel
+
+### 6.7.1 Escrow lifecycle [D]
+
+```
+(none) --escrow.opened--> open            at the hold; funded_ucr = N x quote_p_ucr
+open   --escrow.settling_started--> settling   job.all_cells_accepted, job.stop_requested or job.cancel_requested
+settling --escrow.closed--> closed (T)    after the settle or cancel transaction; balance_ucr = 0
+```
+
+In `settling`, payouts for in-flight cells still post until the drain ends. The drain is bounded: `drain_s = lease.timeout_s + lease.max_extensions x lease.extend_s + lease.submit_grace_s` = 1200 + 1 x 600 + 120 = 1920 s at the initial defaults (formula, not a measurement); after it the lease reaper has expired every lease of the job and a late paste-back is `LEASE_EXPIRED`.
+
+### 6.7.2 Verification budget [D][A]
+
+A verification cell (`cell_kind` in `gold`, `audit`, `third`, `review`, `rework`) is charged to a job through the cell field `charged_job_id` (required from `S5.*`, 6.17) and pays its donor exactly 1,000,000 ucr (FD§4.3). Its payment is drawn from the pool, and when the pool is spent, from the job's levy budget (code in 6.6.2). The scheduler may create a verification cell for job J only if
+
+```
+free(J) = (pool_budget - paid_pool) + (levy_budget - paid_levy_budget)
+free(J) - 1_000_000 x in_flight_verification_cells(J) >= 1_000_000
+```
+
+so a payout can never fail for lack of budget. When this is false the scheduler stops creating optional verification for J (gold insertion, sampled audits) and logs `ledger.verification_budget_exhausted`; automatic checks still run. A mandatory third execution (`verify.third_exec_on_mismatch`) that cannot be funded sends the contested cell back to `queued` as a new attempt instead (S8.* owns the cell side). The sampling floor (`verify.audit_rate_floor`, FD§4.4) is therefore a rate over funded verification: where a job's budget cannot fund the floor, that fact is published as `hamyar_ledger_verification_unfunded_total` and counted in the false-accept analysis (S8.*) [A]. No path creates credit to fund verification of a member job (ISS-61).
+
+### 6.7.3 Settlement and cancel algorithm [D]
+
+```
+function settle(job):                                    -- post('settle'|'cancel', ... )
+    e = escrow_of(job); assert e.state == 'settling'; assert no cell in leased|submitted|flagged_for_audit
+    levy_due       = e.accepted_primary_cells x e.quote_lambda_ppm
+    levy_available = e.levy_budget_ucr - e.paid_levy_budget_ucr
+    levy_posted    = min(levy_due, levy_available)
+    if levy_posted > 0: post levy(E -> R, levy_posted), draining slices earliest expiry first
+    refund         = balance(e) - levy_posted               -- everything else: unspent primary, unspent pool, unspent levy
+    if refund > 0: post refund(E -> M(requester), refund), restoring remaining slices to their lots
+    e.state = 'closed'; assert balance(e) == 0              -- INV-L07
+```
+
+Properties [D]: the levy is charged on accepted primary cells only, so a job that completes in part pays the levy in part; unspent pool is refunded, so the requester pays for verification actually performed, not for the quoted average; `levy_posted <= levy_due` always, and is lower than `levy_due` only when verification overran its pool (6.7.2). The published gauge `hamyar_pricing_effective_levy_ppm` = levy posted / accepted primary cells over the trailing window keeps that visible. Cancel runs the same function after the drain: unstarted cells cost nothing (their primary, pool and levy shares are in the refund), accepted cells have already been paid at acceptance (LD-03).
+
+Examples (exact; full FD§3.3 case in 6.15): partial, N = 240, 100 primary and 10 verification cells accepted: balance = 276,000,000 - 110,000,000 = 166,000,000; levy = 100 x 50,000 = 5,000,000; refund = 161,000,000. Fractional, N = 7: escrow 8,050,000, pool 700,000, levy budget 350,000; with no verification cell: payouts 7,000,000, levy 350,000, refund 700,000; with one verification cell: it takes the 700,000 pool and 300,000 of the levy budget, so the levy posted is 50,000 and the refund is 0 (ISS-61).
