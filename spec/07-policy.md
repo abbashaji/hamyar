@@ -130,6 +130,7 @@ Facts are built by `build_facts(stage, subject)` from the database; the evaluato
 | `policy.pairing`, `.license_required_flags`, `.prohibited_category_ids`, `.required_acks_for_job` | data | the `PolicyVersion` under evaluation |
 | `registry.services[]` | `{svc_id, kind, state, flags, has_terms_copy, review_round, state_hash}` | `flags` is already passed through `flag_value()`: only `yes` or `no` |
 | `registry.active_topic_keys` | list | `TopicCategory` rows with status active |
+| `registry.excluded_for_topics` | list of `svc_` ids | candidate services dropped because their recorded `excluded_topic_keys` (7.11, item i) intersect `job.topic_keys` |
 | `cell.service_id`, `cell.eligible_service_ids`, `cell.topic_keys` | | `lease` and `accept` |
 | `volunteer.optins.{purposes, licenses, sensitivities, service_requirements, topics}`, `volunteer.declared_service_ids` | lists | `OptIn` rows (7.9) |
 | `params.<name>` | value | parameters read at evaluation time; their versions go into the decision record |
@@ -158,7 +159,7 @@ Expressions are JSON; a string starting with `$` is a fact path; inside `keep_wh
 
 ```
 function evaluate(stage, facts, pv):
-  eligible = candidate_services(facts, pv)            # state == approved, kind per service_requirement
+  eligible = candidate_services(facts, pv)            # usable state for the stage, kind per service_requirement, pinned list, minus topic exclusions
   trace = []
   for rule in pv.rules sorted by ordinal where stage in rule.stages:
     if not eval_expr(rule.applies_when, facts):
@@ -232,6 +233,7 @@ An `accept` evaluation reuses the persisted screening outcome of the job (`scree
   {"sub_code":"task_exceeds_copy_send_return","fail_when":{"ne":["$template.task_scope","copy_send_return"]}},
   {"sub_code":"prohibited_category","fail_when":{"intersects":["$screen.reviewer_categories","$policy.prohibited_category_ids"]}},
   {"sub_code":"reviewer_rejected","fail_when":{"eq":["$screen.reviewer_decision","reject"]}},
+  {"sub_code":"service_usage_policy_forbids","fail_when":{"all":[{"nonempty":"$registry.excluded_for_topics"},{"empty":"$eligible"}]}},
   {"sub_code":"screen_reject","fail_when":{"intersects":["$screen.reject_groups",["link","instruction","delimiter","control","action_request"]]}},
   {"sub_code":"awaiting_review","hold_when":{"any":[{"all":[{"eq":["$screen.flagged",true]},{"absent":"$screen.reviewer_decision"}]},{"all":[{"eq":["$screen.sampled",true]},{"absent":"$screen.reviewer_decision"}]}]},"fail_when":{"eq":[1,0]}}]},
  {"rule_id":"R4","ordinal":4,"kind":"check","stages":["screen","admit","accept"],"checks":[
@@ -603,3 +605,154 @@ function supplyGauge(tuple t):                        # t = (purpose, license, s
 - The gauge is computed per distinct tuple at job screening, at quote time and at each `metrics.rollup_interval_s`; the per-member list is never exposed. Public and requester views show a band (`none`, `fewer_than_k`, `ok`) using `analytics.min_cohort_k`; the Operator dashboard shows exact counts and the bottleneck axis. Metric: `hamyar_policy_category_supply_donors` (labels: axis, value). [D]
 - **Feeding the quote.** S6.* uses `capacity_t = min(global_capacity, est_cells_per_day * window_days)` for the tuple; `covered_donors = 0` yields `422 NO_CAPACITY` with `details.reasons = ["policy.R8.volunteer_optin_mismatch"]` and the bottleneck axis. A tuple with low coverage lengthens the quoted window instead of failing (FD§5.7(8)). [D]
 - **Fragmentation guard.** The Operator dashboard shows the weekly share of active volunteers that have revoked each default axis value; a drop is an input to `P1M` measures (decline and opt-out rates by category, FD§9). [H] Opt-out fragmentation starves some categories; tested by that share and by quote-versus-actual windows; kill criterion set in the pre-registration (S13.*).
+
+## 7.10 Service Registry workflow
+
+### 7.10.1 Records [D]
+
+All three tables are `permanent`, append-only for answers and copies, and have no soft-delete (S0.7). Corrections are new rows.
+
+**`ServiceRegistryEntry`** (`svc_`)
+
+| Field | Type | Rule |
+| --- | --- | --- |
+| `name` | text | Display text; plain, escaped on output; no provider logo or trademark asset is shipped |
+| `service_kind` | enum `service_kind` | `chat_service` (M0, M1) or `open_weight` (M2: a model with a checked license, hosted or local) (`ISS-77`) |
+| `state` | S0.9.6 | initial `unreviewed` (counts as `no`); the only way out is `service.review_started` |
+| `review_round` | int | starts at 0; +1 at each `service.review_started` |
+| `approved_round` | int or null | the round whose answers are effective; null until first approval |
+| `approved_at`, `review_due_at`, `grace_ends_at` | timestamptz | `review_due_at = approved_at + service.review_max_age_days * 86,400 s` (90 days initial configurable default, replaced by counsel's advice [V]); `grace_ends_at = review_due_at + service.review_grace_days * 86,400 s` |
+| `revoked_reason_code`, `revoked_reason_text` | enum, text | codes: `terms_changed`, `provider_warning`, `flag_error`, `compliance`, `other` |
+| `adapter.supports_prefill`, `adapter.prefill_url_template`, `adapter.max_url_chars`, `adapter.copy_only`, `adapter.clean_chat_hint_key` | S0.8.3 | defaults: `false`, null, null, `true`, a generic key. `supports_prefill = true` is rejected by a constraint unless the effective `prefilled_link_use` answer is `yes`; `prefill_url_template` must start with `https://` and contain `{prompt}` exactly once; `max_url_chars` is a reviewer-entered integer >= 1 from the G2 measurement [V]. `copy_only` is derived: `not (supports_prefill and prefilled_link_use is yes)`. The platform only substitutes the prompt into the template; the volunteer opens the link and presses Send |
+| `homepage_ref` | text | display only; never fetched by the platform |
+| `notes` | text | reviewer-internal |
+
+**`TermsCopy`** (`tcp_`): `service_id`, `review_round`, `copy_kind` (`terms`, `usage_policy`, `permission_letter`, `other`), `bytes` (object storage reference), `content_type` (one of `service.terms_copy_allowed_types`), `size_bytes` (<= `service.terms_copy_max_bytes`), `sha256` (computed by the server over the stored bytes, S0.6.4), `source_reference` (text the reviewer types: the address or document title it came from), `captured_at` (date the reviewer captured it; not in the future), `uploaded_at`, `language`, `provider_version_label` (as printed, optional), `uploaded_by_admin_id`. The platform never fetches or scrapes a provider page: the reviewer captures the document and uploads it. Stored bytes are never executed and never rendered inline in the admin origin (download, or a scriptless sandboxed renderer: S10.*). [D]
+
+**`FlagAnswer`** (`fla_`): `service_id`, `review_round`, `flag_key` (S0.8.3), `region` (ISO 3166-1 alpha-2 or null), `answer` (`yes`, `no`, `unknown`), `terms_copy_id` (required when `answer = yes`; may point at a `permission_letter`), `quote_locator` (text <= 500 chars naming the page or section of the saved copy; required when `answer = yes`), `note` (text <= 2,000; required when `answer = unknown`: what is missing), `value_text` and `value_json` (non-yes/no content, 7.11), `counsel_memo_ref` (optional text pointer to a memo [V]), `recorded_by_admin_id`, `recorded_at`, `supersedes_id`. Unique on `(service_id, review_round, flag_key, region)` among rows with no successor. [D]
+
+### 7.10.2 Reviewer workflow [D]
+
+| Step | Actor | Action | Result |
+| --- | --- | --- | --- |
+| 1 | reviewer or operator | create the entry: `name`, `service_kind` | `service.created`; state `unreviewed`; unusable by any job |
+| 2 | reviewer | start review | `service.review_started`; `review_round` + 1; state `in_review`; allowed from `unreviewed`, `rejected`, `review_due`, `revoked` (from `revoked` the reviewer must state why reinstatement is justified) |
+| 3 | reviewer | upload every needed copy (terms, usage policy, any permission letter) | `service.terms_copy_saved` per copy; hash shown to the reviewer for the record |
+| 4 | reviewer | answer every flag of 7.11 | `service.flag_recorded` per answer; a `yes` must cite a copy and a locator; `unknown` must say what is missing |
+| 5 | reviewer | fill adapter fields (copy-only by default) | validated by 7.10.1 |
+| 6 | reviewer, then approver(s) | submit for approval | guard of 7.10.3 |
+| 7 | system | approve | `service.approved`; `approved_round = review_round`; `approved_at`, `review_due_at`, `grace_ends_at` set; public `ChangeLogEntry` (7.8.5) |
+| 8 | reviewer | or reject | `service.rejected` with a reason code; the answers and copies stay as the record |
+
+A service can be `in_review` for any length of time; nothing in this workflow starts the clock on anyone but the reviewer, and no part of the product depends on a service being approved by a date. Answers recorded in a round that is never approved are never effective. [D]
+
+### 7.10.3 Approval guard (`service.approved`) [D]
+
+All of the following, checked in the transaction that sets the state:
+
+| # | Condition |
+| --- | --- |
+| 1 | For the current `review_round`: `third_party_task_use` = `yes` and `prohibited_content_compatible` = `yes` (FD§5.3), each with a `TermsCopy` of this round |
+| 2 | `human_copy_paste_use` = `yes` and `access_pooling_or_crediting` = `yes`, each with a saved copy: the product consists of a human copying and returning text on a credit system, so a service whose reviewed terms do not say yes (or say nothing) is not used (stricter than FD§5.3: `ISS-71`) [A] |
+| 3 | Every other key of 7.11 has a recorded answer (explicit `unknown` is allowed; a missing row is not), and `regional_availability` has an answer for every region in `service.required_regions` |
+| 4 | At least one `TermsCopy` with `copy_kind = terms` and one with `usage_policy` (the same document may be uploaded twice, once per kind) exist for the round, hashes verified |
+| 5 | `service.min_approvers` distinct admins hold the `reviewer` role and approve (1 initial configurable default: FD§5.3 has a reviewer record the answers; 2 is an owner decision: `needs_owner`). With two or more required approvers, the admin who recorded the answers cannot be the only approver |
+| 6 | Adapter fields valid; `service_kind = open_weight` additionally requires `training_use_of_output` recorded, `model_notes` (model name and license identifier) filled, and a copy of the model license |
+
+A failure returns `422 POLICY_REJECTED` with `details.reasons = ["policy.R10.loosen_without_changelog"]` only when the cause is the missing change-log entry; every other cause is `422 UNPROCESSABLE` with `details.fields[]` naming the missing item. [D]
+
+### 7.10.4 Time, suspension and lapse [D]
+
+| Event | Trigger | Effect |
+| --- | --- | --- |
+| `service.review_due` | now >= `review_due_at` | new jobs blocked at once (state is not `approved`); in-flight cells continue until `grace_ends_at`, evaluated on the answers of `approved_round`; alarm to reviewers |
+| `service.review_lapsed` | now >= `grace_ends_at` and state `review_due` or `in_review` | state `suspended`; same effects as a suspension (7.10.5) |
+| `service.suspended` | kill switch `kill.service.<svc_id>` engaged (S14.*) or lapse | in-flight work paused (7.10.5); reversible |
+| `service.resumed` | kill switch released, cause was the kill switch, `now < review_due_at` | state `approved`; otherwise a new review is required (`service.review_started`) |
+| Terms changed | a reviewer or a report finds the provider's terms differ from the saved copy | the reviewer engages the kill switch first, then starts a new round; the old answers stay effective for in-flight evaluation only until the service is revoked or the new round is approved |
+
+Usable states per stage: `screen`, `admit` and `submit` consider only `approved`; `lease` and `accept` of an already admitted job consider `approved`, and `review_due` or `in_review` while `now < grace_ends_at`; a `suspended` or `revoked` service is never usable (a submitted cell attested on a `suspended` service is held, 7.10.5). Flags are always read from `approved_round`. [D]
+
+### 7.10.5 Revocation and suspension: what happens to in-flight work [D]
+
+Trigger: `service.revoked`, or `service.suspended` (kill switch or lapse), of service `s`. Revocation is a tightening: effective at once, one admin, reason code and text required, public entry within `change.tighten_publish_within_s`. The transaction sets the state, then `policy_sweep` (7.7.5) applies:
+
+| Object | Condition | `revoked` (and lapse to `suspended` that is not released) | `suspended` by kill switch (temporary) |
+| --- | --- | --- | --- |
+| Job | `eligible_service_ids \ {s}` is non-empty | job continues; `eligible_service_ids` shrinks; S6.* re-validates the quote | job continues on the other services |
+| Job | the set becomes empty | `job.stop_requested`, `closure_reason` = `service_revoked`, to `settling` | `job.paused` (`suspended`); `job.resumed` when `s` resumes or the set is non-empty again |
+| Cell `queued` | job continues | unchanged (offered only through the other services) | unchanged |
+| Cell `queued` | job stops / pauses | `cell.voided` | `cell.paused` |
+| Cell `leased` on `s` | job continues | `lease.revoked`, then `cell.paused` and `cell.resumed` to `queued`; `attempt` unchanged; no penalty | `lease.revoked`, `cell.paused` |
+| Cell `leased` on another service | any | unchanged unless the job stops | unchanged |
+| Cell `submitted` or `flagged_for_audit`, attested on `s` | job continues | `accept` fails: `reject.policy_changed`, requeued without incrementing `attempt`, no credit | acceptance deferred (`hold`) until `service.resumed` or `service.revoked`; verification continues |
+| Cell `submitted` on another service | any | unaffected | unaffected |
+| Cell `accepted` | any | unchanged; credit stays; a later finding that a recorded flag was wrong (`flag_error`) opens a `Report` and, only by the two-operator `reversal` of S6.*, can undo credit | unchanged |
+| Outputs of accepted cells of a stopped job | | withheld until a reviewer records `release_partial_deliverable` [A] | n/a |
+
+Notifications (copy keys in S11.*): volunteers see `copy.service.removed` in the cell and in history, no penalty to trust tier or reliability; requesters see the closure reason and the change-log entry. A newly approved service never joins the `eligible_service_ids` of jobs already admitted: eligible sets only shrink after admission (a loosening is not retroactive; the Commons backlog, which is continuously created, picks up new services). [D]
+
+### 7.10.6 The only way to read a flag [D]
+
+```
+function flag_value(entry, flag_key, region = null, stage):        # gate keys only
+  assert flag_key in GATE_KEYS                                     # info.* keys are never read here
+  if entry.state not in usable_states(stage, entry, now): return "no"
+  row = latest FlagAnswer(service_id = entry.id, review_round = entry.approved_round,
+                          flag_key = flag_key, region = region)    # the end of the supersedes chain
+  if row is null:                 return "no"                      # missing is no
+  if row.answer != "yes":         return "no"                      # no and unknown are both no (FD§5.3)
+  if row.terms_copy_id is null or row.quote_locator is null: return "no"   # a yes without evidence is no
+  return "yes"
+
+function info_value(entry, flag_key, region = null): returns the raw answer (yes|no|unknown), for display and advice only
+```
+
+No rule expression may name an `info.*` key (`flags_yes` arguments are validated against `GATE_KEYS` when a `PolicyVersion` is frozen). [D]
+
+### 7.10.7 Where a job is stopped from existing without an approved service (enforcement points) [D]
+
+| Point | Check | Failure |
+| --- | --- | --- |
+| `E1` create (`POST /v1/jobs`, admin Commons job creation) | `launch.member_jobs_enabled` is true for member jobs; `kill.all_new_jobs` released; at least one `approved` service exists | `403 LAUNCH_GATE_CLOSED`; `503 KILL_SWITCH_ENGAGED`; `422 POLICY_REJECTED` with `policy.R7.license_exceeds_service_flags`, `sub_code = no_approved_service`; no `Job` row is created |
+| `E2` set `service_requirement` / `pinned_service_ids` | every pinned service is `approved` and has an effective `TermsCopy` | `422 POLICY_REJECTED`, `sub_code = pinned_service_not_approved` |
+| `E3` submit | `R1` | `422`, job stays `draft` |
+| `E4` screen | `R2`..`R7`; eligible set non-empty | `job.policy_rejected` or `hold` |
+| `E5` admit | fresh `R1`..`R7` + `R9` in the escrow transaction; database `CHECK`: a job in `admitted`, `running`, `suspended`, `assembling`, `settling` has `cardinality(eligible_service_ids) > 0` | `422`; no escrow |
+| `E6` lease and accept | `R8` and 7.7.3 | `404 NOT_FOUND`; `reject.policy_changed` |
+
+**Invariants (continuously checked)** [D]
+
+| ID | Invariant |
+| --- | --- |
+| `INV-P01` | Every `ServiceRegistryEntry` in `approved` satisfies 7.10.3 for its `approved_round` (answers, copies with matching hashes, approvers) |
+| `INV-P02` | No `Job` row exists beyond `draft` with an empty `eligible_service_ids`; every id in a binding stamp was `approved` at admission |
+| `INV-P03` | `FlagAnswer` is read only through `flag_value` / `info_value` (a static test over the code base) |
+| `INV-P04` | A frozen `PolicyVersion` never changes; per `Policy` exactly one version is `effective`; versions form a chain through `parent_version_id` |
+| `INV-P05` | Every `loosen` version and every `service.approved` / `service.resumed` has a `ChangeLogEntry` that was public-ready before the state took effect |
+| `INV-P06` | No `tighten` version has `effective_from > approved_at` |
+| `INV-P07` | Every `cell.leased` event carries `policy_version_id` and `r8 = pass`; every `accepted` cell has an `accept_decision` with `result = pass` under a version that was effective at that time |
+| `INV-P08` | On an empty database after migration: zero `approved` services, `launch.members_may_join`, `launch.member_jobs_enabled` and `launch.minting_enabled` all false, one effective `PolicyVersion` with exactly the 12 active tuples of 7.6.1 |
+| `INV-P09` | `TermsCopy.sha256` equals the hash of the stored bytes (recomputed on a schedule) |
+
+The check job `policy_invariant_check` runs every `policy.invariant_check_interval_s` (60 s initial configurable default), emits `hamyar_policy_invariant_violations_total` and raises an `Alarm` of the highest severity; whether a violation engages a kill switch automatically is decided in S14.*. `INV-P08` runs in CI and at deployment, not on a timer. [D]
+
+## 7.11 The G0 questions (a)-(k) mapped to stored answers
+
+An item of G0 that the counsel track owns (entity form, regulation of credit, sanctions, privacy law, copyright of output, wording of the waiver, name) is not a registry flag: it is a `LaunchGateItem` of S14.*, and a registry answer may point to a memo through `counsel_memo_ref` [V]. The registry stores what the saved terms say, as the reviewer reads it; it is not a legal conclusion. [D]
+
+| G0 | FD§8.3 question | `flag_key` and kind | Stored fields beyond `answer` | Effect |
+| --- | --- | --- | --- | --- |
+| (a) | A personal free account may be used for tasks for other people? | `third_party_task_use`, gate | copy + locator when `yes` | approval guard 1 |
+| (b) | Sharing, pooling, reselling or crediting of access is prohibited? | `access_pooling_or_crediting`, gate (phrased as a permission: `yes` = permitted) | copy + locator; `note` | approval guard 2 (`ISS-71`) |
+| (c) | Terms on automation, scraping, prefilled links, copy-and-paste workflows | three keys: `human_copy_paste_use` (gate), `prefilled_link_use` (gate), `info.automation_limits` (info, `yes` = the terms restrict automation or scraping; `ISS-77`) | `value_text` for `info.automation_limits`: what the terms say, in the reviewer's words | guard 2; adapter rule of 7.10.1; display of the clean-chat advice |
+| (d) | Regional availability and what the terms say about circumvention | `regional_availability`, gate, one answer per region in `service.required_regions` (initial configurable default `["IR"]`, plus the operator's jurisdiction once chosen [V]) | `region`; `value_text`: what the terms say about circumvention (recorded, never acted on) | recorded and shown as a notice; does not block an approval because the platform neither knows nor stores where a member is (`ISS-72`); the product never advises circumvention (Principle 9) |
+| (e) | Commercial use of outputs on the free tier | `commercial_use_of_output`, gate | copy + locator | `R5` filter |
+| (f) | Using outputs to train or develop other models | `training_use_of_output`, gate | copy + locator | `R6` filter |
+| (g) | Publishing outputs openly | `open_publication_of_output`, gate | copy + locator | `R7` filter via `license_required_flags` |
+| (h) | Does the provider train on chats by default; could memory or connectors leak content | `info.provider_trains_on_chats`, `info.memory_or_connectors_risk`, info (`yes` = it does / it could) | `value_text` optional | drives the clean-chat advice and the card hint `adapter.clean_chat_hint_key`; never gates |
+| (i) | What the usage policy and prohibited-content rules require | `prohibited_content_compatible`, gate | `value_text`: summary of the prohibitions; `value_json`: `{"excluded_topic_keys": [TopicCategory keys the usage policy forbids]}` | approval guard 1; excluded topics remove the service from the candidate set of jobs carrying that topic (`R3.service_usage_policy_forbids` when nothing is left) |
+| (j) | What "free allowance" formally means; can it change without notice | `info.allowance_may_change`, info (`yes` = it may change without notice) | `value_text`: the definition as written | shown to volunteers and to the capacity forecast notes (S6.*); never gates |
+| (k) | Would the provider give written permission for this use | `info.written_permission`, info (`yes` = permission was obtained) | `terms_copy_id` pointing at a `permission_letter` copy; `counsel_memo_ref` | recorded as evidence; never gates; a permission letter may support a `yes` elsewhere in the same round |
+
+Fields that are not yes/no (`value_text`, `value_json`, `region`, `note`, `quote_locator`, `counsel_memo_ref`) are part of the immutable `FlagAnswer` row. The reviewer's reading is the record; the saved copy is the evidence; a later dispute is settled by the copy and its hash. [D]
