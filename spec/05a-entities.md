@@ -1167,3 +1167,142 @@ One checklist line of `G0`..`G5` with its evidence and sign-offs (FD§8.3). A li
 | `created_by_admin_id` | id `adm_` | NN, FK | |
 
 **Checks (trigger)** `evidence_attached` requires non-empty `evidence`; `signed_off` requires at least `launch.min_signoffs` distinct `admin_user_id` values in `signoffs`, each signing the current `evidence_hash`, and none of them the `created_by_admin_id` of the evidence unless the parameter allows it [A]. **View** `launch_gate_items_current` returns the highest revision per `item_key`; the rule that decides whether `launch.members_may_join` may be set reads it (S14.*). **Indexes** `(gate_id, item_key, revision DESC)`. Counsel answers and provider answers are [V] data entered by humans; the system never fills them.
+
+## 5.13 Measurement and operations entities
+
+### 5.13.1 `Experiment` · `experiments` · `exp_` · `IMS` · `permanent`
+
+An arm configuration, including the accelerated-expiry arm (FD§9 Phase 1). Arms are frozen once the experiment is `running`. [D]
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `experiment_key` | text | NN, unique, `^EXP-[0-9]{2,}$` | S0.5 |
+| `kind` | text | NN | `expiry_arm`, `growth`, `other` [A] |
+| `flag_key` | text | null | the feature flag it drives (`ff.experiment.expiry_arm`, `ff.growth.v1_fast_path`, ...) |
+| `arms` | json | NN | array of `{arm, fraction_ppm, overrides}`; fractions sum to 1000000; `overrides` maps parameter names to values, for example `{"credit.lifetime_days": "14"}` for the accelerated arm |
+| `status` | enum(`experiment_status`) | NN, default `draft` | |
+| `prereg_id` | id `prr_` | **NN when `running`** (CHECK) | no experiment starts without a locked pre-registration |
+| `seed_version` | int | NN | `experiment.assignment_seed_version` at start |
+| `started_at`, `stopped_at` | ts | null | |
+
+### 5.13.2 `ExperimentAssignment` · `experiment_assignments` · `asg_` · `IMM` · `permanent`
+
+Logged, randomized assignment (prompt G); `experiment.assignment_log_enabled` is the constant true. [D]
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `experiment_id`, `member_id` | id | NN, FK; **unique pair** | |
+| `arm` | text | NN | |
+| `bucket_ppm` | int | NN, `0..999999` | `uint32(HMAC-SHA-256(secret.experiment_assignment_key, experiment_key \|\| member_id)[0..4]) mod 1000000` [A]; the arm is the interval of the cumulative `fraction_ppm` that contains it |
+| `seed_version` | int | NN | |
+| `assigned_at` | ts | NN | |
+
+The `mem_` id is opaque (the member row is reduced on closure, S5.6.1). **Not stored** any trait of the member used to choose the arm; assignment depends only on the bucket.
+
+### 5.13.3 `PreRegistration` · `pre_registrations` · `prr_` · `IMS` · `permanent`
+
+Thresholds and decision rules recorded before launch, then locked (prompt H). [D]
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `title` | text | NN, <= 120 chars | |
+| `thresholds` | json | NN | named values, for example `eta_min_ppm`, `week2_return_min_ppm`, `large_jobs_within_quote_min`; each name has a `measure_code` and a definition reference to the metric it applies to |
+| `decision_rules` | text | NN, <= 8000 chars | |
+| `status` | enum(`prereg_status`) | NN, default `draft` | |
+| `locked_at` | ts | NN iff `locked` | |
+| `content_hash` | hash | NN iff `locked` | |
+| `locked_by_admin_ids` | arr of `adm_` | NN iff `locked` | `FND` decisions: recorded by the founders' admin accounts |
+| `amends_id` | id `prr_` | null, FK | after a lock a change is a new row that amends the locked one and is published as an amendment |
+
+All columns except `status`, `locked_at`, `content_hash` and `locked_by_admin_ids` are frozen after lock (trigger). The rule that sets `launch.members_may_join` requires every pre-registration listed for Phase 1 to be `locked` (S14.*).
+
+### 5.13.4 `Event` · `events` · `evt_` · `IMS` · `ops`
+
+Domain and analytics event without personal data; also the transactional outbox (S0.9.1). [D]
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `name` | text | NN | S0.9 event names and `ledger.*`, `parameter.*`, `policy.*`, `changelog.*`, `launch.*` |
+| `event_version` | int | NN | |
+| `occurred_at` | ts | NN | |
+| `actor_type`, `actor_ref` | enum, text | NN, null | `principal_type` and an opaque id (`mem_`, `adm_` or null) |
+| `subject_type`, `subject_id` | text, id | null | |
+| `policy_version_id` | id `plv_` | null | |
+| `parameter_versions` | json | NN | versions in force |
+| `payload` | json | NN, <= 4 KiB | per-name schema of codes, counts and ids; **no free text**, no output text, no IP |
+| `request_id` | text | null | |
+| `published_at` | ts | null | set once when the outbox relay publishes it |
+
+**Indexes** `(published_at) WHERE published_at IS NULL`; `(name, occurred_at)`; `(subject_type, subject_id)`; `(actor_ref, occurred_at)`. **Retention** `retention.event_raw_days` (default 30), after which rows are deleted and only `MetricSnapshot` aggregates remain; a 28-day return metric therefore fits inside the raw window [A]. `analytics.third_party_trackers` and `analytics.cookies_enabled` are constants false: no event leaves the platform.
+
+### 5.13.5 `MetricSnapshot` · `metric_snapshots` · `mts_` · `IMM` · `permanent`
+
+Aggregated published metric: v, η, claim ratio, mint-cap utilization, return rates, false-accept and false-reject estimates (FD§9 Phase 1 list). [D]
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `metric_name` | text | NN, `^hamyar_[a-z0-9_]+$` | S0.5 |
+| `scope`, `scope_key` | enum(`metric_scope`), text | NN, null | for example `job_type` / `translation_glossary` for v |
+| `window_start`, `window_end` | ts | NN | |
+| `value`, `unit` | int64, enum(`metric_unit`) | NN, NN | ratios in ppm, amounts in `ucr` |
+| `numerator`, `denominator` | int64 | null | kept so a ratio can be recomputed; v = verification cells / accepted primary cells |
+| `sample_size` | int | NN | |
+| `is_suppressed` | bool | NN | true when the cohort is below `analytics.min_cohort_k` (the value is then NULL in public views) |
+| `published_at` | ts | null | |
+| `computation_version` | text | NN | |
+| `parameter_versions` | json | NN | |
+| `supersedes_id` | id `mts_` | null, FK | a recomputation is a new snapshot |
+
+**Indexes** `(metric_name, scope, scope_key, window_end DESC)`. Simulation output is never written here (prompt K): simulated runs use a separate database.
+
+### 5.13.6 `CalibrationRecord` · `calibration_records` · `cal_` · `IMM` · `permanent`
+
+Phase 0 calibration observation (FD§8.3 G3, S0.10.4 `CAL`). [D]
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `service_id` | id `svc_` | NN, FK | |
+| `template_version_id` | id `tpv_` | null, FK | |
+| `recorded_by_admin_id` | id `adm_` | NN, FK | the founder or tester who ran the cells on their own account |
+| `observed_on` | day | NN | |
+| `cells_attempted`, `cells_completed`, `cells_refused`, `cells_failed` | int | NN, >= 0, `completed + refused + failed <= attempted` | |
+| `cells_until_limit` | int | null | cells completed before the allowance limited the account that day |
+| `seconds_per_cell` | arr of int | NN, <= 500 values | raw samples; percentiles are computed from them |
+| `copy_paste_errors` | int | NN | |
+| `auto_check_passes`, `auto_check_fails` | int | NN | |
+| `max_input_chars_completed` | int | null | feeds `cell.envelope.max_input_chars` |
+| `note` | text | null, <= 1000 chars | the reviewer is told not to enter credentials or account identifiers |
+| `supersedes_id` | id `cal_` | null, FK | |
+
+`calibration.min_samples_per_service` decides when these rows may replace a default; that decision is a `ParameterVersion` with `calibration_source` pointing at the records. **Not stored** the provider account name or any identifier of the tester's account.
+
+### 5.13.7 `InvariantCheck` · `invariant_checks` · `ivc_` · `IMM` · `ops` (with exception)
+
+Result of one run of a ledger invariant (prompt C). [D]
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `invariant_id` | text | NN, `^INV-L[0-9]{2,}$` | |
+| `run_kind` | enum(`check_run_kind`) | NN | `per_commit`, `sampled`, `full_recompute`, `checkpoint` |
+| `started_at`, `finished_at` | ts | NN | |
+| `seq_from`, `seq_to` | int64 | NN | the ledger range covered |
+| `result` | enum(`check_result`) | NN | |
+| `details` | json | null, <= 8 KiB | expected and actual aggregates; account ids only |
+| `checkpoint_hash` | hash | NN iff `checkpoint` | the head `entry_hash` published daily (`ledger.checkpoint_interval_s`) |
+| `alarm_id` | id `alm_` | null, FK | |
+
+**Retention** `retention.ops_log_days`, except that rows with `result = 'violated'` and every `checkpoint` row are exempt from purging, because a checkpoint is the external anchor of the chain and a violation is evidence [A]; both are reported in `ISS-51`. **Indexes** `(invariant_id, started_at DESC)`; `(result) WHERE result <> 'passed'`.
+
+### 5.13.8 `Alarm` · `alarms` · `alm_` · `MUT` · `ops`
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `alarm_key` | text | NN | `ledger.invariant_violated`, `price.eta_below_threshold`, `inflation.mint_utilization`, `verify.false_accept_alarm`, `verify.false_reject_alarm`, `service.review_due`, `retention.job_failed`, ... |
+| `severity` | enum(`alarm_severity`) | NN | |
+| `state` | enum(`alarm_state`) | NN, default `open` | |
+| `dedupe_key` | text | NN | unique while `open` or `acknowledged` |
+| `source_ref` | text | null | an id such as an `ivc_` or `mts_` |
+| `details` | json | null, <= 4 KiB | |
+| `acknowledged_by_admin_id`, `acknowledged_at`, `resolved_at` | id, ts, ts | null | |
+
+**Retention** `retention.ops_log_days` after `resolved_at`. A `critical` ledger alarm also engages `kill.all_minting` and `kill.all_new_jobs` by policy (S14.*); that is an `AdminAction` by `system`, not a column here.
