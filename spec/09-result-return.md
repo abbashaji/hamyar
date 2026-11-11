@@ -230,7 +230,7 @@ Every output slot of a template version declares a `slot_context` of `prose` (fr
 | 12 | Run of combining marks longer than `screen.max_combining_run` | Mn, Me | reject `reject.schema_invalid` | same | same | Rendering and storage abuse; Persian vowel marks are short runs |
 | 13 | Mixed-script token | A token mixing Latin with Cyrillic, Greek or Armenian (UTS #39 restriction level check) | keep, add flag `confusable_token` | reject `reject.forbidden_content` | reject `reject.forbidden_content` | Homoglyph spoofing; in prose it is a signal only |
 
-Unicode noncompliant UTF-8 or unpaired surrogates never reach this table: they are rejected at JSON decode (`400 MALFORMED_REQUEST`, SC-07). [D]
+Invalid UTF-8 and unpaired surrogates never reach this table: they are rejected at JSON decode (`400 MALFORMED_REQUEST`, SC-07). [D]
 
 ### 9.7.3 Normalization procedure
 
@@ -451,4 +451,157 @@ The distribution is collected per `template_version_id` as the histogram metric 
 | Meaning | A volunteer's own statement. It is stored as `attested_service_id` and `attested_model_label`, shown in manifests under those names, and described to requesters as "declared by the volunteer, not verified" (FD§5.6; FD§5.7 failure mode 7) [P] |
 | Use | Registry membership check (above), audit and incident analysis, and aggregate statistics per service (for calibration, `CAL`). Not proof of anything: a donor can name any permitted service. The platform cannot check which service produced a text, because it never reads the provider page (E1, E6) |
 | Consequence of a false attestation | None is detectable from the text itself. A pattern of attestations that audits contradict (for example systematically different outputs for the same claimed service) is an input to reliability review by a human, not an automatic penalty [H] |
-| Copy | `copy.submit.attestation_note` (9.5, copy table) |
+| Copy | `copy.submit.attestation_note` (9.15) |
+
+## 9.14 Submit endpoint processing
+
+### 9.14.1 Pseudocode: every check in order
+
+Checks are evaluated strictly in this order and the first failure ends the request. `SC-nn` ids are stable and used by the tests. [D]
+
+```
+submitResult(req, lease_id):
+
+  # ---- Stage T: transport and identity (nothing persisted) ----
+  SC-01  if media_type(req) != application/json            -> 415 UNSUPPORTED_MEDIA_TYPE
+  SC-02  body := read_stream(req, cap = cell.envelope.max_submission_bytes)
+         if cap exceeded (stream cut at cap + 1 byte)      -> 413 PAYLOAD_TOO_LARGE      [reject.size_exceeded]
+  SC-03  p := authenticate(req, scheme = member)
+         missing -> 401 AUTH_REQUIRED; wrong scheme or invalid -> 401 AUTH_INVALID (counted); expired -> 401 AUTH_EXPIRED
+  SC-04  if p.status != active                             -> 403 FORBIDDEN
+         if kill.member.<p.id> engaged                     -> 503 KILL_SWITCH_ENGAGED
+  SC-05  if over ratelimit.member_api_rpm or ratelimit.member_submissions_per_hour
+                                                           -> 429 RATE_LIMITED (Retry-After)
+  SC-06  k := header Idempotency-Key; missing or not ^[A-Za-z0-9_-]{16,64}$ -> 400 VALIDATION_FAILED
+         lookup(p.id, POST, path, k, sha256(canonical(body)))
+           stored            -> replay stored response (Idempotent-Replayed: true)
+           body differs      -> 422 IDEMPOTENCY_KEY_MISMATCH
+           running           -> 409 IDEMPOTENCY_IN_PROGRESS
+  SC-07  doc := parse_strict_json(body)                     # UTF-8 only, no duplicate keys, depth <= cell.envelope.max_json_depth,
+         malformed                                         -> 400 MALFORMED_REQUEST      # no __proto__/constructor/prototype keys
+  SC-08  validate_envelope(doc)                             # exact keys, types, id regexes, nonce regex, label length
+         invalid                                           -> 400 VALIDATION_FAILED (details.fields)
+
+  # ---- Stage L: lease and nonce (read only; failures here are retryable inside the lease) ----
+  SC-09  l := load_lease(lease_id)
+         missing or l.member_id != p.id                     -> 404 NOT_FOUND
+         if l.gate_failures > lease.max_gate_failures       -> 429 RATE_LIMITED
+  SC-10  if doc.cell_id != l.cell_id: l.gate_failures += 1   -> 403 FORBIDDEN              [reject.nonce_invalid]
+  SC-11  if !ct_equal(sha256(b64url_decode(doc.lease_nonce)), l.nonce_hash):
+                                  l.gate_failures += 1      -> 403 FORBIDDEN              [reject.nonce_invalid]
+  SC-12  if l.state == submitted                            -> go to SC-13
+         if l.state in {expired, released, revoked}         -> 410 LEASE_EXPIRED          [reject.lease_expired]
+         if now() > l.grace_until                           -> 410 LEASE_EXPIRED          [reject.lease_expired] (details.reason = past_grace)
+         late := now() > l.expires_at
+  SC-13  (only when l.state == submitted, nonce already consumed)
+         s := stored submission of l
+         if payload_hash(doc) == s.payload_hash             -> 200 replay of s outcome (replayed = true), emit nothing
+         else                                               -> 409 STATE_CONFLICT (details.reason = conflicting_resubmission); signal.conflicting_resubmit
+  SC-14  c := load_cell(l.cell_id)
+         if c.state != leased or c.attempt != l.attempt     -> 409 STATE_CONFLICT; alarm hamyar_submission_invariant_violations_total
+  SC-15  if !service_permitted(doc.attestation.service_id, c): l.gate_failures += 1
+                                                            -> 422 UNPROCESSABLE           [reject.attestation_invalid]
+
+  # ---- Stage N: content normalization (pure function, in memory) ----
+  SC-16  (text, report, verdict) := normalizeOutput(doc.output_text, c.slot_context)       # 9.7.3
+         # verdict is ok or a reject code: reject.schema_invalid | reject.forbidden_content | reject.length_out_of_bounds
+
+  # ---- Stage C: atomic claim (the only point that consumes the nonce) ----
+  SC-17  BEGIN; lock lease then cell (fixed lock order, same as the reaper)
+         re-check l.state == active, l.nonce_consumed_at IS NULL, now() <= l.grace_until, c.state == leased, c.attempt == l.attempt
+           race lost (state moved)                          -> ROLLBACK; re-run from SC-12 on the fresh row (becomes 410 or SC-13)
+         INSERT submission (state = received if verdict ok else schema_failed;
+                            output_text stored only when verdict ok; raw_hash always)      # unique(lease_id) is the last guard
+         UPDATE lease SET state = submitted, nonce_consumed_at = now()
+         UPDATE cell  SET state = submitted        (if verdict not ok: then checks_failed -> rejected, requeue per S5.*)
+         INSERT outbox events (9.14.4); COMMIT
+         if verdict not ok                                  -> respond 201 state = schema_failed [verdict code]; STOP
+
+  # ---- Stage V: abuse checks on the persisted submission (synchronous, deterministic) ----
+  SC-18  if lease_to_submit_s < verify.timing_min_s         -> checks_failed [reject.timing_anomaly]; STOP
+  SC-19  if duplicate hard case D2 or D3 (9.11)             -> checks_failed [reject.duplicate_of_other_output]; STOP
+  SC-20  hits := run_detectors(ckey, text, slot exemptions)  # classes L, C, A (9.9)
+         if any hit whose action is quarantine              -> quarantined; STOP (cell flagged_for_audit)
+  SC-21  record soft signals in flags: timing_soft_fast, duplicate_same_cell, duplicate_source, confusable_token,
+         invisible_in_code, bidi_stripped, late; set force_audit if timing_soft_fast or duplicate_same_cell
+  SC-22  enqueue verify_submission(submission_id, force_audit)   # S8.* continues: automatic checks, gold, audit sampling
+         respond 201 state = received
+```
+
+On any path that ends in `STOP` above, the response is built from stored state; the response body of 9.5.3 is the same on every path. [D]
+
+### 9.14.2 Check table
+
+| Check | Condition | HTTP and `code` | `details.reject_code` | Persists a `Submission` | Consumes nonce | Counts toward |
+| --- | --- | --- | --- | --- | --- | --- |
+| SC-01 | Not JSON | 415 `UNSUPPORTED_MEDIA_TYPE` | none | no | no | rate limit |
+| SC-02 | Body over `cell.envelope.max_submission_bytes` | 413 `PAYLOAD_TOO_LARGE` | `reject.size_exceeded` | no | no | rate limit |
+| SC-03 | Missing, invalid or expired token; token of another scheme | 401 `AUTH_REQUIRED`, `AUTH_INVALID`, `AUTH_EXPIRED` | none | no | no | rate limit per IP hash |
+| SC-04 | Member not `active`; `kill.member.<id>` engaged | 403 `FORBIDDEN`; 503 `KILL_SWITCH_ENGAGED` | none | no | no | |
+| SC-05 | Rate limit exceeded | 429 `RATE_LIMITED` | none | no | no | |
+| SC-06 | Bad key; key reuse with another body; call in flight | 400 `VALIDATION_FAILED`; 422 `IDEMPOTENCY_KEY_MISMATCH`; 409 `IDEMPOTENCY_IN_PROGRESS` | none | no | no | |
+| SC-07 | Malformed JSON, invalid UTF-8, duplicate or reserved keys, depth | 400 `MALFORMED_REQUEST` | none | no | no | |
+| SC-08 | Envelope schema violation | 400 `VALIDATION_FAILED` | none | no | no | |
+| SC-09 | Lease unknown or not the caller's | 404 `NOT_FOUND` | none | no | no | |
+| SC-09 | `gate_failures` above `lease.max_gate_failures` | 429 `RATE_LIMITED` | none | no | no | |
+| SC-10 | Body `cell_id` is not the lease's cell | 403 `FORBIDDEN` | `reject.nonce_invalid` | no | no | `gate_failures`, `signal.forgery_attempt` |
+| SC-11 | Nonce hash mismatch | 403 `FORBIDDEN` | `reject.nonce_invalid` | no | no | `gate_failures`, `signal.forgery_attempt` |
+| SC-12 | Lease ended or past `grace_until` | 410 `LEASE_EXPIRED` | `reject.lease_expired` | no | no | |
+| SC-13 | Replay of identical payload / different payload | 200 replay / 409 `STATE_CONFLICT` | none | no (already exists) | already consumed | `signal.conflicting_resubmit` for the 409 |
+| SC-14 | Cell not `leased` for this attempt | 409 `STATE_CONFLICT` | none | no | no | invariant alarm |
+| SC-15 | Attested service not permitted for the cell | 422 `UNPROCESSABLE` | `reject.attestation_invalid` | no | no | `gate_failures` |
+| SC-16 | Control or forbidden character, replacement character, private use, combining run, or length out of bounds | 201 with `state` = `schema_failed` | `reject.schema_invalid`, `reject.forbidden_content`, `reject.length_out_of_bounds` | yes, text not stored | yes | cell attempt (S5.*), anomaly signal |
+| SC-18 | Below the timing floor | 201 with `state` = `checks_failed` | `reject.timing_anomaly` | yes | yes | anomaly signal |
+| SC-19 | Duplicate of another output (hard cases) | 201 with `state` = `checks_failed` | `reject.duplicate_of_other_output` | yes | yes | anomaly signal |
+| SC-20 | Link, code to run or request for action | 201 with `state` = `quarantined` | none (reason shown through `copy.submit.flagged_withheld`) | yes | yes | reviewer queue |
+| SC-22 | Passed the stages of this part | 201 with `state` = `received` | none | yes | yes | |
+
+SC-17 has no external code of its own: its failure modes are the race outcomes already listed (410, replay or conflict). Gate failures at SC-01..SC-15 never consume a cell attempt and never change cell state; the donor can correct the problem and retry inside the lease. A failure at SC-16 or later burns one attempt of the cell (`cell.max_attempts`), which is why the dry run of 9.5.4 exists (`ISS-94`). [D]
+
+### 9.14.3 Stored fields of `Submission` (requirements on S5.*)
+
+| Field | Type | Note |
+| --- | --- | --- |
+| `id`, `lease_id` (unique), `cell_id`, `member_id`, `attempt` | ids, int | `sub_` id server-generated |
+| `state`, `reject_code` | text | Values from S0.9.3 and S0.8.4 |
+| `received_at`, `late`, `lease_to_submit_s` | timestamptz, bool, int | Server times; seconds, floored |
+| `slot_context` | text | `prose`, `code`, `structured` per slot |
+| `output_text` | text, nullable | Canonical text; null when rejected at SC-16 or after purge |
+| `output_hash`, `raw_hash`, `payload_hash`, `dup_key` | text | 9.7.4; hashes survive the purge |
+| `output_chars`, `output_bytes` | int | Of the canonical text |
+| `normalization_report` | json | Counts per class only, never the removed text |
+| `flags` | json | List of `{class, hits}` and signal names, never matched text |
+| `attested_service_id`, `attested_model_label` | text | 9.13 |
+
+A separate table `submission_fingerprints` [A] holds the MinHash signature and band hashes (9.11.2). Retention is `job_bound`: `output_text`, `normalization_report`, `attested_model_label` and the fingerprints are purged `retention.job_payload_days` after the job reaches a terminal state; hashes, codes, flags and ids stay (S0.7). Indexes: unique `(lease_id)`; `(cell_id, attempt)`; `(dup_key)`; band-hash lookup on `submission_fingerprints`; partial `(received_at)` where `state = 'quarantined'` for the reviewer queue; `(member_id, received_at)` for the timing signals. [D]
+
+### 9.14.4 Events emitted by outcome
+
+Event names are those of S0.9.3, all written to the outbox in the claim transaction or, for the later stages, in their own transaction. A gate rejection emits no domain event; it writes one ops log line `submission.gate_rejected` with the check id and code, and increments `hamyar_submission_gate_rejections_total` [A]. [D]
+
+| Outcome | Events |
+| --- | --- |
+| Gate rejection (SC-01..SC-15) | none |
+| Claim succeeded | `submission.received`, `lease.submission_received`, `cell.submitted` |
+| `schema_failed` (SC-16) | the three above, then `submission.schema_failed`, `cell.checks_failed` |
+| `checks_failed` (SC-18, SC-19) | the three above, then `submission.checks_failed`, `cell.checks_failed` |
+| `quarantined` (SC-20) | the three above, then `submission.quarantined`, `cell.flagged_for_audit` |
+| Reaper at `grace_until` | `lease.expired`, `cell.lease_expired`, then `cell.requeued` |
+| Replay | none |
+
+## 9.15 Copy keys for the return path
+
+Copy intent and texts for the paste-back form. Every key has `fa` and `en` and the marker `needs_human_and_legal_review`. Promises use "declared", never "guaranteed" (S0.2). Full screens are in S11.*. [D]
+
+| Key | Shown when | `en` | `fa` |
+| --- | --- | --- | --- |
+| `copy.submit.too_long` | `reject.size_exceeded`, `reject.length_out_of_bounds` | The pasted text is longer than this task allows. Copy only the answer, not the whole chat. | متن چسبانده‌شده از حد مجاز این کار بلندتر است. فقط پاسخ را کپی کنید، نه کل گفتگو را. |
+| `copy.submit.damaged_text` | `reject.schema_invalid` | The pasted text looks damaged. Please copy the answer again and paste it. | متن چسبانده‌شده آسیب‌دیده به نظر می‌رسد. لطفاً پاسخ را دوباره کپی و چسبانده کنید. |
+| `copy.submit.hidden_characters_removed` | Row 4, 7 or 9 of 9.7.2 stripped something | Invisible formatting characters were removed from your text. | نویسه‌های قالب‌بندی نامرئی از متن شما حذف شد. |
+| `copy.submit.lease_expired` | `reject.lease_expired` | This cell's time has run out and it went back to the queue. Nothing is lost; you can take another. | زمان این سلول تمام شد و به صف برگشت. چیزی از دست نرفته؛ می‌توانید سلول دیگری بردارید. |
+| `copy.submit.flagged_withheld` | `state` = `quarantined` | Your answer contains a link, code to run, or a request. It is held for review and is not counted yet. | پاسخ شما شامل پیوند، کد برای اجرا یا درخواست است. برای بررسی نگه داشته شد و هنوز شمرده نمی‌شود. |
+| `copy.submit.replayed` | Replay (9.10 case 4) | Already received. Showing the earlier result. | قبلاً دریافت شد. نتیجهٔ پیشین نمایش داده می‌شود. |
+| `copy.submit.attestation_note` | Beside the service picker | The service and model you name are recorded as your own statement; they are declared, not verified. | سرویس و مدلی که اعلام می‌کنید به‌عنوان اظهار خودتان ثبت می‌شود؛ اعلام‌شده است، نه تأییدشده. |
+| `copy.submit.service_not_allowed` | `reject.attestation_invalid` | This task cannot be done with that service. Please choose one from the list. | این کار با آن سرویس قابل انجام نیست. لطفاً یکی از فهرست را انتخاب کنید. |
+| `copy.submit.not_counted_duplicate` | `reject.duplicate_of_other_output` | This answer matches another submission and was not counted. | این پاسخ با ارسال دیگری مطابقت دارد و شمرده نشد. |
+| `copy.submit.too_fast` | `reject.timing_anomaly` | This was sent faster than the task can be done. It was not counted; you can try again. | این پاسخ سریع‌تر از زمان لازم برای انجام کار ارسال شد. شمرده نشد؛ می‌توانید دوباره تلاش کنید. |
