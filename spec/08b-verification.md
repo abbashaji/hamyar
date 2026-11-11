@@ -366,7 +366,7 @@ Promotion needs evidence (the lower bound); demotion needs evidence of harm (the
 
 Consequences derived from the defaults (a = b = 1, tail 0.10, window 50), stated so they are not discovered later [H]:
 
-- `established` needs at least **10 clean observations**, because 0.1^(1/10) = 0.794 < 0.80 and 0.1^(1/11) = 0.811 ≥ 0.80. Promotion is limited by observations, not by `trust.established_min_cells` = 10. A new member's 5 blanket cells give about 5 observations; the other 5 arrive at about `g/(1-g) + s` = 0.16 per cell (8.31), so about 31 further cells: roughly 36 cells in all. Whether this is acceptable is a `P1M` finding.
+- `established` needs at least **10 clean observations**, because 0.1^(1/10) = 0.794 < 0.80 and 0.1^(1/11) = 0.811 ≥ 0.80. Promotion is limited by observations, not by `trust.established_min_cells` = 10. A new member's 5 blanket cells give about 5 observations; the other 5 arrive at about `g + s` = 0.15 per leased cell (each gold lease and each random audit yields one observation), so about 33 further cells: roughly 38 cells in all. Whether this is acceptable is a `P1M` finding.
 - `trusted` needs **zero fails in a full window of 50**: P=50, F=0 gives 955,855 ≥ 950,000, while P=49, F=1 gives 925,859. One failure removes `trusted` eligibility until it leaves the window.
 - Tier changes the audit multiplier and the cap multiplier only (`trust.audit_multiplier.*`, `trust.cap_multiplier.*`), never the gold rate and never the floors (8.29).
 
@@ -410,7 +410,7 @@ function on_observation(state, outcome, selection):       # called for every cou
 
 Initial `adapt_factor_ppm` = 1,000,000. Derived properties at the defaults (step-down 0.80, clean streak 20, step-up 2.00):
 
-- From factor 1.0 to the lower limit 0.2 takes `ceil(ln 0.2 / ln 0.8)` = 8 steps = **160 consecutive clean observations**. At about 0.16 observations per cell this is about 1,000 cells (derived, illustrative).
+- From factor 1.0 to the lower limit 0.2 takes `ceil(ln 0.2 / ln 0.8)` = 8 steps = **160 consecutive clean observations**. At about 0.15 observations per cell this is about 1,070 cells (derived, illustrative).
 - A single FAIL doubles the factor; from the lower limit it takes 3 failures to reach 1.0 (0.2, 0.4, 0.8, then 1.6).
 - Fixtures: factor 1,000,000 with 20 clean observations gives 800,000 and, for tier `established` (1.0), `audit_rate` 80,000 ppm; then one FAIL gives 1,600,000 and 160,000 ppm. For tier `trusted` (0.5) at the lower limit the product is 10,000 ppm, below the floor, so the rate is 20,000 (`AC-verify-10`). For tier `restricted` (3.0) and factor 2.0 the product is 600,000, so the rate is capped at 500,000 (`AC-verify-12`).
 
@@ -419,3 +419,89 @@ Initial `adapt_factor_ppm` = 1,000,000. Derived properties at the defaults (step
 - **Floors hold for every member in every state**: `verify.audit_rate_floor` (0.02) and `verify.gold_rate_floor` (0.01) are validated parameters (C2) and are applied last. No tier, factor, budget or operator edit of a rate can go below them; only the floor parameter itself can be lowered, as a `loosen` change with notice (R10).
 - Detection exposure of a patient bad actor who stays at both floors (derived, not a measurement): per bad cell the chance that gold or audit sees it is at most `1 - (1 - 0.02)(1 - 0.01) = 0.0298` (using the gold floor per cell as an upper bound), so about `1 / 0.0298` = **34 bad cells accepted in expectation before the first detection**, and `ln 0.05 / ln(1 - 0.0298)` = 99.0, so about **100 bad cells** before the chance of at least one detection reaches 95%. Each accepted bad cell also earns 1 credit. The first detection doubles the factor, and two consecutive gold fails restrict the member (8.28.4). This residual is the price of the floor; 8.40-L8 repeats it.
 - **Budget band.** The random audit draw is `u` in `[0, 1_000_000)` (8.22.2). Before the draw the inclusion probability is fixed: `pi = audit_rate(m)` if the cell's job has verification budget (8.32), else `pi = audit_rate_floor_ppm`. The audit happens iff `u < pi`. Draws in the floor band are always funded; draws above it only while the job's pool lasts. The same rule applies to gold (8.24.2). The actual `pi` is stored (8.22.2), and the share of draws truncated by budget is published beside v as `truncated_extra_share` because truncation censors the measured v (`ISS-85`). [D]
+
+## 8.30 False-accept and false-reject estimators
+
+FD§9 asks for the false-reject rate "from gold cells" and a false-accept estimate "from audits". Neither is observable as stated: a gold fail is a rejection by construction, and audit agreement does not bound errors that the comparator or the auditors share. The estimators below add the missing adjudication and state what they cannot see (`ISS-86`). All are computed per `job_type` and per template over the window `price.v_window_days`, never pooled across templates. [D]
+
+### 8.30.1 Logged data they need [D]
+
+For every primary or rework submission that passed P0 to P2: `selection`, `sampling_pi_ppm`, `sampling_draw_ppm` (8.22.2). For every audit and group: comparator version and verdict, resolution, `selection`. For every gold submission: outcome, adjudication result. Only `selection = random` cells enter 8.30.2; `forced` and `blanket` cells are reported separately.
+
+### 8.30.2 False-accept estimator [D]
+
+Let, for one stratum and window: `n_acc` = accepted primary and rework cells that were eligible for the random draw; `R` = resolved random audits (primary in majority or minority, not `inconclusive` or cancelled), `r = |R|`; `k` = members of `R` where the primary was in the minority (bad); `inc` = random audits that ended inconclusive.
+
+```
+B_unsampled   = sum over i in R with bad_i of (1_000_000 - pi_i) / pi_i               # Horvitz-Thompson count of bad cells that were NOT audited
+FA_point_ppm  = ceil(1_000_000 * B_unsampled / n_acc)
+scale         = (n_acc - audited_and_accepted) / n_acc                                 # share of accepted cells that nobody audited
+rate_lo, rate_hi = beta_quantile(tail, a0 + k, b0 + r - k), beta_quantile(1 - tail, a0 + k + inc, b0 + r - k)   # inconclusive counted as bad in the upper bound
+FA_lo_ppm     = floor(1_000_000 * rate_lo * scale);   FA_hi_ppm = ceil(1_000_000 * rate_hi * scale)
+status        = insufficient_data if r < n_min_FA
+              | alarm  if FA_lo_ppm >= verify.false_accept_alarm_ppm
+              | clear  if FA_hi_ppm <  verify.false_accept_alarm_ppm
+              | watch  otherwise
+```
+
+`a0`, `b0` are `verify.reliability_prior_a/b` and `tail` is `verify.estimator_tail_prob` (8.28.2). Because audits catch bad cells **before** acceptance (a cell flagged for audit is accepted only if it passes), the false-accept mass sits in the cells nobody audited; that is what `B_unsampled` estimates. The interval treats `pi` as roughly constant across the stratum; when it varies by more than a factor of 2 (for example after budget truncation) the point estimate stays valid and the interval is approximate [H].
+
+- **Minimum sample.** `n_min_FA` is the smallest `r` for which zero bad cells could still clear the alarm: `ceil(ln(tail) / ln(1 - alarm)) - 1`. At the defaults (tail 0.10, alarm 0.05, uniform prior) `n_min_FA` = **44** resolved random audits, about `44 / 0.10` = 440 random-eligible primary cells per template per window at `s` = 0.10 (derived). Below it the status is `insufficient_data` and no number is published as a rate (the count is still published).
+- The estimate is a **lower bound on the true false-accept rate** whenever the comparator or the auditors can be wrong in the same direction as the executor (8.40-L5, L6).
+
+### 8.30.3 False-reject estimator [D]
+
+Gold fails are adjudicated by an admin-side reviewer (role `reviewer`, permission `perm.verify.read_gold`) who sees the reference, the donor output and the rubric, not a member-facing cell (so no gold item is exposed to members and no cell is paid). Each gold fail is enqueued with probability `verify.gold_adjudication_rate` (initial configurable default 1.0, 8.37). The reviewer returns `upheld` (the output really was bad), `overturned_acceptable` (an equally valid output, or the comparator was too strict) or `overturned_defect` (the reference or item is defective).
+
+```
+passes  = gold submissions that passed;  adjudicated = gold fails that were adjudicated;  over = adjudicated with overturned_*
+X       = over / verify.gold_adjudication_rate                  # estimated good gold outputs wrongly rejected
+FR_point_ppm = ceil(1_000_000 * X / (passes + X))
+FR_lo_ppm, FR_hi_ppm = floor/ceil of beta_quantile(tail / 1 - tail, a0 + X, b0 + passes)      # exact for rate 1.0, approximate below 1.0 [H]
+status = insufficient_data if passes < n_min_FR | alarm if FR_lo_ppm >= verify.false_reject_alarm_ppm | clear if FR_hi_ppm < ... | watch
+```
+
+`n_min_FR` = `ceil(ln(tail) / ln(1 - false_reject_alarm)) - 1` = 21 good gold submissions at the defaults (alarm 0.10). Effects of an overturn: the gold outcome becomes PASS (a correcting record, the original stays), the donor's observation is corrected, the donor is paid 1 credit through the appeal-award path (8.34), `consecutive_gold_fails` is recomputed, and an item with `overturned_defect`, or with two overturns, is quarantined (8.24.1). A **second, selection-biased floor** is published: organic rejections overturned on appeal divided by organic rejections in the window; it counts only donors who appeal. [D]
+
+### 8.30.4 Diagnostics published beside the rates [D][H]
+
+| Diagnostic | Computation | Reading |
+| --- | --- | --- |
+| Gold detectability gap | Bad rate on gold (after adjudication) against bad rate on random audits of the same template, tested at `verify.gold_leak_alpha` (signal L2, 8.24.5) | Gold lower than organic: gold easier or recognized |
+| Comparator calibration | A random share `verify.comparator_calibration_rate` (initial configurable default 0.05, 8.37) of resolved audit pairs, matched and mismatched, is adjudicated blind to the comparator verdict by an admin-side reviewer; Beta bounds of false-match and false-mismatch rates | Bounds how much 8.30.2 understates false-accept |
+| Truncation | `truncated_extra_share` (8.29.3) | Sampling was cut by budget |
+| Coverage | Share of random-eligible cells with `audit_coverage_gap` | Audits that could not run |
+| Auditor pool | Count of degraded auditor assignments (8.25.3) | Weak independence |
+
+Alarms: `status = alarm` raises `Alarm` with the stratum and, with `verify.false_accept_alarm` pre-registered (S13.*), is a kill-switch input for the template (S14.*: `kill.template.<tpl_id>`). Numbers published to the public parameter page are the status, the interval and the sample size, never a bare point estimate. [D]
+
+## 8.31 Counting verification and rework cells into v
+
+v is **measured**, never set (FD§4.3, S0.10.1). This part supplies the counts; S6.* owns publication and the quote. [D]
+
+```
+v_ppm(type, window) = ceil( 1_000_000 * V_num / V_den )
+V_den = accepted primary cells of the job type, accepted inside the window, not overturned
+V_num = accepted cells of the job type, accepted inside the window, with cell_kind in { gold, audit, third, review, rework }
+```
+
+| Item | Counted in v? | Reason |
+| --- | --- | --- |
+| Accepted `gold` cell (sponsor job's type) | yes, numerator | Paid 1 credit (8.32) |
+| Accepted `audit` and `third` cells, sampled or blanket | yes | Paid |
+| Accepted `review` cells (subjective audits, review gold) | yes | Paid |
+| Accepted `rework` cell | yes, 1 cell each | ISS-05; counted at 1 whether or not the reversal of the overturned payout was recovered (conservative, rounds v up) [A] |
+| Rejected, expired, declined, cancelled or voided verification cells | no | Not paid, so no credit cost; reported as `wasted_execution_share` (rejected and expired verification executions / V_den), not priced [A] |
+| Primary cell later `overturned` | removed from V_den | Its replacement is a `rework` cell in V_num; V_den is literal FD§4.3 and slightly overstates v when overturns are many |
+| Admin-side adjudication (8.30.3, comparator calibration) | no | No cell, no credit; reviewer time is an `OPS` cost |
+| Commons cells (minted) | **not** in member-job v | Published separately as `commons_verification_share` (ISS-03) |
+
+Strata: per `job_type` (S0.8.6); published monthly (`price.publish_period_days`) from the trailing `price.v_window_days`; below `price.v_min_sample_cells` accepted primary cells the quote falls back to `price.v_prior` (S6.*). The snapshot carries the numerator split by kind, the denominator and `truncated_extra_share`.
+
+**Expected v from the sampling parameters** (derived; tests compare it to the measurement and any gap is a finding). Per accepted primary cell, with `mu` the share of audits that mismatch, `beta` the share of primary cells under blanket redundancy, `rho` the rework share, `n` = `verify.blanket_redundancy_n`: [D]
+
+```
+v_exp = g/(1-g) + (1 - beta) * s * (1 + mu) + beta * (n - 1) + rho            # subjective templates replace the s term with the review rate
+```
+
+Illustrative inputs (not measurements): g = 0.05, s = 0.10, mu = 0.10, rho = 0.005. With beta = 0: `v_exp` = 0.0526 + 0.1100 + 0.005 = **0.1676**, so v = 167,632 ppm, p = 1.217632 and `eta = floor(10^12 / 1,217,632)` = 821,266 ppm. With beta = 0.05: `v_exp` = 0.2621, p = 1.312132, eta = 762,118 ppm, below the suggested 0.80. At both floors (g = 0.01, s = 0.02): 0.0321. Two consequences (`ISS-85`): the default `price.v_prior` = 0.10 is below what the default `g` and `s` imply, and adaptive sampling is the main lever on eta. **Floor funding check** (parameter-editor warning, proposed `C9`): `g_floor/(1-g_floor) + s_floor * (1 + mu)` must not exceed `price.v_prior + price.levy_lambda`; at the defaults 0.0321 ≤ 0.15. [A]
