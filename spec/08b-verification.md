@@ -124,3 +124,118 @@ The draw `u` is made only after P1 to P2 passed, uses the server CSPRNG, and its
 | `rejected` | `cell.attempts_exhausted` | `exhausted` | attempts spent; **also** every verification cell rejected on content (`reject.gold_mismatch`, `reject.audit_mismatch`, `reject.review_unacceptable`): its single attempt is used up [A] |
 
 A `gold` instance has an attempt limit of 1, an exception to `cell.max_attempts` stated here (`ISS-84`). A gold cell whose lease expires returns to the pool as a new instance for another member. A cell stuck in `flagged_for_audit` for a reason other than `sampled` is never released without a verdict: after `job.max_overrun_ratio` pressure it goes to an operator queue (S14.*), not to `accepted`. [D]
+
+## 8.23 Automatic checks and anomaly intake [D]
+
+Automatic checks are the cheapest stage (FD§4.4 step 1). The template half defines each check; this part fixes the contract.
+
+- A check is a pure, deterministic function `check(output, input, ctx) -> pass | fail(reason_code)`. It never executes submitted content, never calls a model, never fetches a URL. A check that needs execution of submitted code is not allowed in Phase 1 (S9.*); such a template uses parse-level checks only. [D]
+- Checks run in the template's order and stop at the first failure. The failing check's `reason_code` maps to a donor-visible reason (8.33). Standard checks: schema validity, length bounds (`cell.envelope.max_output_chars`), language, refusal-pattern detection, format validator, forbidden content.
+- Automatic-check failures on organic cells are **not** reliability observations (they are a gate, not a quality sample) but are counted per member in `auto_fail_rate` for support and S9.* abuse tooling. On gold cells they are fails (8.24). [D]
+
+**Anomaly signals consumed from S9.*** (S9.* owns detection and thresholds `verify.timing_min_s`, `verify.duplicate_similarity_threshold`):
+
+| Signal | Meaning | Default action here | Reliability effect |
+| --- | --- | --- | --- |
+| `timing_below_min` | `submitted_at - leased_at < verify.timing_min_s` | `force_audit` | step-up of the adaptive factor (8.29) |
+| `duplicate_of_other_output` | similarity to another member's output ≥ `verify.duplicate_similarity_threshold` | `force_audit`; S9.* may instead reject with `reject.duplicate_of_other_output` | step-up; a rejection counts as one fail with `source = anomaly` |
+| `forgery_finding` | S9.* integrity finding | S9.* voids or restricts | `member.restricted` (S10.*, S9.*) |
+
+In every case an anomaly overrides the random draw (`selection = forced`) and **cannot lower** any sampling rate. A `forced` audit that passes is an exonerating observation for the member (counted); it is excluded from the false-accept estimators because selection by suspicion is not random (8.30). [D]
+
+## 8.24 Gold cells
+
+### 8.24.1 The library [D]
+
+`GoldCell` (`gld_`, permanent, S0.7) is a known-answer item. Its reference answer is access-restricted: readable only by the verification worker (`system`) and by reviewers holding `perm.verify.read_gold` (S10.* assigns it; name registered in `ISS-84`).
+
+| Field | Rule |
+| --- | --- |
+| `status` | `draft`, `active`, `quarantined`, `retired` (machine below) |
+| `job_type`, `template_id` | An item belongs to one template; a primary-execution item and a review item are separate (`gold_kind`: `exec`, `review`) |
+| `input_ref`, `reference_ref` | Input and reference stored as content-hashed blobs; the reference is never sent to any member |
+| `reference_source` | `reviewer_authored`, `deterministic` (a validator or checker defines correctness), `reviewer_approved_consensus` (a majority output a reviewer approved). Consensus without reviewer approval is never a reference: correlated model error would become "truth" (limit 8.40-L6) |
+| `polarity` | Review items only: `acceptable` or `unacceptable`, the known verdict |
+| `source_license_ref` | The license record of the source text. Input must be `S0` and its license must allow display under any card face it can be attached to [V: reviewer records the license per item] |
+| `exposure_count`, `activated_at`, `retired_at`, `leak_flag` | Maintained by 8.24.4 |
+
+```
+(none)       --gold_cell.drafted-->      draft
+draft        --gold_cell.activated-->    active        guard: approved by a reviewer who is not the author; pool rules pass
+active       --gold_cell.quarantined-->  quarantined    leak signal (8.24.5), a defect found on appeal, or a manual flag
+quarantined  --gold_cell.reactivated-->  active        guard: reviewer clears it, new `activated_at`
+active|quarantined --gold_cell.retired--> retired (T)  exposure cap reached or manual
+```
+
+A template may be leased to members only while its active gold pool holds at least `verification.gold_pool_min` items; below that the template is paused for new cells (`template.paused`, kill-switch path S14.*) and an alarm is raised. This keeps gold detectability and rates from degrading silently. [D]
+
+### 8.24.2 Insertion: substitution at lease time [D]
+
+Gold is inserted when a member leases a cell. The member picks a card; the server decides, per lease, whether the lease is a gold instance of the **same template**. The real cell the member picked stays `queued`.
+
+```
+function lease_cell(member, selected_cell):              # inside the lease transaction, idempotent per Idempotency-Key
+  g = gold_rate_ppm(member, scope_of(selected_cell))      # 8.29
+  u = csprng_uniform_ppm()                                # fresh draw, separate from any audit draw
+  if u >= g: return create_lease(selected_cell)
+  if u >= verify.gold_rate_floor_ppm and sponsor_budget_exhausted(selected_cell.job): return create_lease(selected_cell)  # extras only
+  item = pick_gold_item(selected_cell.template_version, member)
+  if item is None: alarm(gold_pool_empty, template); return create_lease(selected_cell)
+  inst = new_cell(kind = gold, gold_cell_id = item.id, job = selected_cell.job, template_version = selected_cell.template_version)
+  return create_lease(inst)                               # the same card face, envelope and lease timeout as a real cell
+
+function pick_gold_item(tv, member):
+  eligible = items where status = active and template matches and exposure_count < verify.gold_max_exposures
+                   and member has no lease ever for the item and the member's opt-ins (R8) cover the item's metadata
+  return uniform_random(eligible)
+```
+
+- `g` is a share of **leases**, so gold cells per primary cell are `g / (1 - g)` (used in 8.31). [D]
+- The decision is stored with the lease; a replay of the same request returns the same cell, so repeating a request cannot re-roll the draw. [D]
+- **Sponsor job.** A gold instance belongs to the job whose slot it takes; that job's verification pool pays for it (8.32). The card face (purpose, license, sensitivity, service, template, expected time, provenance sentence) is rendered from the sponsor job, and the gold input is `S0` with a compatible license (8.24.1), so no field on the card is false. The general volunteer notice says that some cells are hidden reference checks and that the volunteer cannot tell which (copy `copy.verify.hidden_checks_notice`, S11.*, `needs_human_and_legal_review`). [D]
+- Unique exposure is enforced by a partial unique index `ux_leases_member_gold` on `leases (member_id, gold_cell_id) WHERE gold_cell_id IS NOT NULL` (column added to `Lease`, `ISS-84`). An exposure counts when the lease is issued, whether or not the member submits. [D]
+
+### 8.24.3 How gold stays hidden [D]
+
+1. No member-facing response, event or log field contains `cell_kind`, `gold_cell_id`, `audit_id` or `selection` for a cell that is unresolved. After resolution a member sees only the outcome and the reason code. S15.* schemas for gold and organic cells are identical (`AC-verify-03`).
+2. Same template, envelope, lease timeout, card layout, copy and latency class. Server-side branches that differ by kind must not change response size by more than the natural variation of the template [H: measured in `TEC`].
+3. The gold reference, comparator output and sponsor linkage are visible only to the roles in 8.24.1 and to an appeal reviewer for that appeal (8.34).
+4. **Published rates, hidden instances.** `verify.gold_rate_g`, the floors and the formulas are public (FD Principle 5); which lease is gold is not.
+5. A donor whose gold cell fails sees `reject.gold_mismatch` and so learns that this one cell was a reference check. That cost is accepted because FD§4.4 requires donors to see why (`ISS-86`); the item is burned for that member, the reference is never shown, and failures feed leak detection (8.24.5).
+
+### 8.24.4 Rotation and retirement [D]
+
+- Each item is retired when `exposure_count` reaches `verify.gold_max_exposures` (initial configurable default 20, 8.37). Each member sees an item at most once, ever.
+- Retirement rate (items per day) = `g x cells_per_day / verify.gold_max_exposures`. Illustrative inputs from the FD§3.3 example (40 donors x 8 cells a day = 320 cells a day, g = 0.05): 16 gold exposures a day and 0.8 items retired a day, about 24 a month per 320 cells a day. The library must be fed at this rate or the template pauses (8.24.1). These are not measurements.
+- `gold_pool_low` alarm when the active pool of a template covers fewer than 7 days of the current retirement rate (derived: 7 x rate; 7 is the `admission.active_donor_window_days` default reused as a look-ahead).
+- Reference answers are authored or approved by reviewers (a cost counted in `OPS`); a donor's result is never promoted to a reference without reviewer approval.
+
+### 8.24.5 Leak detection [D][H]
+
+A gold item is "leaked" when its answer circulates or its identity is recognizable. Signals are computed per item over its last `verify.gold_max_exposures` exposures and per template over the window `price.v_window_days`; each is a one-sided test at significance `verify.gold_leak_alpha` (initial configurable default 0.01, 8.37).
+
+| Signal | Test | Reading |
+| --- | --- | --- |
+| L1 pass-rate drift | Fisher exact test, later half of the item's exposures against the earlier half | Rising pass rate on one item |
+| L2 gold versus organic | Two-proportion test: gold pass rate against the random-audit agreement rate of the same template (8.30) | Gold passes more than organic work: gold is easier, recognizable or leaked |
+| L3 timing | Median `elapsed_s` of the item's exposures against the template median (rank test) | Answers produced faster than the template allows |
+| L4 near-duplicate cluster | Two or more exposures from different invite trees whose outputs meet `verify.duplicate_similarity_threshold` where the comparator does not predict identical outputs | Answer text is being shared |
+| L5 decline asymmetry | Decline-or-expiry rate of gold leases against organic leases of the same template (two-proportion test) | Donors recognize gold and avoid it |
+| L6 report | A donor, reviewer or operator flags the item | Manual |
+
+On any signal the item goes `quarantined`; no new exposures. Observations that members produced on the item **after the earliest exposure inside the suspect window** are flagged `suspect = true` and removed from every estimator in both directions (no penalty, no credit); payments already made are not reversed. A quarantined item returns to `active` only by reviewer decision with a new `activated_at`. Signals are triage, not proof: tests are not corrected for multiple comparisons and will raise false alarms at roughly `verify.gold_leak_alpha` per test [H]. L2 doubles as the **gold-detectability diagnostic** reported in 8.30.
+
+### 8.24.6 Resolving a gold submission [D]
+
+```
+function resolve_gold(sub):
+  cel = cell_of(sub); item = gold_item_of(cel)
+  verdict = comparator(item.tv.verification.comparator)(sub.output, item.reference)         # deterministic
+  if verdict == match:  record(sub, gold, pass);  record_observation(m, scope, PASS, gold);  accept(cel)          # paid 1 credit
+  else:                 record(sub, gold, fail, reason=reject.gold_mismatch);  record_observation(m, scope, FAIL, gold)
+                        reject(cel, reject.gold_mismatch); consecutive_gold_fails(m) += 1
+                        maybe_enqueue_adjudication(sub)                                    # 8.30.3
+  if consecutive_gold_fails(m, scope) >= trust.restrict_after_gold_fails: emit member.restricted     # 8.28.4
+```
+
+`inconclusive` from a gold comparator is a defect of the item: it is not an observation, the donor is paid, and the item is quarantined. A passing gold cell resets `consecutive_gold_fails`. [D]
