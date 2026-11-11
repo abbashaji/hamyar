@@ -756,3 +756,107 @@ Provenance manifest of a deliverable (FD§5.6). Two renderings of one record: th
 ```
 
 The export removes `volunteer_handle` from every cell and states "declared", never "guaranteed". **Not stored** any input or output text (hashes only), any requester identifier other than `job_id`.
+
+## 5.9 Credit and ledger entities
+
+The ledger is one double-entry book, `ledger_id = 'main'` [A]. Amounts are integer `ucr` (S0.6.1). Business meaning of postings, the invariant list `INV-L<nn>` and the check schedule belong to S6.*; this section fixes the stored shape and the structural guarantees the database itself enforces. [D]
+
+### 5.9.1 `LedgerAccount` · `ledger_accounts` · `lac_` · `DER` · `permanent`
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `account_type` | enum(`ledger_account_type`) | NN | `member`, `escrow`, `reserve`, `issuance`, `retired` |
+| `member_id` | id `mem_` | NN iff `member`, unique | |
+| `escrow_id` | id `esc_` | NN iff `escrow`, unique, deferred FK | |
+| `balance_ucr` | ucr | NN, default 0 | cache, updated only by `ledger_post()`; sign rule below |
+| `last_entry_seq` | int64 | NN, default 0 | the highest `seq` that touched this account |
+
+**Sign rule (CHECK)** `member`, `escrow`, `reserve`, `retired`: `balance_ucr >= 0`; `issuance`: `balance_ucr <= 0`. This is `ledger.allow_negative_balance` = false enforced by the database. **Singletons** a unique index allows exactly one `reserve`, one `issuance` and one `retired` account. **Indexes** `(account_type)`. **Public view.** The public ledger (S12.*) shows `vol_` handles computed on read from `member_id`; no `mem_` id and no handle is stored here. **Not stored** any personal datum; the table is the same shape for a member and for a Reserve.
+
+### 5.9.2 `LedgerEntry` · `ledger_entries` · `lge_` · `CHN` · `permanent`
+
+One balanced pair of legs, append-only, hash-chained (S0.8.5). Never updated, never deleted. [D]
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `ledger_id` | text | NN, `CHECK = 'main'` | |
+| `seq` | int64 | NN; unique with `ledger_id`; gap-free | the order of the ledger (S0.6.2) |
+| `txn_id` | id `txn_` | NN, FK | |
+| `entry_type` | enum(`ledger_entry_type`) | NN | `mint`, `grant`, `escrow_hold`, `transfer`, `escrow_release`, `levy`, `refund`, `expire`, `retire`, `reserve_donation`, `reversal` |
+| `debit_account_id`, `credit_account_id` | id `lac_` | NN, FK, `debit <> credit` | the from and to accounts of S0.8.5 |
+| `amount_ucr` | ucr | NN, `> 0` | |
+| `lot_id` | id `lot_` | null, FK | the lot created, consumed or restored |
+| `lot_effect` | enum(`lot_effect`) | NN | `create`, `consume`, `restore`, `none`, per the table in S0.8.5 |
+| `restores_entry_id` | id `lge_` | null, FK | for a `refund` that restores consumed lots: the `escrow_hold` entry it undoes in part |
+| `reverses_entry_id` | id `lge_` | null, FK, unique | for a `reversal` |
+| `job_id`, `cell_id` | id | null | references for explorers; the transaction is authoritative |
+| `prev_hash`, `entry_hash` | hash | NN | `entry_hash = SHA-256(prev_hash \|\| canonical(entry))` (S0.6.4); genesis `prev_hash` is `sha256:` followed by 64 zeros |
+
+`canonical(entry)` is the RFC 8785 serialization of every column except `entry_hash` and `created_at`'s sub-second digits are kept (full `ts`). **Entry shape.** Credit consumed from several lots is posted as several entries in one transaction, one per lot, so each entry stays a single balanced pair with one lot. **Direction rule (trigger)** `(entry_type, debit account type, credit account type, lot_effect)` must appear in the reference table `ledger_entry_type_rules`, seeded from S0.8.5 by a migration (constants, not a domain entity): for example `mint` is `issuance` to `member` with `create`; `levy` is `escrow` to `reserve` with `none`. **Indexes** `(debit_account_id, seq)`; `(credit_account_id, seq)`; `(txn_id)`; `(job_id) WHERE job_id IS NOT NULL`; `(entry_type, seq)`. **Not stored** a member identity (accounts carry opaque ids), a memo field, any free text.
+
+### 5.9.3 `LedgerTransaction` · `ledger_transactions` · `txn_` · `IMM` · `permanent`
+
+Atomic group of entries with one `txn_kind` (S0.8.5). [D]
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `txn_kind` | enum(`ledger_txn_kind`) | NN | `mint`, `grant`, `hold`, `payout`, `settle`, `cancel`, `reservation_activate`, `expire`, `retire`, `reserve_donation`, `reversal` |
+| `natural_key` | text | NN, **unique** | the business idempotency key, for example `payout:<cell_id>`, `hold:<job_id>`, `settle:<job_id>`, `grant:starter:<member_id>`, `expire:<lot_id>`; a second post with the same key is a no-op that returns the first result |
+| `member_id`, `job_id`, `cell_id` | id | null | |
+| `reversal_of_txn_id` | id `txn_` | null, FK, unique | |
+| `entry_count`, `total_ucr` | int, ucr | NN | checked against the entries at commit |
+| `actor_type`, `actor_ref` | enum, text | NN | `principal_type` and an opaque id |
+| `approval_action_ids` | arr of `act_` | NN, length 2 iff `txn_kind = 'reversal'` | two distinct admins (`ledger.reversal_min_approvers`) |
+| `parameter_versions` | json | NN | versions in force (`credit.*`, `price.*`, `mint.*`) |
+
+**Indexes** `(txn_kind, created_at)`; `(cell_id)`; `(job_id)`.
+
+### 5.9.4 `CreditLot` · `credit_lots` · `lot_` · `DER` · `permanent`
+
+A dated, expiring portion of a member's credit; enables oldest-first spending (FD§4.5). Rebuildable from the entries. [D]
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `member_id` | id `mem_` | NN, FK | |
+| `origin_entry_id` | id `lge_` | NN, FK, unique | the `mint`, `grant`, `transfer` or `refund` entry that created it |
+| `original_ucr`, `remaining_ucr` | ucr | NN, `0 <= remaining <= original` | `remaining` is the cache |
+| `earned_at` | ts | NN | |
+| `expires_at` | ts | NN | `earned_at + lifetime * 86400 s` using the parameter version at `earned_at` (S0.6.2); a restored lot keeps its original value (`ISS-07`) |
+| `lifetime_days_applied` | int | NN | `credit.lifetime_days`, `credit.lifetime_days_accelerated` or `grant.starter_lifetime_days` |
+| `expiry_arm` | text | null | the experiment arm that chose the lifetime (S5.13.1) |
+| `is_starter` | bool | NN | `grant` entries with the starter lifetime |
+
+**Indexes** `(member_id, expires_at) WHERE remaining_ucr > 0` (oldest-first spending and the expiry sweep, `credit.expiry_sweep_interval_s`); `(expires_at) WHERE remaining_ucr > 0`. **Invariant** per member, `sum(remaining_ucr) = member account balance_ucr`.
+
+### 5.9.5 `Escrow` · `escrows` · `esc_` · `MUT` · `permanent`
+
+Per job or reservation hold, bound to one `escrow` account. Machine S0.9.8 (`open`, `settling`, `closed`). [D]
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `job_id` / `reservation_id` | id | exactly one set (CHECK) | a reservation escrow moves into the job escrow by `escrow_release` at activation |
+| `owner_member_id` | id `mem_` | NN, FK | |
+| `ledger_account_id` | id `lac_` | NN, FK, unique | |
+| `state` | enum | NN, default `open` | |
+| `escrow_ucr` | ucr | NN, `> 0` | total held at admission |
+| `planned_primary_ucr`, `planned_pool_ucr`, `planned_levy_ucr` | ucr | NN; **sum = `escrow_ucr`** (CHECK) | `N * 1000000`, `N * v_ppm`, `N * lambda_ppm` (S0.6.1) |
+| `paid_ucr`, `levy_ucr`, `refunded_ucr`, `released_ucr` | ucr | NN, default 0 | `DER` running totals of postings out of this escrow |
+| `closing_txn_id` | id `txn_` | null; NN when `closed` | the `settle` or `cancel` transaction |
+| `closed_at` | ts | null | |
+
+**Checks** `state = 'closed'` implies the account balance is exactly 0 and `paid + levy + refunded + released = escrow_ucr`. **Unique** `job_id`; `reservation_id`. **Indexes** `(owner_member_id, state)`; `(state)`.
+
+### 5.9.6 `Reserve` · `reserves` · `rsv_` · `MUT` · `permanent`
+
+Singleton: the public Commons Reserve; holds the ceiling state (FD§4.2, FD§4.6). [D]
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `ledger_account_id` | id `lac_` | NN, FK, unique | the `reserve` account |
+| `ceiling_ucr_applied` | ucr | NN | `reserve.ceiling_credits` in force at the last retirement check |
+| `last_retire_check_at`, `last_retire_txn_id` | ts, id | null | |
+| `grants_paused` | bool | NN | true while the balance is at or below `grant.reserve_floor_credits` (FD§4.6: grants pause, never print) |
+| `grants_paused_since` | ts | null | |
+| `cum_levy_in_ucr`, `cum_expired_in_ucr`, `cum_grants_out_ucr`, `cum_retired_ucr`, `cum_donated_in_ucr` | ucr | NN, default 0 | `DER`, checked by the invariants |
+
+A unique index on `((true))` keeps the table to one row. Retirement amounts are public (`ledger.entry_committed`).
