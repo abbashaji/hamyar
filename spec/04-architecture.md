@@ -60,3 +60,106 @@ These are not deferred; they are out of the product. Each follows from ground ru
 | Executing submitted content in the application process or in any process that holds secrets or store access | Submitted text is untrusted; the only exception is the isolated check runner (4.4, `ISS-41`) |
 | A shared password or shared token for any principal | Per-principal credentials only (S0.11.4); PR§4.5 items 1, 2 and 7 show the cost of a shared one |
 | Unsolicited messages of any kind (push, SMS, e-mail marketing, in-site pop-ups) | The public site is notification-free (4.4); the only message the platform may ever send is one the member explicitly requested, such as a recovery action [A] (`ISS-44`) |
+
+## 4.3 System overview
+
+### 4.3.1 Context diagram
+
+```text
+ Public visitor           Member (donor and/or requester)          Admin (reviewer / operator)
+   browser                    browser, mostly phone                        browser
+      |                            |            \                              |
+      | HTTPS                      | HTTPS       \ human only: copy, open,      | HTTPS + passkey
+      |                            |              \ press Send, paste back       |
+      v                            v               v                            v
++------------+            +---------------+   +---------------------+    +--------------+
+| public     |            | member app    |   | provider chat site  |    | admin tool   |
+| site       |            | (static SPA + |   | (third party; no    |    | (static SPA, |
+| (static,   |            | Service-      |   | Hamyar server or    |    | own origin)  |
+| no notif.) |            | adapters)     |   | script talks to it) |    |              |
++------------+            +---------------+   +---------------------+    +--------------+
+      | GET /v1/public/*          | /v1/* (member scheme)                      | /v1/admin/*
+      +---------------------------+---------------------+----------------------+
+                                                         v
++--------------------------------------------------------------------------------------+
+| HAMYAR SERVER SIDE: API + scheduler + outbox relay in one deployable (4.3.2)          |
++--------------------------------------------------------------------------------------+
+     |                   |                    |                       |
+     v                   v                    v                       v
+[Transactional store] [Blob store]      [Ephemeral store]      [Check runner: isolated,
+ ledger, state,        terms copies,     rate-limit counters,   flag-gated, no network,
+ outbox, config        uploads,          login challenges       no secrets, no store access]
+                       deliverables
+     |
+     v
+[Backup sink: encrypted before it leaves, independent location]   [Alert sink] [Log sink] [Static host]
+```
+
+The arrow from the member to the provider chat site is the human's own browser action. No server, script or extension of Hamyar sits on it (4.2.2) [D].
+
+### 4.3.2 Layers and deployable units
+
+```text
++----------------------------------------------------------------------------------+
+| API layer: routing by surface (public / member / admin), authentication by       |
+| scheme, rate limits, idempotency, error model, request ids, pagination           |
++----------------------------------------------------------------------------------+
+| Application services (own entities and transactions)                             |
+|  Identity  JobCell  Ledger  Policy  Registry  Templates  Verification            |
+|  Admission  Config (params, flags, kill switches, launch gates)  Analytics       |
+|  PublicProjection  Reports and Appeals  AdminActions                             |
++----------------------------------------------------------------------------------+
+| Domain library (pure, no I/O): ucr arithmetic, price and admission math, policy  |
+| evaluator, state machines, estimators, canonical JSON, ids, hashing              |
++----------------------------------------------------------------------------------+
+| Ports: TransactionalStore BlobStore EphemeralStore Clock Random Scheduler        |
+|  SecretStore LogSink MetricSink AlertSink BackupSink StaticHost CheckRunner      |
+|  Mailer (optional, off unless S10.* adopts e-mail recovery)                      |
++----------------------------------------------------------------------------------+
+| Drivers: one real and one in-memory fake per port                                |
++----------------------------------------------------------------------------------+
+```
+
+| Deployable unit | Contents | State | Scaling and roles |
+| --- | --- | --- | --- |
+| `server` | API layer, application services, scheduler (4.8), outbox relay (4.7) | none in process; everything in the stores | N identical instances; `HAMYAR_ROLES` selects `api`, `jobs` or both; each background job runs on whichever instance holds its lock |
+| `check-runner` | Executes template-defined checks that must run code (4.4, `ISS-41`) | none; ephemeral work directory | Separate host or sandbox; absent unless `ff.verify.sandboxed_tests` is on |
+| `static bundles` | Public site, member app, admin tool: build output with content hashes | none | Published to the `StaticHost` port; cacheable; no server code |
+| Stores | Transactional store, blob store, ephemeral store | all durable state | Per 4.6 |
+
+Decision [D]: one modular monolith, not services per component. Reason: the ledger, job and cell state, and the outbox must share one transaction (4.6), and the operating team is small [A: the owner decision that could overturn this is a larger team or a hosting model that forces separate deployables, S3.*]. Module boundaries are enforced by import rules in CI (4.5) so a module can later be extracted behind its interface without changing callers.
+
+### 4.3.3 Origins and browser hardening [D][A]
+
+| Origin (bootstrap setting) | Serves | Auth scheme | CORS allow-list |
+| --- | --- | --- | --- |
+| `public_origin` | Public site bundle (S12.*) | none | n/a (static) |
+| `app_origin` | Member app bundle (S11.*) | n/a (static) | n/a |
+| `api_origin` | `/v1/public/*` and member `/v1/*` | `none`, `member` | `app_origin`, and `public_origin` for public GET only |
+| `admin_origin` | Admin tool bundle (S11.*) | n/a (static) | n/a |
+| `admin_api_origin` | `/v1/admin/*` only | `admin` | `admin_origin` only |
+
+Staging and production MUST use five distinct origins; dev and test MAY collapse them onto local ports. The admin origin has its own session store and cookies are not used anywhere (S0.11.4), so there is no cross-origin session to steal. Responses of every origin carry these headers [D]:
+
+| Header | Value (intent) |
+| --- | --- |
+| `Content-Security-Policy` | `default-src 'none'`; scripts, styles, fonts and images from `'self'` only (images may add `data:`); `connect-src` limited to the origin's API; `frame-ancestors 'none'`; `base-uri 'none'`; `form-action 'self'` |
+| `Referrer-Policy` | `no-referrer` |
+| `X-Content-Type-Options` | `nosniff` |
+| `Strict-Transport-Security` | long max-age with `includeSubDomains` once all origins are HTTPS-only [V: host support] |
+| `Cross-Origin-Opener-Policy` | `same-origin` |
+| `Permissions-Policy` | camera, microphone, geolocation and clipboard-read denied |
+
+The panel sets no CSP or security headers and its `index.html` loads web fonts from third-party hosts (PR§4.5 item 12); both are replaced, not ported. Untrusted text (submissions, uploads, report text) is rendered only as text nodes: a CI lint forbids `innerHTML`-style sinks and unsanitized markdown-to-HTML in all three bundles; the sanitizer allowlist, if any, is owned by S9.* [D].
+
+### 4.3.4 Trust boundaries [D]
+
+| Boundary | What crosses | Controls |
+| --- | --- | --- |
+| B1 browser to API | Untrusted input | Schema validation at the edge, authentication by scheme, rate limits, idempotency, size limits (`api.max_body_bytes`) |
+| B2 member to provider site | Nothing of ours: the human copies a prompt out and pastes text back | No channel exists; pasted text is untrusted input (S9.*) |
+| B3 application to stores | Queries and writes | Separate database roles per component (4.6.5); ledger tables writable only through the ledger module |
+| B4 application to check runner | Untrusted content in, verdict out | One-way call, size and time limits, no network, no secrets, no store access |
+| B5 admin origin to member origin | Nothing | Separate origins, session stores and CORS lists |
+| B6 operators to production | Admin actions | Passkeys per `AdminUser`, `AdminAction` log, two-person actions (`security.two_person_actions`) |
+| B7 production to backup sink | Backup artifacts | Encrypted before leaving the host; the sink cannot read them (4.12) |
