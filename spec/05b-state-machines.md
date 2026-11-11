@@ -117,3 +117,97 @@ BRANCHES
 ### 5.22.3 Commons jobs [D][A]
 
 A Commons job runs the same machine with these differences: JT-01 by an `admin`; JT-04 quotes price 0 and no window; JT-09 is confirmed by an `admin` and posts no `hold` and creates no `Escrow`; there is no `levy`, no `refund` and no `settle` transaction, so JT-16 and JT-17 only change state; cells mint on acceptance (CT-06) instead of paying from escrow. A Commons job's `running` state never times out on `overrun_timeout` (it has no quoted window). `launch.minting_enabled` and `kill.all_minting` gate its leasing (5.29.3).
+
+## 5.23 Cell, Lease and Submission state machines
+
+States and events are S0.9.3. A `Cell` row persists across attempts and carries `attempt` (starts at 1, limit `cell.max_attempts`); each attempt has its own `Lease` and at most one `Submission` (5.29.4). [D]
+
+```
+CELL, one attempt
+ queued --leased--> leased --submitted--> submitted --checks_passed--> accepted (T) --overturned--> overturned (T)
+                      |   |                    +--flagged_for_audit--> flagged_for_audit --audit_passed--> accepted
+                      |   |                    |                                    +--audit_failed--> rejected
+                      |   |                    +--checks_failed--> rejected
+                      |   +--lease_expired--> expired
+                      +--declined--> queued
+ rejected, expired --requeued--> queued (attempt + 1)      rejected, expired --attempts_exhausted--> exhausted (T)
+ queued, leased --paused--> suspended --resumed--> queued
+ any non-terminal --cancelled--> cancelled (T)            any non-terminal --voided--> voided (T)
+
+LEASE:  (none) --issued--> active --submission_received--> submitted
+                           active --expired--> expired   active --released--> released   active --revoked--> revoked
+SUBMISSION: (none) --received--> received --checks_passed--> checks_passed --accepted--> accepted (T)
+            received --schema_failed--> schema_failed (T)   received --checks_failed--> checks_failed (T)
+            received --quarantined--> quarantined --released_from_quarantine--> checks_passed
+            checks_passed, flagged cell --rejected--> rejected (T)
+```
+
+### 5.23.1 Cell transitions
+
+| id | from | event | to | guard | side effects | ledger effects | audit-log entry |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| CT-01 | (none) | `cell.created` | queued | Primary cells: created only by JT-09 (member job) or an admin-confirmed Commons job. Non-primary cells (`gold`, `audit`, `third`, `review`, `rework`): job in `admitted` or `running`, and for a member job the creation guard `pool_ok` holds: `payable_ucr(job) - committed_ucr(job) >= 1,000,000`, where `payable_ucr` = escrow balance minus `levy_reserved_ucr` (= N x `lambda_ppm`, stamped at JT-04) and `committed_ucr` = 1,000,000 x non-terminal non-primary cells. This makes it impossible to create a cell that escrow cannot pay [D] | Unique `(job_id, ordinal, cell_kind)`; `attempt` = 1 | none | `cell.created {cell_kind, ordinal, template_version_id}` |
+| CT-02 | queued | `cell.leased` | leased | `G-leasable` of 5.29.3 (member active and opted in, job and template and kill switches allow, independence, caps, headroom) and the CAS of 5.29.3 | Create the `Lease` (LT-01) with nonce, `expires_at`, `hard_expires_at`; reserve earning headroom (5.29.3); first lease of a job fires JT-10 | none | `cell.leased {lease_id, attempt}` |
+| CT-03 | leased | `cell.submitted` | submitted | The lease is `active`, owned by the caller, nonce matches, and the database clock is <= `hard_expires_at` (5.29.4); body <= `cell.envelope.max_submission_bytes` | Create the `Submission` (SBT-01); lease -> `submitted` (LT-02); enqueue the verification pipeline (S8.*, S9.*) | none | `cell.submitted {submission_id, late}` where `late` = clock > `expires_at` |
+| CT-04 | leased | `cell.lease_expired` | expired | Reaper: lease `active` and clock > `hard_expires_at` | Lease -> `expired` (LT-03); release headroom reservation; no trust effect (an expiry is not evidence about quality) [D] | none | `cell.lease_expired {lease_id}` |
+| CT-05 | leased | `cell.declined` | queued | Caller owns the active lease; no penalty and no cooldown (FD§5.5, `lease.decline_cooldown_s` = 0) | Lease -> `released` (LT-04) with `release_reason` in `declined`, `reported`; a report also files a `Report`; release headroom | none | `cell.declined {initiator: member, release_reason}` |
+| CT-18 | leased | `cell.declined` | queued | System revokes a lease for a cause that is not the cell's fault: `member.suspended`, `member.banned`, `kill.member`, a closed session policy | Lease -> `revoked` (LT-05); release headroom | none | `cell.declined {initiator: system, cause}`. The decline-rate metric counts only `initiator` = member [D] |
+| CT-06 | submitted | `cell.checks_passed` | accepted (T) | Submission `checks_passed`; not selected for audit (decided by S8.*); `G-accept` returns ACCEPT (below) | Submission -> `accepted` (SBT-08); release or consume headroom; enqueue `tier_evaluator` for the donor; if gold, record a reliability observation | Commons job: `mint` txn, entry `mint` issuance -> member 1,000,000 `ucr`, new lot, key `mint:<cell_id>`. Member job: `payout` txn, entry `transfer` escrow -> member 1,000,000 `ucr`, new lot, key `payout:<cell_id>` | `cell.checks_passed {verification_methods[], policy_version_id}` |
+| CT-07 | submitted | `cell.flagged_for_audit` | flagged_for_audit | Submission `checks_passed` and (sampled with the adaptive rate, or anomaly, or blanket redundancy pending, or a high-risk template; S8.*) | Create the `Audit` (`pending`) and its audit cell through CT-01 (needs `pool_ok` in a member job); the audit cell cannot be leased by anyone in `independence_set` (5.29.3) | none | `cell.flagged_for_audit {audit_id, trigger}` |
+| CT-08 | submitted | `cell.checks_failed` | rejected | Submission `schema_failed` or `checks_failed`, a gold mismatch, a timing or duplicate finding (S9.*), or `G-accept` returns REJECT_POLICY | Submission -> `schema_failed` or `checks_failed` (SBT-02, SBT-04); release headroom; set reason `reject.*` visible to the donor with an appeal link (APT-01); two consecutive gold failures feed MT-06; a `reject.policy_changed` result is not a reliability observation [D] | none (a rejected cell earns nothing) | `cell.checks_failed {reason_code}` |
+| CT-09 | flagged_for_audit | `cell.audit_passed` | accepted (T) | `Audit` `matched`, or `resolved` in favor (third execution); `G-accept` returns ACCEPT | As CT-06 | As CT-06 | `cell.audit_passed {audit_id}` |
+| CT-10 | flagged_for_audit | `cell.audit_failed` | rejected | `Audit` `resolved` against the submission | Submission -> `rejected` (SBT-09); release headroom; reason `reject.audit_mismatch` | none | `cell.audit_failed {audit_id}` |
+| CT-11 | rejected, expired | `cell.requeued` | queued | `attempt` < `cell.max_attempts`; job in `admitted` or `running` (for a job in a drain, CT-15 applies instead) | `attempt` + 1; the next lease excludes members who already submitted this cell (5.29.3) | none | `cell.requeued {attempt}` |
+| CT-12 | rejected, expired | `cell.attempts_exhausted` | exhausted (T) | `attempt` = `cell.max_attempts` | For a primary cell the `job_progress` worker raises `job.stop_requested` with `cells_exhausted` once no primary cell is non-terminal (JT-15) | none | `cell.attempts_exhausted {attempt}` |
+| CT-13 | queued, leased | `cell.paused` | suspended | Job `suspended` (JT-11 fan-out); a leased cell's lease is revoked first, in the same transaction | Lease -> `revoked` (LT-05) if leased; release headroom | none | `cell.paused {pause_causes[]}` |
+| CT-14 | suspended | `cell.resumed` | queued | Job resumed (JT-12) | none | none | `cell.resumed {}` |
+| CT-15 | queued, suspended, expired, rejected, leased (see note) | `cell.cancelled` | cancelled (T) | Job `cancelling`, or `settling` with reason `overrun_timeout` or `cells_exhausted`, or a non-primary cell when JT-13 fires. A `leased` cell is cancelled only with `revoke_lease` = true, which the system uses only for closures that forbid paying (never for a requester's cancel): a requester's cancel lets leased cells drain, and the cell is cancelled instead of requeued when its lease ends [D]. A cell in `submitted` or `flagged_for_audit` is never cancelled: it completes verification and is paid | Lease -> `revoked` if `revoke_lease`; release headroom | none (the escrow share of an unexecuted cell is refunded by `settle`) | `cell.cancelled {closure_or_cancel, revoke_lease}` |
+| CT-16 | queued, suspended, leased, submitted, flagged_for_audit, expired, rejected | `cell.voided` | voided (T) | Closure reason that voids (table 5.22.1), `G-accept` returns VOID, or an integrity finding (S9.*) | Lease -> `revoked` if leased; Submission -> `rejected` if it exists; release headroom; no reliability observation | none (never paid) | `cell.voided {reason}` |
+| CT-17 | accepted | `cell.overturned` | overturned (T) | A fraud finding or an `Appeal` `overturned` on an acceptance (kind `report_outcome`); two admins (`ledger.reversal` is in `security.two_person_actions`) | Create a `rework` cell (CT-01; funded from the verification pool, counts toward v, ISS-05); reverse the donor's reliability credit | `reversal` txn mirroring the original `mint` or `transfer` entry, key `reversal:<original_txn_id>`; two approvers (`ledger.reversal_min_approvers`). If the donor already spent the lot, the reversal consumes other lots oldest-first; if the balance cannot cover it the reversal is refused and escalated to S6.* [D] | `cell.overturned {finding, reversal_txn_id}`; +AA |
+
+`Cell.expired` and `Cell.rejected` are attempt outcomes: the reaper performs CT-04 and then CT-11 (or CT-15, CT-12) as separate back-to-back transactions. A crash between them leaves the cell in `expired` or `rejected`, which the `cell_requeuer` sweep (5.29.10) finishes. [D]
+
+### 5.23.2 `G-accept`: the acceptance guard [D]
+
+R9 says the policy is re-checked when a result is accepted. `G-accept` is the one function that decides, inside the acceptance transaction (5.29.6), and it returns exactly one of four outcomes. It first takes a shared lock on the policy-pointer row and on the job row (lock order 5.29.2), so a tightening that commits earlier is always seen and an acceptance that commits earlier is legitimately accepted.
+
+| Check, in order | ACCEPT when | Otherwise |
+| --- | --- | --- |
+| Job state | `admitted`, `running`, `settling` or `cancelling` (the last two only for a drain that the table 5.22.1 allows) | `suspended`: DEFER. Terminal, or a stop reason that voids: VOID |
+| Policy (R9) | the current `PolicyVersion` still permits the job's stamped declarations (S7.* evaluator) | VOID with `reject.policy_changed` |
+| Template version | `approved` or `retired` with cause `superseded` | `paused`: DEFER. `retired` with cause `withdrawn_for_cause`: VOID |
+| Reported service (the donor's attested service, FD§5.6) | `approved` or `review_due` (grace) | `suspended` or `in_review` after a lapse: REJECT_POLICY with `reject.policy_changed` (the donor is not penalized, the cell requeues). `revoked`: per the revocation's `inflight_policy` (5.26) |
+| Donor | `member_status` `active` | `suspended`: DEFER. `banned`: VOID |
+| Money | Commons: `launch.minting_enabled` true, `kill.all_minting` released, a headroom reservation exists. Member job: `payable_ucr(job) >= 1,000,000` | Commons switch off: DEFER. A missing reservation or insufficient payable amount is a defect: abort the transaction and raise an `Alarm`; the cell stays as it was |
+
+DEFER changes no state and emits no event; it records `acceptance_deferred_until` and the sweeps re-enqueue the cell when the blocking cause clears (`job.resumed`, `template.resumed`, `member.reinstated`, `killswitch.released`). A deferred cell keeps its headroom reservation. Outcomes map to transitions: ACCEPT to CT-06 or CT-09; VOID to CT-16; REJECT_POLICY to CT-08. [D]
+
+### 5.23.3 Lease transitions
+
+| id | from | event | to | guard | side effects | ledger effects | audit-log entry |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| LT-01 | (none) | `lease.issued` | active | Same transaction as CT-02; unique partial index allows one `active` lease per cell (5.29.3) | Store `nonce_hash` (SHA-256 of 16 random bytes, `lease.nonce_bytes`); `expires_at` = now + `lease.timeout_s`; `hard_expires_at` = `expires_at` + `lease.submit_grace_s`; `extensions` = 0; return the nonce once in the response and never store it | none | `lease.issued {cell_id, expires_at, hard_expires_at}` |
+| LT-02 | active | `lease.submission_received` | submitted | Same transaction as CT-03 | Store `submitted_at`; the nonce is spent | none | `lease.submission_received {submission_id}` |
+| LT-03 | active | `lease.expired` | expired | Same transaction as CT-04 | none | none | `lease.expired {}` |
+| LT-04 | active | `lease.released` | released | Same transaction as CT-05 | none | none | `lease.released {release_reason}` |
+| LT-05 | active | `lease.revoked` | revoked | Same transaction as CT-13, CT-15, CT-16 or CT-18 | none | none | `lease.revoked {cause}` |
+
+**Extension (not a state change).** `POST /v1/leases/{lease_id}/extension` adds `lease.extend_s` to `expires_at` and `hard_expires_at` when `extensions` < `lease.max_extensions`, the lease is `active` and the database clock is <= `expires_at`; the update is one CAS (`WHERE state = 'active' AND extensions = :seen AND now() <= expires_at`), so an extension and a reaper expiry cannot both win. It writes a log-only event `lease.extended` (convention addition 5) and no `StateTransition`. [D]
+
+**Expiry semantics, resolving `ISS-54`.** `lease.timeout_s` is the time the donor is told they have (`expires_at`). `lease.submit_grace_s` is part of the lease, not a race: `hard_expires_at` = `expires_at` + grace is stored at issue, the cell cannot be re-leased before `hard_expires_at`, and a submission is valid up to and including `hard_expires_at`. After it the lease is dead for everyone, even if the reaper has not yet run and even if nobody has re-leased the cell, so the outcome never depends on reaper timing. [D]
+
+### 5.23.4 Submission transitions
+
+| id | from | event | to | guard | side effects | ledger effects | audit-log entry |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| SBT-01 | (none) | `submission.received` | received | Same transaction as CT-03; unique `(lease_id)` | Store content (never executed, escaped on display, S9.*), `content_hash`, byte and character lengths, reported service and model, `time_to_submit_s` | none | `submission.received {content_hash, bytes}` |
+| SBT-02 | received | `submission.schema_failed` | schema_failed (T) | Output fails the template's output schema | Cell -> CT-08 with `reject.schema_invalid` | none | `submission.schema_failed {errors[]}` |
+| SBT-03 | received | `submission.checks_passed` | checks_passed | Schema and automatic checks pass and the output flagging of S9.* finds nothing | Cell stays `submitted` until CT-06 or CT-07 | none | `submission.checks_passed {check_ids[]}` |
+| SBT-04 | received | `submission.checks_failed` | checks_failed (T) | An automatic check, gold comparison or screening fails | Cell -> CT-08 | none | `submission.checks_failed {reason_code}` |
+| SBT-05 | received | `submission.quarantined` | quarantined | Output contains links, code to run or a request for action (FD§5.5, `screen.output_url_action` = `quarantine`) | Withheld from results; queued for a reviewer; cell stays `submitted` | none | `submission.quarantined {pattern_ids[]}` |
+| SBT-06 | quarantined | `submission.released_from_quarantine` | checks_passed | A reviewer with `perm.submission.release` clears it (quarantine is the last automatic step, so no check remains) | Cell proceeds to CT-06 or CT-07 | none | `submission.released_from_quarantine {}`; +AA |
+| SBT-07 | quarantined | `submission.checks_failed` | checks_failed (T) | A reviewer confirms the finding | Cell -> CT-08 with `reject.forbidden_content` | none | `submission.checks_failed {reason_code}`; +AA |
+| SBT-08 | checks_passed | `submission.accepted` | accepted (T) | Same transaction as CT-06 or CT-09 | none | as CT-06 | `submission.accepted {}` |
+| SBT-09 | checks_passed | `submission.rejected` | rejected (T) | Same transaction as CT-10 or CT-16 | none | none | `submission.rejected {reason_code}` |
+
+A submission in `quarantined` that no reviewer decides is bounded by the job's `overrun_timeout` and by the alert on `report.triage_sla_days`; it never auto-releases. [D]
