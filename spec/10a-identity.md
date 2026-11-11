@@ -262,3 +262,97 @@ A device whose key was revoked by recovery gets `401 AUTH_INVALID` with `details
 | 9 | Account renting or selling | Hand the recovery key to a buyer | Cannot be detected without identity; caps bound the value | Accepted, monitored via anomalies |
 | 10 | Operator social engineering | Someone asks support to restore access | No operator or reviewer permission can restore or reassign a key (matrix, 10.11) | Members who lose everything start over |
 | 11 | Insider writes a key row into the database | DBA inserts a `MemberKey` | Key-chain verification job and client verification (10.7) | A DBA can still disrupt service |
+
+## 10.9 Device identification and rate limits
+
+### 10.9.1 What a 'device' is, and the privacy tradeoff [D]
+
+A `Device` is one browser profile that holds a random 128-bit device token (10.3.1). It is identified by `SHA-256(token)` and nothing else. No fingerprint is computed. Candidate signals:
+
+| Signal | Used? | Privacy cost | Cost to evade | Decision |
+| --- | --- | --- | --- | --- |
+| Device keypair (after registration) | Sessions, linking, key chain | None beyond the key | One new key, free | Not a pre-registration limiter (the key does not exist yet) |
+| Device token (random, client-held) | Pre-registration and grant limits | Links identities created in one browser profile | Clear site data, free | Used; a speed bump for honest accidents and lazy farming only |
+| IP hash (10.14.2) | Daily and per-minute counters | Daily-rotating keyed hash, kept at most `retention.ip_hash_ttl_days` | New network or VPN, cheap | Used as one coarse signal, never alone, never to ban |
+| `platform_class` (4 values) | Stored | About 2 bits | n/a | Compatibility and reachability statistics only |
+| Canvas, audio, font, screen, full User-Agent fingerprint | No | High entropy, stable, trackable across sites | Moderate | Rejected: it would make every honest member trackable |
+| Hardware ids, IMEI, MAC, advertising id | No | Very high | n/a | Not available to the web; rejected |
+| Phone number, SMS code, national id | No | Ties the pseudonym to a SIM or person (FD Principle 8) [V] | n/a | Rejected |
+| Third-party CAPTCHA or device-reputation service | No | Third-party tracking; may be blocked in Iran [V] | n/a | Rejected (`analytics.third_party_trackers` is false) |
+| Proof of work on registration | No | None | Low for bots, high for low-end phones | Rejected for Phase 1 [H: bots outpace people]; revisit with `OPS` data |
+| Verified work before benefit (first verified cell before the starter grant, FD§4.6) | Yes | None | Real effort per identity | The defence that carries the weight (IC6) |
+
+**Tradeoff, stated plainly:** weak device identity means an adversary evades device and IP limits at near-zero cost. What bounds farming is economics (a verified cell before any grant, caps, expiry) and vouching (10.10). A stronger device identifier would protect the platform slightly more and every honest member much less, so it is not used (IC7). The server can link two identities created from the same browser profile through the device token; members who want separate pseudonyms use separate browser profiles, and the settings screen offers 'forget this device', which replaces the token. [D]
+
+**Grant memory** [D]: when a member closes, the `Device` row is deleted unless `grants_issued` is above zero; then only `{token_hash, grants_issued}` remains for `retention.member_inactive_days`, then it is deleted. Reason: `grant.max_per_device` is a lifetime limit, so it needs memory, and a hash of a random token tied to nothing else costs little privacy (`ISS-103`).
+
+### 10.9.2 Limits [D]
+
+| Scope | Key | Limit (parameter) | Window | Store | On exceed |
+| --- | --- | --- | --- | --- | --- |
+| Public reads, challenge creation | IP hash | `ratelimit.public_rpm` | minute | volatile counters | 429 |
+| Failed authentications | IP hash | `ratelimit.auth_failures_per_hour` [A] | hour | volatile | 429 |
+| New members | device token | `ratelimit.device_new_members_per_day` | UTC day | volatile | 429 |
+| New members | IP hash | `ratelimit.ip_hash_new_members_per_day` | UTC day | volatile | 429 |
+| New members | invite tree | `ratelimit.invite_tree_new_members_per_day` | UTC day | counted from `Member.created_at` | 429 |
+| Recovery attempts | IP hash and device token, separately | `ratelimit.recovery_attempts_per_day` | UTC day | volatile | 429 |
+| Device-link offers | member | `ratelimit.device_link_offers_per_day` [A] | UTC day | volatile | 429 |
+| Leases, submissions, API | member | `ratelimit.member_leases_per_hour`, `ratelimit.member_submissions_per_hour`, `ratelimit.member_api_rpm` | hour, hour, minute | volatile | 429 |
+| Admin API | admin user | `ratelimit.admin_api_rpm` | minute | volatile | 429 |
+| Starter grant | device, tree, day | `grant.max_per_device`, `grant.max_per_invite_tree_per_day`, `grant.max_per_day` | lifetime, UTC day, UTC day | database | grant paused, not rejected (`S6.*`) |
+| Invitations | member, tree | `invite.*` (10.10) | n/a | database | `CAP_EXCEEDED` |
+
+```
+allow(scope, key, limit, window_s):                  # fixed window aligned to the wall clock / UTC day
+  w = floor(now / window_s); k = 'rl:' + scope + ':' + key + ':' + w
+  n = store.incr(k, ttl = window_s + 5)              # the TTL is the window, so a counter cannot outlive it
+  return n <= limit
+request check: peek every applicable counter first; increment all only when every one passes,
+  so a denial by one scope does not burn the others.  A small race overshoot is accepted.
+```
+
+Failure policy [D]: if the counter store is unavailable, registration, recovery, link and challenge endpoints fail closed (`503 UNAVAILABLE`, `Retry-After`); authenticated member endpoints fail open to a per-process in-memory limiter. Reason: bootstrap endpoints are where abuse enters, and a store outage must not stop contributors already signed in.
+
+Responses [D]: `429 RATE_LIMITED` with `Retry-After` and the headers of S0.11.7; `details.copy_key` is the generic `copy.ratelimit.try_later`; the scope is named only in a member's own limits, never to anonymous callers (it would help tune an attack). The label of `hamyar_ratelimit_denied_total` is the scope, a fixed small set, never an id. IP-hash limits delay; they never ban, flag or reduce standing, because many honest members may share one address (carrier-grade NAT, shared connections) [V: how many members share an address is unknown; `ratelimit.ip_hash_new_members_per_day` is an initial configurable default replaced by `OPS` and `SEC` measurement].
+
+## 10.10 Vouched invitations and invite trees
+
+`Invite` states: `active`, `redeemed` (T), `expired` (T), `revoked` (T). Events [A]: `invite.issued`, `invite.redeemed`, `invite.expired`, `invite.revoked`, `invite.strike_recorded`, `invite.tree_frozen`, `invite.tree_unfrozen`. In `invite_only` mode (`identity.registration_mode`, default) every registration needs an invite; the platform never sends invites (no e-mail or phone numbers are collected for it). [D]
+
+**Issuing rules** (all must hold, else `422 CAP_EXCEEDED` or `403 FORBIDDEN`): [D]
+
+| Rule | Parameter |
+| --- | --- |
+| Member `status` is `active`, `trust_tier` is not `restricted`, not in recovery cooldown, not inside an issuing suspension | `trust.*`, `identity.recovery_cooldown_s` |
+| At least this many accepted cells (verified work, not time) | `invite.min_accepted_cells_to_issue` |
+| Active invites below | `invite.max_active_per_member` |
+| Tree members plus outstanding invites below | `invite.tree_max_members` |
+| Invitee depth (inviter depth + 1) at most | `invite.tree_max_depth` |
+| The tree is not frozen | strike rules below |
+
+The invite is a 128-bit random code carried in a link fragment, `https://<member-origin>/join#<code>`; a fragment is not sent in the request line or in `Referer` (`Referrer-Policy: no-referrer` is set as well) and the client posts it in the body. Only `SHA-256(code)` is stored. Single use, expires `invite.ttl_days` after issue, revocable by the issuer until redeemed. Operators issue `kind` = `seed` invites (no inviter, depth 0, a new `invite_tree_id` equal to the seed invite's own id) under two-person approval (`invite.seed_issue`, 10.12); seeds are how the Phase 1 members arrive (FD§9). Invites never carry a bonus by themselves; a `Referral` (`S12.*`) may be attached when `ff.growth.v5_referral` is on. [D]
+
+**Visibility and the social-graph risk** [D]: a vouching graph shows who knows whom, which can expose people if one pseudonym is unmasked. So: an inviter sees counts and the state of their own invites, never who redeemed one; an invitee is told they were invited, never by whom; only operators (`perm.invite.view_tree_edges`, logged) see edges. `invited_by_member_id` is cleared `invite.accountability_days` after the invitee's `created_at` [A], leaving only the opaque `invite_tree_id`. If either side is banned inside that window the edge is kept for `retention.moderation_days` after resolution. Cost: after the window accountability is tree-level only.
+
+**Accountability when a descendant is banned** (every step appealable through the ban process in `S10.*`) [D]
+
+| Event | Effect | Deliberately not done |
+| --- | --- | --- |
+| A member is banned with a reason class of `credit_farming`, `forgery` or `sybil` (set by the reviewer ruling) and the edge still exists | The direct inviter gets one strike (`Invite.strike_recorded_at`) | No strike for other ban reasons; no strike for ancestors beyond the direct inviter |
+| Strikes inside `invite.strike_window_days` reach `invite.strikes_to_revoke_issuing` | Issuing is suspended for `invite.strike_window_days`; the inviter's active invites are revoked | Credit, status, tier and all other rights are untouched |
+| Bans inside one tree within `invite.strike_window_days` reach `invite.tree_freeze_ban_threshold` | Tree frozen: no new registrations or invites from it, its starter grants and referral bonuses are held; operator review; unfreeze by an operator, logged | Existing members are not restricted |
+| Descendants of a member banned for `sybil` or `credit_farming` | Their pending starter grants are held until a reviewer clears them | No automatic ban, no sampling change |
+
+Reason for no automatic ban cascade: an attacker could join through a victim's invite, misbehave, and punish the victim. Strikes touch only the right to invite, need a reviewer ruling, and can be appealed. [D]
+
+**Anti-farming** [D]
+
+| Vector | Control |
+| --- | --- |
+| Invite link posted publicly | Single use, `invite.ttl_days`, per-member and per-tree quotas, `ratelimit.invite_tree_new_members_per_day` |
+| Mass identities from one tree | `invite.tree_max_members`, depth cap, freeze rule; starter grant only after a verified cell and capped by `grant.max_per_invite_tree_per_day` and `grant.max_per_day` |
+| Self-invite with a second identity | Same device token as the inviter, or same IP hash on the same day, does not block (families share devices) but holds the invitee's starter grant and any referral bonus for review (`growth.referral.hold_s` for bonuses) |
+| Invite rings and cycles | Impossible: a member has exactly one inviter and invites only create new members |
+| Hidden privilege | No per-member quota overrides exist; changes are global parameters with a change log |
+
+Exposure bound from grants, derived from defaults: per tree per day `grant.max_per_invite_tree_per_day x grant.starter_credits` = 2 x 3 = 6 credits; platform-wide per day `grant.max_per_day x grant.starter_credits` = 20 x 3 = 60 credits, each requiring a verified cell and funded from the Reserve, never minted. [D]
