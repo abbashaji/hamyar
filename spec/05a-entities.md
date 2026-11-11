@@ -1668,3 +1668,157 @@ Seeded by a migration; read by `ledger_post()` and by the invariant checks. Chan
 | `retire` | `reserve` | `retired` | `none` |
 | `reserve_donation` | `member` | `reserve` | `consume` |
 | `reversal` | credit side of the reversed entry | debit side of the reversed entry | mirror of the reversed entry's effect |
+
+### 5.14.8 Service Registry, flag answers and the launch-gate guards
+
+```sql
+CREATE TABLE service_registry_entries (
+  id text PRIMARY KEY CHECK (is_id(id,'svc')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  row_version int NOT NULL DEFAULT 1,
+  slug text NOT NULL UNIQUE,
+  display_name text NOT NULL CHECK (char_length(display_name) <= 80),
+  service_kind text NOT NULL CHECK (service_kind IN ('general_chat','open_weight_hosted','open_weight_local')),
+  review_status text NOT NULL DEFAULT 'unreviewed' CHECK (review_status IN
+    ('unreviewed','in_review','approved','review_due','rejected','suspended','revoked')),
+  suspension_cause text CHECK (suspension_cause IN ('kill_switch','review_lapsed')),
+  current_terms_copy_id text REFERENCES terms_copies(id) DEFERRABLE INITIALLY DEFERRED,
+  reviewed_at timestamptz,
+  review_due_at timestamptz,
+  adapter_supports_prefill bool NOT NULL DEFAULT false,
+  adapter_prefill_url_template text,
+  adapter_max_url_chars int CHECK (adapter_max_url_chars > 0),
+  adapter_copy_only bool NOT NULL DEFAULT true,
+  adapter_clean_chat_hint_key text,
+  open_weight_license_ref text,
+  CHECK ((review_status = 'suspended') = (suspension_cause IS NOT NULL)),
+  CHECK (review_status NOT IN ('approved','review_due') OR current_terms_copy_id IS NOT NULL),
+  CHECK (NOT adapter_supports_prefill OR (adapter_prefill_url_template LIKE '%{prompt}%' AND adapter_max_url_chars IS NOT NULL)),
+  CHECK (adapter_supports_prefill OR adapter_copy_only)
+);
+
+CREATE TABLE terms_copies (
+  id text PRIMARY KEY CHECK (is_id(id,'tcp')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  service_id text NOT NULL REFERENCES service_registry_entries(id),
+  document_kind text NOT NULL CHECK (document_kind IN ('terms','usage_policy','written_permission')),
+  media_type text NOT NULL CHECK (media_type IN ('text/html','text/plain','application/pdf')),
+  content_hash text NOT NULL CHECK (is_hash(content_hash)),
+  byte_size int NOT NULL CHECK (byte_size > 0),          -- upper bound is parameter service.terms_copy_max_bytes
+  storage_key text NOT NULL,
+  source_ref text NOT NULL CHECK (char_length(source_ref) <= 500),
+  provider_version_label text,
+  captured_on date NOT NULL,
+  captured_by_admin_id text NOT NULL REFERENCES admin_users(id),
+  language text,
+  supersedes_id text REFERENCES terms_copies(id),
+  UNIQUE (service_id, content_hash)
+);
+
+CREATE TABLE flag_answers (
+  id text PRIMARY KEY CHECK (is_id(id,'fla')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  service_id text NOT NULL REFERENCES service_registry_entries(id),
+  flag_key text NOT NULL CHECK (flag_key IN ('third_party_task_use','access_pooling_or_crediting',
+    'human_copy_paste_use','prefilled_link_use','regional_availability','commercial_use_of_output',
+    'training_use_of_output','open_publication_of_output','prohibited_content_compatible',
+    'info.provider_trains_on_chats','info.memory_or_connectors_risk','info.allowance_may_change','info.written_permission')),
+  region text CHECK (region ~ '^[A-Z]{2}$'),
+  answer text NOT NULL CHECK (answer IN ('yes','no','unknown')),
+  terms_copy_id text REFERENCES terms_copies(id),
+  evidence_note text CHECK (char_length(evidence_note) <= 2000),
+  answered_on date NOT NULL,
+  reviewer_admin_id text NOT NULL REFERENCES admin_users(id),
+  supersedes_id text REFERENCES flag_answers(id),
+  CHECK ((flag_key = 'regional_availability') = (region IS NOT NULL) OR flag_key <> 'regional_availability'),
+  CHECK (flag_key <> 'regional_availability' OR region IS NOT NULL),
+  CHECK (answer = 'unknown' OR terms_copy_id IS NOT NULL)
+);
+CREATE INDEX flag_answers_lookup ON flag_answers (service_id, flag_key, region, answered_on DESC, created_at DESC);
+
+CREATE VIEW effective_flag_answers AS            -- latest answer per (service, flag, region); absent = unknown = no
+  SELECT DISTINCT ON (service_id, flag_key, COALESCE(region,'')) *
+  FROM flag_answers ORDER BY service_id, flag_key, COALESCE(region,''), answered_on DESC, created_at DESC;
+```
+
+```
+TRIGGER svc_approval_guard BEFORE UPDATE ON service_registry_entries   -- defense in depth for S7.* and BM3
+  IF NEW.review_status = 'approved' AND OLD.review_status IS DISTINCT FROM 'approved':
+      REQUIRE NEW.current_terms_copy_id IS NOT NULL
+      REQUIRE effective_answer(NEW.id,'third_party_task_use') = 'yes'
+      REQUIRE effective_answer(NEW.id,'prohibited_content_compatible') = 'yes'
+      REQUIRE every gate answer used by the approval points at a terms_copy of this service
+      REQUIRE count(DISTINCT admin_user_id) FROM admin_actions
+              WHERE action = 'service.approve' AND subject_id = NEW.id
+                AND subject_hash = (SELECT content_hash FROM terms_copies WHERE id = NEW.current_terms_copy_id)
+              >= parameter('service.min_approvers')
+      IF NEW.adapter_copy_only = false: REQUIRE effective_answer(NEW.id,'prefilled_link_use') = 'yes'
+      otherwise RAISE 'STATE_CONFLICT'
+
+TRIGGER jobs_service_guard BEFORE UPDATE OF state ON jobs
+  IF NEW.state IN ('quoted','admitted') AND OLD.state IS DISTINCT FROM NEW.state:
+      candidates := NEW.pinned_service_ids if service_requirement = 'M1', else all services of the
+                    kind the requirement allows (M0 general_chat, M2 open_weight_*)
+      REQUIRE exists svc IN candidates WITH review_status = 'approved'    -- unreviewed counts as no
+      REQUIRE the registry flags needed by NEW.purpose and NEW.license (R5, R6, R7) are 'yes' for that svc
+      otherwise RAISE 'POLICY_REJECTED'
+```
+
+The trigger is not the policy engine: the engine (S7.*) decides and explains with `policy.<rule>.<slug>` reasons; the trigger makes it impossible to reach `quoted` or `admitted` through any other path, including a bug. [D]
+
+### 5.14.9 PolicyVersion
+
+```sql
+CREATE TABLE policy_versions (
+  id text PRIMARY KEY CHECK (is_id(id,'plv')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  policy_id text NOT NULL REFERENCES policies(id),
+  version int NOT NULL CHECK (version >= 1),
+  allowlist jsonb NOT NULL,
+  allowlist_hash text NOT NULL CHECK (is_hash(allowlist_hash)),
+  rules_hash text NOT NULL CHECK (is_hash(rules_hash)),
+  version_hash text NOT NULL UNIQUE CHECK (is_hash(version_hash)),
+  change_class text NOT NULL CHECK (change_class IN ('tighten','loosen','neutral')),
+  changelog_entry_id text REFERENCES change_log_entries(id) DEFERRABLE INITIALLY DEFERRED,
+  supersedes_id text REFERENCES policy_versions(id),
+  effective_from timestamptz NOT NULL,
+  created_by_admin_id text NOT NULL REFERENCES admin_users(id),
+  approval_action_ids text[] NOT NULL DEFAULT '{}',
+  UNIQUE (policy_id, version),
+  CHECK (change_class <> 'loosen' OR changelog_entry_id IS NOT NULL)          -- R10
+);
+-- Trigger: for 'loosen', effective_from >= created_at + parameter('policy.loosen_min_notice_days') * interval '1 day'.
+-- Trigger: version_hash = sha256(rules_hash || allowlist_hash); rules rows of this version are complete (R1..R10 once each).
+```
+
+### 5.14.10 LaunchGateItem
+
+```sql
+CREATE TABLE launch_gate_items (
+  id text PRIMARY KEY CHECK (is_id(id,'lgi')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  gate_id text NOT NULL CHECK (gate_id IN ('G0','G1','G2','G3','G4','G5')),
+  item_key text NOT NULL,
+  revision int NOT NULL CHECK (revision >= 1),
+  status text NOT NULL CHECK (status IN ('open','evidence_attached','signed_off','reopened')),
+  title_key text NOT NULL,
+  service_id text REFERENCES service_registry_entries(id),
+  evidence jsonb NOT NULL DEFAULT '[]',
+  evidence_hash text NOT NULL CHECK (is_hash(evidence_hash)),
+  signoffs jsonb NOT NULL DEFAULT '[]',
+  reopen_reason text,
+  supersedes_id text REFERENCES launch_gate_items(id),
+  created_by_admin_id text NOT NULL REFERENCES admin_users(id),
+  UNIQUE (item_key, revision),
+  CHECK (status NOT IN ('evidence_attached','signed_off') OR jsonb_array_length(evidence) > 0),
+  CHECK (status <> 'reopened' OR reopen_reason IS NOT NULL),
+  CHECK ((revision = 1) = (supersedes_id IS NULL))
+);
+CREATE VIEW launch_gate_items_current AS
+  SELECT DISTINCT ON (item_key) * FROM launch_gate_items ORDER BY item_key, revision DESC;
+-- Trigger lgi_signoff_guard: when status = 'signed_off',
+--   count(DISTINCT signoffs[*].admin_user_id) >= parameter('launch.min_signoffs'), and every signoff.evidence_hash = evidence_hash.
+```
+
+The guard that sets `launch.members_may_join`, `launch.member_jobs_enabled` or `launch.minting_enabled` to true (S14.*) reads `launch_gate_items_current` for every gate in `launch.required_gate_ids` and requires `signed_off`, at least `launch.min_approved_services` approved registry entries, and locked pre-registrations. This part fixes only the data it reads. [D]
