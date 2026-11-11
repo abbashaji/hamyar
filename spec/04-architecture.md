@@ -450,3 +450,80 @@ CI rule [D]: for every transition in S0.9 there is exactly one event schema, and
 | `scheduler_watchdog` | Detects overdue jobs, clock skew, stale checkpoints, stale backups | `ops.ttl_sweep_interval_s` | 4.11 |
 
 Template auto-pause on reports (`template.autopause_report_count` within `template.autopause_window_s`) is not a job: it is evaluated inline when a report is filed, so a tightening is not delayed by a sweep [D].
+
+## 4.9 Configuration management, feature flags, kill switches, launch switches
+
+### 4.9.1 Layers [D]
+
+| Layer | What | Stored in | Changed by | Read path |
+| --- | --- | --- | --- | --- |
+| Constants (`CON`) | `credit.scale_ucr_per_credit`, `lease.nonce_bytes` and the other constants of S0.10.6 | Code | A spec change and a release | Compiled in |
+| Parameters | Everything else in S0.10.6 and S16.* | `Parameter`, `ParameterVersion` (definitions shipped in a manifest in the repository, values in the store) | Admin tool through the config service (4.9.3) | `ConfigSnapshot` |
+| Policy, registry, template data | Rules, flags, terms copies, templates | Entity tables (S7.*, S8.*) | Reviewer workflows | Versioned reads |
+| Feature flags and experiments | `ff.<area>.<name>`, default off | `FeatureFlag`, `Experiment` | Admin tool | `ConfigSnapshot` |
+| Kill switches | `kill.<scope>`, default released | `KillSwitch` | Operator engages; two operators release | Read inside the guarded transaction |
+| Launch switches | `launch.members_may_join`, `launch.member_jobs_enabled`, `launch.minting_enabled` | Parameters with a special write path | Only `LaunchGate.applySignedOff` (S14.*) | Read inside the guarded transaction |
+| Bootstrap | Origins, store locations, role selection, environment name (4.13.2) | Process environment | Deployment | At start; never changes at runtime |
+
+### 4.9.2 Snapshot and epoch [D][A]
+
+- `config_epoch` is a store-wide integer incremented in the same commit as any change to a parameter, policy version, feature flag or kill switch. It is stamped on every event (4.7.2) and on every job at admission, so the versions in force can be reconstructed with `valueAt(name, epoch)`.
+- A `ConfigSnapshot {config_epoch, taken_at, valid_until, parameters, flags, kill_switches, policy_version_id}` is taken once per request or job run and used for the whole of it, so one request never sees two configurations. `valid_until` is the earliest upcoming `effective_from`, so scheduled loosenings take effect on time without a cache flush.
+- Snapshots are cached in process for at most `ops.config_cache_ttl_s`. For anything that moves credit, creates a job or issues a lease, the unit of work re-reads the epoch inside the transaction; if it moved, the snapshot is reloaded and the guards re-run. A stale cache can therefore delay a screen hint but never a brake.
+- Parameter definitions are generated from the S16.* table into `config/parameters.manifest`. CI fails when a name in S0.10.6 is missing, when code reads a name through anything but the typed accessor, or when a domain module defines a numeric constant that duplicates an `initial configurable default`. Migrations seed new parameters at version 1 with `effective_from` equal to the migration time and never overwrite an existing value (4.10).
+
+### 4.9.3 Parameter write path [D]
+
+```text
+applyChange(ctx, name, new_value, effective_from, reason):
+  require perm for the parameter's owner role                       // S0.10.5
+  validate type, range, enum, and constraints C1..C8                // S0.10.3; failure = VALIDATION_FAILED
+  class := tighten | loosen | neutral from tighten_direction        // R10
+  if class != tighten: require effective_from >= now + notice_days  // prospective only
+  if class == loosen or name in security.two_person_actions: require a second approver
+  if name starts with launch.: reject                               // only LaunchGate.applySignedOff may write
+  in one unit of work: insert ParameterVersion; insert ChangeLogEntry (public unless security.*);
+     insert AdminAction (or system actor); bump config_epoch; emit parameter.changed
+  tighten: effective now; the public entry follows within change.tighten_publish_within_s
+```
+
+### 4.9.4 Flags, experiments, kill switches [D]
+
+- Evaluation order for an operation: kill switch, then launch switch, then feature flag, then parameter. An unknown flag name evaluates to off, as `unknown` evaluates to `no` (S0.8.3).
+- Experiment assignment is deterministic (a keyed hash of experiment id and member id, seed `experiment.assignment_seed_version`), made at most once per member and experiment, and written as an `ExperimentAssignment` row in the same commit as its first use. The mechanism and unit of randomization are owned by S13.*; this part requires only that it is deterministic, logged and independent of the member's behavior.
+- Kill switches take effect inside the transaction that would cross them, not through cache invalidation:
+
+| Switch | Enforced at | Effect |
+| --- | --- | --- |
+| `kill.all_minting` | `LedgerService.post` for `mint` | `KILL_SWITCH_ENGAGED`; Commons cells may still be accepted without credit only as S6.* defines |
+| `kill.all_new_jobs` | `createJob`, `submitJob`, `confirmEscrow` | Refused; running jobs continue |
+| `kill.template.<id>` | Lease issuance, `submitJob` | Template `paused`; its jobs `suspended`; no lease for its cells |
+| `kill.service.<id>` | Lease issuance, `submitJob` | Service `suspended`; cells needing it not shown; in-flight handling per S7.* |
+| `kill.member.<id>` | Authentication and lease issuance | Principal refused |
+
+- Engaging is one operator and immediate; releasing needs two operators (`security.two_person_actions`). Every change writes `KillSwitch`, `AdminAction`, an event and an epoch bump.
+- Launch switches: `members_may_join` is checked in `createMember`, `member_jobs_enabled` in `submitJob`, `minting_enabled` in `post` for `mint`; each refuses with `LAUNCH_GATE_CLOSED`. The only writer is `LaunchGate.applySignedOff`, which re-evaluates the gate rule of S14.* in the same commit. No environment variable, header, role or build flag bypasses it; dev, test and staging pass the same sign-off flow with synthetic administrators and synthetic evidence, and their data is labeled `synthetic` [D].
+
+## 4.10 Migrations
+
+### 4.10.1 Rules [D]
+
+- Migrations are ordered, immutable once released and checksummed; `schema_migrations(version, checksum, applied_at, duration_ms)` records them. The runner takes an exclusive lock and runs as the `migrator` role. Production and staging are forward-only; down scripts exist for dev convenience only. A failed migration is fixed forward or the pre-migration restore point is used (4.12).
+- Expand/contract: release N adds nullable or new structures and writes both; N+1 reads the new; N+2 removes the old. The application at versions N and N-1 must both run against schema N, which makes rolling deploys and application rollback safe.
+- A migration declares its lock impact; large tables use online index builds and batched backfills of `ops.migration_batch_size` rows, resumable and idempotent. Seeds of parameters, flags and kill switches follow 4.9.2.
+- A pre-migration restore point is taken automatically before any production migration.
+
+| Class | Allowed | Extra rule |
+| --- | --- | --- |
+| Schema expand or contract | Yes | Contract steps only after the expand release is fully deployed |
+| Data backfill | Yes | Idempotent, resumable, batched |
+| Seed (parameters, flags, kill switches, gate items) | Yes | Never overwrites a value |
+| Ledger-touching | Only with a numbered spec change, two-person approval, a full invariant recompute and chain verification before and after, a checkpoint before and after, and forward correcting entries (`reversal`); rows are never edited. Changing `credit.scale_ucr_per_credit` is this class (S0.6.1) | Blocked otherwise |
+
+### 4.10.2 Append-only enforcement [D]
+
+The authoritative list is every S5.* table that has no `updated_at` and no delete path. At minimum: `ledger_entries`, `ledger_transactions`, `parameter_versions`, `policy_versions`, `terms_copies`, `flag_answers`, `admin_actions`, `change_log_entries`, `metric_snapshots`, `calibration_records`, and approved `template_versions`. For each, the migration revokes update and delete from `app_rw` and adds a rejecting trigger or equivalent. A migration test enumerates the list and fails if any table lacks both protections. Permanent tables hold no personal data by construction (S0.7), so retention never needs to edit them.
+
+### 4.10.3 Migration tests [D]
+
+CI applies all migrations to an empty store and to the previous release's schema loaded with synthetic fixtures; runs the contract suite of every port driver; checks the append-only list; runs the full invariant recompute on a fixture ledger before and after; and measures duration against the declared lock impact.
