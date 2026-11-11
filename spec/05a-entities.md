@@ -430,3 +430,144 @@ The log of every operator and reviewer action. Named so it does not collide with
 | `prev_hash`, `entry_hash` | hash | NN | chain over the table, S5.15 |
 
 **Keys** PK `id`; unique `seq`; FKs. **Indexes** `(subject_type, subject_id, seq)`; `(admin_user_id, seq)`; `(action, seq)`. **Not stored** admin IP, session token, user-agent.
+
+## 5.7 Templates, uploads and jobs
+
+### 5.7.1 `Template` · `templates` · `tpl_` · `MUT` · `permanent`
+
+Stable identity of a reviewed prompt pattern; points at its active version.
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `slug` | text | NN, unique, `^[a-z][a-z0-9_]{2,60}$` | |
+| `job_type` | enum(`job_type`) | NN | |
+| `active_version_id` | id `tpv_` | null, FK (deferred) | must reference a version of this template with `review_status = 'approved'` |
+| `created_by_admin_id` | id `adm_` | NN, FK | |
+
+Pausing a template is the kill switch `kill.template.<tpl_id>` (S5.12.3), not a column. **Indexes** `(job_type)`. **Not stored** statistics about outcomes (those are `MetricSnapshot`).
+
+### 5.7.2 `TemplateVersion` · `template_versions` · `tpv_` · `IMS` · `permanent`
+
+Immutable once it enters review. Machine `review_status` (S0.9.5). Content columns are frozen when `template.review_requested` fires; an edit after `changes_requested` creates a new version, never edits a reviewed one. [D]
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `template_id`, `version` | id, int | NN; `(template_id, version)` unique; `version` starts at 1 | |
+| `review_status` | enum | NN, default `draft` | `draft`, `in_review`, `awaiting_second_review`, `changes_requested`, `approved`, `rejected`, `paused`, `retired` |
+| `author_admin_id` | id `adm_` | NN, FK | the second-reviewer rule needs it (FD§5.7 failure mode 10) |
+| `prompt_body` | text | NN, <= 20000 chars | with named data slots |
+| `slots` | json | NN | slot name, type, max chars, escaping rule |
+| `delimiter_spec` | json | NN | the delimiters wrapping data and the instruction to treat it as data (FD§5.5) |
+| `output_schema` | json | NN | JSON Schema of the expected paste-back |
+| `auto_checks` | json | NN | ordered list of automatic checks (schema, length, language, refusal pattern, tests) |
+| `comparator` | json | null | audit comparator; required when the type is audited |
+| `envelope` | json | NN | `cell.envelope.*` limits for this template; each <= the global parameter |
+| `risk_class` | enum | NN, default `standard` | `high` forces blanket redundancy (`verify.blanket_redundancy_n`) |
+| `allowed_purposes`, `allowed_sensitivities`, `allowed_licenses`, `allowed_service_requirements` | arr | NN | the template's own allowlist, intersected with the `PolicyVersion` allowlist |
+| `topic_category_id` | id `top_` | null, FK | |
+| `card_sentence_key` | text | NN | copy key of the one-line provenance sentence (FD§5.5) |
+| `content_hash` | hash | NN from `in_review` | RFC 8785 hash of every content column above |
+| `approved_at` | ts | null | the date shown on the card ("reviewed on [date]") |
+
+**Keys** PK; FK `template_id`, `author_admin_id`, `topic_category_id`. **Indexes** `(template_id, review_status)`; `(content_hash)`. **Approvals** are `AdminAction` rows with `action = 'template.approve'`, `subject_id` = this id and `subject_hash = content_hash`; the guard counts distinct `admin_user_id` different from `author_admin_id` against `template.min_reviewers_new` or `template.min_reviewers_edit`. A content change voids earlier approvals because the hash no longer matches. **Stored** the full prompt text (public by design: volunteers can expand it). **Not stored** any claim that the template works; effectiveness is [H] and is measured outside this table.
+
+### 5.7.3 `Glossary` · `glossaries` · `gls_` · `IMS` · `job_bound`
+
+Shared glossary of a translation job (FD§2). One row per job.
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `job_id` | id `job_` | NN, FK, unique | |
+| `source_lang`, `target_lang` | text | NN | BCP 47 tags |
+| `terms` | json | null after purge | list of `{source, target}`; <= 500 entries, <= 8 KiB total [A] |
+| `entry_count` | int | NN | |
+| `terms_hash` | hash | NN | |
+| `payload_purged_at` | ts | null | `terms` set to NULL `retention.job_payload_days` after the job is terminal |
+
+**Not stored** the requester's identity beyond the job.
+
+### 5.7.4 `Upload` · `uploads` · `upl_` · `IMS` · `job_bound`
+
+A requester's data file before it is split into cells.
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `member_id` | id `mem_` | NN, FK | |
+| `job_id` | id `job_` | null until the draft job exists, FK | |
+| `status` | enum(`upload_status`) | NN | `received`, `screening`, `accepted`, `rejected`, `split`, `purged` |
+| `media_type` | enum(`upload_media_type`) | NN | |
+| `byte_size` | int | NN, `<= job.max_upload_bytes` | |
+| `content_hash` | hash | NN | |
+| `storage_key` | text | null after purge | object store key behind the storage interface (S4.*) |
+| `unit_count` | int | null | segments or rows found by the splitter |
+| `screening_report` | json | null | counts and offsets of URL, personal-data and instruction-pattern hits; never copies of the matched text |
+| `purged_at` | ts | null | |
+
+**Indexes** `(member_id, created_at)`; `(job_id)`. **Not stored** the original file name, the client's path, EXIF or document metadata (stripped at intake).
+
+### 5.7.5 `Job` · `jobs` · `job_` · `MUT` · `job_bound`
+
+A requester's request, or a Commons job. Machine S0.9.2. The declarations, the policy stamp and the quote are written once and never changed after `job.escrow_confirmed`. [D]
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `state` | enum | NN, default `draft` | the 15 states of S0.9.2 |
+| `closure_reason` | enum | null; set with `job.stop_requested` | `policy_stopped`, `service_revoked`, `template_retired`, `operator_killed`, `overrun_timeout` |
+| `is_commons` | bool | NN | true for Commons jobs; the only jobs whose acceptance mints |
+| `requester_member_id` | id `mem_` | NN iff `is_commons` = false | |
+| `job_type` | enum | NN | |
+| `template_version_id` | id `tpv_` | NN, FK | must be `approved` at screening |
+| `purpose`, `license`, `sensitivity`, `service_requirement` | enum | NN | the four declarations (FD§5.2) |
+| `pinned_service_ids` | arr of `svc_` | NN; non-empty iff `M1` | |
+| `topic_category_id` | id `top_` | null, FK | |
+| `upload_id`, `glossary_id` | id | null, FK | |
+| `input_hash` | hash | NN from `screening` | hash of the upload; system-added metadata (FD§5.2) |
+| `size_class`, `deadline_class` | enum | NN, both `standard` | |
+| `deadline_at` | ts | null | requester's latest acceptable date |
+| `policy_version_id` | id `plv_` | null until `job.policy_passed`, then NN | R9 stamp |
+| `primary_cell_count` | int | NN, 1..`admission.max_job_cells` | N of S0.6.1 |
+| `v_snapshot_id` | id `mts_` | null | the published v used in the quote |
+| `v_ppm`, `lambda_ppm`, `price_per_cell_ucr` | ppm, ppm, ucr | set at quote; `price = 1000000 + v + lambda` (CHECK) | |
+| `escrow_ucr` | ucr | `= primary_cell_count * price_per_cell_ucr` (CHECK) | |
+| `verification_pool_cells` | int | `floor(primary_cell_count * v_ppm / 1000000)` | S0.6.1; remainder refunded at settlement (`ISS-04`) |
+| `quoted_window_s` | int | NN at quote | |
+| `quote_expires_at` | ts | NN at quote | `price.quote_ttl_s` |
+| `parameter_versions` | json | NN at quote | map of parameter name to version in force (`admission.*`, `price.*`, `credit.*`, `verify.*`) |
+| `escrow_id` | id `esc_` | null until `escrow_confirmed` | |
+| `reservation_id` | id `rsn_` | null | set when activated from a reservation |
+| `submitted_at`, `admitted_at`, `started_at`, `assembled_at`, `settled_at` | ts | null | |
+| `requester_rating` | int | null, 1..5 | rating of the outcome (prompt F); no free text, because free text can hold personal data |
+
+**Keys** PK; FKs. **Indexes** `(requester_member_id, state)` (concurrency cap `admission.max_concurrent_jobs_per_member`); `(state, deadline_at)`; `(template_version_id)`; `(policy_version_id)`. **Checks** `is_commons = (requester_member_id IS NULL)`; every declared combination is in the stamped `PolicyVersion.allowlist` (verified by the writer, recorded by `policy_version_id`). **Defense in depth** a trigger refuses `state` to `quoted` or `admitted` unless every service the job could run on is `approved` with a current `TermsCopy` (S5.14.8). **Stored** declarations, quote, hashes. **Not stored** the uploaded content (that is `Upload`, purged), the requester's identity beyond the pseudonymous id, any rating text.
+
+### 5.7.6 `Reservation` · `reservations` · `rsn_` · `MUT` · `job_bound`
+
+Capacity booking for a future date with escrow at booking (FD§4.8). Machine S0.9.8.
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `member_id` | id `mem_` | NN, FK | |
+| `state` | enum | NN | `held`, `activated`, `cancelled`, `expired` |
+| `target_day` | day | NN | UTC; at most `reservation.max_horizon_days` ahead |
+| `cell_count` | int | NN, >= 1 | |
+| `job_type` | enum | NN | |
+| `price_per_cell_ucr`, `escrow_ucr` | ucr | NN | priced at booking |
+| `escrow_id` | id `esc_` | NN, FK, unique | |
+| `activated_job_id` | id `job_` | null, FK | |
+| `free_cancel_until` | ts | NN | `target_day` minus `reservation.free_cancel_notice_s` |
+| `expires_at` | ts | NN | |
+
+**Indexes** `(member_id, state)` (`reservation.max_active_per_member`); `(target_day, state)` (`reservation.capacity_share_cap`). Cancellation inside the notice window is a ledger fee policy owned by S6.*; this table stores only the state.
+
+### 5.7.7 `WaitlistEntry` · `waitlist_entries` · `wlt_` · `MUT` · `job_bound`
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `job_id` | id `job_` | NN, FK, unique | |
+| `member_id` | id `mem_` | NN, FK | |
+| `state` | enum(`waitlist_state`) | NN | `waiting`, `released`, `expired`, `cancelled` |
+| `position_key` | int64 | NN, from a sequence | FIFO order within a deadline class (FD§4.8) |
+| `requested_window_s` | int | NN | |
+| `expires_at` | ts | NN | `admission.waitlist_ttl_days` |
+
+**Indexes** `(state, position_key)`; `(member_id, state)` (`admission.waitlist_max_per_member`).
