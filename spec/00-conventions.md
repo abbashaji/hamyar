@@ -635,3 +635,113 @@ The list below is the FULL set of parameter names; names are stable and C-022 co
 | `change.notice_days_default` | days | 7 (FD Principle 5) | 0..90 | `FND` |
 | `change.notice_days_price` | days | 14 (for `price.*`, `admission.*`, `credit.*`) | 0..90 | `FND` |
 | `change.tighten_publish_within_s` | duration_s | 86,400 (tightening is immediate, its public log entry follows within a day) | 0..604800 | `FND` |
+
+**Table B: verify, lease, cell, trust, invite, ratelimit, identity, session, retention, policy, screen, service, template, optin, appeal, report**
+
+| Name | Type | Initial configurable default | Validation | Replaced by |
+| --- | --- | --- | --- | --- |
+| `verify.gold_rate_g` (g) | ratio | 0.05 | C2 | `P1M` reliability-estimate variance and false-accept estimate |
+| `verify.gold_rate_floor` | ratio | 0.01 | C2 | `FND` |
+| `verify.gold_rate_max` | ratio | 0.20 | C2 | `FND` |
+| `verify.audit_rate_s` (s) | ratio | 0.10 | C2 | `P1M` false-accept estimate, v |
+| `verify.audit_rate_floor` | ratio | 0.02 (FD§4.4: sampling never falls to zero) | C2; > 0 | `FND` |
+| `verify.audit_rate_max` | ratio | 0.50 | C2 | `FND` |
+| `verify.blanket_redundancy_n` | int | 3 (FD§4.4 "triple") | 2..5 | `P1M` |
+| `verify.new_donor_blanket_cells` | int | 5 first cells of a new donor | 0..50 | `P1M` |
+| `verify.adapt.clean_streak` | int | 20 clean observations before a step down | 1..1000 | `P1M` |
+| `verify.adapt.step_down_ratio` | ratio | 0.80 | 0 < x < 1 | `P1M` |
+| `verify.adapt.step_up_ratio` | ratio | 2.00 | > 1 | `P1M` |
+| `verify.reliability_prior_a` | int | 1 (Beta prior, successes) | >= 1 | `P1M` |
+| `verify.reliability_prior_b` | int | 1 (Beta prior, failures) | >= 1 | `P1M` |
+| `verify.reliability_window_obs` | int | 50 most recent gold and audit observations | 5..1000 | `P1M` |
+| `verify.human_review_rate` | ratio | 0.20 of subjective outputs | 0..1 | `P1M` |
+| `verify.human_review_gold_rate` | ratio | 0.10 | 0..1 | `P1M` |
+| `verify.timing_min_s` | duration_s | 5 (below this a submission is a timing anomaly) | >= 0 | `CAL` seconds-per-cell distribution |
+| `verify.duplicate_similarity_threshold` | ratio | 0.95 | 0..1 | `P1M` |
+| `verify.false_accept_alarm` | ratio | 0.05 | 0..1 | `FND` (pre-registered) |
+| `verify.false_reject_alarm` | ratio | 0.10 | 0..1 | `FND` (pre-registered) |
+| `verify.third_exec_on_mismatch` | bool | true (FD§4.4) | constant | `CON` |
+| `verify.model_judge_mints_credit` | bool | false (FD§4.4) | constant in Phase 1 | `CON` |
+| `lease.timeout_s` | duration_s | 1200 = 10 x 120 s, ten times the FD§3.2 first-contribution estimate | C3 | `CAL` p95 of seconds per cell |
+| `lease.max_active_per_member` | int | 3 (a daily batch is one card or a few, FD§3.2) | 1..50 | `P1M` |
+| `lease.max_extensions` | int | 1 | 0..5 | `CAL` |
+| `lease.extend_s` | duration_s | 600 | 60..3600 | `CAL` |
+| `lease.submit_grace_s` | duration_s | 120 (late paste-back accepted if the cell is not yet re-leased) | 0..900 | `CAL` copy-paste timing |
+| `lease.reap_interval_s` | duration_s | 30 | 5..300 | `OPS` |
+| `lease.nonce_bytes` | int | 16 | constant | `CON` |
+| `lease.decline_cooldown_s` | duration_s | 0 (a decline is never punished, FD§5.5) | constant | `CON` |
+| `cell.envelope.max_input_chars` | int | 4000 | 200..100000 | `CAL` largest input that completes in one Send |
+| `cell.envelope.max_output_chars` | int | 6000 | 200..100000 | `CAL` |
+| `cell.envelope.max_submission_bytes` | int | 32,768 (6000 chars x up to 3 UTF-8 bytes = 18,000, plus margin) | 1024..1048576 | `CAL` |
+| `cell.envelope.expected_time_s` | duration_s | 120 (FD§3.2 first-contribution estimate) | 10..3600; C3 | `CAL` median seconds per cell |
+| `cell.max_attempts` | int | 5 | 1..20 | `P1M` |
+| `trust.established_min_cells` | int | 10 accepted cells | 1..10000 | `P1M` |
+| `trust.established_min_reliability` | ratio | 0.80 | 0..1 | `P1M` |
+| `trust.trusted_min_cells` | int | 100 | 1..100000 | `P1M` |
+| `trust.trusted_min_reliability` | ratio | 0.95 | 0..1 | `P1M` |
+| `trust.demote_below_reliability` | ratio | 0.70 | 0..1 | `P1M` |
+| `trust.restrict_after_gold_fails` | int | 2 consecutive failed gold cells | 1..20 | `P1M` |
+| `trust.restriction_days` | days | 7 | 1..90 | `OPS` |
+| `trust.cap_multiplier.new` / `.established` / `.trusted` / `.restricted` | ratio | 0.50 / 1.00 / 1.50 / 0.25 of K (FD§6.1: tiers raise caps) | 0..10 | `P1M` |
+| `trust.audit_multiplier.new` / `.established` / `.trusted` / `.restricted` | ratio | 1.0 / 1.0 / 0.5 / 3.0 of s, then clamped to the floor and maximum (FD§6.1: tiers lower sampling) | 0..10 | `P1M` |
+| `invite.max_active_per_member` | int | 3 | 0..100 | `OPS` farming flags |
+| `invite.ttl_days` | days | 14 | 1..90 | `OPS` |
+| `invite.min_accepted_cells_to_issue` | int | 3 | 0..1000 | `OPS` |
+| `invite.tree_max_members` | int | 50 | 1..10000 | `OPS` |
+| `invite.tree_max_depth` | int | 4 | 1..20 | `OPS` |
+| `ratelimit.device_new_members_per_day` | int | 3 | 1..100 | `OPS` |
+| `ratelimit.ip_hash_new_members_per_day` | int | 10 | 1..1000 | `OPS`, `SEC` |
+| `ratelimit.invite_tree_new_members_per_day` | int | 10 | 1..1000 | `OPS` |
+| `ratelimit.member_leases_per_hour` | int | 30 | 1..1000 | `P1M` |
+| `ratelimit.member_submissions_per_hour` | int | 60 | 1..1000 | `P1M` |
+| `ratelimit.member_api_rpm` | int | 120 | 10..10000 | `OPS` |
+| `ratelimit.admin_api_rpm` | int | 300 | 10..10000 | `OPS` |
+| `ratelimit.public_rpm` | int | 60 per IP hash | 1..10000 | `OPS` |
+| `ratelimit.recovery_attempts_per_day` | int | 5 | 1..100 | `SEC` |
+| `identity.recovery_key_bits` | int | 128 | >= 128 | `SEC` |
+| `identity.key_rotation_grace_s` | duration_s | 604,800 | 0..2592000 | `SEC` |
+| `identity.device_link_code_ttl_s` | duration_s | 300 | 30..3600 | `SEC` |
+| `identity.recovery_cooldown_s` | duration_s | 86,400 (a recovered identity cannot start jobs or spend for this long) | 0..2592000 | `SEC` |
+| `identity.recovery_max_per_90d` | int | 2 | 0..20 | `SEC` |
+| `identity.email_optional` | bool | true (FD§3.2) | constant | `CON` |
+| `session.member_idle_ttl_s` | duration_s | 2,592,000 | 600..31536000 | `SEC` |
+| `session.member_abs_ttl_s` | duration_s | 7,776,000 | 600..31536000 | `SEC` |
+| `session.admin_idle_ttl_s` | duration_s | 1800 | 60..86400 | `SEC` |
+| `session.admin_abs_ttl_s` | duration_s | 28,800 | 600..86400 | `SEC` |
+| `retention.raw_ip_stored` | bool | false | constant | `CON` |
+| `retention.ip_hash_ttl_days` | days | 1 | 0..30 | `SEC` |
+| `retention.session_days` | days | 90 | 1..365 | `SEC` |
+| `retention.request_log_days` | days | 7 | 0..90 | `SEC` |
+| `retention.ops_log_days` | days | 30 | 0..365 | `SEC` |
+| `retention.event_raw_days` | days | 30 | 0..365 | `SEC` |
+| `retention.job_payload_days` | days | 30 | 0..365 | `SEC`, `DEM` |
+| `retention.moderation_days` | days | 180 | 0..1095 | `SEC`, `CNS` |
+| `retention.member_inactive_days` | days | 365 (then status `closed`) | 30..3650 | `SEC` |
+| `policy.loosen_min_notice_days` | days | 7 (R10) | >= change.notice_days_default | `FND` |
+| `policy.tighten_immediate` | bool | true (R10) | constant | `CON` |
+| `policy.recheck_on_accept` | bool | true (R9) | constant | `CON` |
+| `screen.url_action` | enum | `flag_for_review` (`reject`, `flag_for_review`) | enum | `P1M` incident log |
+| `screen.pii_action` | enum | `reject` | enum | `P1M` |
+| `screen.output_url_action` | enum | `quarantine` (FD§5.5: flagged, not shown as a result) | enum | `P1M` |
+| `screen.max_urls_per_input` | int | 0 | 0..100 | `P1M` |
+| `screen.review_rate_new_requester` | ratio | 1.0 (every input reviewed) | 0..1 | `OPS` reviewer load |
+| `screen.review_rate_established_requester` | ratio | 0.20 | 0..1 | `OPS` |
+| `service.review_max_age_days` | days | 90 | 1..365 | `CNS` |
+| `service.review_grace_days` | days | 14 | 0..90 | `CNS` |
+| `service.min_approvers` | int | 1 (FD§5.3: a reviewer records the answers); 2 is an owner decision [A] | 1..5 | `FND` |
+| `service.terms_copy_max_bytes` | int | 5,242,880 | 1024..52428800 | `OPS` |
+| `template.min_reviewers_new` | int | 2 (FD§5.7 failure mode 10) | 1..5 | `FND` |
+| `template.min_reviewers_edit` | int | 1 | 1..5 | `FND` |
+| `template.autopause_report_count` | int | 5 reports inside `template.autopause_window_s` | 1..1000 | `OPS` |
+| `template.autopause_window_s` | duration_s | 3600 | 60..604800 | `OPS` |
+| `optin.default_purposes` | json | `["P0","P1"]` (FD§5.4 R8) | subset of P0..P3 | `FND` |
+| `optin.default_sensitivities` | json | `["S0","S1"]` (R8) | subset of S0..S1 | `FND` |
+| `optin.default_licenses` | json | `["L0","L1","L2"]` [A] | subset of L0..L3 | `FND` |
+| `optin.default_service_requirements` | json | `["M0","M1","M2"]` [A] | subset of M0..M2 | `FND` |
+| `optin.sensitive_topics_default` | bool | false (each sensitive topic category is opt-in, R8) | constant | `CON` |
+| `appeal.window_days` | days | 14 | 1..90 | `FND` |
+| `appeal.max_per_decision` | int | 1 | 1..5 | `FND` |
+| `appeal.reviewer_sla_days` | days | 7 (target, published) | 1..60 | `OPS` |
+| `appeal.ban_min_reviewers` | int | 2 | 1..5 | `FND` |
+| `report.triage_sla_days` | days | 3 (target, published) | 1..30 | `OPS` |
+| `report.max_per_member_per_day` | int | 20 | 1..1000 | `OPS` |
