@@ -364,7 +364,7 @@ A requester may book capacity for a future date (exam week, a deadline) with cre
 | --- | --- |
 | `member_id`, `category_key`, `job_type` | Declared at booking; the job later created must have the same `category_key` and `job_type` |
 | `cells_n`, `verification_cells_v`, `committed_cells_r` | As in 6.22; `R` is what is reserved |
-| `v_ppm`, `lambda_ppm`, `p_ucr`, `escrow_ucr`, `escrow_id` | **Price lock**: stamped at booking, used at activation. A lock is at most `reservation.max_horizon_days` stale and `change.notice_days_price` is shorter than that horizon only by design: price changes are announced in advance, so the locked price can be older than a change but never hidden [D][A] |
+| `v_ppm`, `lambda_ppm`, `p_ucr`, `escrow_ucr`, `escrow_id` | **Price lock**: stamped at booking, used at activation. A locked price is at most `reservation.max_horizon_days` old; a later published change of `price.*` does not apply to an existing reservation, and the booking screen shows the locked price and the lock date [D][A] |
 | `target_start_at`, `window_s` | `target_start_at` on the absolute grid (a multiple of `step` since the UTC epoch); `window_s` a multiple of `step` in `[admission.min_window_s, admission.max_window_days × 86,400]` |
 | `activation_deadline_at` | `target_start_at + reservation.activation_grace_s` |
 | `slot_plan` | Integer cells per absolute slot, below |
@@ -427,3 +427,106 @@ Capacity returns when the cells are cancelled, not when settlement ends; the wai
 `refund_ucr = escrow_ucr − (a + b) × 1,000,000 − a × lambda_ppm`, with `escrow_ucr = N × (1,000,000 + v_ppm + lambda_ppm)`.
 
 Since `b <= V = floor(N × v_ppm / 1,000,000)`, the unused verification pool `N × v_ppm − b × 1,000,000` is not negative. With the FD§3.3 inputs and `a = 240`, `b = 24` the refund is 0 and the identity closes (264,000,000 + 12,000,000 = 276,000,000); with `a = 100`, `b = 5` the refund is `276,000,000 − 105,000,000 − 5,000,000 = 166,000,000 ucr`, which equals the unaccepted primary share (140,000,000) plus the unused pool (19,000,000) plus the unused levy (7,000,000). The formula is the arithmetic check of `AC-admission-06`; if `S6.*` states the settlement rule differently, `S6.*` wins and this check is updated. [D][A]
+
+## 6.33 Behaviour when the forecast drops after acceptance
+
+### 6.33.1 Principles [D]
+
+1. An admitted job is **never** re-priced, never silently cancelled and never moved behind later jobs because the forecast fell. Its declared window stays what it was quoted (Principle 10; the copy says "declared").
+2. The requester is told early and plainly when the projection moves beyond the declared window.
+3. New quotes become honest at once, because they are computed from the new forecast and the unchanged backlog (6.27); no separate intake freeze is needed. An intake freeze, an automatic increase of φ, a silent re-quote, and cancelling the newest jobs were considered and rejected: the first duplicates what the backlog already does, the second takes capacity from Commons work and breaks (1 − φ), the last two break principle 1.
+4. A hard stop exists: at `job.max_overrun_ratio × window_s` after `admitted_at` the system emits `job.stop_requested` with `closure_reason` = `overrun_timeout`; accepted cells are paid, everything else is refunded (6.32 formula with the cells accepted so far). Any make-good for such a job is an owner decision (6.39).
+
+### 6.33.2 `window_status` (derived, evaluated by the reforecast job) [D]
+
+| Value | Condition |
+| --- | --- |
+| `not_applicable` | job not in `admitted`, `running`, `suspended` |
+| `on_track` | `projected_finish_at <= window_end_at + admission.overrun_tolerance_ratio × window_s` |
+| `at_risk` | `projected_finish_at` is later than that, and `now <= window_end_at` |
+| `overdue` | `now > window_end_at` and the job is not complete |
+
+`projected_finish_at` is the earliest `T` such that, in both scopes, the cells of all jobs placed before or at this job (reserved jobs with unspent slot budget first, then ascending `hold_seq`), counting this job's own `remaining`, are at most `phi_capacity(fc(S), now, T) − reserved_in(now, T, S)`; if no `T` within `job.max_overrun_ratio × window_s` exists the value is `null` and the status is `at_risk`. A `suspended` job's projection is shown but its status is `on_track` while the suspension is active (whether the window clock pauses is decided by `S5.*`; that dependency is flagged to `S5.*`).
+
+### 6.33.3 Pseudocode
+
+```text
+function reforecast(now)                                           # job every admission.reforecast_interval_s
+  with admission_lock:
+    for scope in {ALL} + live category_keys: fc[scope] = compute_forecast(scope, now); store MetricSnapshot
+    record forecast_error: for each complete day d not yet scored,
+        error_ppm = (actual_accepted_cells(d) - predicted_cells(d)) * 1e6 / predicted_cells(d)   # signed
+    degrade_reservations(now)
+    for job in capacity-holding jobs (admitted, running, suspended) order by priority, hold_seq:
+        old = job.window_status ; new = compute_window_status(job, now)
+        if new != old: persist; emit admission.window_at_risk | window_recovered | window_missed; notify requester
+        if now > job.admitted_at + params.max_overrun_ratio * job.window_s: request_stop(job, "overrun_timeout")
+    release_waitlist(now)                                            # capacity may have risen
+    run consistency checks (6.34.4)
+
+function degrade_reservations(now)           # newest booking is degraded first (last in, first out)
+  for scope in (ALL, categories): for slot k with held_plan(scope, k) > share_cap * phi_capacity(fc(scope), slot_k):
+      for r in held reservations covering slot k in scope ordered by created_at desc until the slot fits:
+          r.degraded = true ; emit admission.reservation_degraded ; notify holder
+```
+
+A degraded reservation keeps its escrow, loses SC-3 priority and stops counting in `reserved_in`; at activation its job joins the ordinary first-come queue behind existing jobs. The holder may cancel without cooldown. [D]
+
+### 6.33.4 Forecast error and calibration [D][H]
+
+The signed daily `error_ppm` is aggregated (never per member) and published as `hamyar_admission_forecast_error_ratio`. It is the measurement that replaces `admission.forecast_haircut`, `admission.horizon_discount_per_day` and, together with the deposit-to-withdrawal ratio, φ (`P1M`). [H: with a clean 14-day history the trailing mean overstates next-week capacity because of churn; test: the median signed error over the pilot; success: the median error is within the margin the haircut covers; kill criterion: error beyond 0.25 in magnitude on more than a quarter of days, in which case `admission.min_forecast_donors` is raised and the haircut set from the data.]
+
+## 6.34 Concurrency, operations, events and metrics
+
+### 6.34.1 Concurrency and idempotency [D]
+
+- **One admission lock.** Quote, confirm, hold release, waitlist release, reservation booking, activation, cancellation and the reforecast run hold a single mutual-exclusion lock named `admission` (a serializable transaction or an advisory lock). Hold time is bounded by `api.request_timeout_s`. Phase 1 member-job volume is low, so a global lock is acceptable; per-scope sharding is not possible because the global test spans all categories [A].
+- `hold_seq` and `waitlist_seq` come from database sequences read under the lock; they are never reused.
+- **Idempotency.** Every command above takes `Idempotency-Key` (S0 0.11.5). Natural idempotency underneath: one quote document per `(job_id, quote_seq)`, one live hold per job, one `escrow_hold` per job, one reservation escrow per reservation, one `escrow_release` per activation. A retried confirm after success returns the stored result and posts nothing.
+- **Race guarantee.** Two simultaneous quotes or confirms are serialized; the later one sees the earlier hold in its backlog. Joint admission beyond capacity is impossible.
+
+### 6.34.2 Background jobs [D]
+
+| Job | Cadence | Does |
+| --- | --- | --- |
+| `admission.reforecast` | `admission.reforecast_interval_s` | 6.33.3 |
+| `admission.waitlist_sweep` | `admission.waitlist_recheck_interval_s` and the triggers of 6.29.2 | `release_waitlist` |
+| `admission.hold_reaper` | every `lease.reap_interval_s` [A] | `job.quote_expired`, hold release; entry expiry (`job.waitlist_expired`) |
+| `admission.reservation_watch` | same | activation at `target_start_at`, expiry at `activation_deadline_at` |
+| `admission.rollup` | daily after the UTC boundary | fills `donor_day_counts`, deletes rows older than `W + 1` days |
+
+Every job is idempotent: running twice on the same inputs produces the same state and no second event.
+
+### 6.34.3 Events and metrics [D][A]
+
+Domain events used: `job.*` and `reservation.*` of S0 0.9. Events added by this part (logged under the same names, no personal data): `admission.forecast_recomputed`, `admission.quote_issued`, `admission.hold_released`, `admission.window_at_risk`, `admission.window_recovered`, `admission.window_missed`, `admission.reservation_degraded`, `admission.consistency_violated`.
+
+Metrics (S0 0.5 scheme): `hamyar_admission_decisions_total` (by decision), `hamyar_admission_forecast_capacity_cells` (by scope), `hamyar_admission_active_donors_count`, `hamyar_admission_committed_cells`, `hamyar_admission_utilization_ratio` (backlog of `ALL` divided by the φ capacity of a maximum-length window), `hamyar_admission_waitlist_length_count`, `hamyar_admission_waitlist_wait_s`, `hamyar_admission_window_at_risk_total`, `hamyar_admission_window_missed_total`, `hamyar_admission_completion_vs_quote_ratio` (actual time from `admitted_at` to completion divided by `window_s`; the FD§9 "time to complete a large job versus quote" measure), `hamyar_admission_forecast_error_ratio`, `hamyar_admission_commons_share_ratio`, `hamyar_admission_category_supply_ratio`, `hamyar_admission_reservation_noshow_ratio`.
+
+### 6.34.4 Consistency checks (run by `admission.reforecast`; a failure raises an `Alarm` and `admission.consistency_violated`) [D]
+
+| Check | Statement |
+| --- | --- |
+| Hold integrity | Every capacity-holding job has exactly one `hold_seq`; no `hold_seq` belongs to a terminal job |
+| Entry integrity | A `waiting` entry exists exactly for each `waitlisted` job |
+| Member caps | No member exceeds `admission.max_concurrent_jobs_per_member`, `admission.waitlist_max_per_member` or `reservation.max_active_per_member` |
+| Reservation caps | For every slot, held non-degraded plans are at most `reservation.capacity_share_cap` of the φ capacity, or the reservation is flagged `degraded` |
+| Escrow link | Every `held` reservation has an `Escrow` in `open` with `escrow_ucr`; every `activated` reservation has a closed reservation escrow |
+| No orphan capacity | With no non-terminal job and no held reservation, backlog and reserved totals are zero |
+
+## 6.35 API surface and copy keys
+
+Operation ids and paths are proposals for `S15.*`; conventions of S0 0.11 apply (member scheme, `/v1`, `Idempotency-Key` on every write, ETag where the resource is mutable). [A]
+
+| `op` | Method and path | Purpose | Errors beyond the common ones |
+| --- | --- | --- | --- |
+| `confirmJobQuote` | `POST /v1/jobs/{job_id}/confirmation` body `{quote_seq}` | 6.28.3 | `422 NO_CAPACITY` (`details.requote`), `422 INSUFFICIENT_CREDIT`, `409 STATE_CONFLICT` (also for an expired quote) |
+| `requestJobQuote` | `POST /v1/jobs/{job_id}/quotes` body `{requested_window_s?}` | Re-quote while `quoted` or after a release | `422 CAP_EXCEEDED`, `403 LAUNCH_GATE_CLOSED`, `503 KILL_SWITCH_ENGAGED` |
+| `cancelJob` | `POST /v1/jobs/{job_id}/cancellation` | 6.32 | `409 STATE_CONFLICT` |
+| `createReservation` | `POST /v1/reservations` | 6.30.2 | `422 CAP_EXCEEDED`, `422 NO_CAPACITY`, `422 INSUFFICIENT_CREDIT` |
+| `getReservation`, `listReservations` | `GET /v1/reservations/{id}`, `GET /v1/reservations` | Read | `404 NOT_FOUND` |
+| `cancelReservation` | `POST /v1/reservations/{id}/cancellation` | 6.30.3 | `409 STATE_CONFLICT` |
+| `getPublicCapacity` | `GET /v1/public/capacity` | Public gauge, 6.25 | none |
+| `getAdminCapacity` | `GET /v1/admin/capacity` | Operator dashboard: exact counts, backlog, forecast history, error | `403 FORBIDDEN` |
+
+Copy keys used (text in `fa` and `en`, marker `needs_human_and_legal_review`, owned by `S11.*`; intent only here): `copy.admission.window_declared` (the window is a declared estimate, not a promise of completion), `copy.admission.counter_offer` (a later window is available and why, by `limiting_factor`), `copy.admission.waitlisted` (position, reason, expiry; nothing is held or charged), `copy.admission.window_at_risk` (the projection moved; what happens next), `copy.admission.reservation_expiry_warning` (lots that expire before the reserved date), `copy.admission.late_cancel_cooldown`, `copy.admission.cancel_refund_summary`, `copy.admission.supply_gauge_suppressed`. [D]
