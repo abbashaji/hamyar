@@ -710,3 +710,114 @@ The payloads are illustrative; the suite also runs a maintained public injection
 | `AC-submit-14` | Given a gold cell and a normal cell, When each is submitted, Then the two responses have the same fields and no field reveals the kind |
 | `AC-submit-15` | Given stored text `<script>alert(1)</script>`, When any screen or export shows it, Then it appears as literal text and no script runs |
 | `AC-submit-16` | Given the dry run, When `validateSubmission` is called, Then nothing is persisted, the nonce is unconsumed and `lease.validations` is incremented |
+
+## 9.17 Observability, logging and alarms
+
+Metric names follow S0.5 (`hamyar_<area>_<name>_<unit>`). No label carries content, a nonce or an identifier of a member. [D]
+
+| Metric | Kind | Labels | Use |
+| --- | --- | --- | --- |
+| `hamyar_submission_received_total` | counter | `state`, `template_version_id` | Volume and outcome mix |
+| `hamyar_submission_gate_rejections_total` | counter | `check_id`, `code` | Gate failures (SC-01..SC-15); a spike of SC-10 or SC-11 is a forgery or client-defect signal |
+| `hamyar_submission_replays_total` | counter | none | Idempotent resubmits (9.10 case 4) |
+| `hamyar_submission_conflicting_resubmissions_total` | counter | none | Case 5; non-zero rates need explanation |
+| `hamyar_submission_quarantined_total` | counter | `flag_class` | Reviewer load; compared with the share released |
+| `hamyar_submission_quarantine_age_seconds` | gauge | none | Age of the oldest unreviewed quarantine (alarm before `screen.quarantine_max_age_days`) |
+| `hamyar_submission_duplicate_signals_total` | counter | `kind` (`d1`..`d3`) | 9.11 |
+| `hamyar_submission_timing_signals_total` | counter | `kind` | 9.12 |
+| `hamyar_submission_lease_to_submit_seconds` | histogram | `template_version_id` | Verified submissions only; the `CAL` distribution |
+| `hamyar_submission_normalization_changes_total` | counter | `class` | Which character classes donors actually hit (tunes 9.7 with data) |
+| `hamyar_submission_invariant_violations_total` | counter | `invariant` | Must stay zero: SC-14 failures, a stripped class found in canonical text, a second submission for one lease |
+
+**Alarms** (entity `Alarm`, S0.7) [D]: any increment of `hamyar_submission_invariant_violations_total`; a sustained rise of SC-11 failures across many members; quarantine age above half of `screen.quarantine_max_age_days`; a template whose quarantine share exceeds the others by a margin set by the operator (feeds `template.autopause_report_count`).
+
+**Never logged, never in an event, never in a metric label** [D]: `output_text`, `model_label`, the plaintext `lease_nonce`, bearer tokens, the removed characters of a normalization, matched detector text, raw IP addresses (S0.6.4). Logged: ids, hashes, sizes, check ids, reject codes, flag classes and counts.
+
+## 9.18 Parameters used and added
+
+Every default is an `initial configurable default`, replaced by the measurement in the last column (S0.10.4). Used parameters keep the definitions of S0.10.6; added parameters are reported as convention additions (below) and are completed by S16.* without renaming. [D]
+
+**Used (defined in S0.10.6)**
+
+| Name | Initial configurable default | Use here |
+| --- | --- | --- |
+| `cell.envelope.max_output_chars` | 6000 | 9.6, 9.7.3 |
+| `cell.envelope.max_submission_bytes` | 32,768 | 9.6 |
+| `cell.max_attempts` | 5 | 9.14.2 |
+| `lease.timeout_s`, `lease.extend_s`, `lease.max_extensions`, `lease.submit_grace_s` | 1200, 600, 1, 120 | 9.4.4 |
+| `lease.nonce_bytes` | 16 (constant) | 9.4.1 |
+| `lease.reap_interval_s`, `lease.max_active_per_member` | 30, 3 | 9.4.4, 9.6 |
+| `ratelimit.member_api_rpm`, `ratelimit.member_submissions_per_hour`, `ratelimit.member_leases_per_hour`, `ratelimit.public_rpm` | 120, 60, 30, 60 per IP hash | 9.6 |
+| `verify.timing_min_s` | 5 | 9.12 |
+| `verify.duplicate_similarity_threshold` | 0.95 | 9.11 |
+| `screen.output_url_action` | `quarantine` | 9.9 |
+| `calibration.min_samples_per_service` | 30 | 9.12 |
+| `api.idempotency_ttl_s` | 86,400 | 9.10 |
+| `retention.job_payload_days` | 30 | 9.14.3 |
+| `template.autopause_report_count`, `template.autopause_window_s` | 5, 3600 | 9.9.2 |
+
+**Added by this part** [A]
+
+| Name | Type | Initial configurable default | Validation | Replaced by |
+| --- | --- | --- | --- | --- |
+| `cell.envelope.max_json_depth` | int | 16 | 2..64 | `TEC` parser limits on real devices |
+| `cell.envelope.max_model_label_chars` | int | 80 | 1..200 | `CAL` labels donors actually type |
+| `lease.max_gate_failures` | int | 5 | 1..100 | `OPS` observed honest retry counts |
+| `lease.max_validations` | int | 10 | 0..100 | `CAL` copy-paste error rate |
+| `lease.max_nonce_rotations` | int | 2 | 0..10 | `OPS` reload frequency on phones |
+| `screen.max_combining_run` | int | 8 | 1..64 | `P1M` reviewed Persian sample |
+| `screen.output_code_action` | enum | `quarantine` | `reject`, `flag_for_review`, `quarantine` | `P1M` incident log and release ratio |
+| `screen.output_request_action` | enum | `quarantine` | same | `P1M` |
+| `screen.output_max_urls` | int | 0 | 0..100 | `P1M` |
+| `screen.quarantine_max_age_days` | days | 7 | 1..60 | `OPS` reviewer capacity |
+| `verify.duplicate_min_chars` | int | 80 | 1..10000 | `P1M` rate of honest short agreement |
+| `verify.duplicate_shingle_chars` | int | 5 | 2..20 | `P1M` |
+| `verify.duplicate_minhash_perms` | int | 128 | multiple of 4 (S9-C2) | `OPS` index cost |
+| `verify.duplicate_window_days` | days | 14 | 1..90 | `P1M` |
+| `verify.timing_soft_ratio` | ratio | 0.25 | 0..1 | `CAL` |
+| `verify.timing_regular_window_obs` | int | 20 | 5..1000 | `P1M` |
+| `verify.timing_regular_cv` | ratio | 0.05 [H] | 0..1 | `P1M` |
+
+The LSH layout uses 4 rows per band, so `bands = verify.duplicate_minhash_perms / 4` (32 at the default). Named cross-parameter constraints added (to be folded into S0.10.3): `S9-C1` `cell.envelope.max_submission_bytes >= 3 x cell.envelope.max_output_chars`; `S9-C2` `verify.duplicate_minhash_perms` is a multiple of 4; `S9-C3` `lease.max_validations >= 0` and `lease.max_gate_failures >= 1`. [A]
+
+## 9.19 What this part cannot promise
+
+Stated plainly, because FD Principle 11 forbids claiming more than can be shown. [D]
+
+1. **Provenance.** A valid submission shows that a member with a live lease sent text in time. It does not show that any model produced the text, that the leased prompt was used, or that the named service was used (E1, E6, 9.13).
+2. **Relayed or paraphrased copies and multiple accounts.** Similarity detection misses paraphrase, translation and light edits, and cannot see that two accounts are one person. Link analysis is probabilistic (9.11.3).
+3. **Who pressed Send.** The platform automates only its own side and cannot see the volunteer's side. Timing regularity is a weak signal of scripting, not proof; a patient script defeats it (9.12).
+4. **Detector coverage.** Classes L, C and A are heuristics with false positives and unknown false negatives; reviewer sampling estimates the second, imperfectly [H] (9.9.1).
+5. **Freedom from XSS and injection.** The defense is structural and tested, not proven; browser features such as Trusted Types are [V] on the target phones, and a defect in any one escaping point is possible (9.8).
+6. **The donor's own exposure.** The platform cannot stop a service's memory or connectors from acting on what the donor pastes into it (FD§5.5 injection note) or an attacker's content that reaches the donor through a cell input; that is addressed in S7.* and S11.* and remains a residual risk [H].
+7. **Account takeover.** A stolen session token allows submission as that member; the nonce does not prevent it (9.4.6, S10.*).
+8. **Calibrated thresholds.** Every timing, duplicate and size default is an initial configurable default, not a measurement, and simulation output is not evidence about people (S0.2 rule 3).
+9. **Reviewer capacity.** Quarantine moves risk to a reviewer queue; if it is not staffed, cells age out and honest donors wait (`ISS-92`).
+
+User-facing text about this stage says submissions are "checked" and results are "declared" by the volunteer, never "verified" or "guaranteed" unless an S8.* method actually verified them. [D]
+
+## Issues raised
+
+Problems and gaps found while specifying the return path. Each resolution is already applied in this file; C-001 consolidates them into S2.* and may record a different resolution. [D]
+
+| id | severity | fd_ref | issue | resolution | status |
+| --- | --- | --- | --- | --- | --- |
+| `ISS-91` | major | FD§4.4, prompt | The FD's automatic "unit tests" check for code changes runs submitted code, which contradicts the rule that submitted content is never executed | Web, API and admin tiers never execute content; the one execution need is confined to an isolated, network-less, resource-limited, ephemeral runner returning only pass or fail and a truncated log. Until it is built and signed off under `SEC` [V], the check is `inconclusive`, the cell goes to audit, and `code_change_tests` cannot be approved (9.8.2) | proposed |
+| `ISS-92` | major | FD§5.5 | The FD says outputs with links, code to run or requests for action are "flagged instead of shown" but defines no owner, queue, decision or deadline, so a flagged cell could wait forever and its donor's credit stay blocked | A quarantine lifecycle: reviewer decision (release or reject), hidden from everyone else, no reliability effect unless marked deliberate, age-out after `screen.quarantine_max_age_days`, queue-age metric and alarm (9.9.2, 9.17) | proposed |
+| `ISS-93` | major | prompt scope E, FD§4.4 | "Detection of copy-paste of another donor's output" cannot separate collusion from honest agreement: honest runs of a deterministic task produce equal short outputs, and published Commons outputs are copyable | Similarity is a signal, with two narrow hard cases (cross-cell reuse of long text) and exclusions for short or schema-constrained outputs; no output is visible before its cells are accepted; limits stated (9.11) | proposed |
+| `ISS-94` | minor | FD§3.4, S0.9.3 | A schema failure ends the attempt and burns one of `cell.max_attempts`, so an honest paste error or a griefing donor can exhaust a cell | A dry run `validateSubmission` with the syntactic checks only, the same normalization routine in the browser, and gate failures that consume nothing; the copy-paste error rate is measured under `CAL` and `cell.max_attempts` tuned [H] (9.5.4, 9.14.2) | proposed |
+| `ISS-95` | minor | FD§3.4, S0.9.3 | S0.9.3 requeues an expired lease "at once", while `lease.submit_grace_s` accepts a late paste-back | The reaper acts at `grace_until = expires_at + lease.submit_grace_s`; `expires_at` stays the donor-facing deadline; state machines unchanged (9.4.4) | applied |
+| `ISS-96` | minor | FD§5.6 | "Input and output hashes" do not say whether the hash covers what arrived or what is stored, and the two differ after normalization | `raw_hash` over the received string, `output_hash` over the canonical text; the manifest uses `output_hash` (9.7.4) | applied |
+| `ISS-97` | minor | prompt scope E | A "minimum plausible time" cannot be derived before Phase 0, so a hard timing rule risks rejecting honest practiced donors | One hard floor, `verify.timing_min_s`, kept low and replaced by `CAL`; everything else is a flag, active only after `calibration.min_samples_per_service` samples (9.12) | proposed |
+| `ISS-98` | major | prompt, S0.11.5 | S0.11.5 replays the stored response of an idempotent call, which for `createLease` would re-serve the plaintext nonce and force the idempotency store to hold secrets, contradicting hash-only storage | Secret response fields are not stored; replay returns `lease_nonce` = null with `details.nonce_redelivery` = `use_rotation`; `rotateLeaseNonce` recovers a lost nonce (9.4.3) | proposed |
+
+**Convention additions made by this part** (not issues; listed so C-001 can fold them back) [A]
+
+- `reject.attestation_invalid` added to the cell rejection reason list of S0.8.4 (9.13).
+- Operations `submitResult`, `validateSubmission`, `rotateLeaseNonce` and their paths (9.3, 9.5); response fields `lease_nonce`, `details.reject_code`, `details.reason`, `details.nonce_redelivery`, `details.stored_submission_id`.
+- Entity field requirements on `Lease` and `Submission`, and the table `submission_fingerprints` (9.4.5, 9.14.3).
+- The 17 added parameters and constraints `S9-C1`..`S9-C3` (9.18).
+- Signal names `signal.forgery_attempt`, `signal.conflicting_resubmit`, `signal.timing_below_floor`, `signal.timing_soft_fast`, `signal.timing_regular`; flag names in 9.9 and 9.21 of the check pseudocode; ops log event `submission.gate_rejected`; metrics of 9.17.
+- `slot_context` (`prose`, `code`, `structured`) as a required declaration of every template output slot (S8.*), and the template output exemption list for flag classes (9.7.1, 9.9.1).
+- Test ids numbered from 901 in each layer, and acceptance-criteria area `submit` (9.16).
+- File name: the owner cell writes `spec/09-result-return.md`, whereas S0.13 lists `spec/09-result-return-abuse.md`.
