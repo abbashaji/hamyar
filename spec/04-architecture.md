@@ -618,3 +618,97 @@ Artifacts are encrypted before they leave the host with a key the backup sink do
 ### 4.12.3 Drills [D]
 
 A restore drill every `ops.restore_drill_interval_days` and before launch (BM9), following 4.12.2 on staging with synthetic data, logged with duration against `ops.rto_s`. A portability drill exports everything to neutral formats (SQL dump, blob manifest, configuration) and imports into a fresh environment on a different host class, proving the ports hold (`AC-arch-10`).
+
+## 4.13 Deployment and environments
+
+### 4.13.1 Environments [D]
+
+| Environment | Purpose | Data | Launch switches | Secrets |
+| --- | --- | --- | --- | --- |
+| `dev` | Local work | Synthetic; in-memory fakes or a local store; origins may collapse | Off | None real |
+| `test` | CI, ephemeral per run | Synthetic fixtures; a real transactional store (not a fake) for contract and ledger tests; deterministic `Clock` and `Random`; no network except the package registry | Off until a test signs off through the real flow | None real |
+| `staging` | Production-like rehearsal: migrations, restore and portability drills, load tests, reachability tests | Synthetic only; never a copy of production | Same flow, synthetic administrators | Its own |
+| `prod` | Real operation | Real | `false` at every build; flipped only by sign-off (S14.*) | From `SecretStore`; production secrets never exist elsewhere |
+
+Staging and production are built from the same infrastructure description and the same artifacts; only bootstrap settings differ.
+
+### 4.13.2 Bootstrap settings [D]
+
+The only settings outside the parameter table. Everything else is a parameter (4.9).
+
+| Setting | Meaning | Secret |
+| --- | --- | --- |
+| `HAMYAR_ENV` | `dev`, `test`, `staging`, `prod` | no |
+| `HAMYAR_ROLES` | `api`, `jobs` or both | no |
+| `HAMYAR_STORE_URL`, `HAMYAR_BLOB_URL`, `HAMYAR_EPHEMERAL_URL` | Store locations and credentials | yes |
+| `HAMYAR_PUBLIC_ORIGIN`, `HAMYAR_APP_ORIGIN`, `HAMYAR_API_ORIGIN`, `HAMYAR_ADMIN_ORIGIN`, `HAMYAR_ADMIN_API_ORIGIN` | The five origins (4.3.3) | no |
+| `HAMYAR_SECRET_SOURCE` | Where `SecretStore` reads from | no |
+| `HAMYAR_BUILD_ID` | Content hash of the build; shown on health | no |
+
+The process refuses to start when `HAMYAR_ENV` is `staging` or `prod` and any origin is local or not HTTPS, when two origins are equal, or when a required setting is missing (fail closed).
+
+### 4.13.3 Pipeline [D]
+
+| Stage | Gate |
+| --- | --- |
+| Static checks | Types, lint, import-boundary rules, forbidden sinks (4.3.3), pinned dependency lockfile, license and vulnerability scan, secret scan, parameter manifest check (4.9.2) |
+| Tests | Unit, property, state-machine, policy, migration (4.10.3), port contract suites, API conformance against S15.*, log canary (`AC-arch-08`) |
+| Build | Reproducible server image and static bundles with content hashes; bundle size against the budgets owned by S11.* |
+| Staging | Deploy, smoke, end-to-end, reachability probe |
+| Production | Manual approval by a second maintainer [A: owner decision if the team is one person, S3.*], pre-migration restore point, rolling deploy (N and N-1 compatible), post-deploy smoke |
+
+Rollback is roll-forward or redeploy of the previous artifact, which is safe because of expand/contract; configuration epochs are never rolled back. No runtime fetch of code or assets from a third party exists; build-time dependencies come from a pinned lockfile and, where feasible, a vendored offline cache [A]. The panel's release script checks that required secret names exist and runs tests before deploy (PR§7.6); that pre-deploy check is kept (4.18).
+
+Rotate-before-exposure [D]: existing secrets of the panel (PR§4, including the fifth, `EXT_TOKEN`, `ISS-48`) are never reused as Hamyar secrets. The pre-exposure checklist item under G4 requires every secret in use to have been issued after the repository or host became reachable to anyone but the founders [V: operator, evidence in `LaunchGateItem`].
+
+## 4.14 Service-adapter interface
+
+### 4.14.1 Purpose and hard limits [D]
+
+A Service-adapter turns one prompt and one registry descriptor into the actions a human takes: copy the prompt, and open the service, with the prompt prefilled only where the registry says that is supported. No provider is hardcoded: every capability below is data recorded by a reviewer [V]. Hard limits (ground rule 3, FD Principle 3):
+
+- It runs in the member's browser, is pure (no network, no storage, no timers), and never reads the chat page, its URL, its DOM, or the clipboard.
+- Its only outputs are (a) a clipboard write on the member's tap, (b) a link the member taps to open the service in a new browsing context with `rel="noopener noreferrer"`, and (c) text shown on screen. It keeps no handle to the opened page, posts no message to it, never embeds it in a frame, and never presses Send.
+- Paste-back is the member pasting into our own text field with the platform's own paste gesture. The programmatic clipboard-read API is not used.
+
+### 4.14.2 Descriptor (derived by the service registry) [D]
+
+| Field | Type | Source | Meaning |
+| --- | --- | --- | --- |
+| `service_id` | `svc_` id | Registry | Which service |
+| `adapter.supports_prefill` | bool | Reviewer [V: tested on real phones and desktops, G2] | The service opens with a prompt carried in the link |
+| `adapter.prefill_url_template` | string or null | Reviewer [V] | HTTPS template with exactly one `{prompt}` placeholder |
+| `adapter.max_url_chars` | int or null | Reviewer [V] | Longest accepted URL, counted in characters of the final URL |
+| `adapter.copy_only` | bool | Reviewer; forced true when prefill is not supported or `prefilled_link_use` is not `yes` | Copy button only |
+| `adapter.open_url` | string or null | Reviewer [V] | Plain HTTPS address that opens the service without a prompt (`ISS-45`) |
+| `adapter.clean_chat_hint_key` | copy key | Reviewer | Advice shown with the buttons, for example use a clean chat with memory off (FD§5.5) |
+| `mode_allowed` | list | Computed | `[copy_only]` or `[prefill, copy_only]` |
+
+The server computes `mode_allowed`; the client cannot widen it. Rules [D]:
+
+- `unreviewed`, `in_review`, `rejected`, `suspended` and `revoked` services return `copy_only` with no `open_url`: nothing is opened for a service that is not `approved`. An unreviewed entry has every capability false or null (unknown is no).
+- `prefill` is allowed only when `supports_prefill` is true, a template and limit are present, and the `prefilled_link_use` flag is `yes` with a saved `TermsCopy`.
+- At write time the registry validates a template: scheme `https`; no user information; exactly one `{prompt}`, in the query or fragment and never in the host; no other placeholders. The template is dated registry data; a change is an `AdminAction` and a change-log entry (S7.*).
+
+### 4.14.3 Planning algorithm [D]
+
+```text
+plan(prompt_text, d: AdapterDescriptor) -> AdapterPlan:
+  actions := [ CopyPrompt(prompt_text) ]                         // always first and always present
+  if "prefill" not in d.mode_allowed: return CopyOnly(actions, open_link = d.open_url, reason = not_allowed)
+  url := d.prefill_url_template with {prompt} replaced by percent_encode_utf8(prompt_text)
+  if length(url) > d.max_url_chars: return CopyOnly(actions, open_link = d.open_url, reason = url_too_long)
+  return Prefill(actions + [ OpenLink(url) ])
+```
+
+The encoded URL is ASCII, so character count and byte count agree. Mixed-direction and Persian text survives because encoding is over UTF-8; bidi display of the prompt is S11.*. The prompt text reaches the client only inside an active lease (S9.*). A prefilled URL puts the cell prompt, which is S0 or S1 text, into the member's browser history and possibly the provider's logs; this is why `copy_only` is the default and why the card says so [H: whether that matters to members is an interview question, S13.*].
+
+### 4.14.4 What is verified, where it is stored [V]
+
+| Fact | Verified by | Stored in |
+| --- | --- | --- |
+| Prefill works, template, length limit, per device class | Reviewer with real devices (G2) | `ServiceRegistryEntry` `adapter.*` fields; `CalibrationRecord` for the test run |
+| Terms permit prefilled links and copy-and-paste | Reviewer reading the saved terms (G0) | `FlagAnswer` for `prefilled_link_use` and `human_copy_paste_use` |
+| Clean-chat advice is accurate for the service | Reviewer | `copy.*` key text, marked `needs_human_and_legal_review` |
+
+Adding a service is therefore data entry plus review; no code release is needed, and the client bundle contains no provider name or URL (`AC-adapter-03`).
