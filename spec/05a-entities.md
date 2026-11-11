@@ -968,3 +968,202 @@ One dated yes / no / unknown answer for one flag of one entry (S0.8.3). [D]
 | `supersedes_id` | id `fla_` | null, FK | |
 
 The **effective answer** for `(service, flag_key, region)` is the row with the latest `(answered_on, created_at)`; if none exists it is `unknown`, so evaluated `no`. The view `effective_flag_answers` implements this and is what every guard reads. **Indexes** `(service_id, flag_key, region, answered_on DESC)`. A flag answer is never edited; a changed reading is a new row, and a change that moves a gate flag from `yes` to `no` or `unknown` is a tightening that takes effect at once (R10).
+
+## 5.11 Moderation and community entities
+
+### 5.11.1 `Report` · `reports` · `rpt_` · `MUT` · `moderation`
+
+Abuse or content report from a volunteer or requester. Machine S0.9.8 (`open`, `triaged`, `actioned`, `dismissed`). [D]
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `reporter_member_id` | id `mem_` | null after retention | needed for `report.max_per_member_per_day` and to prevent report abuse |
+| `subject_type`, `subject_id` | enum(`report_subject_type`), id | NN | |
+| `report_kind` | enum(`report_kind`) | NN | |
+| `evidence_cell_id` | id `cel_` | null, FK | |
+| `reporter_text` | text | null, <= 1000 chars; null after retention | escaped on display; may hold personal data, hence the short life |
+| `state` | enum | NN, default `open` | |
+| `triaged_by_admin_id` | id `adm_` | null, FK | |
+| `outcome` | enum(`report_outcome`) | null; NN when `actioned` or `dismissed` | |
+| `resulting_action_id` | id `act_` | null, FK | |
+| `resolved_at` | ts | null | |
+
+**Indexes** `(state, created_at)`; `(subject_type, subject_id)`; `(reporter_member_id, created_at)`. **Retention** `retention.moderation_days` after `resolved_at`: counts are added to a `MetricSnapshot`, then `reporter_member_id` and `reporter_text` are nulled and the row is deleted by `retention_svc`. **Not stored** the reporter's identity in any public surface.
+
+### 5.11.2 `Appeal` · `appeals` · `apl_` · `MUT` · `moderation`
+
+Challenge to a rejection, ban or report outcome. Machine S0.9.7. [D]
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `appeal_kind` | enum | NN | `cell_rejection`, `member_suspension`, `member_ban`, `job_rejection`, `template_rejection`, `report_outcome` |
+| `appellant_member_id` | id `mem_` | NN, FK | |
+| `subject_type`, `subject_id` | enum(`appeal_subject_type`), id | NN | |
+| `decision_action_id` | id `act_` | null, FK | the decision under appeal when it was an admin action |
+| `decision_event_ref` | text | null | an opaque event id for automatic decisions (for example a `reject.*` outcome) |
+| `decision_at` | ts | NN | `filed` is allowed only within `appeal.window_days` of it (API error otherwise) |
+| `state` | enum | NN | `filed`, `assigned`, `in_review`, `awaiting_second_review`, `upheld`, `overturned`, `withdrawn` |
+| `statement` | text | null after retention, <= 2000 chars | |
+| `original_decider_admin_id` | id `adm_` | null | the assigned reviewer must differ (S0.9.7) |
+| `assigned_admin_id`, `second_reviewer_admin_id` | id `adm_` | null, FK | bans and template rejections need `appeal.ban_min_reviewers` |
+| `resulting_action_id` | id `act_` | null, FK | the reversing action, for example `cell.overturned` or `member.reinstated` |
+| `resolved_at` | ts | null | |
+
+**Indexes** `(state, created_at)`; `(appellant_member_id)`; `(subject_type, subject_id)`. `appeal.max_per_decision` is enforced by counting rows with the same `(decision_action_id | decision_event_ref)` inside the filing transaction. A decision is final once `upheld`.
+
+### 5.11.3 `Team` · `teams` · `tem_` · `MUT` · `member_bound`
+
+Self-created, opt-in group (FD§6.1 rank 5). Membership is `members.team_id`. [D]
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `name` | text | NN, 2..40 chars | moderated; a team name is public if the team is public |
+| `owner_member_id` | id `mem_` | NN, FK | needs `team.create_min_tier` |
+| `status` | enum(`team_status`) | NN | |
+| `join_code_hash` | bytes32 | NN | joining by private code only; no discovery of members |
+| `is_public` | bool | NN, default false | shown only when the member count is at least `team.min_public_members` |
+| `member_count` | int | NN, `<= team.max_members` | `DER` |
+
+**Not stored** member lists in this row, member locations, affiliations or any inferred grouping (city, university). Team scores are computed from verified cells and published as aggregates subject to `analytics.min_cohort_k`.
+
+### 5.11.4 `Badge` · `badges` · `bdg_` · `IMS` · `permanent`
+
+Badge definition; criteria are in terms of verified cells only (FD§6.1). Criteria are immutable; only `status` changes.
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `slug` | text | NN, unique | |
+| `criteria` | json | NN | declarative, for example `{"metric":"accepted_cells","op":">=","value":100}`; allowed metrics are verified-cell counts only, never streaks (FD§6.1: no streak penalties) |
+| `criteria_hash` | hash | NN | |
+| `copy_key` | text | NN | |
+| `status` | enum(`badge_status`) | NN | |
+
+### 5.11.5 `BadgeAward` · `badge_awards` · `baw_` · `IMM` · `member_bound`
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `member_id`, `badge_id` | id | NN, FK; **unique pair** | |
+| `accepted_cells_at_award` | int | NN | |
+
+**Not stored** the criteria snapshot (the badge's `criteria_hash` identifies it).
+
+### 5.11.6 `Referral` · `referrals` · `ref_` · `MUT` · `member_bound`
+
+Referral link and its two-sided bonus state (FD§6.2 V5). The bonus is a `grant` from the Reserve, never a `mint` (`ISS-06`). [D]
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `referrer_member_id` | id `mem_` | NN, FK | |
+| `newcomer_member_id` | id `mem_` | null, FK, unique; `<> referrer` | set at redemption |
+| `invite_id` | id `inv_` | null, FK | the invite used, if the link was also an invite |
+| `code_hash` | bytes32 | NN, unique | |
+| `state` | enum(`referral_state`) | NN | `issued`, `redeemed`, `qualified`, `paid`, `voided`, `expired` |
+| `newcomer_verified_cells` | int | NN, default 0 | qualifies at `growth.referral.min_newcomer_verified_cells` |
+| `qualified_at`, `hold_until` | ts | null | payment waits `growth.referral.hold_s` |
+| `bonus_referrer_txn_id`, `bonus_newcomer_txn_id` | id `txn_` | null, FK, unique | |
+| `void_reason` | text | null | one of `farming_flag`, `same_device`, `same_invite_tree`, `member_closed`, `reserve_paused` |
+
+**Indexes** `(referrer_member_id, created_at)` (`growth.referral.max_per_referrer_per_30d`); `(state, hold_until)`. Anti-farming checks (same device, same tree, shared IP hash within TTL) read `devices` and `invites`; their outcome is only the `void_reason` code.
+
+## 5.12 Configuration, change and launch-gate entities
+
+### 5.12.1 `Parameter` · `parameters` · `prm_` · `MUT` · `permanent`
+
+Definition of a configuration parameter (S0.10.3). The value itself is in the current `ParameterVersion`. [D]
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `name` | text | NN, unique, regex of S0.10.1 | never renamed |
+| `type` | enum | NN | `int`, `ratio`, `credits`, `duration_s`, `days`, `bool`, `enum`, `string`, `json` |
+| `unit` | text | null | |
+| `validation` | json | NN | `min`, `max`, `enum`, `exclusive_bounds`, named constraints `C1`..`C8` (S0.10.3) |
+| `default_value` | json | NN | the `initial configurable default`; never edited |
+| `current_version_id` | id `pmv_` | NN, FK (deferred) | |
+| `tighten_direction` | enum | NN | `up`, `down`, `none` |
+| `notice_days` | int | NN | |
+| `owner` | enum | NN | `operator`, `reviewer`, `founders` |
+| `calibration_source` | text | NN | a code of S0.10.4 plus a pointer |
+| `is_public`, `is_mutable` | bool | NN | constants have `is_mutable = false`; `security.*` has `is_public = false` |
+| `introduced_in` | text | NN, `^S[0-9]+\.[0-9]+$` | |
+
+**Indexes** `(owner)`. A parameter's value is never read from this table by business code; it reads the current version through the cache that S4.* defines, and stamps the version number where S0.10.3 says so.
+
+### 5.12.2 `ParameterVersion` · `parameter_versions` · `pmv_` · `IMM` · `permanent`
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `parameter_id`, `version` | id, int | NN; unique pair; versions start at 1 and rise by 1 | |
+| `value` | json | NN | typed per `Parameter.type`; ratios in ppm, credits in `ucr` strings (S0.6.1) |
+| `value_hash` | hash | NN | |
+| `effective_from` | ts | NN | `>= created_at + notice_days` unless `change_class = 'tighten'` (trigger) |
+| `change_class` | enum | NN | |
+| `reason` | text | NN, <= 1000 chars | published when the parameter is public |
+| `changelog_entry_id`, `admin_action_id` | id | NN for public parameters, FK | |
+| `approval_action_ids` | arr | NN | a `loosen` change needs a second `operator` approval (S0.10.3) |
+| `supersedes_id` | id `pmv_` | null, FK | |
+
+Prior values are never overwritten, so a job, lot or lease that stamped `(name, version)` can always be reproduced.
+
+### 5.12.3 `KillSwitch` · `kill_switches` · `ksw_` · `IMM` · `permanent`
+
+State history of each kill switch (S0.10.6). Each row is one change; the current state of a key is its latest row, and a key with no row is `released`. [D]
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `switch_key` | text | NN | `kill.all_minting`, `kill.all_new_jobs`, `kill.template.<tpl_id>`, `kill.service.<svc_id>`, `kill.member.<mem_id>` |
+| `state` | enum | NN | `engaged`, `released` |
+| `seq` | int64 | NN, unique | |
+| `reason` | text | NN, <= 1000 chars | |
+| `admin_action_id` | id `act_` | NN, FK | releasing needs two admins (`security.two_person_actions`) |
+
+**Indexes** `(switch_key, seq DESC)`. The view `kill_switch_current` returns the latest row per key; every guard reads it. Engaging is a tightening and takes effect at once.
+
+### 5.12.4 `FeatureFlag` · `feature_flags` · `ffl_` · `MUT` · `permanent`
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `flag_key` | text | NN, unique, `^ff\.[a-z0-9_]+\.[a-z0-9_]+$` | `ff.growth.v1_fast_path` .. `ff.growth.v6_milestones`, `ff.channel.human_review`, `ff.job.reservations`, `ff.public.ledger_page`, `ff.experiment.expiry_arm` |
+| `enabled` | bool | NN, default false | |
+| `rollout_ppm` | ppm | NN, default 0 | exposure fraction when an experiment drives it |
+| `experiment_id` | id `exp_` | null, FK | experiment-capable flags have one (S0.10.6) |
+| `description_key` | text | NN | |
+
+Every change writes an `AdminAction` and, when public, a `ChangeLogEntry`.
+
+### 5.12.5 `ChangeLogEntry` · `change_log_entries` · `chg_` · `IMM` · `permanent`
+
+Public record of a parameter, policy, template or service change (R10, FD Principle 5). [D]
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `seq` | int64 | NN, unique | |
+| `subject_type`, `subject_id` | enum(`changelog_subject_type`), id | NN | |
+| `change_class` | enum | NN | |
+| `summary_en`, `summary_fa` | text | NN / null, <= 1000 chars | `fa` carries `needs_human_and_legal_review` until reviewed |
+| `before_hash`, `after_hash` | hash | NN | |
+| `effective_from` | ts | NN | |
+| `published_at` | ts | NN | `published_at <= effective_from` for `loosen` and `neutral` (CHECK); a `tighten` may publish up to `change.tighten_publish_within_s` after |
+| `notice_given_days` | int | NN | |
+| `admin_action_id` | id `act_` | NN, FK | |
+| `supersedes_id` | id `chg_` | null, FK | a correction is a new entry |
+
+### 5.12.6 `LaunchGateItem` · `launch_gate_items` · `lgi_` · `IMM` (revision rows) · `permanent`
+
+One checklist line of `G0`..`G5` with its evidence and sign-offs (FD§8.3). A line is a stable `item_key`; every state change inserts a new revision row, so evidence and sign-offs are never overwritten (`ISS-53`). Machine S0.9.8: `open`, `evidence_attached`, `signed_off`, `reopened`. [D]
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `gate_id` | enum(`gate_id`) | NN | |
+| `item_key` | text | NN | stable, for example `G0.counsel_memo`, `G0.service_flags:<svc_id>`, `G1.threat_model`, `G2.reachability`, `G3.calibration`, `G4.repo_review`, `G5.demand_check` |
+| `revision` | int | NN; `(item_key, revision)` unique | starts at 1 |
+| `status` | enum | NN | |
+| `title_key` | text | NN | copy key |
+| `service_id` | id `svc_` | null, FK | set for per-service G0 lines |
+| `evidence` | json | NN | array of `{kind, ref_id, hash, note}`; `kind` is `service_entry`, `terms_copy`, `calibration_record`, `document` (hash and title only) or `counsel_memo` (hash and date only; the memo text is not stored) |
+| `evidence_hash` | hash | NN | |
+| `signoffs` | json | NN | array of `{admin_user_id, signed_at, admin_action_id, evidence_hash}` |
+| `reopen_reason` | text | NN when `reopened`, <= 1000 chars | |
+| `supersedes_id` | id `lgi_` | null, FK | previous revision |
+| `created_by_admin_id` | id `adm_` | NN, FK | |
+
+**Checks (trigger)** `evidence_attached` requires non-empty `evidence`; `signed_off` requires at least `launch.min_signoffs` distinct `admin_user_id` values in `signoffs`, each signing the current `evidence_hash`, and none of them the `created_by_admin_id` of the evidence unless the parameter allows it [A]. **View** `launch_gate_items_current` returns the highest revision per `item_key`; the rule that decides whether `launch.members_may_join` may be set reads it (S14.*). **Indexes** `(gate_id, item_key, revision DESC)`. Counsel answers and provider answers are [V] data entered by humans; the system never fills them.
