@@ -703,3 +703,160 @@ Outcome and tag copy (rows carry `needs_human_and_legal_review`):
 - **AC-req-58** Given a rating already exists, When a second submission is sent, Then `409 ALREADY_EXISTS` is answered and the stored rating is shown.
 - **AC-req-59** Given `ui.requester.rating_flag_cells_max` cells are already picked, When another index is added, Then the picker refuses it and states the limit by its configured value.
 - **AC-req-60** Given the rating window has passed, When the page loads, Then the form is absent and the page states that the window ended.
+
+## 11.42 Provenance manifest (requester profile)
+
+The manifest is the `Manifest` entity (`mfs_`, S0.7) attached to one `Deliverable`. It records FD§5.6 provenance in a form a requester can publish beside the output without exposing anyone. Hashing and encoding follow S0.6: content hashes are `sha256:<hex>` over raw bytes; the manifest hash is SHA-256 over RFC 8785 canonical JSON; ids are `<prefix>_<ulid>`; timestamps are RFC 3339 UTC. [D]
+
+### 11.42.1 Field decisions [D][A]
+
+| FD§5.6 item | Manifest field | Note |
+| --- | --- | --- |
+| Job and cell ids | `job_id`, `cells[].cell_id` | Opaque ids (S0.6.3); no member id appears |
+| Template and version | `template.*` | Version is the immutable `TemplateVersion` |
+| Input and output hashes | `input.input_hash`, `cells[].input_hash`, `cells[].output_hash`, `files[].hash` | Show integrity since assembly, not truth |
+| Declared purpose, license, sensitivity | `declared.*` | `declared.enforcement` is the constant `declared_not_technically_enforced` |
+| Policy profile and version | `policy.*`, `cells[].policy_version_id_at_acceptance` | Stamped at admission, re-checked at acceptance (`R9`) |
+| Service and model as reported by the volunteer | `cells[].service` | `attestation` is the constant `volunteer_reported`: attested, not proven (FD§5.7 failure mode 7); `reported_model` is untrusted text of at most 80 characters |
+| Verification method and result | `cells[].verification`, `verification_summary` | Gold cells are hidden and never listed; the summary counts them inside `verification_cells_run` |
+| Timestamps | `generated_at`, `policy.stamped_at`, `cells[].accepted_at` | Per-cell times are rounded down to `job.manifest_time_granularity_s` so they cannot single out a volunteer's session (RD-08) |
+| Salted-hash volunteer id | **not in this profile** | FD§5.6 says requesters never see it, yet also says exports carry the manifest; resolved by two profiles, `ISS-116`. The `internal` profile (admin only, S10.*) adds `cells[].volunteer_handle` (`vol_<32 hex>`, S0.6.4) and exact timestamps |
+| License and no-training flag | `declared.license`, `declared.no_training_declared`, `declared.downstream_use_uncontrolled` | `no_training_declared` is true when the declared purpose is not `P3`; it is contractual, not technically enforced; `downstream_use_uncontrolled` is true for `L1` and `L2` |
+
+A manifest is immutable. If a delivered cell is later overturned (`cell.overturned`), the platform builds a new `Deliverable` and `Manifest` whose `supersedes` names the old `mfs_` id; the old files stay downloadable until `available_until`. [A]
+
+### 11.42.2 JSON Schema (draft 2020-12), version 1
+
+Clients validate only the required fields and ignore unknown ones (S0.11.1). `S2` and `S3` never reach a manifest in Phases 1-2 (`R2`); widening the enum is a schema version change.
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:hamyar:schema:manifest:requester:1",
+  "title": "Hamyar provenance manifest, requester profile, version 1",
+  "type": "object",
+  "required": ["manifest_version", "manifest_id", "profile", "job_id", "deliverable_id", "generated_at", "completeness",
+               "declared", "template", "policy", "input", "cells", "verification_summary", "files", "missing_cells",
+               "supersedes", "manifest_hash", "signature"],
+  "properties": {
+    "manifest_version": { "const": 1 },
+    "manifest_id":    { "type": "string", "pattern": "^mfs_[0-9a-hjkmnp-tv-z]{26}$" },
+    "profile":        { "const": "requester" },
+    "job_id":         { "type": "string", "pattern": "^job_[0-9a-hjkmnp-tv-z]{26}$" },
+    "deliverable_id": { "type": "string", "pattern": "^dlv_[0-9a-hjkmnp-tv-z]{26}$" },
+    "generated_at":   { "type": "string", "format": "date-time" },
+    "completeness":   { "enum": ["complete", "partial"] },
+    "supersedes":     { "type": ["string", "null"], "pattern": "^mfs_[0-9a-hjkmnp-tv-z]{26}$" },
+    "declared": {
+      "type": "object",
+      "required": ["purpose", "license", "sensitivity", "service_requirement", "no_training_declared",
+                   "downstream_use_uncontrolled", "enforcement"],
+      "properties": {
+        "purpose":     { "enum": ["P0", "P1", "P2", "P3"] },
+        "license":     { "type": "object", "required": ["code", "spdx_id"],
+                         "properties": { "code": { "enum": ["L0", "L1", "L2", "L3"] },
+                                         "spdx_id": { "type": ["string", "null"], "maxLength": 64 } } },
+        "sensitivity": { "enum": ["S0", "S1"] },
+        "service_requirement": { "enum": ["M0", "M1", "M2"] },
+        "no_training_declared":        { "type": "boolean" },
+        "downstream_use_uncontrolled": { "type": "boolean" },
+        "enforcement": { "const": "declared_not_technically_enforced" }
+      }
+    },
+    "template": { "type": "object", "required": ["template_id", "template_version_id", "job_type"],
+      "properties": { "template_id": { "type": "string", "pattern": "^tpl_[0-9a-hjkmnp-tv-z]{26}$" },
+                      "template_version_id": { "type": "string", "pattern": "^tpv_[0-9a-hjkmnp-tv-z]{26}$" },
+                      "job_type": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" } } },
+    "policy": { "type": "object", "required": ["policy_id", "policy_version_id", "stamped_at"],
+      "properties": { "policy_id": { "type": "string", "pattern": "^pol_[0-9a-hjkmnp-tv-z]{26}$" },
+                      "policy_version_id": { "type": "string", "pattern": "^plv_[0-9a-hjkmnp-tv-z]{26}$" },
+                      "stamped_at": { "type": "string", "format": "date-time" } } },
+    "input": { "type": "object", "required": ["input_hash", "glossary_hash", "cell_count_primary"],
+      "properties": { "input_hash": { "$ref": "#/$defs/sha256" },
+                      "glossary_hash": { "oneOf": [ { "$ref": "#/$defs/sha256" }, { "type": "null" } ] },
+                      "cell_count_primary": { "type": "integer", "minimum": 1 } } },
+    "cells": { "type": "array", "items": { "type": "object",
+      "required": ["cell_id", "index", "input_hash", "output_hash", "attempts", "accepted_at", "service", "verification",
+                   "policy_version_id_at_acceptance"],
+      "properties": {
+        "cell_id": { "type": "string", "pattern": "^cel_[0-9a-hjkmnp-tv-z]{26}$" },
+        "index": { "type": "integer", "minimum": 1 },
+        "input_hash": { "$ref": "#/$defs/sha256" },
+        "output_hash": { "$ref": "#/$defs/sha256" },
+        "attempts": { "type": "integer", "minimum": 1 },
+        "accepted_at": { "type": "string", "format": "date-time" },
+        "policy_version_id_at_acceptance": { "type": "string", "pattern": "^plv_[0-9a-hjkmnp-tv-z]{26}$" },
+        "service": { "type": "object", "required": ["service_id", "reported_model", "attestation"],
+          "properties": { "service_id": { "type": "string", "pattern": "^svc_[0-9a-hjkmnp-tv-z]{26}$" },
+                          "reported_model": { "type": ["string", "null"], "maxLength": 80 },
+                          "attestation": { "const": "volunteer_reported" } } },
+        "verification": { "type": "array", "minItems": 1, "items": { "type": "object", "required": ["method", "outcome"],
+          "properties": { "method": { "enum": ["auto_check", "audit_second", "audit_third", "human_review", "blanket_redundancy"] },
+                          "outcome": { "const": "pass" } } } }
+      } } },
+    "verification_summary": { "type": "object",
+      "required": ["automatic_checks_passed", "cells_audited", "audit_mismatches", "third_executions", "human_reviews", "verification_cells_run"],
+      "additionalProperties": { "type": "integer", "minimum": 0 } },
+    "files": { "type": "array", "items": { "type": "object", "required": ["name", "media_type", "bytes", "hash"],
+      "properties": { "name": { "type": "string", "pattern": "^[A-Za-z0-9._-]{1,100}$" },
+                      "media_type": { "type": "string" }, "bytes": { "type": "integer", "minimum": 0 },
+                      "hash": { "$ref": "#/$defs/sha256" } } } },
+    "missing_cells": { "type": "array", "items": { "type": "integer", "minimum": 1 }, "uniqueItems": true },
+    "manifest_hash": { "$ref": "#/$defs/sha256" },
+    "signature": { "oneOf": [ { "type": "null" },
+      { "type": "object", "required": ["alg", "key_id", "value"],
+        "properties": { "alg": { "const": "Ed25519" }, "key_id": { "type": "string" }, "value": { "type": "string" } } } ] }
+  },
+  "$defs": { "sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" } }
+}
+```
+
+The `signature` field is optional in value (`null` allowed) because a platform signing key is a new secret that S10.* must name and the owner must decide on (S3.*) [A][V]. Without it the manifest gives integrity (hashes) but not authenticity of origin; the interface says so (`copy.req.notice_manifest_limits`).
+
+Example instance (two cells; hashes abbreviated with `...` for reading; a real value is `sha256:` plus 64 hex characters; every value is illustrative):
+
+```json
+{ "manifest_version": 1, "manifest_id": "mfs_01j9z6x4k7q2m8v5t3r1w0c9ab", "profile": "requester",
+  "job_id": "job_01j9z6x4k7q2m8v5t3r1w0c9ac", "deliverable_id": "dlv_01j9z6x4k7q2m8v5t3r1w0c9ad",
+  "generated_at": "2026-11-14T09:00:00Z", "completeness": "complete", "supersedes": null,
+  "declared": { "purpose": "P1", "license": { "code": "L2", "spdx_id": null }, "sensitivity": "S0", "service_requirement": "M0",
+                "no_training_declared": true, "downstream_use_uncontrolled": true, "enforcement": "declared_not_technically_enforced" },
+  "template": { "template_id": "tpl_...", "template_version_id": "tpv_...", "job_type": "translation_glossary" },
+  "policy": { "policy_id": "pol_...", "policy_version_id": "plv_...", "stamped_at": "2026-11-12T09:30:00Z" },
+  "input": { "input_hash": "sha256:...", "glossary_hash": "sha256:...", "cell_count_primary": 2 },
+  "cells": [ { "cell_id": "cel_...", "index": 1, "input_hash": "sha256:...", "output_hash": "sha256:...", "attempts": 1,
+               "accepted_at": "2026-11-13T14:00:00Z", "policy_version_id_at_acceptance": "plv_...",
+               "service": { "service_id": "svc_...", "reported_model": "as typed by the volunteer", "attestation": "volunteer_reported" },
+               "verification": [ { "method": "auto_check", "outcome": "pass" } ] },
+             { "cell_id": "cel_...", "index": 2, "input_hash": "sha256:...", "output_hash": "sha256:...", "attempts": 2,
+               "accepted_at": "2026-11-13T16:00:00Z", "policy_version_id_at_acceptance": "plv_...",
+               "service": { "service_id": "svc_...", "reported_model": null, "attestation": "volunteer_reported" },
+               "verification": [ { "method": "auto_check", "outcome": "pass" }, { "method": "audit_second", "outcome": "pass" } ] } ],
+  "verification_summary": { "automatic_checks_passed": 2, "cells_audited": 1, "audit_mismatches": 0, "third_executions": 0,
+                            "human_reviews": 0, "verification_cells_run": 1 },
+  "files": [ { "name": "output-001.txt", "media_type": "text/plain", "bytes": 4096, "hash": "sha256:..." } ],
+  "missing_cells": [], "manifest_hash": "sha256:...", "signature": null }
+```
+
+### 11.42.3 Verification on the device [D]
+
+```
+function verify_manifest(manifest_bytes, downloaded_files):         # runs in the browser; no server call
+  m = parse_json(manifest_bytes)
+  ok_shape = has_required_fields(m, schema_v1) and m.manifest_version == 1
+  body     = m without the keys manifest_hash and signature
+  expected = "sha256:" + hex(SHA256(RFC8785_canonical(body)))       # S0.6.4: one canonicalizer for the whole system
+  ok_hash  = (expected == m.manifest_hash)
+  for f in m.files: ok_file[f.name] = f.name in downloaded_files and "sha256:" + hex(SHA256(downloaded_files[f.name])) == f.hash
+  idx      = [c.index for c in m.cells] + m.missing_cells
+  ok_cells = unique(idx) and sorted(idx) == [1 .. m.input.cell_count_primary]
+             and (m.completeness == complete implies m.missing_cells is empty)
+  ok_sig   = "not_signed" if m.signature is null else verify_ed25519(m.signature.value, expected, public_key(m.signature.key_id))
+  return { ok_shape, ok_hash, ok_file, ok_cells, ok_sig }          # shown as a checklist, each line with its meaning
+```
+
+The public key set for `signature.key_id` would be published on the public parameters page (S12.*) [A][V]. A failed line never hides the file; it states what could not be confirmed.
+
+- **AC-req-61** Given a manifest whose `cells` and `missing_cells` indices cover 1..N exactly once, When Verify runs, Then `ok_cells` is true; given an index missing or repeated, Then it is false and the checklist names the index.
+- **AC-req-62** Given a manifest body altered by one character, When Verify runs, Then `ok_hash` is false and the page states that the manifest does not match its recorded hash.
+- **AC-req-63** Given the requester profile, When the manifest is parsed, Then no key named `volunteer_handle` exists at any depth and no `accepted_at` has a finer granularity than `job.manifest_time_granularity_s`.
