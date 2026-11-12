@@ -619,3 +619,87 @@ The linear baseline is crude because volunteer supply arrives in daily batches; 
 | Accessibility | Opens as a dialog that returns focus to its tile; Escape closes it; the attempt list is an ordered list |
 
 - **AC-req-45** Given a cell on attempt 3 with `cell.max_attempts` 5, When the sheet opens, Then it shows "attempt 3 of 5" from the parameter value, an "at risk" tag, and no volunteer identifier, no `vol_` handle and no output text anywhere in the response or the page.
+
+## 11.40 Cancellation and refund screens
+
+### SCR-req-14 Cancel a request
+
+| Row | Content |
+| --- | --- |
+| Purpose | Let the requester stop a request, showing before they confirm exactly what is kept, paid and returned |
+| Entry conditions | Cancel pressed on `SCR-req-12` (job `admitted`, `running` or `suspended`, escrow held) or on `SCR-req-07`, `SCR-req-09`, `SCR-req-01` (job `quoted`, `waitlisted` or `draft`, nothing held) |
+| Blocks | With escrow: (1) what happens, in order: finished results are kept and can be downloaded as a partial result; cells already with volunteers are allowed to finish, and the ones that are accepted are paid; cells not started are cancelled; (2) the preview table from `getCancellationPreview`: held, paid to volunteers, reserve levy, refund with its three parts, and the equation "paid + levy + refund = held"; (3) the note that returned credit keeps its original expiry dates (`ISS-07`); (4) "This cannot be undone" and a Confirm cancellation button. Without escrow: one sentence that nothing was held, and Confirm |
+| States | `no_escrow`, `preview_ready`, `cancelling` (after confirmation: `Job.cancelling`, shows the count of cells still `in_flight` and links to the receipt when `cancelled`), `too_late` (`409 STATE_CONFLICT`: the job reached `settling` or a terminal state; the page shows the new state instead) |
+| Actions | `getCancellationPreview`, `cancelJob` (new `Idempotency-Key`; sends `job.cancel_requested`) |
+| Copy intent | Cancelling is a normal, penalty-free choice; the numbers shown are a preview and the receipt is final; nothing blames the requester |
+| Accessibility | Confirmation is a dialog with the amounts in text; focus starts on its heading; the destructive button is not the default action |
+
+- **AC-req-46** Given 240 cells held at 276 credits with 100 primary and 9 verification cells accepted (illustrative), When the preview renders, Then it shows paid 109, levy 5, refund 162 made of 140 unstarted primary pay, 15 unspent verification pool and 7 unearned levy, and the equation 109 + 5 + 162 = 276 holds.
+- **AC-req-47** Given a job in `draft`, `quoted` or `waitlisted`, When the person confirms, Then the job becomes `cancelled`, no refund table is shown, and the page says nothing was held.
+- **AC-req-48** Given the job moved to `settling` while the dialog was open, When Confirm is pressed, Then `409 STATE_CONFLICT` is answered, no state changes, and the page shows the current state.
+
+### SCR-req-15 Settlement receipt and refund display
+
+| Row | Content |
+| --- | --- |
+| Purpose | One final, checkable account of where the held credit went, for completed, ended-incomplete and cancelled jobs, and for reservations that were cancelled or expired |
+| Entry conditions | Job `completed`, `failed` or `cancelled` with an escrow, or a `Reservation` `cancelled` or `expired`; the receipt exists only after the escrow is `closed` (S0.9.8) |
+| Blocks | (1) Held amount. (2) Paid to volunteers, with the counts of accepted primary and verification cells. (3) Reserve levy. (4) Refund with its three parts: unstarted primary pay, unspent verification pool, unearned levy; a refund smaller than one cell can include the pool remainder left by rounding (`ISS-04`). (5) The check line: paid + levy + refund = held, with a tick only when the integers match exactly. (6) Restored credit lots with their original expiry dates; for a lot already past expiry the line `copy.req.receipt_lot_expired` says it moves to the Reserve at the next sweep (`credit.expiry_sweep_interval_s`, `ISS-07`). (7) Receipt entries: `txn_` ids with their kinds (`settle`, `cancel`, `reservation_activate`). (8) Finish time against the quote as a signed number of seconds provided by the server, shown in words. (9) Links to results and rating |
+| States | `ready`, `pending` (escrow not yet `closed`; the page polls and says settlement is in progress), `inconsistent` (the equality fails: the check line turns into an error, no amounts are presented as final, an automatic `createReport` carries the `job_id`) |
+| Actions | `getSettlementReceipt`, Download results (`SCR-req-16`), Rate (`SCR-req-17`) |
+| Copy intent | Show the identity so the person can audit it themselves; no jargon about ledger types; say that credit is not money and expires |
+| Accessibility | The equation is also written as a sentence; amounts are in a table with row headers; a tick has the text "matches" |
+
+- **AC-req-49** Given the FD§3.3 job completed (illustrative), When the receipt renders, Then held 276, paid 264 (240 primary + 24 verification), levy 12, refund 0 and the check line shows a tick.
+- **AC-req-50** Given a receipt where `paid + levy + refund` differs from `held`, When it renders, Then the check line shows an error, the figures are labelled "not final", and one `createReport` is sent.
+- **AC-req-51** Given a restored lot with `already_expired` true, When the receipt renders, Then `copy.req.receipt_lot_expired` is shown for that lot.
+
+## 11.41 Results and rating screens
+
+### SCR-req-16 Results download with provenance manifest
+
+| Row | Content |
+| --- | --- |
+| Purpose | Deliver the assembled output and its provenance manifest, make integrity checkable on the device, and say plainly what the provenance does and does not show |
+| Entry conditions | Job `completed` (a complete `Deliverable`) or `failed` or `cancelled` with accepted cells (a partial `Deliverable`, `completeness` `partial`, ISS-115) |
+| Blocks | (1) Completeness banner; for a partial result the missing cell indices. (2) For licenses `L1` and `L2` the notice "downstream use uncontrolled" (11.45). (3) The declared no-training flag in words, marked as contractual and not technically enforced (`copy.req.notice_no_training`). (4) The untrusted-output notice (`copy.req.notice_untrusted_output`). (5) The files list from `getDeliverable`: name, media type, size, short hash, Download, and an integrity mark after download. (6) A text preview of the first `ui.requester.preview_chars` characters of a chosen text file, rendered inert (RD-14). (7) The manifest panel: Download manifest, Verify, and a plain-language summary (template and version, policy version, declared purpose, license and sensitivity, how many cells were verified by which method, which services volunteers reported using, with `copy.req.notice_service_attested`). (8) "Available until {date}" from `available_until` (terminal state plus `retention.job_payload_days`); after that the files are deleted and the manifest with its hashes stays (S0.7). (9) Rate this result, Report a problem |
+| States | `ready`, `partial`, `withheld_present` (some outputs are held for a reviewer and not in the files; the count is shown), `purged` (past `available_until`: no download buttons; manifest only), `hash_mismatch` (a downloaded file's SHA-256 differs from the listed hash: the file is kept, marked untrusted, and Report a problem is prefilled) |
+| Actions | `getDeliverable`, `downloadDeliverableFile` (`fetch` with the Bearer header; the bytes are saved from a `Blob`; the SHA-256 is computed on the device with the platform crypto API and compared with `files[].hash`; where the API is missing the page says integrity could not be checked), `getManifest`, `createReport` |
+| Copy intent | Results come from strangers using AI services and are verified by sampling, not guaranteed correct; the manifest records what was declared and attested; hashes show the file is unchanged since assembly, not that its content is true |
+| Accessibility | Preview text has `dir="auto"` and bidi isolation; the preview is a labelled region with a copy button; download buttons say the file name and size; after a download an `aria-live` message says whether the hash matched |
+
+- **AC-req-52** Given a downloaded file whose SHA-256 equals `files[].hash`, When the download ends, Then the file shows "matches the manifest"; given a mismatch, Then it shows a warning, keeps the file and offers Report a problem.
+- **AC-req-53** Given a partial deliverable with cells 17 and 18 missing, When the page renders, Then it states "partial", lists indices 17 and 18, and the manifest summary shows `completeness` `partial`.
+- **AC-req-54** Given the job's terminal date plus `retention.job_payload_days` has passed, When the page loads, Then no Download button for result files is rendered, the manifest remains downloadable and the page says files were deleted by the retention rule.
+- **AC-req-55** Given an output text containing `<script>alert(1)</script>` and a right-to-left override character, When the preview renders, Then the text is shown literally, nothing executes, no link is created and the override cannot reorder surrounding interface text.
+- **AC-req-56** Given license `L2`, When the page renders, Then "downstream use uncontrolled" appears above the files list and in the manifest summary.
+
+### SCR-req-17 Rate the outcome
+
+| Row | Content |
+| --- | --- |
+| Purpose | Collect the requester's judgement of the outcome as a quality signal, without turning it into a verification method or a penalty |
+| Entry conditions | Job `completed`, or `failed` or `cancelled` with accepted cells; within `ui.requester.rating_window_days` of the terminal state; no rating exists yet (one rating per job) |
+| Blocks | Outcome: Good / Mixed / Poor (`outcome_rating`: `good`, `mixed`, `poor`). Optional tags: `accuracy`, `format`, `completeness`, `speed_vs_quote`, `other`. Optional comment up to `ui.requester.rating_comment_max_chars`. Optional "these cells look wrong": pick up to `ui.requester.rating_flag_cells_max` cell indices. A statement of use: the rating changes nobody's credit, is never shown to volunteers with the requester's name, and may lead to closer checks of the cells flagged; in aggregate it helps judge templates. The objective figure "finished {x} before or after the quoted deadline" is shown but is recorded by the system, not by the rating |
+| States | `open`, `submitted` (read-only), `window_closed`, `not_eligible` |
+| Actions | `createJobRating`, `getJobRating` |
+| Copy intent | Short and optional; makes clear that a low rating is allowed and safe; never asks for personal details |
+| Accessibility | Three outcomes are radio buttons with text labels and icons; the cell picker accepts typed indices and shows the chosen list as text |
+
+Outcome and tag copy (rows carry `needs_human_and_legal_review`):
+
+| Value | EN | FA |
+| --- | --- | --- |
+| `good` | Good | خوب |
+| `mixed` | Mixed | متوسط |
+| `poor` | Poor | ضعیف |
+| `accuracy` | Accuracy | دقت |
+| `format` | Output format | قالب خروجی |
+| `completeness` | Completeness | کامل بون |
+| `speed_vs_quote` | Time compared with the quote | زمان نسبت به بازهٔ اعلام‌شده |
+| `other` | Something else | موارد دیگر |
+
+- **AC-req-57** Given a `completed` job inside the rating window, When the person submits Good with tag `accuracy`, Then one `createJobRating` creates a `JobRating`, the screen becomes read-only and no cell state or ledger entry changes.
+- **AC-req-58** Given a rating already exists, When a second submission is sent, Then `409 ALREADY_EXISTS` is answered and the stored rating is shown.
+- **AC-req-59** Given `ui.requester.rating_flag_cells_max` cells are already picked, When another index is added, Then the picker refuses it and states the limit by its configured value.
+- **AC-req-60** Given the rating window has passed, When the page loads, Then the form is absent and the page states that the window ended.
