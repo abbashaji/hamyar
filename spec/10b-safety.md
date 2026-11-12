@@ -358,7 +358,7 @@ rotate(secret):
 | Secret | Steps | Verification |
 | --- | --- | --- |
 | `PANEL_TOKEN` | Generate a new random value; set it in the Worker's secret store; redeploy | An old cookie and the old password are refused; the new password works (every cookie ends, because the cookie is signed with this token) |
-| `ADMIN_TOKEN` | Generate; set; redeploy; clear every `bp_owner_key` in browsers that used the panel; treat any copy that reached a chat transcript, a URL or a log as exposed | The old value is refused by release, takedown and publish-plan; the new value works |
+| `ADMIN_TOKEN` | Generate; set; redeploy; clear every `bp_owner_key` in browsers that used the panel; treat any copy that reached a chat transcript, a URL or a log as exposed | The old value is refused by release, takeover and publish-plan; the new value works |
 | `GITHUB_TOKEN` | Create a replacement with the narrowest scope that works [V: scope is not determinable from code]; set it; redeploy; revoke the old token at GitHub; narrow `ALLOWED_REPOS` to the needed repositories; confirm whether `main` is branch-protected | Old token returns an authentication error; Worker calls succeed; GitHub's audit log shows no unexpected use [V] |
 | `MCP_AUTH_TOKEN` | Generate; set; redeploy; invalidate every issued OAuth grant and registered client, by replacing the KV namespace the connector library uses (its key layout was not read [V]); re-consent from the owner's own client only | Old password refused; an old grant is refused; the owner's new consent works |
 | `EXT_TOKEN` | Unset the secret so the legacy endpoints answer 404 | Endpoint returns 404 |
@@ -404,4 +404,75 @@ on suspected_compromise(secret or class):
 - **No secrets in URLs.** Query strings carry none (S0.11.1); one-time codes are never placed in a URL.
 - **CI separation.** Jobs that run untrusted code get no secrets and a read-only token (the panel's own design comment, panel-review §4.5 item 13 [V]).
 - **Drill.** A rotation drill and a compromise drill run in `BM9`; both are logged and reviewed.
+
+## 10.15 Hosting and reachability
+
+### 10.15.1 Principles [D]
+
+1. **Provider-neutral** (FD Principle 7): storage, hosting, mail, secrets and edge sit behind ports, so the system can move without a rewrite.
+2. **Reachability is unverified** [V]: whether members in Iran can reach any chosen host is a measurement (G2), not an assumption (`RISK-14`).
+3. **No circumvention** (FD Principle 9, ground rule 3): the platform bundles, recommends and implements no VPN, proxy, relay, bridge, domain fronting or mirror-hunting feature, and its copy gives no instruction to bypass a block. If the host is unreachable from a place, that is a recorded finding and an owner decision (change host through the ports, or accept). Whether any reachability measure is lawful is [V] for counsel.
+4. **No mandatory third-party dependency** at runtime in any page: no CDN, font host, analytics, tag manager, captcha, embedded map or social widget (`analytics.third_party_trackers` = false, constant).
+5. **Low bandwidth** is a design input, not a polish step (S10.15.6).
+
+### 10.15.2 Ports [A]
+
+Port names are proposed here; S4.* may rename them and assembly reconciles. Each port has a contract, a forbidden list, and a conformance test run against every adapter.
+
+| Port | Contract | Forbidden | Conformance test |
+| --- | --- | --- | --- |
+| `StoragePort` | Relational store with serializable transactions for ledger postings, role separation (S10.14.3), append-only ledger tables, point-in-time restore | Eventually consistent stores for the ledger or leases (the panel's KV is advisory only, panel-review §2.2) | Ledger property and race suite (`T-prop-nn`, `T-adv-nn`) passes on the adapter |
+| `BlobPort` | Immutable objects by hash: `TermsCopy` bytes, uploads, backups | Public-read buckets | Round trip by hash; access denied without credentials |
+| `SecretsPort` | Versioned secrets, per-component scope, no value listing | Reading values into logs or the database | Scope test: a component reads only its own secrets |
+| `SchedulerPort` | Reliable timers for lease reaping, expiry sweeps, retention sweeps, checkpoints, rotation reminders, invariant checks | Timers that run only when a request arrives (the panel evaluates expiry lazily, panel-review §3.3, which is not enough here) | Missed-tick test |
+| `EdgePort` (optional) | TLS termination, routing, coarse rate limiting, HSTS | Logging full IPs beyond `retention.ip_hash_ttl_days`; injecting third-party scripts | Header and log audit |
+| `MailPort` (optional, off by default) | Send a notice to a member-supplied address | Any message that asks for a recovery key or contains a login link | Template audit |
+| `ClockPort` | Server time from a trusted source (S0.6.2) | Client time | Skew alarm |
+| `LogSink` | Accepts only the fields of S10.13.1 item 9 | Free text, IPs, bodies | Schema test rejects extra fields |
+
+An optional DoS-absorbing front is permitted only as an `EdgePort` adapter chosen by the owner after G1; such a front is an additional `host_provider` in S10.13.3 and must be named there before use.
+
+### 10.15.3 Portability and the move drill [D]
+
+```
+move(host_old -> host_new):
+  freeze: engage kill.all_new_jobs and kill.all_minting
+  take a backup (encrypted); verify the ledger hash chain and checkpoints on the old host
+  provision host_new from the same artifacts through the same ports; restore the backup
+  verify: hash chain equals the last published checkpoint; invariants pass; counts of members, lots, escrows match
+  rotate secrets that the old host could read (S10.14.6 list for a host change)
+  switch DNS (TTL lowered in advance); keep host_old read-only until traffic has moved
+  release kill switches by two-person killswitch.release; publish a ChangeLogEntry
+```
+
+The drill runs in `BM9` on a second host with synthetic data before launch (`AC-safety-10`).
+
+### 10.15.4 Reachability from Iran [V] [D]
+
+- **What is verified:** from networks inside Iran, can the first page load, the member API answer, and a cell round trip (lease, paste-back, submit) complete, within `ui.first_load_budget_bytes` and time budgets recorded as results, not promised? Also from outside Iran for the control.
+- **Who:** the founders, with testers who opt in knowing the risk of the test and who are asked for no identity; remote measurement services where available [V]. No provider account is used in the test.
+- **Measures:** DNS resolution, TCP connect, TLS handshake, first byte, full load on a throttled link, repeated at different times of day.
+- **Where stored:** evidence on `g2.reachability_recorded` and `CalibrationRecord`-style rows by the `TEC` code; repeated every `security.reachability_check_interval_days` after launch, because blocking changes.
+- **If unreachable:** the options in S10.15.1 item 3 only. The record states the finding; it is a [V] for counsel whether any further step is lawful.
+
+### 10.15.5 No third-party resources [D]
+
+| Control | Detail |
+| --- | --- |
+| Content security policy | `default-src 'self'`; no `unsafe-inline` or `unsafe-eval`; `frame-ancestors 'none'`; `connect-src` limited to the app's own origins. The panel today sets no such headers and loads fonts from third-party hosts (panel-review §4.5 item 12) [V], so none of its page code is reused unreviewed |
+| Fonts | Persian and Latin fonts are self-hosted subsets; their licenses are checked [V: license of each font, reviewer, stored with the asset] |
+| Build check | CI fails if any built asset or page contains an absolute `http` or `https` URL to a host outside the project's own set (`AC-safety-09`) |
+| Preconnect, prefetch, embeds | None to third parties |
+| Reports | No third-party error reporting; errors go to `LogSink` only |
+
+### 10.15.6 Low-bandwidth rules [D]
+
+- First load stays within `ui.first_load_budget_bytes` compressed (initial configurable default in S10.18; replaced by `TEC` measurement on real phones and links).
+- Text first: no images on the first-contribution path; system fonts until the subset font arrives; no web socket requirement, polling with `ETag`, `Retry-After` and backoff (S0.11.7).
+- A cell response body is at most `cell.envelope.max_input_chars` x 3 bytes of UTF-8 plus metadata; a submission is at most `cell.envelope.max_submission_bytes` (S0.10.6). Paste-back retries use the same `Idempotency-Key`, so a dropped connection never costs a second submission.
+- Public pages are cacheable (`Cache-Control: max-age` no larger than the refresh parameter, S0.11.7), so a weak link can reuse them.
+
+### 10.15.7 Environments [D]
+
+Production, staging and development are separate hosts and secret scopes. No production data, member record or secret enters a non-production environment; tests use synthetic data (S18.*). The admin origin is separate in every environment (S0.11.4). Monitoring and alerting follow S10.13.1 item 9.
 
