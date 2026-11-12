@@ -109,3 +109,115 @@ RTL is the primary layout, not a mirrored afterthought: the design is made in `f
 | Text in images | No text is baked into a bitmap. Any generated image (share card, S12.*) draws its text with the same font stack, direction and digit rules as the UI. | AC-i18n-18 |
 | Emoji and symbols | Never the only carrier of meaning (S11.48); rendering varies by device [V]. | AC-i18n-22 |
 | Exports | Downloads that contain text (provenance manifest, deliverables) are UTF-8, use ASCII digits and ISO dates (S0.6), and carry no direction marks added by the renderer. | AC-i18n-07 |
+
+## 11.43 Numerals
+
+Three contexts, one rule each [D]:
+
+| Context | Digits | Why |
+| --- | --- | --- |
+| Display of a number the system formats (balance, price, count, time left, version of a parameter) | `latin` or `persian` per the member's `digits` setting | Readability (FD§10, prompt F) |
+| Typed input in a numeric field | Either digit set accepted, converted to ASCII before anything leaves the field | A member should not have to switch keyboards |
+| Storage, API, exports, logs, hashes, IDs, clipboard of content | ASCII digits `0` to `9` only | S0.6: amounts are base-10 integer strings, timestamps are RFC 3339; one canonical form keeps hashes and comparisons stable |
+
+**Digit sets.** `latin` is U+0030 to U+0039. `persian` is the Extended Arabic-Indic digits U+06F0 to U+06F9 (`۰۱۲۳۴۵۶۷۸۹`). The Arabic-Indic digits U+0660 to U+0669 are never produced, because the forms of four, five and six differ from the Persian ones; they are accepted on input and converted. [D]
+
+**Default.** `fa` uses `i18n.digits_default_fa`, initially `persian` [A][H]: the hypothesis is that Persian readers prefer Persian digits in a Persian interface; it is tested in the Phase 1 interviews (FD§9) and replaced by the measured majority (`P1M`); the kill criterion (a share of interviewees who switch to `latin` in the first session) is set by the founders in the pre-registration (`FND`). `en` uses `latin`. The member can change it in settings at any time. [D]
+
+**The formatter works on values, never on strings** [D]
+
+```
+fn fmt_number(value, opts, ctx):            # value: integer or exact decimal, never a float
+    sign, int_part, frac = split(value, opts.decimals)
+    sep_group = '٬' if ctx.digits == 'persian' else ','
+    sep_dec   = '٫' if ctx.digits == 'persian' else '.'
+    s = group(int_part, size=3, sep=sep_group) + ((sep_dec + frac) if frac else '')
+    if ctx.digits == 'persian': s = map_digits(s, '0123456789' -> '۰۱۲۳۴۵۶۷۸۹')
+    return isolate(sign + s, dir='ltr', mode=ctx.mode)   # S11.45: one LTR unit per number
+```
+
+The separators follow the digit set, not the locale. Platform number formatting MAY be used where it gives exactly this output [V: support on the target phones]; otherwise the bundled formatter is used. Every formatted number is one LTR isolate, so its display does not depend on the surrounding text direction or on the mixed bidi classes of digits and separators [D]. A ratio is shown as a decimal, never as a percent (`0.87`, not `87%`), which avoids a percent-sign placement problem and matches the FD figures [D].
+
+**Amounts and ratios** [D]
+
+- Credit amounts come from `_ucr` integers (S0.6): balances are shown rounded down, prices rounded up, to `ui.credit.display_decimals` places; a whole number of credits is shown without decimals.
+- Ratios come from `_ppm` integers and are shown to `ui.ratio.display_decimals` places, rounded half away from zero (the FD§3.3 example shows 869,565 ppm as `0.870`).
+- Counts are integers. Grouping separators are used from four digits up.
+- A value that the system could not compute is shown as an em dash with an accessible label, never as `0`.
+
+**Where the digit mapping is never applied** [D]: free text of any kind (prompt text, requester data, template bodies, submitted results, glossary terms, reviewer notes); the recovery key, invite and device-link codes; IDs (`job_...`), hashes, keys, URLs, e-mail addresses, version strings; code blocks; JSON. Copy buttons that copy a number from the UI copy the ASCII form. The mapping is a property of the formatter that produced the number, so text a person typed cannot be changed by it. Literal digits in notice copy are avoided altogether (S11.50).
+
+**Input parsing** [D]
+
+```
+fn parse_decimal(raw):                           # numeric fields; returns Decimal or a field error
+    s = trim(raw)
+    s = map U+0660..U+0669 and U+06F0..U+06F9 to '0'..'9'
+    s = replace '٫' with '.' ; replace '٬' with ','
+    s = remove U+200E, U+200F, U+200C, U+00A0, U+202F, and ASCII space   # paste residue and grouping spaces
+    if s matches ^[0-9]+(\.[0-9]+)?$:            ok
+    elif s matches ^[0-9]{1,3}(,[0-9]{3})+(\.[0-9]+)?$:   s = remove ','   # ',' only as a grouping mark
+    else: return error VALIDATION_FAILED, field code 'number_format'
+    return Decimal(s)
+```
+
+A comma is never read as a decimal point, because `1,5` read as `15` would silently change an amount. The field echoes the parsed value in the display form before the member confirms anything that moves credit (job size, reservation size, escrow confirmation). The server validates the ASCII value again and never parses Persian digits (S0.11). [D]
+
+**Ordered lists** use a CSS counter style defined in the stylesheet (`system: numeric`, symbols `۰` to `۹`) when `digits` is `persian`, and `decimal` otherwise; no external resource is involved. Sorting, search and filtering operate on the ASCII values. [D]
+
+## 11.44 Dates, times and calendars
+
+**Storage and wire** [D]: UTC `timestamptz` and RFC 3339 with `Z`; durations in integer seconds (S0.6). The server never stores, accepts or emits a Jalali string. Conversion to a display calendar happens only on the client.
+
+**Calendars** [D]: `calendar` is `jalali` or `gregorian` (S0.8.6). `fa` defaults to `jalali`, `en` to `gregorian`. With `i18n.dual_calendar_detail` true (FD§10), every detail view shows the primary calendar first and the other calendar second, plus the ISO instant. Lists and cards show the primary calendar only.
+
+**Display patterns** (example instant `2026-11-11T09:30:00Z` shown in the zone `UTC`; the Jalali values are computed examples that the golden table of this section must confirm [V])
+
+| Context | `fa`, `jalali`, `persian` digits | `en`, `gregorian`, `latin` digits |
+| --- | --- | --- |
+| Short date | `۱۴۰۵/۰۸/۲۰` | `11 Nov 2026` |
+| Long date | `چهارشنبه ۲۰ آبان ۱۴۰۵` | `Wednesday 11 November 2026` |
+| Date and time (24-hour clock) | `۲۰ آبان ۱۴۰۵، ۰۹:۳۰` | `11 Nov 2026, 09:30` |
+| Other calendar line in a detail view | `۱۱ نوامبر ۲۰۲۶` (digit set of the member) | `20 Aban 1405` |
+| ISO line in a detail view | `2026-11-11T09:30:00Z` (always ASCII) | same |
+| Duration | number plus `ثانیه`, `دقیقه`, `ساعت` or `روز` | number plus `s`, `min`, `h` or `d` words in full |
+| Credit expiry | the absolute date, then the days left | the same order |
+
+The clock is 24-hour in both locales [A] (no AM and PM markers to translate). Relative wording (`in 3 hours`) is used only for countdowns and for times less than one day away or past; everything else is absolute. [D]
+
+**Names for the fallback formatter and for tests** [D]
+
+| No. | Jalali month, `fa` | Jalali month, `en` | Gregorian month, `fa` |
+| --- | --- | --- | --- |
+| 1 | فروردین | Farvardin | ژانویه |
+| 2 | اردیبهشت | Ordibehesht | فوریه |
+| 3 | خرداد | Khordad | مارس |
+| 4 | تیر | Tir | آوریل |
+| 5 | مرداد | Mordad | مه |
+| 6 | شهریور | Shahrivar | ژوئن |
+| 7 | مهر | Mehr | ژوئیه |
+| 8 | آبان | Aban | اوت |
+| 9 | آذر | Azar | سپتامبر |
+| 10 | دی | Dey | اکتبر |
+| 11 | بهمن | Bahman | نوامبر |
+| 12 | اسفند | Esfand | دسامبر |
+
+Weekdays in `fa`, Saturday first: `شنبه`, `یکشنبه`, `دوشنبه`, `سه‌شنبه`, `چهارشنبه`, `پنجشنبه`, `جمعه`. Jalali months 1 to 6 have 31 days, months 7 to 11 have 30 days, month 12 has 29 days, or 30 in a leap year. [V: names and spellings checked by a native-speaking reviewer; stored in the copy review record of S11.53]
+
+**Calendar library requirement** (the library is chosen by the stack in S4.*; this is the requirement) [D]
+
+1. Convert between a UTC instant and a Jalali or Gregorian calendar date, in a given IANA zone, correctly for at least 2026-01-01 to 2040-12-31 [A]; the range covers every date the system can show (credit lifetime, reservations, quotes; S0.10).
+2. The official Jalali calendar defines leap years astronomically; arithmetic algorithms approximate it and may differ for some years [V]. The library MUST pass a golden table of boundary dates (the first day of each Jalali year, the last day of each leap Esfand, month boundaries, and the Gregorian dates around them) in CI. Who supplies and signs the table, and its source, is [V]: a native-speaking reviewer records it as a test fixture with its source reference.
+3. Prefer the platform calendar support (`Intl` with the Persian calendar) where present [V: support on the target phones]; always bundle an arithmetic fallback (S0.6). Both are self-hosted, make no network request and count against `ui.budget.js_bytes`.
+4. Pure functions; no hidden clock; time comes from the server-supplied instant (S11.49).
+5. A date typed or picked by the member is converted to a UTC instant or window on the client and sent as RFC 3339; the UI shows the resulting UTC window in both calendars before confirmation.
+
+**Time zone** [D]: the device zone by default, overridden by an IANA zone chosen in settings, never from an IP address (S0.6). Offsets and daylight-saving rules for any country come from the tz database on the device and are not written into this spec or the code [V]. Detail views show the offset in force at that instant.
+
+**Period boundaries and labels** [D]
+
+- Rate limits, the monthly mint cap and daily jobs use UTC boundaries (S0.6). A cap period is therefore labeled `UTC month` (`ماه میلادی به وقت UTC`) and never with a Jalali month name, because the boundaries differ and a Jalali label would mislead. The screen shows the start and end of the period, and any reset time, in the member's calendar and zone next to the UTC value.
+- Weekly aggregates on public pages (S12.*, S13.*) use fixed UTC weeks and say so; the member's week start (`i18n.week_start_fa`, `saturday` [V]) affects only calendar pickers and personal views.
+- Countdowns (lease time left) are rendered from the server's `expires_at`; see S11.49 for clock-skew handling.
+
+**Date input and pickers** [D]: every date field names its calendar in its label; the text field parses only the selected calendar, and the year must fall in a plausible window for it (otherwise the error is `VALIDATION_FAILED` with a field code, shown from a copy key); the picker is keyboard operable, its month grid follows the reading direction, and its week starts on `i18n.week_start_fa` for `jalali` and on the member's regional default otherwise [V].
