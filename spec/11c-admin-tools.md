@@ -194,7 +194,7 @@ No field holds an IP address, a user agent, a device fingerprint or a passkey cr
 | `member.resolve_handle` | `perm.member.resolve_handle` (`operator`) | `CT3` | R | 2 | none (logged read) |
 | `approval.approve`, `approval.reject`, `approval.withdraw` | per underlying action | `CT2` | n/a | n/a | `approval.executed`, `approval.rejected`, `approval.withdrawn`; `approval.requested` and `approval.expired` (system) |
 
-The `CT3` codes `member.ban`, `audit.accept`, `quarantine.release`, `cell.overturn`, `member.resolve_handle` and `launch.signoff` are proposed additions to the default of `security.two_person_actions` (S0.10.6 lists four names) and are reported in `ISS-118`. [A]
+The `CT3` codes `member.ban`, `audit.accept`, `quarantine.release`, `cell.overturn`, `member.resolve_handle` and `launch.signoff` are proposed additions to the default of `security.two_person_actions` (S0.10.6 lists four names) and are reported in `ISS-117`. [A]
 
 ### 11.44.4 Preview and API [D]
 
@@ -811,3 +811,66 @@ Entity `WorkClaim`, table `work_claims`, prefix `clm_`, retention `moderation`. 
 | `AC-claim-07` | A lease in `submitted` | An operator releases it | `409 STATE_CONFLICT` |
 | `AC-claim-08` | A release with `requeue_at_front` | The next lease in that template queue is issued | It is that cell |
 | `AC-claim-09` | `listLeases` | The response is checked against its schema | It contains no `mem_` or `vol_` id |
+
+## 11.57 Admin copy keys (Persian and English)
+
+Admin screens use the `copy.admin.*` keys below; each has `fa` and `en` text and is marked `needs_human_and_legal_review` (S0.5). Persian is written right to left with the zero-width non-joiner where the language needs it. Copy says "declared" and never "guaranteed" (FD Principle 11). [D]
+
+| Key | `fa` | `en` | Marker |
+| --- | --- | --- | --- |
+| `copy.admin.danger_confirm_title` | تأیید اقدام حساس | Confirm a sensitive action | `needs_human_and_legal_review` |
+| `copy.admin.reason_prompt` | دلیل را بنویسید؛ این متن در گزارش ممیزی ثبت می‌شود. | State the reason. It is saved in the audit log. | `needs_human_and_legal_review` |
+| `copy.admin.type_to_confirm` | برای ادامه، شناسهٔ هدف را تایپ کنید. | Type the target id to continue. | `needs_human_and_legal_review` |
+| `copy.admin.two_person_waiting` | این اقدام برای اجرا به تأیید مدیر دیگری نیاز دارد. | This action needs a second admin before it runs. | `needs_human_and_legal_review` |
+| `copy.admin.two_person_own_request` | تأیید درخواست خودتان ممکن نیست. | You cannot approve your own request. | `needs_human_and_legal_review` |
+| `copy.admin.fail_closed_one_admin` | برای این اقدام دست‌کم دو مدیر فعال با دسترسی لازم وجود ندارد. | This action needs at least two active admins with the required permission. | `needs_human_and_legal_review` |
+| `copy.admin.unknown_is_no` | پاسخ «نامشخص» مانند «خیر» محسوب می‌شود. | “Unknown” counts as “no”. | `needs_human_and_legal_review` |
+| `copy.admin.terms_copy_required` | بدون نسخهٔ ذخیره‌شدهٔ شرایط، ثبت یا تأیید این پاسخ ممکن نیست. | This answer cannot be recorded or approved without a saved copy of the terms. | `needs_human_and_legal_review` |
+| `copy.admin.declared_notice` | بررسی‌ها بر پایهٔ اظهارها و بازبینی‌های ثبت‌شده است و تضمین نیست. | Reviews rest on recorded declarations and checks; they are not guarantees. | `needs_human_and_legal_review` |
+| `copy.admin.tighten_now` | این تغییر فوراً اعمال می‌شود و ثبت عمومی آن ظرف مهلت اعلام‌شده منتشر خواهد شد. | This change takes effect immediately; its public log entry follows within the declared period. | `needs_human_and_legal_review` |
+| `copy.admin.loosen_notice` | این تغییر قاعده را آسان‌تر می‌کند؛ پیش از اجرا در گزارش تغییرات عمومی اعلام می‌شود و فقط از زمان اعلام‌شده اجرا می‌شود. | This change loosens a rule. It is announced in the public change log and takes effect only at the declared time. | `needs_human_and_legal_review` |
+| `copy.admin.constant_not_editable` | این مقدار ثابت است و فقط با تغییر مشخصات قابل تغییر است. | This value is a constant and changes only through a specification change. | `needs_human_and_legal_review` |
+| `copy.admin.killswitch_engage_warning` | با فعال‌کردن این کلید قطع اضطراری، کار در جریان متوقف می‌شود. | Engaging this kill switch pauses work in flight. | `needs_human_and_legal_review` |
+| `copy.admin.killswitch_release_warning` | آزادسازی کلید قطع اضطراری به تأیید مدیر دومی نیاز دارد. | Releasing a kill switch needs a second admin. | `needs_human_and_legal_review` |
+| `copy.admin.member_minimal_view` | فقط کمترین داده نمایش داده می‌شود و هر مشاهده ثبت می‌شود. | Only the minimum data is shown and every view is logged. | `needs_human_and_legal_review` |
+| `copy.admin.claim_taken_over` | این مورد از شما به مدیر دیگری منتقل شد. | This item was taken over by another admin. | `needs_human_and_legal_review` |
+| `copy.admin.launch_blocked` | تا امضای همهٔ دروازه‌های لازم، پذیرش عضو و کارهای اعضا فعال نمی‌شود. | Member admission and member jobs stay off until the required gates are signed off. | `needs_human_and_legal_review` |
+
+## 11.58 Parameters added by this part (convention gaps)
+
+S0.10.6 says names are stable and S16.* completes the table. This part needs the parameters below; each default is an `initial configurable default` and each area and owner already exists in S0.10.5. [D][A]
+
+| Name | Type | Initial configurable default | Validation | Owner | Replaced by |
+| --- | --- | --- | --- | --- | --- |
+| `session.admin_stepup_s` | duration_s | 300 | 30..3600; at most `session.admin_idle_ttl_s` | `operator` | `SEC` |
+| `security.admin_two_person_pending_ttl_s` | duration_s | 86,400 | 600..604800 | `operator` | `SEC` |
+| `security.admin_reason_min_chars` | int | 20 | 1..500 | `operator` | `SEC` |
+| `ratelimit.admin_member_lookups_per_day` | int | 30 | 1..1000 | `operator` | `SEC`, `OPS` |
+| `ui.admin_claim_ttl_s` | duration_s | 1800, the initial value of `session.admin_idle_ttl_s`, so a claim does not outlive an idle session | 60..86400 | `operator` | `OPS` |
+| `ui.capacity_dashboard_refresh_s` | duration_s | 60, the initial value of `public.counter_refresh_s` | 5..3600 | `operator` | `OPS` |
+| `verify.reviewer_recheck_rate` | ratio | 0.10 | 0..1 [H] | `operator` | `P1M` disagreement rate between first and re-check reviewers |
+
+The `security.two_person_actions` default grows from four names to ten: `ledger.reversal`, `launch.signoff`, `parameter.loosen`, `killswitch.release` (S0.10.6) plus `member.ban`, `audit.accept`, `quarantine.release`, `cell.overturn`, `member.resolve_handle`, `launch.signoff` already counted; the list therefore adds five new names (`ISS-117`).
+
+## 11.59 Dependencies on other parts and open [V] items
+
+| Item | Owner part | What this part needs | Tag |
+| --- | --- | --- | --- |
+| Permission matrix and admin authentication (WebAuthn, onboarding of a second admin, session revocation) | S10.* | Every `perm.*` name of 11.44.3 mapped to `reviewer` or `operator`; the two-admin onboarding rule | [A] |
+| Kill-switch effects and the launch rule | S14.* | Full effects of 11.54.2; the exact switch rule of 11.53; whether a reopened gate switches members off | [A] |
+| Reversal of credit already spent; compensation for a wrongly rejected cell | S6.* | An owner-approved rule; until then the tool refuses (`would_overdraw`) | [V] |
+| Review checklist, lint rules, in-flight handling after retire or revoke | S8.*, S9.*, S7.* | Data and rules this part displays | [A] |
+| Report categories, takedown of delivered deliverables, retention of handle-key versions | S10.*, S12.* | Opaque category enum; a withdrawal action for deliverables; key-version retention | [V] |
+| Metric snapshots and capacity forecast algorithm | S13.*, S6.* | The data behind the tiles of 11.52.1 | [A] |
+| All `op` names and schemas of 11.44..11.56 | S15.* | Fold into the API specification with the same ids | [D] |
+| Passkey support on reviewers' devices and reachability of the admin origin for reviewers in Iran | S10.*, S19.* | Test on real devices and networks | [V] |
+
+## Issues raised
+
+This file is the third file of part 11, so it uses the issue sub-block `ISS-117`..`ISS-119` (S0.4) [A]. Each resolution is already applied inside the file; C-001 consolidates and may record a different one.
+
+| id | severity | fd_ref | issue | resolution | status |
+| --- | --- | --- | --- | --- | --- |
+| `ISS-117` | minor | prompt | Convention gaps used by the admin tools: (a) entities `ApprovalRequest` (`apr_`) and `WorkClaim` (`clm_`); (b) `TermsCopy.document_kind` (`terms`, `usage_policy`, `written_permission`), needed to store the usage policy and written permission of FD§8.3 G0(i) and (k); (c) no retirement marker or event for a `GoldCell`; (d) events `approval.*` and `workclaim.*`; (e) the seven parameters of 11.58; (f) `security.two_person_actions` default lacks `member.ban`, `audit.accept`, `quarantine.release`, `cell.overturn`, `member.resolve_handle`; (g) the action codes of 11.44.3 and the reason-code lists; (h) sub-headings `11.41` upward to avoid collisions with other S11 files; (i) the terms-copy upload body (derived from `service.terms_copy_max_bytes`) exceeds `api.max_body_bytes`, so it gets its own limit; (j) `Alarm` kinds `abuse.*`, `launch.rule_failing`, `ops.changelog_overdue`; (k) a transient `requeue_at_front` flag on a released `Cell` | Used as proposed in this file; C-001 and C-022 fold them into S0 and S16 | proposed |
+| `ISS-118` | major | FD§5.3, FD§3.4, FD§8.3 | State machines of S0.9 lack transitions the tools need: (a) a `banned` member has no exit, so an overturned ban appeal cannot be applied; (b) nothing moves a rejected cell to accepted after an overturned `cell_rejection` appeal; (c) `awaiting_second_review` has no rule for split votes; (d) an approved service cannot be re-reviewed early (`review_started` only leaves `unreviewed`, `rejected`, `review_due`, `revoked`); (e) an operator lease release has no event; (f) the launch rule can fail after a gate is reopened while the switches stay on | (a) add `banned --member.reinstated--> active` on an overturned appeal only; (b) add `rejected --cell.reinstated--> accepted` when no other attempt was accepted, otherwise correct the reliability record and create no second credit (11.48.3); (c) a further distinct reviewer breaks a tie, else the original decision stands (11.48); (d) add `approved|suspended --service.review_started--> in_review`; (e) reuse `cell.declined` with actor `admin` and reason `operator_release` (11.56.3); (f) raise `launch.rule_failing` and require an explicit `launch.switch_off`, automatic switch-off left to S14.* (11.53) | proposed |
+| `ISS-119` | major | FD§5.7, FD§4.2, prompt | Decisions only the owner can make: (a) with fewer than two admins every two-person action is unavailable (`AD9`), and `ledger.reversal_min_approvers` is a constant 2; (b) `service.min_approvers` 1 or 2; (c) credit already spent cannot be reversed under `ledger.allow_negative_balance` = false, and a wrongly rejected cell whose work was paid to another attempt has no compensation rule; (d) whether a service approval needs a notice period like a loosening (applied: a public entry at approval time, no notice); (e) who counts as "founders" for parameters owned by `founders` (applied: two distinct `operator` approvers) | Applied as stated in each section; listed for S3.* | needs_owner |
