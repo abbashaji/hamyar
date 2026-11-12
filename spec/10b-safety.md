@@ -598,3 +598,62 @@ target: decision within appeal.reviewer_sla_days (published target, initial conf
 - Aggregate counts of reports, actions, appeals and outcomes are published every `report.transparency_publish_days` (initial configurable default 30), unless counsel advises a delay [V].
 - Reporter anonymity from the subject is a constant (`report.reporter_identity_hidden` = true).
 
+## 10.17 Acceptance criteria (Given / When / Then)
+
+IDs follow S0.5 (`AC-safety-nn`). Test layers (`T-adv`, `T-inj`, `T-policy`, `T-e2e`) are assigned in S18.*. [D]
+
+| ID | Given | When | Then |
+| --- | --- | --- | --- |
+| `AC-safety-01` | A full synthetic day of traffic from known IPs | Every table, log line and metric is searched for those IPs, in clear or as plain hashes | None found in app storage; only keyed counters exist, holding no member id (`retention.raw_ip_stored` = false) |
+| `AC-safety-02` | `secret.ip_hash_key` version for day D and `retention.ip_hash_ttl_days` = 1 | One day after day D ends | The version no longer exists in `SecretsPort`, and counters for day D cannot be matched to any IP |
+| `AC-safety-03` | A member with cells, a device, a session and an optional e-mail, then `member.closed` | The retention sweep runs | All `member_bound` rows are deleted or opaqued; the ledger keeps only the opaque `mem_` id with day-granular times; a payload older than `retention.job_payload_days` is purged; an overdue sweep raises `hamyar_retention_overdue_rows_total` |
+| `AC-safety-04` | A synthetic legal request naming a `mem_` id | One admin tries `disclosure.release` alone | It is refused until a second distinct admin approves; both approvals and the export hash are in `AdminAction`; the export contains only the rows of the S10.13.5 table |
+| `AC-safety-05` | `secret.legacy_*` not yet rotated | An operator tries to set `launch.members_may_join` to true | Refused with `LAUNCH_GATE_CLOSED` until `g1.secrets_rotated` is signed off with a `secret.rotated` record per legacy secret dated before the exposure event |
+| `AC-safety-06` | The deployed `SecretsPort` listing | Compared to S10.14.2 | Names match exactly; a missing or extra name fails `g1.secrets_inventory_complete` |
+| `AC-safety-07` | A synthetic run that logs errors containing token-shaped strings | Logs and error bodies are scanned | Every token-shaped string is masked; no secret value appears; the scanner finds none in the repository history |
+| `AC-safety-08` | A report whose decider chooses `ban` | The decider confirms | The ban takes effect only after a distinct second approver; no ledger row is added or changed; leases are revoked (`lease.revoked`); the member can still file an appeal, export and close the account |
+| `AC-safety-09` | A production build | The build check scans all assets and pages | Any absolute URL to a host outside the project's set fails the build; the content security policy has no external source |
+| `AC-safety-10` | A backup and a second host | The move drill of S10.15.3 runs on synthetic data | The restored ledger hash chain equals the last published checkpoint; invariants pass; secrets readable by the old host are rotated |
+| `AC-safety-11` | An appeal about a decision by reviewer A | It is assigned | The reviewer is not A and has no declared conflict; the appellant's view contains no reporter identity; a ban appeal needs `appeal.ban_min_reviewers` distinct reviewers |
+| `AC-safety-12` | `report.external_contact` is empty | `g1.abuse_contact_published` is submitted for sign-off | It is refused until the contact is set and shown on the public pages |
+| `AC-safety-13` | `template.autopause_report_count` reports in `template.autopause_window_s`, all from one member or from `new` members | Counting runs | The template is not paused; with enough distinct reporters at or above `template.autopause_min_reporter_tier` it is paused (`template.paused`) and release needs the two-person action |
+| `AC-safety-14` | All `copy.privacy.*` and `copy.risk.*` keys in `fa` and `en` | The copy lint runs | No key contains the forbidden words of S10.13.1 item 12 (Persian equivalents from a reviewer-maintained list), each carries `needs_human_and_legal_review`, and the fourteen items of S10.13.7 are present |
+| `AC-safety-15` | Submitted text with script tags, SQL fragments, a leading `=`, bidirectional controls and zero-width characters | It is stored, displayed in every reviewer and requester view, and exported | Nothing executes; display is escaped; controls are isolated and marked; the CSV cell is prefixed; the stored bytes and hash are unchanged (`T-inj-nn`) |
+| `AC-safety-16` | A `safety_of_person` report and a `prohibited_content` report | Neither is triaged within its SLA | `hamyar_report_triage_overdue_total` rises and an `Alarm` is raised, the urgent one first |
+| `AC-safety-17` | A member token | It is sent to `/v1/admin/*`, and an admin token to a member endpoint | `AUTH_INVALID` each time, counted by the rate limiter; the member origin does not route the admin surface |
+| `AC-safety-18` | A ledger row edited or deleted using the app database role | The statement runs | It is refused by privileges; a row altered by a superuser in a test is detected by the hash chain and `ledger.invariant_violated` fires within `ledger.invariant_check_interval_s` |
+
+## 10.18 Parameters, enums and permissions added by this part
+
+All are convention additions (S0.1) and are reported under `## Issues raised`. Defaults are `initial configurable default` values, not findings. `owner` follows S0.10.5. [A]
+
+**Parameters**
+
+| Name | Type | Initial configurable default | Validation | Owner | Replaced by |
+| --- | --- | --- | --- | --- | --- |
+| `retention.backup_days` | days | 35 | 1..365 | `operator` | `SEC`, then restore-drill experience (`OPS`) |
+| `retention.sweep_interval_s` | duration_s | 3600 (equals `credit.expiry_sweep_interval_s`) | 60..86400 | `operator` | `OPS` |
+| `ledger.member_timestamp_granularity_s` | int | 86,400 (one UTC day, S0.6.2) | 1..86400 | `operator` | `SEC` |
+| `security.emergency_access_ttl_s` | duration_s | 3600 | 60..86400 | `operator` | `SEC` |
+| `security.reachability_check_interval_days` | days | 30 | 1..365 | `operator` | `OPS` |
+| `ui.first_load_budget_bytes` | int | 204,800 | 10240..5242880 | `operator` | `TEC` |
+| `report.urgent_triage_sla_s` | duration_s | 14,400 | 600..86400 | `reviewer` | `OPS` |
+| `report.max_text_chars` | int | 1000 | 100..10000 | `reviewer` | `OPS` |
+| `report.decision_sample_rate` | ratio | 0.10 | 0..1 | `reviewer` | `OPS` |
+| `report.transparency_publish_days` | days | 30 | 1..365 | `reviewer` | `FND` |
+| `report.external_contact` | string | empty (gate item stays open until set) | non-empty before launch | `operator` | `CON` |
+| `report.reporter_identity_hidden` | bool | true | constant | `operator` | `CON` |
+| `template.autopause_min_distinct_reporters` | int | 3 (must not exceed `template.autopause_report_count`) | 1..1000 | `reviewer` | `OPS` |
+| `template.autopause_min_reporter_tier` | enum | `established` | `new`, `established`, `trusted` | `reviewer` | `OPS` |
+
+**Change to an existing default** [A]: `security.two_person_actions` gains `member.ban`, `disclosure.release`, `report.legal_hold_clear` and `secret.emergency_access` (S0.10.6 table C lists four).
+
+**Enums**
+
+| Enum | Values |
+| --- | --- |
+| `report_category` | `unsafe_prompt`, `injection_attempt`, `suspected_sensitive_data`, `prohibited_content`, `harassment`, `forged_or_junk_result`, `fraud_or_farming`, `impersonation`, `safety_of_person`, `legal_notice`, `other` |
+| `moderation_action` | `no_action`, `warn`, `restrict`, `suspend`, `ban`, `reject_job`, `pause_template`, `suspend_service`, `void_cells`, `takedown_output`, `refer_to_counsel` |
+
+**Permissions**: `perm.report.file`, `perm.report.triage`, `perm.report.decide`, `perm.member.ban_approve`, `perm.appeal.review`. **Secrets**: the `secret.*` names of S10.14.2 (never parameters). **Admin action kinds**: `disclosure.received`, `disclosure.release`, `secret.rotated`, `secret.emergency_access`, `safety_review`.
+
