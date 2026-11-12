@@ -177,3 +177,92 @@ A lost passkey is handled by another operator through `deactivateAdminUser` and 
 | `getAdminAction` | `GET /v1/admin/actions/{act_id}` | `admin` `perm.admin_action.read` | - | `AdminAction` | `NOT_FOUND` | n/a | - | `A-R` |
 
 The log is append-only, has no update or delete path and is included in the daily checkpoint scope of S6.* [A]. A reviewer sees only their own actions unless they also hold `perm.admin_action.read`.
+
+## 15.23 Service Registry
+
+Every service is created `unreviewed`, which counts as `no` everywhere (FD§5.3, S0 0.9.6). No endpoint in this file lets a service reach `approved` without a saved `TermsCopy` and recorded flag answers; the guard is `approvalGuard` below. Nothing about any provider is hardcoded: names, URL templates, limits and answers are data typed by a reviewer [V]. The server never fetches a terms page or any URL on its own (no scraping, no server-side request to a reviewer-entered address); a `source_ref` is stored text only.
+
+**Schemas** [D]
+
+| Object | Fields |
+| --- | --- |
+| `Service` | `svc_id`, `name` (1..120 chars), `state` (S0 0.9.6), `adapter` (below), `latest_terms_copy_id`, `approved_at`, `review_due_at`, `closure_cause` (`kill_switch` or `revoked` or `none`), `row_version`, `created_at` |
+| `adapter` | `supports_prefill` (bool), `prefill_url_template` (string with exactly one `{prompt}`, `https` only, or null), `max_url_chars` (int 1..100000 or null), `copy_only` (bool, read-only, computed: true when prefill is unsupported or `prefilled_link_use` is not `yes`), `clean_chat_hint_key` (a `copy.*` key) |
+| `TermsCopy` | `tcp_id`, `service_id`, `source_ref` (text, 1..2000), `captured_on` (UTC date, not in the future), `media_type` (`text/html`, `application/pdf`, `text/plain`, `text/markdown`; recorded, never interpreted), `size_bytes`, `sha256`, `status` (`uploading` or `sealed`), `chunk_count`, `captured_by_admin_id`, `created_at` |
+| `FlagAnswer` | `fla_id`, `service_id`, `flag_key` (S0 0.8.3), `answer` (`yes`, `no`, `unknown`), `region` (ISO 3166-1 alpha-2 or null), `terms_copy_id`, `quote_ref` (text pointing at the passage, 1..500), `note`, `reviewer_admin_id`, `answered_at` |
+
+`TermsCopy.status` is a convention addition (`ISS-154`); a `sealed` copy is immutable. Adapter changes that enable prefill or change `prefill_url_template` are recorded in the public change log with the host name only [D].
+
+### 15.23.1 Service endpoints
+
+| op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `listServices` | `GET /v1/admin/services` | `admin` `perm.service.read` | `?state`, `?q` (name prefix) | list of `Service` | - | n/a | cursor | `A-R` |
+| `getServiceSummary` | `GET /v1/admin/services/summary` | `admin` `perm.service.read` | - | `{counts_by_state: {state: int}, approved_count, review_due_soon: [svc_id]}`; the input of the launch rule (15.27.3) | - | n/a | - | `A-R` |
+| `createService` | `POST /v1/admin/services` | `admin` `perm.service.record` | `{name, adapter?, reason}` | 201 `Service` in `unreviewed`; event `service.created` | `ALREADY_EXISTS` (same normalized name) | req | - | `A-W` |
+| `getService` | `GET /v1/admin/services/{svc_id}` | `admin` `perm.service.read` | - | `Service`, `ETag` | `NOT_FOUND` | n/a | - | `A-R` |
+| `updateServiceAdapter` | `PATCH /v1/admin/services/{svc_id}/adapter` | `admin` `perm.service.record` (`SU` and `service.min_approvers` approvals when it enables prefill or changes the template) | JSON Merge Patch of `adapter`; `If-Match` | 200 `Service` | `VALIDATION_FAILED` (`prefill_requires_flag`: `supports_prefill=true` needs the current `prefilled_link_use` answer `yes` with a sealed copy; template shape; `max_url_chars`), `PRECONDITION_FAILED` | req | - | `A-W` |
+
+An adapter's behavior at run time (what the volunteer's card shows) is derived from this record by the adapter layer of S4.* and S11.*; a `copy_only` service never gets a link.
+
+### 15.23.2 Terms copies (chunked upload) [D]
+
+The API is JSON only (S0 0.11.1) and bodies are capped at `api.max_body_bytes` (1,048,576), but a terms copy may be `service.terms_copy_max_bytes` (5,242,880). Therefore a copy is uploaded in base64 chunks (`ISS-155`):
+
+```
+chunk_raw_max_bytes = floor(api.max_body_bytes * 3 / 4) - 1024      # base64 grows data by 4/3; 1024 reserved for the JSON envelope
+                    = floor(1,048,576 * 3 / 4) - 1024 = 786,432 - 1,024 = 785,408 bytes   (default configuration)
+chunk_count         = ceil(size_bytes / chunk_raw_max_bytes)           # 5,242,880 bytes -> 7 chunks
+```
+
+| op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `createTermsCopy` | `POST /v1/admin/services/{svc_id}/terms-copies` | `admin` `perm.service.record` | `{source_ref, captured_on, media_type, size_bytes, sha256, note?}` | 201 `TermsCopy` (`uploading`) plus `chunk_raw_max_bytes`, `chunk_count` | `VALIDATION_FAILED` (`size_bytes` over `service.terms_copy_max_bytes`), `STATE_CONFLICT` (service `revoked` or `rejected`: start a review first) | req | - | `A-W` |
+| `putTermsCopyChunk` | `PUT /v1/admin/terms-copies/{tcp_id}/chunks/{n}` | `admin` `perm.service.record` | `{data_base64}` (`n` from 0) | 200 `{n, bytes, received_count}` | `STATE_CONFLICT` (already sealed), `VALIDATION_FAILED` (chunk too large; `n` out of range), `PAYLOAD_TOO_LARGE` | req | - | `A-W` |
+| `sealTermsCopy` | `POST /v1/admin/terms-copies/{tcp_id}/seal` | `admin` `perm.service.record` | `{}` | 200 `TermsCopy` (`sealed`); the server concatenates the chunks, checks the byte count and `sha256` (S0 0.6.4), then freezes the copy; event `service.terms_copy_sealed` | `VALIDATION_FAILED` (`details.reason` = `missing_chunks` or `hash_mismatch`; nothing is sealed) | req | - | `A-W` |
+| `listTermsCopies` | `GET /v1/admin/services/{svc_id}/terms-copies` | `admin` `perm.service.read` | - | list of `TermsCopy` | - | n/a | cursor | `A-R` |
+| `getTermsCopy` | `GET /v1/admin/terms-copies/{tcp_id}` | `admin` `perm.service.read` | - | `TermsCopy` | `NOT_FOUND` | n/a | - | `A-R` |
+| `getTermsCopyChunk` | `GET /v1/admin/terms-copies/{tcp_id}/chunks/{n}` | `admin` `perm.service.read` | - | `{n, data_base64}` | `NOT_FOUND` | n/a | - | `A-R` |
+
+The Operator tools never render a terms copy as live HTML: it is offered as a download or shown as escaped text (S9.* escaping rule applies to all stored external text). An unsealed copy is garbage-collected after `security.approval_ttl_s` seconds of inactivity [A].
+
+### 15.23.3 Flag answers [D]
+
+| op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `recordFlagAnswers` | `POST /v1/admin/services/{svc_id}/flag-answers` | `admin` `perm.service.record` | `{terms_copy_id, answers: [{flag_key, answer, region?, quote_ref?, note?}], reason}` (1..13 answers, atomic) | 201 `{data: [FlagAnswer]}`; event `service.flags_recorded` | `STATE_CONFLICT` (`details.reason` = `service_not_recordable`: allowed only in `in_review` or `suspended`; `copy_not_sealed`; `copy_other_service`), `VALIDATION_FAILED` (unknown `flag_key`; `region` required for `regional_availability` and forbidden on other keys; a `yes` on a gate flag without `quote_ref`) | req | - | `A-W` |
+| `listFlagAnswers` | `GET /v1/admin/services/{svc_id}/flag-answers` | `admin` `perm.service.read` | `?flag_key`, `?region` | full history, newest first | - | n/a | cursor | `A-R` |
+| `getEffectiveFlags` | `GET /v1/admin/services/{svc_id}/flags` | `admin` `perm.service.read` | - | `{flags: [{flag_key, region, answer, answered_at, terms_copy_id, source: recorded or default_unknown}], gates_ready: bool, missing: [string]}` | `NOT_FOUND` | n/a | - | `A-R` |
+
+Rules [D]:
+
+1. Answers are append-only. A new answer for the same `(flag_key, region)` supersedes the older one by `answered_at`; the older one stays in history. There is no edit and no delete.
+2. A flag with no answer is reported as `unknown` with `source: default_unknown`, and `unknown` is evaluated as `no` everywhere (FD§5.3, S0 0.8.3).
+3. A `yes` on any gate flag MUST carry `quote_ref` (where in the saved copy the permission is stated). This keeps `yes` tied to text, not to memory.
+4. Gate answers may be recorded only while the service cannot take new jobs (`in_review`, `suspended`). Negative evidence about an `approved` or `review_due` service therefore goes through a kill switch first (15.28: `kill.service.<svc_id>`), then the answers, then resume or revoke. This closes the window in which a service is `approved` while its recorded answers say otherwise [D].
+5. The flags are the 13 keys of S0 0.8.3; answers for `info.*` keys never gate anything.
+
+### 15.23.4 Review, approval, rejection, revocation
+
+```
+approvalGuard(svc, copy_id):                      # evaluated at request time and again at execution
+  require svc.state == in_review
+  copy = TermsCopy(copy_id); require copy.service_id == svc.id and copy.status == sealed
+  require today_utc - copy.captured_on <= service.review_max_age_days * 1 day       # initial configurable default 90 days
+  for key in [third_party_task_use, prohibited_content_compatible]:                 # FD§5.3 minimum
+      a = latest FlagAnswer(svc, key, region = null)
+      require a != null and a.answer == yes and a.quote_ref != null and a.terms_copy.status == sealed
+  if service.min_approvers > 1: require approver != every reviewer_admin_id who recorded those answers
+  return ok                                      # else STATE_CONFLICT with details.missing = list of failed clauses
+```
+
+Per-purpose and per-region conditions (`R5` to `R7`, `regional_availability`) are not part of approval; they are evaluated per job by the policy engine from the same flags (S7.*). Approval therefore never implies that every purpose is allowed on that service [D].
+
+| op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `startServiceReview` | `POST /v1/admin/services/{svc_id}/reviews` | `admin` `perm.service.review` | `{reason}` | 201 `{service}` (`in_review`); event `service.review_started` | `STATE_CONFLICT` (state not in `unreviewed`, `rejected`, `review_due`, `revoked`) | req | - | `A-W` |
+| `approveService` | `POST /v1/admin/services/{svc_id}/approvals` | `admin` `SU` `perm.service.review` (`2P` when `service.min_approvers` > 1; the key `service.approve` is then added to the two-person set) | `{reviewed_terms_copy_id, reason}` | 200 `Service` (`approved`, `approved_at`, `review_due_at = approved_at + service.review_max_age_days`); event `service.approved`; public change-log entry kind `service` | `STATE_CONFLICT` (`details.missing`: `terms_copy_missing`, `copy_too_old`, `gate_flag_not_yes:<flag_key>`, `quote_ref_missing`, `same_reviewer`) | req | - | `A-W` |
+| `rejectService` | `POST /v1/admin/services/{svc_id}/rejections` | `admin` `SU` `perm.service.review` | `{reason, public_text?}` | 200 `Service` (`rejected`); event `service.rejected` | `STATE_CONFLICT` | req | - | `A-W` |
+| `revokeService` | `POST /v1/admin/services/{svc_id}/revocations` | `admin` `SU` `perm.service.revoke` | `{reason_code (terms_changed, flag_changed, provider_notice, safety_incident, other), reason, public_text: {fa, en}}` | 200 `{service (revoked), affected: {open_jobs, queued_cells, leased_cells}}` counted at commit; event `service.revoked`; public change-log entry; single admin, because revocation tightens (R10) | `STATE_CONFLICT` (already `revoked`) | req | - | `A-W` |
+
+Suspension and resumption of a service are kill-switch operations (`kill.service.<svc_id>`, 15.28), not separate endpoints, because S0 0.9.6 ties `service.suspended` to a kill switch [D]. `service.review_due` and `service.review_lapsed` are timer events produced by the scheduler (15.34); they have no endpoint. What happens to the in-flight cells and jobs of a revoked service is decided by S7.*; the API's only contribution is the event `service.revoked` and the `affected` counts. A reviewer's revocation reason is internal; `public_text` is what the change log shows (Principle 5).
