@@ -529,3 +529,134 @@ then: touch last_used_at (rate-limited); idle_expires_at = last_used_at + idle T
 **Revocation** [D]: (1) 'log out' revokes the current session; (2) 'log out everywhere' revokes all sessions of the member (`POST /v1/members/me/session-revocations`, step-up); (3) revoking or rotating a key revokes the sessions bound to it; (4) recovery revokes all; (5) `member.banned` revokes all sessions at once and `member.suspended` or an engaged `kill.member.<id>` blocks X3 permissions on the next request; (6) locking an admin credential revokes that admin's sessions and raises an alarm. Revoked and expired rows are deleted by the retention sweep every `retention.sweep_interval_s`; a row never outlives `retention.session_days` (constraint C9 [A]: `session.member_abs_ttl_s <= retention.session_days x 86,400`).
 
 **Considered and rejected** [D]: per-request signatures binding the token to the device key (DPoP style). They cost CPU and battery on low-end phones and add little against the main threat, a script injected into the page, which can ask a non-extractable key to sign. The defences are a strict Content-Security-Policy, no third-party scripts, escaping of all submitted text (`S9.*`), step-up for sensitive actions and short admin lifetimes.
+
+## 10.14 Logging, IP handling and retention
+
+### 10.14.1 What is and is not collected [D]
+
+Retention values are parameters of `S0.10.6` (`retention.*`); `member_bound`, `job_bound`, `moderation`, `short`, `ops` and `permanent` are the classes of S0.7.
+
+| Data item | Collected? | Form and place | Retention | Rationale |
+| --- | --- | --- | --- | --- |
+| Raw IP address | No | Held in memory for the length of one request and passed once to the IP hasher; never logged, never in an error, metric, trace or database row | None (`retention.raw_ip_stored` = false, constant) | FD Principle 8 |
+| IP hash | Short-lived | Rate-limit counter keys in a volatile store (10.14.2) | At most `retention.ip_hash_ttl_days` (1); each counter dies with its window | Coarse abuse limits (10.9) |
+| Country, city, ASN from the IP | No | No GeoIP lookup on any member endpoint | None | Location is never collected or inferred (`public.location_display` = `never`) |
+| User-Agent, Accept-Language, other headers | No | Only `platform_class` (4 values) is derived once at registration; the raw header is dropped; language is the member's own setting | `platform_class`: `member_bound` | Compatibility statistics at about 2 bits |
+| Referer | No | `Referrer-Policy: no-referrer` on every response | None | Invite links and pages must not leak |
+| Request log line | Yes, minimal | `request_id`, route template, method, status class, latency, response size bucket, `principal_type`, `actor_day_hash` = HMAC(daily key, member id) | `retention.request_log_days` (7) | Debugging; the daily hash lets a day's requests be followed without a standing identifier |
+| Request and response bodies, `Authorization` header | No | Stripped before any logger; submitted text lives only in its domain row | None in logs | Prompts and outputs are job data, not log data |
+| Session | Yes | SHA-256 of the token, state, expiry (10.13) | `short`, at most `retention.session_days` (90) | Authentication |
+| Public keys, key chain | Yes | `MemberKey` | `member_bound` | Authentication, tamper evidence |
+| Private keys, recovery key | Never reach the server | Device only | n/a | IC2 |
+| Device token | Yes, hashed | `Device.token_hash` | `member_bound`, then grant-memory residue for `retention.member_inactive_days` (10.9.1) | Lifetime grant limit |
+| E-mail | Optional | Ciphertext plus keyed index (10.5) | `member_bound`; deleted on removal, closure or `kill.optional_pii` | Notices only |
+| Activity time | Date only | `Member.last_active_on` | `member_bound`; inactivity of `retention.member_inactive_days` (365) closes the member | Inactivity closure |
+| Precise timestamps on leases, submissions, ledger entries | Yes | Domain rows | Their own class (`job_bound`, `permanent`) | Required for leases and the ledger; public and member-facing surfaces coarsen them (`S12.*`) because time of day can reveal a time zone |
+| Cell and job content | Yes | `job_bound` | Payload fields purged `retention.job_payload_days` (30) after a terminal state; hashes stay | Delivery, audit, provenance |
+| Volunteer's provider account, credentials, session, chat page | Never | n/a | n/a | Ground rule 3; IC3 |
+| Volunteer-attested service and model | Yes | Provenance fields | `job_bound` | Audit, labelled attested not proven (FD§5.6) |
+| Analytics events | Yes, no personal data | `Event`; no cookies, no third-party tracker; cohorts below `analytics.min_cohort_k` suppressed | `retention.event_raw_days` (30), then aggregates | FD§9 measures with minimal retention |
+| Operational telemetry and errors | Yes, scrubbed | No IP, no body, no token; no third-party error tracker | `retention.ops_log_days` (30) | Operations |
+| Failed-authentication and denial counters | Counts only | Volatile counters by IP hash; metric by scope | Window; metrics `ops` | Abuse limits |
+| Security notices | Yes | `SecurityNotice` | `retention.session_days` | Member awareness (10.6 to 10.8) |
+| Recovery requests | Yes | `RecoveryRequest`, no IP | 90 days | Recovery cap |
+| Invite edges | Yes | `Invite`, `Member.invited_by_member_id` | Edge cleared `invite.accountability_days` after joining; kept `retention.moderation_days` after resolution if a party is banned | Accountability (10.10) |
+| Reports and appeals | Yes | `Report`, `Appeal` | `moderation`: `retention.moderation_days` (180), then counts | Safety process |
+| Admin actions | Yes | `AdminAction` with `adm_` ids only | `permanent` | Accountability of operators |
+| Admin credentials | Yes | Public key, sign count, label | `permanent` while the admin exists | WebAuthn |
+| Legal requests received | Yes | Count, date, outcome, no content | `permanent` | Transparency report, if lawful [V] |
+| Backups | Yes | Encrypted snapshots of the above | Set in `S4.*` as a published number; restores re-apply deletion tombstones | Recovery of service [V] |
+| DNS, TLS and connection metadata at the host or CDN | Outside this system | Whatever the host keeps | Unknown [V] | Stated in 10.15 and the member notice |
+
+### 10.14.2 Exact IP handling [D]
+
+```
+IpHasher.hash(ip):                       # runs once, in edge middleware, before routing and logging
+  addr = parse(ip)
+  if addr is IPv6: addr = addr masked to its /64 prefix       # one household can hold a /64; IPv4 stays /32
+  day   = utc_date(now)                                       # epoch label
+  k_day = HKDF-SHA-256(ikm = secret.ip_hash_key[version], salt = 'hamyar/v1/iphash', info = day, L = 32)
+  return base64url( HMAC-SHA-256(k_day, addr_bytes)[0:16] )   # 128-bit truncated hash
+  # the variable 'ip' is discarded; k_day is never stored; the logger has no access to the raw value
+```
+
+1. **The same address hashes differently each UTC day**, so counters cannot be joined across days even by someone holding the hash store; per-minute, per-hour and per-day limits only need equality within a day. [D]
+2. **Counters live in a volatile store** behind the `CounterStore` interface; not in the relational database, not in backups, never written with a TTL longer than the window; if the chosen engine snapshots to disk, the snapshot must expire with the same bound [V: engine behavior]. [A]
+3. **`retention.ip_hash_ttl_days`** is the ceiling on any IP-hash-bearing record. Setting it to 0 turns off the daily IP limits (only per-minute limits remain) and leaves registration limited by device token and tree; this is the lever for emergency minimization (10.15.4).
+4. **Residual risk, stated plainly:** the IPv4 space has only 2^32 addresses, so anyone who holds both the hashes and `secret.ip_hash_key` can recover the addresses by enumeration. The key therefore lives in the secrets store, separate from the counter store, and is rotated per `security.secret_rotation_days`; hashes expire within a day.
+5. **Deployment requirement** [V]: the reverse proxy, CDN or platform MUST NOT write client IPs to access logs, and the trusted header that carries the client address must be one only the platform can set. Where the host cannot disable its own logging, that fact MUST be recorded in the G1 threat model and in the member notice (the host then sees what 10.15.1 says).
+6. A test sends a sentinel address and asserts it appears in no database dump, log line, metric, trace or backup fixture (AC-privacy-01).
+
+### 10.14.3 Closure, export, deletion [D]
+
+`member.closed` (member-initiated, or after `retention.member_inactive_days`) deletes `MemberKey`, `Device` (except grant memory), `Session`, e-mail, `SecurityNotice`, `OptIn` and invite edges, and reduces the `Member` row to the opaque `mem_` id, as S0.7 requires. Ledger and provenance rows are `permanent` by design and contain no personal data; provenance carries `vol_` handles, not `mem_` ids (S0.6.4). Closure is irreversible and cannot be recovered. `GET /v1/members/me/export` returns the member's own rows in JSON. The interface states that closure does not rewrite the public ledger or published provenance.
+
+## 10.15 Member safety in a high-risk context
+
+The launch audience includes people in Iran for whom participation may carry personal risk (FD§8.2 risk 5). The threat model itself is a G1 deliverable [V]; this section fixes the design commitments that part must test. [D]
+
+### 10.15.1 What each party can see
+
+| Party | Can see | Cannot see | Residual risk and response |
+| --- | --- | --- | --- |
+| Local network observer, ISP | That the device connects to Hamyar's addresses, traffic volume and timing; the host name unless encrypted client hello is used [V] | Request contents (TLS) | Use of the site cannot be hidden. Hamyar does not provide or advise circumvention (FD Principle 9). The notice says so |
+| Hosting or edge provider | If it terminates TLS: plaintext requests, tokens, submitted text and client IPs at its layer | Keys it does not hold (private keys, recovery keys) | Treated as trusted-but-not-blind; storage and hosting sit behind interfaces so they can move (`S4.*`); reachability from Iran is [V] |
+| Database or storage provider | Everything in the database, including ciphertext, hashes, pseudonymous ids | Clear e-mail without the secret store; any IP older than the counter window | Separate secrets store; minimal columns (10.2) |
+| Operator or admin (insider) | Pseudonymous rows within their permissions (10.11); invite edges (operators only) | E-mail (not exposed), keys, provider data, volunteer chat pages | Two-person actions, `AdminAction` log, separation of powers |
+| Other members | A donor sees the cell text; a requester sees the output | Requesters never see `vol_` handles or `mem_` ids; donors never see requester ids | Provenance salted-hash handle (S0.6.4) |
+| The volunteer's own AI provider | The prompt and the answer, inside the volunteer's own account | Hamyar identity or keys | Outside Hamyar's control; the cell card says so; clean-chat advice (FD§5.5) |
+| E-mail sender or mailbox provider | The address and that Hamyar wrote | Anything beyond the neutral notice | 10.5 |
+| Browser or phone vendor, extensions, cloud sync | Whatever is on the device, including the key store and clipboard | n/a | Warnings at key display; panic wipe (10.15.4) |
+
+### 10.15.2 Seizure and compelled disclosure
+
+| Scenario | What exists to hand over | What does not exist | Design response |
+| --- | --- | --- | --- |
+| Database seized | Pseudonymous members, public keys, ledger and job rows, content within `retention.job_payload_days`, request logs for `retention.request_log_days`, invite edges inside the accountability window, e-mail ciphertext | Names, phones, clear e-mail, raw IPs, passwords, private and recovery keys, provider credentials | Minimal columns, short retention |
+| Database plus secrets store seized | The above plus decryptable e-mail addresses and IP hashes that can be enumerated back to addresses | Keys on devices | Keep the stores separate; `kill.optional_pii` (10.15.4) |
+| Order naming a member id | Their rows, keys, balances, activity dates, submissions in retention | The identity behind the pseudonym | Disclosure is two-person (`disclosure.release`) with counsel sign-off [V], recorded as a count |
+| Order for the invite graph | Edges inside the accountability window; tree membership afterwards | Edges older than `invite.accountability_days` | Edge clearing (10.10) |
+| Member's device seized, unlocked | The active session and device key: full control until revoked | The recovery key (never stored on the device) | Panic wipe; remote revoke from another device or by recovery |
+| Recovery paper seized | Control of the identity | n/a | Cooldown; keep it private; accepted residual risk |
+| Admin's device or authenticator seized | One credential | The second approver | Emergency credential lock by any admin; short admin sessions |
+
+What Hamyar commits to: hold less, decrypt less, log the disclosure, publish counts where the law allows [V]. It does not commit to resist a lawful order; whether and how to respond is counsel's decision [V].
+
+### 10.15.3 No location, no mandatory identity [D]
+
+No location is collected, inferred or displayed by default (`public.location_display` = `never`); no GeoIP is used (10.14.1); teams are opt-in and hidden below `team.min_public_members`; share cards carry no personal data (`S12.*`). No real name, photo, phone, e-mail or social account is ever required; a member needs only a browser. Geo-blocking for sanctions or export-control reasons would need IP geolocation, which contradicts this section: it is a question for counsel and an owner decision (`S3.*`) [V], and until decided no geo lookup exists.
+
+### 10.15.4 Safety features [D]
+
+| Feature | Behavior |
+| --- | --- |
+| Panic wipe | One tap on any screen deletes the device key, device token, session, caches and local settings, then tries to revoke the device key on the server (local deletion happens first and does not wait for the network) |
+| Quick exit | A button on every screen that navigates to a neutral page and replaces the history entry where the browser permits [V] |
+| `kill.optional_pii` [A] | Operator action (`perm.identity.purge_optional_pii`): one admin engages, two-person releases (`killswitch.release`). Immediately: refuse new e-mail addresses, delete every e-mail ciphertext and index, set the effective `retention.ip_hash_ttl_days` to 0, set the effective `retention.request_log_days` to 0 and delete existing request logs, stop recording `actor_day_hash` |
+| Notices | The six `copy.*` keys below, all marked `needs_human_and_legal_review` |
+
+| Copy key | en | fa |
+| --- | --- | --- |
+| `copy.privacy.pseudonymity_notice` | Hamyar does not ask for your name, phone number or e-mail. Your identity is a key stored on this device. This reduces what we hold about you; it does not make you anonymous: your internet provider can see that you connect to this site, and anyone who gets your device or recovery key can act as you. | همیار نام، شماره تلفن یا ایمیل شما را نمی‌خواهد. هویت شما کلیدی است که روی همین دستگاه نگه‌داری می‌شود. این کار اطلاعاتی را که ما از شما داریم کم می‌کند، اما شما را ناشناس نمی‌کند: ارائه‌دهندهٔ اینترنت شما می‌تواند ببیند که به این سایت وصل می‌شوید، و هر کس به دستگاه یا کلید بازیابی شما دست یابد می‌تواند به‌جای شما عمل کند. |
+| `copy.privacy.no_promise_notice` | We declare that we collect the minimum needed and do not store your IP address. We cannot promise that nobody can see that you use Hamyar, or that your data can never be taken from our servers. | ما اعلام می‌کنیم که کمترین اطلاعات لازم را جمع می‌کنیم و نشانی IP شما را ذخیره نمی‌کنیم. نمی‌توانیم قول بدهیم که هیچ‌کس نتواند ببیند شما از همیار استفاده می‌کنید، یا اطلاعات هرگز از سرورهای ما گرفته نشود. |
+| `copy.identity.recovery_key_notice` | This recovery key is the only way to get your identity back if you lose this device. Write it down and keep it somewhere private. We never see it and cannot restore it for you. Anyone who has it can take over your identity. Hamyar will never ask you for it. | این کلید بازیابی تنها راه برگرداندن هویت شما در صورت از دست رفتن این دستگاه است. آن را روی کاغذ بنویسید و جایی خصوصی نگه دارید. ما هرگز آن را نمی‌بینیم و نمی‌توانیم آن را برای شما بازیابی کنیم. هر کس آن را داشته باشد می‌تواند هویت شما را در اختیار بگیرد. همیار هرگز آن را از شما نمی‌خواهد. |
+| `copy.identity.email_optional_notice` | E-mail is optional. If you add one, we store it encrypted and use it only for the notices you choose. It cannot be used to recover your identity. An e-mail address can link you to a real person; if that matters to you, leave it empty. | ایمیل اختیاری است. اگر آن را اضافه کنید، به‌صورت رمزگذاری‌شده نگه‌داری می‌شود و فقط برای اعلان‌هایی که خودتان برمی‌گزینید به کار می‌رود. با ایمیل نمی‌توان هویت را بازیابی کرد. نشانی ایمیل می‌تواند شما را به یک شخص واقعی پیوند دهد؛ اگر این برایتان مهم است، آن را خالی بگذارید. |
+| `copy.identity.wipe_device_confirm` | Remove this identity from this device? Without your recovery key you will not be able to get it back. | این هویت از این دستگاه حذف شود؟ بدون کلید بازیابی نمی‌توانید آن را پس بگیرید. |
+| `copy.identity.recovery_phishing_warning` | Enter your recovery key only on the exact address shown here, and never in a chat, e-mail or message. | کلید بازیابی را فقط در همین نشانی وب‌سایت وارد کنید و هرگز آن را در گفتگو، ایمیل یا پیام وارد نکنید. |
+
+## 10.16 What the platform can NOT promise
+
+The member-facing wording uses `declared` and never `guaranteed` (IC8). Stated plainly, Hamyar cannot promise that: [D]
+
+1. Anyone is anonymous. A network observer, the host and the member's own devices can reveal that a person uses Hamyar.
+2. Use of Hamyar is safe or lawful for a given person in a given country. Terms of services, sanctions and local law are [V] and are not decided by this product.
+3. The host, edge or network will keep Hamyar reachable, or that it is reachable from Iran [V].
+4. Data cannot be taken from the servers by a compromise, an insider or a lawful or unlawful order. Hamyar can only hold less, keep it for less time and separate what it keeps.
+5. A lost recovery key or a lost device can be fixed. No operator can restore or reassign an identity.
+6. A stolen recovery key or an unlocked stolen device cannot be used against the owner, beyond the limits of the cooldown and caps.
+7. IP hashes are irreversible. They are keyed and short-lived, but enumerable by whoever holds the key and the hashes (10.14.2).
+8. The vouching graph, once exposed, will not harm the people in it. It is minimized and cleared, not erased from every backup.
+9. A volunteer's provider account is safe. Hamyar never touches it and cannot see what the provider does with a prompt.
+10. Fake accounts and credit farming are prevented. They are bounded and monitored (10.9, 10.10); a patient adversary with many cheap identities is accepted residual risk.
+11. Backups, deleted e-mail and closed accounts vanish at once. Backups expire on their schedule (10.5, 10.14.3).
+12. Counsel, regulators or providers will accept the design. Every such question stays [V].
