@@ -468,3 +468,105 @@ When reports on a template reach `template.autopause_report_count` inside `templ
 | `AC-abuse-04` | Any response of the abuse and appeal APIs | Checked against the schema | No field contains a reporter's `mem_` or `vol_` id |
 | `AC-abuse-05` | A `createCellOverturn` for accepted cells | Approved by a second admin | For each cell `cell.overturned`, a ledger `reversal` and a `rework` cell (S0 `ISS-05`) exist, or the whole request is rejected by the guard of 11.50.3 |
 | `AC-abuse-06` | An item older than `report.triage_sla_days` | The queue loads | The overdue badge shows |
+
+## 11.50 Tool 6: Ledger explorer and reversal
+
+**Purpose.** Let an operator read the ledger exactly as stored, see invariant and hash-chain status, acknowledge alarms, and request a reversal. The explorer cannot edit, insert or delete anything; the only write path to the ledger from any admin screen is the two-person reversal (S0.8.5). [D]
+**Roles and permissions.** `operator`: `perm.ledger.read`, `perm.ledger.reverse`, `perm.alarm.acknowledge`. `reviewer`: read-only views of entries and transactions reached through an open appeal, report or alarm (a `context`, 11.55).
+
+**`SCR-ops-04` Explorer.** [D]
+
+| Block | Content and rules |
+| --- | --- |
+| A Account list | `ledger_account_type`, `lac_` id, balance as a base-10 integer string in `ucr` with the credit value rounded down beside it (S0.6.1), the constraint of the type (`member` >= 0, `escrow` >= 0 and zero when closed, `reserve` >= 0, `issuance` <= 0 and equal to minus cumulative mint, `retired` >= 0 and equal to cumulative retired). A totals row shows the sum of all balances, which must be exactly 0 |
+| B Entries | Filters: entry type, transaction kind, account type, `job_id`, `txn_id`, date range, amount range. No search by `mem_` id and no listing of one member's entries without a `context` (`AD7`); member accounts appear as `lac_` ids |
+| C Lots | Credit lots of an account (`lot_` id, amount, `earned_at`, `expires_at`), only with a `context` |
+
+**`SCR-ops-05` Entry and transaction detail.** Debit and credit accounts, type, amount, `seq`, `prev_hash`, `entry_hash` with a recompute button, the owning transaction and its sibling entries, lots consumed or created, the policy and parameter versions stamped, linked job and cell, whether the entry has been reversed. There is no edit control. The "Request reversal" button opens the flow below.
+
+**`SCR-ops-06` Invariants and checkpoints.** One row per `INV-L<nn>` (definitions owned by S6.*): last result, last check time (sampled every `ledger.invariant_check_interval_s`, full recompute every `ledger.full_recompute_interval_s`), linked alarm. Daily checkpoint hashes (`ledger.checkpoint_interval_s`) are listed beside the hash shown on the public ledger page (`ff.public.ledger_page`) so a mismatch is visible. "Run verification now" starts a chain check or a full recompute (`InvariantCheck` row); one runs at a time. Acknowledging an `Alarm` records who and why but never clears a violation: the row stays red until a later check passes (`ledger.invariants_passed`).
+
+### 11.50.3 Reversal flow [D]
+
+1. From an entry or transaction the operator opens the dialog and supplies a `context` (a cell overturn, an appeal or an alarm), a reason code (`fraud_finding`, `appeal_overturn`, `system_error`, `duplicate_posting`, `other`) [A] and text.
+2. `previewAdminAction` returns the mirror entries (`entry_type` `reversal`, same amount, accounts swapped), the lot effects, the resulting balances and these guards: (a) the target is not itself a `reversal` and not already reversed (`STATE_CONFLICT`); (b) no account would break its constraint, given `ledger.allow_negative_balance` = false; a member who already spent the credit makes the preview return `would_overdraw` and the request is refused with `422 UNPROCESSABLE` (what then happens to the loss is an owner decision, `ISS-119`; the screen offers `kill.member.<mem_id>` to stop further spending, 11.54).
+3. The operator confirms at `CT3`; an `ApprovalRequest` with `required_approvals` = `ledger.reversal_min_approvers` (constant 2) is created.
+4. A second `operator` repeats the preview against the current state and approves. Execution posts one `LedgerTransaction` of kind `reversal`, emits `ledger.entry_committed`, runs the per-commit invariant check and writes the `AdminAction` rows in the same transaction.
+
+The original entry is never edited (S0.7 forbids it); both stay visible and linked.
+
+**Audit events.** Codes `ledger.reversal`, `alarm.acknowledge`, `ledger.verify_chain`, and logged reads of member-linked views (`member.lookup`); domain events `ledger.entry_committed`, `ledger.invariants_passed`, `ledger.invariant_violated`, `approval.*`.
+
+| `op` | Method and path | Notes |
+| --- | --- | --- |
+| `listLedgerAccounts`, `getLedgerAccount` | `GET /v1/admin/ledger-accounts[/{lac_id}]` | Member accounts need `context` |
+| `listLedgerEntries`, `getLedgerEntry` | `GET /v1/admin/ledger-entries[/{lge_id}]` | Amounts as integer strings |
+| `listLedgerTransactions`, `getLedgerTransaction` | `GET /v1/admin/ledger-transactions[/{txn_id}]` | |
+| `listCreditLots` | `GET /v1/admin/ledger-accounts/{lac_id}/credit-lots` | `context` required |
+| `listInvariantChecks` | `GET /v1/admin/invariant-checks` | |
+| `createLedgerVerification` | `POST /v1/admin/ledger-verifications` | Body `{kind: chain or invariants}`; one at a time |
+| `listLedgerCheckpoints` | `GET /v1/admin/ledger-checkpoints` | |
+| `createLedgerReversal` | `POST /v1/admin/ledger-reversals` | `202` with an `ApprovalRequest` |
+| `listAlarms`, `acknowledgeAlarm` | `GET /v1/admin/alarms`, `POST .../{alm_id}/acknowledgements` | |
+
+No `PUT`, `PATCH` or `DELETE` route exists on any ledger resource.
+
+| AC | Given | When | Then |
+| --- | --- | --- | --- |
+| `AC-ledgerx-01` | Any ledger resource | `PATCH` or `DELETE` is sent | `404 NOT_FOUND`; no route exists |
+| `AC-ledgerx-02` | A mint entry of 1,000,000 `ucr` whose credit is unspent (fixture) | Operator A requests a reversal and operator B approves | One `reversal` transaction posts the mirror entry, `ledger.entry_committed` and `ledger.invariants_passed` follow, and the original entry is unchanged |
+| `AC-ledgerx-03` | The same entry after the member spent the credit | A requests a reversal | `422 UNPROCESSABLE` with `would_overdraw`; no `ApprovalRequest` is created |
+| `AC-ledgerx-04` | An entry that is already a `reversal` | A requests a reversal | `409 STATE_CONFLICT` |
+| `AC-ledgerx-05` | A request for a member's account without `context` | Sent | `422 UNPROCESSABLE`; a refused `AdminAction` is written |
+| `AC-ledgerx-06` | An open `ledger.invariant_violated` | An operator acknowledges the alarm | The alarm shows acknowledged and the invariant row stays red until a passing check runs |
+| `AC-ledgerx-07` | A seeded edit of one entry (the BM1 corruption test) | `createLedgerVerification` runs | The first broken `seq` is named and `ledger.invariant_violated` is raised |
+| `AC-ledgerx-08` | A balance of 9007199254740993 `ucr` | Displayed | Shown exactly, as a string, never through a JavaScript number |
+
+## 11.51 Tool 7: Parameter editor
+
+**Purpose.** Change configuration parameters with versioning, prospective effect, advance notice and a public change log, so credit and rules are never altered secretly (FD Principle 5; FD§4.9). [D]
+**Roles and permissions.** `perm.parameter.read` for any admin; `perm.parameter.edit` only for the owner role of the area (S0.10.5). Areas owned by `founders` need two distinct `operator` approvers whatever the direction [A]; `launch.*` areas always need two approvers (S0.10.5); a parameter referenced by a locked `PreRegistration` is read-only (`STATE_CONFLICT`, lock owned by S13.*).
+
+**`SCR-ops-07` List.** Filters: area, owner, public, has pending version, locked, constants. Columns: name, type, current value (a `ratio` shown as a decimal from ppm, `credits` as whole credits, durations with the raw `_s` value beside), version, `effective_from`, a badge for a pending future version, default and difference from default, `calibration_source`.
+
+**`SCR-ops-08` Detail and propose.** [D]
+
+| Block | Content |
+| --- | --- |
+| A Definition | Every field of S0.10.3: type, unit, validation, default, `tighten_direction`, `notice_days`, owner, `calibration_source`, `public`, `introduced_in`. Constants (`CON`, not mutable) show "changed only by a spec change" and no form |
+| B Timeline | Every `ParameterVersion`: value, `effective_from`, change class, public log link, admin short id (never shown publicly) |
+| C Form | New value typed by parameter type. A `ratio` is entered as a decimal string and converted to integer ppm without floating point; more than six decimals is `VALIDATION_FAILED`. Reason code and text (`AD3`); a public rationale text for the change log, `fa` and `en`; `evidence_ref` (a `CalibrationRecord`, `MetricSnapshot` or `PreRegistration` id) required when the first `calibration_source` is `CAL`, `P1M` or `DEM`, and for `CAL` the referenced records must number at least `calibration.min_samples_per_service` per service (guard) |
+| D Result of `previewAdminAction` | `change_class` from `tighten_direction`: `up` means a higher value tightens, `down` a lower value, `none` always `neutral`. `effective_from`: for `tighten` now; otherwise `now + notice_days * 86,400 s`, where `notice_days` is the parameter's own, defaulting to `change.notice_days_price` for `price.*`, `admission.*` and `credit.*` and to `change.notice_days_default` elsewhere. Approvals needed, and the local time of the effective instant beside UTC |
+| E Constraints | Named constraints `C1`..`C8` that include this parameter with the current values of their other members. Evaluation is over the timeline: at every effective instant among all pending versions the full set must satisfy `C1`..`C7`; `C8` is a warning that needs a ticked acknowledgement |
+| F Scope notice | "Jobs, lots and leases keep the version they were created under where the spec says so" (S0.10.3), listing the stamped objects the parameter affects |
+
+**Change sets.** Parameters that constraints couple (for example `credit.lifetime_days` and `credit.lifetime_days_accelerated`, constraint `C4`) are edited together: one request lists several `{name, value}` items, is validated as a whole on the timeline, needs one `ApprovalRequest` if any item needs two approvers, and writes one public change-log group. Items keep their own `effective_from`; a tighten item is not delayed by a loosen item. The item count is bounded only by `api.max_body_bytes`. [D]
+
+**Special cases** [D]: the three `launch` switches are read-only here and link to `SCR-ops-12`; `security.*` parameters are not public, so no public entry is written and the screen says so; `security.two_person_actions` accepts only action codes of 11.44.3, adding a code is a tighten and removing one is a loosen; `parameter.changed` is emitted when a version is accepted and carries `effective_from`, consumers apply it at that instant, and no second event is emitted [A].
+
+**`SCR-ops-09` Pending and change log.** Pending versions with a countdown and `Withdraw` (`parameter.withdraw_pending`, `CT2`: a withdrawal is a retraction, so a new `ChangeLogEntry` references the original, which stays); published entries; a tracker of tighten entries due within `change.tighten_publish_within_s` that raises an `Alarm` of kind `ops.changelog_overdue` when late.
+
+**Audit events.** Codes `parameter.*`; domain events `parameter.changed`, `changelog.entry_published`.
+
+| `op` | Method and path | Notes |
+| --- | --- | --- |
+| `listParameters`, `getParameter` | `GET /v1/admin/parameters[/{name}]` | `ETag`; `name` is the dotted key |
+| `listParameterVersions` | `GET /v1/admin/parameters/{name}/versions` | |
+| `createParameterChangeSet` | `POST /v1/admin/parameter-change-sets` | `201` when executed (tighten, neutral), `202` when an `ApprovalRequest` is needed; `If-Match` per item |
+| `withdrawParameterVersion` | `POST /v1/admin/parameter-versions/{pmv_id}/withdrawals` | `CT2` |
+| `listChangeLogEntries` | `GET /v1/admin/change-log-entries` | Includes non-public entries |
+
+| AC | Given | When | Then |
+| --- | --- | --- | --- |
+| `AC-param-01` | `verify.audit_rate_s` 0.10 with `tighten_direction` `up` | Raised to 0.20 | Class `tighten`, effective now, one approver, a public entry due within `change.tighten_publish_within_s`, event `parameter.changed` |
+| `AC-param-02` | `admission.phi` 0.50 with `tighten_direction` `down` | Raised to 0.60 | Class `loosen`, `effective_from` = now + `change.notice_days_price` days, `202` with an `ApprovalRequest`; a quote created before that instant uses 0.50 |
+| `AC-param-03` | `verify.audit_rate_s` above `verify.audit_rate_max` | Submitted | `400 VALIDATION_FAILED`, `details.fields` names `C2` |
+| `AC-param-04` | `credit.lifetime_days_accelerated` raised above `credit.lifetime_days` | Alone, then as a change set that raises `credit.lifetime_days` first | Alone: `VALIDATION_FAILED` (`C4`); as a set: accepted because every effective instant satisfies `C4` |
+| `AC-param-05` | A constant such as `credit.scale_ucr_per_credit` | An edit is attempted | `403 FORBIDDEN` with `copy.admin.constant_not_editable`; no form is shown |
+| `AC-param-06` | `launch.members_may_join` | An edit is attempted here | `403 FORBIDDEN`; the screen links to `SCR-ops-12` |
+| `AC-param-07` | A stale `ETag` | The edit is submitted | `412 PRECONDITION_FAILED` |
+| `AC-param-08` | A ratio typed with seven decimals | Submitted | `400 VALIDATION_FAILED` |
+| `AC-param-09` | A `security.*` parameter tightened | Executed | An `AdminAction` exists and no public `ChangeLogEntry` is written |
+| `AC-param-10` | A pending loosen version | An operator withdraws it | The version is withdrawn, a retraction entry references the original entry, nothing is deleted |
+| `AC-param-11` | A threshold in a locked `PreRegistration` | An edit is attempted | `409 STATE_CONFLICT` |
+| `AC-param-12` | A `CAL` replacement with fewer than `calibration.min_samples_per_service` records per service (fixture 29 against 30) | Submitted | `422 UNPROCESSABLE` |
