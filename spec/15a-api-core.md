@@ -355,3 +355,49 @@ createReport  req { subject_kind: "cell"/"lease"/"template"/"job"/"result", subj
 ```
 
 `report_category` (convention addition): `prohibited_content`, `sensitive_data`, `injection_attempt`, `link_or_action_request`, `wrong_declaration`, `abusive_or_unsafe`, `other`. A volunteer may report any card they hold a lease for; a requester may report a `result` of their own job. The reported party never sees the reporter; reports count toward `template.autopause_report_count` within `template.autopause_window_s` (event `template.paused`, `S8.*`); a report never changes the reporter's tier. Limit: `report.max_per_member_per_day` per UTC day (`RL-REPORT`). [D]
+
+### 15.6.4 Submission (paste-back)
+
+```
+Submission { id: id<sub>, lease_id: id<lse>, cell_id: id<cel>, received_at: ts, late: bool,
+             verdict: "pending"/"accepted"/"rejected"/"under_review", reasons: [string],      reasons are reject.* codes (0.8.4)
+             appealable_until: ts/null,
+             credit: { amount_ucr: ucr, lot_id: id<lot>, expires_at: ts }/null }
+submitResult  req { nonce: b64u<16>, reported_service_id: id<svc>, reported_model: text<80>?,
+                    output_text: string?,                          task run: exactly one of output_text / review_result
+                    review_result: { rating: "accept"/"reject"/"unsure", criteria: [ { key: text<40>, score: int } ]?, note: text<500>? }? }
+              201 { submission: Submission }
+```
+
+`verdict` maps the 0.9.3 submission states: `received` and `checks_passed` -> `pending` (an audit or blanket redundancy may still be running; the raw state is not exposed, so sampling is not revealed), `quarantined` -> `under_review` (output with links, code to run or requests for action, `screen.output_url_action`; withheld from results, FD§5.5; the member sees a neutral "under review", not an accusation), `schema_failed`, `checks_failed`, `rejected` -> `rejected` with `reasons`, `accepted` -> `accepted`. `appealable_until = decided_at + appeal.window_days x 86,400 s` (appeals are filed through the sibling file). The `criteria` keys and score ranges of a review cell are defined by its review template (`S8.*`). [D]
+
+- **Natural idempotency (lease_id, nonce).** The first valid submission wins. The same lease, nonce and body again (even with a new `Idempotency-Key`) returns the stored outcome with `Idempotent-Replayed: true`, emits nothing, and credits nothing twice (0.9.3). The same lease and nonce with a different body is `409 STATE_CONFLICT`, reason `submission_exists`. [D]
+- **Lease checks.** The nonce is compared first, in constant time; a wrong nonce is `410 LEASE_EXPIRED`, reason `nonce_invalid`, stores nothing, leaves the lease untouched and is counted by the forgery heuristics (`S9.*`). Lease `active`: accepted. Lease `expired` but within `lease.submit_grace_s` and the cell not yet re-leased: accepted with `late: true`. Otherwise `410 LEASE_EXPIRED` with reason `lease_expired`, `lease_released` or `lease_revoked`. [D]
+- **Size.** A body or `output_text` above `cell.envelope.max_submission_bytes` is `413 PAYLOAD_TOO_LARGE`, reason `submission_too_large`, stores nothing and keeps the lease active. Within the byte limit but outside the envelope (`cell.envelope.max_output_chars`) the submission is stored and rejected with `reject.length_out_of_bounds`; the cell requeues (FD§3.4). [D]
+- **Attestation, not proof.** `reported_service_id` must be one of the member's `optin.service_ids`; it and `reported_model` are recorded as the volunteer's attestation for the manifest (FD§5.6, failure mode 7). The server never asks for, accepts or stores a chat link, screenshot or page content. [D]
+- **Processing order** (`S8.*`, `S9.*` own the algorithms): schema and size check; forbidden-content, link and instruction-pattern scan (quarantine); automatic checks; gold comparison; duplicate and timing heuristics against stored data; audit sampling. Cheap checks run before the response; a pending verdict resolves later and `getSubmission` returns the final verdict. Clients poll with backoff; the server may send `Retry-After` on a pending verdict. [D]
+- **Payment at acceptance** (`ISS-09`). On `accepted` the same transaction posts the ledger entry: a `mint` for a Commons cell, a `transfer` for a member-job cell, exactly 1,000,000 ucr (0.6.1), creating a `CreditLot` with `expires_at = earned_at + credit.lifetime_days x 86,400 s` under the parameter version at `earned_at` (0.6.2). Nothing in the response reveals the cell kind, an audit, a comparison or another donor's output. [D]
+- **Never executed, always escaped.** Submitted text is stored verbatim and returned only as a JSON string with `X-Content-Type-Options: nosniff`; nothing in this API interprets, renders or executes it. [D]
+
+`getSubmission` returns one `Submission`. `listSubmissions` (history) returns `Page<{ submission: Submission, card: { template_name: text<80>, purpose: enum<purpose>, origin: "commons"/"member" } }>`, filters `verdict`, `from`, `to` (`ts`), newest first.
+
+### 15.6.5 Balance, lots, ledger entries, starter grant
+
+```
+Balance  { as_of: ts, balance_ucr: ucr, held_ucr: ucr, member_cap_ucr: ucr, headroom_ucr: ucr,
+           expiring_soon: { within_days: int, amount_ucr: ucr }, next_expiry: { at: ts, amount_ucr: ucr }/null,
+           earn_today: { earned_ucr: ucr, daily_cap_ucr: ucr } }
+Lot      { id: id<lot>, origin: "mint"/"grant"/"transfer"/"refund", amount_ucr: ucr, remaining_ucr: ucr,
+           earned_at: ts, expires_at: ts, state: "active"/"spent"/"expired" }
+Entry    { id: id<lge>, entry_type: enum<ledger_entry_type>, direction: "in"/"out", amount_ucr: ucr,
+           txn_kind: enum<ledger_txn_kind>, created_at: ts, related: { kind: "cell"/"job"/"reservation", id: string }/null }
+StarterGrant { state: "locked"/"claimable"/"claimed"/"paused", verified_cells: int, required_verified_cells: int,
+               amount_ucr: ucr, lifetime_days: int, claimed_at: ts/null, lot_id: id<lot>/null }
+claimStarterGrant  req {}   201 { grant: StarterGrant, lot: Lot }
+                   err 422 UNPROCESSABLE (grant_requirement_unmet, reserve_floor); 422 CAP_EXCEEDED (grant_per_device, grant_per_tree_day,
+                       grant_daily_limit); 409 ALREADY_EXISTS (starter_grant_claimed)
+```
+
+- `balance_ucr` is the sum of unexpired lot remainders; `held_ucr` is credit in the member's own open escrows (informational); `member_cap_ucr = credit.member_cap_credits x trust.cap_multiplier.<tier>` in ucr; `headroom_ucr = max(0, member_cap_ucr - balance_ucr)`; `expiring_soon` covers `credit.expiry_notice_days`; `daily_cap_ucr` is `mint.per_member_daily_cap_credits` in ucr. All are computed from the ledger, never cached beyond `as_of`. [D]
+- `listLots` is ordered by `expires_at` ascending (the oldest-first spending order, 0.8.5) and filters on `state`; `listLedgerEntries` is newest first and returns only entries on the member's own account, with the related cell, job or reservation of the member but never a counterparty. The public ledger is a public-surface resource (sibling file). [D]
+- **Starter grant** (FD§4.6, `ISS-06`). The grant is claimed, not pushed, so the `grant.starter_lifetime_days` clock starts when the member decides. `claimable` requires `grant.required_verified_cells` verified cells. At claim time the server checks `grant.max_per_device`, `grant.max_per_invite_tree_per_day`, `grant.max_per_day` and that the Reserve stays above `grant.reserve_floor_credits` (otherwise `paused`: grants pause, they are never printed). It posts a `grant` entry from the Reserve for `grant.starter_credits` and is non-transferable (`grant.non_transferable`). [D]
