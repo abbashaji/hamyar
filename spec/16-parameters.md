@@ -99,3 +99,106 @@ Evaluated on every write against the configuration as it will be at `effective_f
 | `C20` | `policy.loosen_min_approvers >= policy.tighten_min_approvers`; `policy.loosen_min_notice_days >= change.notice_days_default` | error |
 
 Worked check of the initial defaults against every constraint [D]: `C1` 0.5; `C2` 0.01 <= 0.05 <= 0.20 and 0.02 <= 0.10 <= 0.50; `C3` 1200 >= 120; `C4` 14 <= 60 twice; `C5` 1000 >= 3; `C6` 0.05 and 0.10 <= 0.50; `C7` 43,200 <= 1,209,600; `C8` 350 >= 300 x 1.15 = 345; `C9` 43,200 and 1,209,600 are multiples of 43,200; `C10` 3 <= 14 and 7 <= 14; `C11` 86,400 <= 2,592,000; `C12` 86,400 >= 1800; `S9-C1` 32,768 >= 18,000; `S9-C2` 128 = 4 x 32; `C13` skipped (Phase 0); `C14` 600 <= 1200, 120 <= 1200; `C15` 2,592,000 <= 7,776,000 and 1800 <= 28,800; `C16` 0.70 <= 0.80 <= 0.95; `C17` 10 <= 1000, 7 <= 14; `C18` 30 >= 1; `C19` `["G0","G1"]`; `C20` 2 >= 1, 7 >= 7. All pass (`AC-param-02`).
+
+## 16.4 Cell envelope
+
+Owner `operator`. Binding: the envelope in force is stamped on a `Cell` when it is created and on its `TemplateVersion` check at approval [A]; lowering a limit never invalidates a leased or submitted cell. The envelope is one parameter group, not a per-template field, in Phase 1 (one size class, S0 0.8.6). [D]
+
+| Name | Type · unit | Validation | Initial configurable default | Chg | Cal | Used |
+| --- | --- | --- | --- | --- | --- | --- |
+| `cell.envelope.max_input_chars` | int · chars | 200..100000 | 4000 | `T↓` | `CAL`: largest input that completes in one Send, per service and device class | S8.*, S9.6 |
+| `cell.envelope.max_output_chars` | int · chars | 200..100000 | 6000 | `T↓` | `CAL`: longest output a service returns inside one Send | S8.*, S9.6, S9.7.3 |
+| `cell.envelope.max_submission_bytes` | int · bytes | 1024..1048576; `S9-C1` | 32,768 (6000 chars x up to 3 UTF-8 bytes = 18,000, plus margin) | `T↓` | `CAL`: size of real paste-backs | S9.6, S4.* |
+| `cell.envelope.expected_time_s` | duration_s | 10..3600; `C3` | 120 (the FD§3.2 first-contribution estimate [H]) | `N` | `CAL`: median seconds per cell | S11.*, S6.*, S9.12 |
+| `cell.envelope.max_json_depth` | int | 2..64 | 16 | `T↓` | `TEC`: parser limits on real phones | S9.7 |
+| `cell.envelope.max_model_label_chars` | int · chars | 1..200 | 80 | `N` | `CAL`: labels donors actually type | S9.7 |
+| `cell.max_attempts` | int | 1..20 | 5 | `N` | `P1M`: attempts to acceptance by template | S5.*, S9.14.2 |
+
+## 16.5 Credit, expiry, caps, grant, Reserve, mint, inflation
+
+Owner `operator`. Binding (S6.* ledger file 6.12.2): `credit.lifetime_days*` to the `CreditLot` (`lifetime_param_version`); `credit.member_cap_credits` and `trust.cap_multiplier.*` to the `Lease` (`ledger_versions`); `mint.*` to the lease; `grant.*` to the evaluation run; `reserve.*` to the next retirement run; `inflation.*` and `ledger.*_interval_s` to the next rollup or run. Every price, lifetime, K and Reserve-ceiling parameter is `N`: always notice, because it changes what members hold or pay. [D]
+
+| Name | Type · unit | Validation | Initial configurable default | Chg | Cal | Used |
+| --- | --- | --- | --- | --- | --- | --- |
+| `credit.scale_ucr_per_credit` | int | constant | 1,000,000 | `C` | `CON` | S0 0.6.1, S6.* |
+| `credit.lifetime_days` (E) | days | 1..365; `C4`, `C17` | 60 (FD§4.5 proposal, from the brief) | `N` | `P1M`: arm comparison, return and share of credit expiring | S6.*, S5.* |
+| `credit.lifetime_days_accelerated` | days | 1..365; `C4`, `C17` | 14 (FD§4.5 example arm) | `N` | `P1M`: arm comparison | S6.*, S13.* |
+| `credit.member_cap_credits` (K) | credits | 1..100000; `C8` | 350 = round to 50 of 1.25 x 240 x 1.15 (the FD§3.3 reference job with a 25% margin) | `N` | `DEM`: p90 large-job size; then `P1M` | S6.* |
+| `credit.expiry_notice_days` | days | 0..60; `C17` | 7 | `N` | `OPS`: member feedback on expiry notices | S6.*, S11.* |
+| `credit.expiry_sweep_interval_s` | duration_s | 60..86400 | 3600 | `N` | `OPS` | S6.*, S4.* |
+| `grant.starter_credits` (G) | credits | 0..1000; `C5` | 3 (FD§4.6 "a few cells") | `T↓` | `P1M`: first-job completion and Reserve flow | S6.* |
+| `grant.starter_lifetime_days` | days | 1..365; `C4` | 14 (FD§4.6 "expires quickly") | `N` | `P1M` | S6.* |
+| `grant.required_verified_cells` | int | 1..50 | 1 (FD§4.6: after one verified contribution) | `T↑` | `FND` | S6.* |
+| `grant.max_per_device` | int | 0..10 | 1 (lifetime) | `T↓` | `OPS`: farming flags | S6.*, S10.* |
+| `grant.max_per_invite_tree_per_day` | int | 0..100 | 2 | `T↓` | `OPS` | S6.*, S10.* |
+| `grant.max_per_day` | int | 0..10000 | 20 | `T↓` | `OPS` | S6.* |
+| `grant.reserve_floor_credits` | credits | >= 0 | 0 (grants pause rather than overdraw, FD§4.6) | `T↑` | `FND` | S6.*, S5.27 |
+| `grant.non_transferable` | bool | constant | true | `C` | `CON` | S6.* |
+| `reserve.ceiling_credits` | credits | >= `grant.starter_credits`; `C5`, `C17` | 1000 | `N` (retirement is irreversible) | `P1M`: grant demand and expiry inflow | S6.* |
+| `reserve.retire_interval_s` | duration_s | 3600..604800 | 86,400 | `N` | `OPS` | S6.* |
+| `reserve.retire_min_credits` | credits | >= 0; `C17` | 10 (avoids noise entries) | `N` | `OPS` | S6.* |
+| `mint.monthly_cap_credits` | credits | >= 0; `C13` | 4800 = 40 donors x 8 cells x 30 days x phi 0.5 (FD§3.3 illustrative inputs); never above forecast redeemable capacity | `T↓` | `CAL`, then `P1M`: measured throughput | S6.*, S6.24.3 |
+| `mint.cap_period` | enum | constant | `utc_month` | `C` | `CON` | S0 0.6.2, S6.* |
+| `mint.per_member_daily_cap_credits` | credits | >= 1; `C18` | 30 = 3 x the FD§3.2 habit of about 10 cells a day | `T↓` | `P1M` | S6.* |
+| `mint.requires_launch_gate` | bool | constant | true | `C` | `CON` | S6.*, S14.* |
+| `inflation.claim_ratio_threshold_weeks` | ratio · weeks | > 0 | 6.0 | `T↓` | `FND` (pre-registered), `P1M` | S6.*, S6.27.2 |
+| `inflation.mint_cap_cut_ratio` | ratio | 0 < x <= 1 | 0.25 (cut applied when the threshold is passed) | `T↑` | `FND` | S6.* |
+| `inflation.mint_utilization_alarm` | ratio | 0..1 | 0.90 | `N` | `OPS` | S6.*, S4.* |
+| `inflation.throughput_window_days` | days | 7..90 | 28 | `N` | `P1M` | S6.*, `C13` |
+
+## 16.6 Price
+
+Owner `operator`. Binding: the quote stores the snapshot ids and the values it used; the `Escrow` stores `quote_p_ucr`, `quote_v_ppm`, `quote_lambda_ppm` at the hold and never changes them; a reservation fixes the price at booking. `price.*` changes take `change.notice_days_price` = 14 days and are announced in the change log with old and new `p_ucr` and eta; a quote lives `price.quote_ttl_s`, far shorter than the notice, so a price change never falls inside a quote. v itself is not a parameter: it is measured and published as a `MetricSnapshot` (S0 0.10.1). [D]
+
+| Name | Type · unit | Validation | Initial configurable default | Chg | Cal | Used |
+| --- | --- | --- | --- | --- | --- | --- |
+| `price.levy_lambda` (λ) | ratio | 0 <= x < 1; `C6` | 0.05 (FD§3.3 illustrative) | `N` | `P1M`: Reserve inflow against grant demand; then `FND` | S6.*, S6.27 |
+| `price.v_prior` | ratio | 0..`price.v_cap`; `C6` | 0.10 (FD§3.3 illustrative); used while fewer than `price.v_min_sample_cells` primary cells are in the window | `N` | `P1M`: measured v | S6.* |
+| `price.v_cap` | ratio | 0..1; `C6` | 0.50 | `N` | `FND` | S6.* |
+| `price.v_window_days` | days | 7..90 | 28 | `N` | `P1M`: stability of v | S6.* |
+| `price.v_min_sample_cells` | int | 1..100000 | 100 | `N` | `P1M`: variance of v | S6.* |
+| `price.publish_period_days` | days | 1..90 | 30 (FD§4.3 "monthly") | `N` | `FND` | S6.*, S12.* |
+| `price.eta_alarm_threshold` | ratio | 0..1 | 0.80 (FD§4.3 suggested starting point, arbitrary) | `N` | `FND` (pre-registered, 16.15) | S6.*, S13.* |
+| `price.quote_ttl_s` | duration_s | 60..86400; `C12` | 1800 | `N` | `OPS`: share of quotes confirmed after expiry | S6.*, S6.27 |
+| `price.v_rounding` | enum | constant | `ceil` | `C` | `CON` | S0 0.6.1, S6.* |
+
+## 16.7 Admission and reservation
+
+Owner `operator`. Binding: a quote, hold or reservation keeps the parameter versions it was created under (recorded in the quote); a change never alters an existing hold or an admitted job's declared window. Lowering `admission.phi` is a tightening, so it can never invalidate an admitted job; it only affects later quotes (S6.* admission file 6.23 D, `AC-admission-23`). Notice for `admission.*` and `reservation.*` is `change.notice_days_price`. Directions for the rows added by the admission part are copied from its table. [D]
+
+| Name | Type · unit | Validation | Initial configurable default | Chg | Cal | Used |
+| --- | --- | --- | --- | --- | --- | --- |
+| `admission.phi` (φ) | ratio | 0 < x < 1; `C1` | 0.50 (FD§3.3 illustrative) | `T↓` | `P1M`: throughput and deposit-to-withdrawal ratio | S6.26, S6.27 |
+| `admission.forecast_window_days` | days | 3..60; `C10` | 14 | `N` | `P1M`: forecast error by window | S6.24 |
+| `admission.active_donor_window_days` | days | 1..30; `C10` | 7 | `N` | `P1M` | S6.24, S7.* |
+| `admission.forecast_haircut` | ratio | 0 <= x < 1 | 0.00 (so FD§3.3 reproduces exactly; expected to become greater than 0 [H]) | `T↑` | `P1M`: median and spread of signed forecast error | S6.24 |
+| `admission.active_donor_min_cells` | int | 1..1000 | 1 | `T↑` | `P1M` | S6.24 |
+| `admission.donor_daily_clamp_cells` | int | 1..1000; `C18` | 30 (equal to `mint.per_member_daily_cap_credits`) | `T↓` | `P1M`: capacity concentration (FD§9) | S6.24 |
+| `admission.min_forecast_donors` | int | 1..1000 | 10 (the cohort size below which a mean is noise [H]) | `T↑` | `P1M`: forecast error; owner decision for a pilot of 30 to 50 (S6.39) | S6.24, S6.28 |
+| `admission.min_history_days` | int | 1..`admission.forecast_window_days`; `C10` | 3 | `T↑` | `P1M` | S6.24 |
+| `admission.horizon_discount_per_day` | ratio | 0 <= x < 1 | 0.00 (FD§3.3 exact; expected to become greater than 0 [H]) | `T↑` | `P1M`: forecast error by horizon | S6.24 |
+| `admission.min_window_s` | duration_s | `C7`, `C9` | 43,200 | `N` | `DEM`: accepted windows | S6.27 |
+| `admission.max_window_days` | days | 1..60; `C7`, `C9` | 14 | `T↓` | `DEM` | S6.27 |
+| `admission.window_step_s` | duration_s | divides 86,400; `C9` | 43,200 (equal to `admission.min_window_s`) | `N` | `DEM` | S6.27 |
+| `admission.max_job_cells` | int | 1..100000 | 300 = floor(350 / 1.15) rounded down to a multiple of 100 | `T↓` | `DEM`, then `P1M` | S6.*, S11.* |
+| `admission.max_concurrent_jobs_per_member` | int | 1..20 | 2 | `T↓` | `FND` | S6.29, S5.* |
+| `admission.waitlist_ttl_days` | days | 1..60 | 7 | `N` | `OPS` | S6.29 |
+| `admission.waitlist_max_per_member` | int | 0..10 | 1 | `T↓` | `OPS` | S6.29 |
+| `admission.waitlist_recheck_interval_s` | duration_s | 30..3600 | 300 | `N` | `OPS` | S6.29 |
+| `admission.waitlist_quote_ttl_s` | duration_s | 60..604800; `C12` | 86,400 (a released requester checks a few times a day [H]) | `N` | `OPS`: share of released quotes confirmed | S6.29 |
+| `admission.deadline_multiplier_standard` | ratio | constant 1.0 in Phase 1 | 1.0 (FD§4.8) | `C` | `CON` | S6.27.3 |
+| `admission.reforecast_interval_s` | duration_s | 60..86400 | 3600 (equal to `metrics.rollup_interval_s`) | `N` | `OPS` | S6.25, S6.33 |
+| `admission.forecast_refresh_s` | duration_s | 60..86400 | 3600; **alias of `admission.reforecast_interval_s`**, not seeded (`ISS-162`) | `N` | `P1M` | S4.19.1 |
+| `admission.overrun_tolerance_ratio` | ratio | 0..1 | 0.10 | `T↓` | `OPS`: share of windows missed | S6.33 |
+| `admission.claim_stretch_max` | ratio | >= 1 | 2.0 | `T↑` | `FND` | S6.27.2 |
+| `admission.share_window_s` | duration_s | 3600..604800 | 86,400 | `N` | `OPS` | S6.26.2 |
+| `job.max_overrun_ratio` | ratio | >= 1 | 2.0 (a job stops with partial settlement at 2 x its quoted window) | `T↓` (bound to the quote that stamped it) | `P1M`: actual against quoted completion | S6.33, S5.* |
+| `reservation.max_horizon_days` | days | 1..180; `C11` | 30 | `T↓` | `P1M` | S6.30 |
+| `reservation.max_active_per_member` | int | 0..10 | 1 | `T↓` | `FND` | S6.30 |
+| `reservation.free_cancel_notice_s` | duration_s | 0..2592000 | 86,400 | `T↑` | `OPS` | S6.30.3 |
+| `reservation.capacity_share_cap` | ratio | 0..1 | 0.25 of the phi capacity of any day or slot | `T↓` | `P1M`: burstiness | S6.26.2, S6.30 |
+| `reservation.min_lead_s` | duration_s | 0..`reservation.max_horizon_days` x 86,400; `C11` | 86,400 (equal to `reservation.free_cancel_notice_s`, so a free cancel exists) | `T↑` | `OPS` | S6.30 |
+| `reservation.activation_grace_s` | duration_s | 0..604800 | 43,200 | `T↓` | `OPS` | S6.30 |
+| `reservation.late_cancel_cooldown_days` | days | 0..90 | 7 | `T↑` | `OPS`: no-show rate | S6.30.3 |
+
+`job.max_overrun_ratio` is listed here because the admission part reads it (hard stop, 6.33); its S0 area is `job` and its owner `operator`. The default 4,800 of `mint.monthly_cap_credits` derives from phi, not from (1 - phi); the two coincide only at 0.5 (`ISS-166`). [D]
