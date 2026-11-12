@@ -83,7 +83,7 @@ Table `events` (entity `Event`, prefix `evt_`, retention class `ops`, S0.7). One
 | `privacy_class` | enum `none`, `entity_ref` | 13.3.2 |
 | `expires_at` | timestamptz | `occurred_at + retention.event_raw_days * 86,400 s` |
 
-Indexes: `(name, occurred_at)`, `(refs->>'job_id', occurred_at)` partial, `(refs->>'lease_id', name)` partial, `(expires_at)`. Unique partial index `(refs->>'lease_id', name)` WHERE `name` IN (`ui.card_opened` first-fire guard is NOT applied; see 13.3.5). No foreign keys (events survive entity deletion by design). [D]
+Indexes: `(name, occurred_at)`, `(refs->>'job_id', occurred_at)` partial, `(refs->>'lease_id', name)` partial, `(expires_at)`. Deduplication of repeated client events is done by the endpoint (13.3.5), not by a unique index. No foreign keys (events survive entity deletion by design). [D]
 
 ### 13.3.2 Privacy classes
 
@@ -174,3 +174,114 @@ No client event can carry free text, a prompt, an output, a URL, a clipboard con
 - **Server events.** Background job `metrics.projector` reads the outbox in order, strips the actor id, maps fields per 13.3.4, validates against the JSON Schema of `(name, event_version)`, and inserts into `events`. A row that fails validation is not inserted; it increments `hamyar_metrics_events_rejected_total` and writes a log line (no payload). The projector is idempotent: `(outbox_id)` is stored in a side table `metrics_projector_offsets`, so replay inserts nothing twice. [D]
 - **Client events.** A member-scheme batch endpoint accepts at most `api.max_body_bytes` of JSON containing up to 50 events [A] (limit stated here because S15.* has no parameter for it; see `## Issues raised`). The server stamps `occurred_at`; it drops any event whose `lease_id` does not belong to the authenticated member (drop, not error, so the endpoint reveals nothing); it applies `ratelimit.member_api_rpm`; it ignores the batch silently when `analytics.client_events_enabled` or the member's `client_events_enabled` is false. `Idempotency-Key` is optional here (S0.11.5). Loss of client events never blocks the UI and never changes a ledger or cell state. [D]
 - **Deduplication.** `ui.card_opened` may repeat per lease (each return is informative); all other `ui.*` events keep only the first row per `(lease_id, name)` within the lease lifetime. [D]
+
+## 13.4 Metric source views and data model additions
+
+### 13.4.1 Metric source views
+
+All metric SQL reads the views below, never the base tables, so that a change in S5.* column names touches one view definition and not fifteen queries. View columns follow the naming rules of S0.7; S5.* is authoritative for the base columns and the view definitions are updated with it [A]. SQL is PostgreSQL-flavored; the semantics are normative and the syntax illustrative (S4.* fixes the stack). Views are owned by a read-only database role used by the rollup jobs; no application role and no admin API reads them row by row (`AN-03`). [D]
+
+| View | One row per | Columns (all derived; times are UTC `timestamptz`) |
+| --- | --- | --- |
+| `mv_member` | member (not `closed`, or opaque id after closure) | `member_ref` (= `member_id`, internal), `created_at`, `status`, `trust_tier`, `is_internal`, `locale`, `first_submission_at`, `first_accepted_at` |
+| `mv_attempt` | lease (one attempt on one cell) | `lease_id`, `cell_id`, `job_id`, `member_ref`, `is_internal`, `cell_kind`, `job_type`, `template_id`, `template_version_id`, `service_id` (nullable), `is_commons`, `purpose`, `sensitivity`, `license`, `service_requirement`, `topic_category_id` (nullable), `issued_at`, `card_opened_at` (latest `ui.card_opened`, nullable), `submitted_at` (nullable), `decided_at` (acceptance, rejection, expiry, decline or release time; null while open), `outcome` (`open`, `declined`, `released`, `expired`, `revoked`, `rejected`, `accepted`), `reject_reason` (`reject.*`, nullable), `decline_reason` (nullable), `auto_check_passed` (bool, nullable) |
+| `mv_job` | job | `job_id`, `is_commons`, `job_type`, `n_primary_cells`, `quoted_window_s`, `committed_cells` (primary plus verification pool, S0.6.1), `submitted_at`, `escrow_confirmed_at`, `all_accepted_at`, `settled_at`, `final_state` (`completed`, `failed`, `cancelled`, `rejected`, `running`, ...), `requester_is_internal` |
+| `mv_gold` | gold-cell execution | `submission_id`, `template_id`, `outcome` (`pass`, `fail`, `inconclusive`), `insertion_prob_ppm` (the effective `g` at insertion), `adjudicated` (bool), `adjudicated_correct` (bool, nullable), `adjudication_prob_ppm` |
+| `mv_audit` | audit | `audit_id`, `cell_id`, `template_id`, `sampling_prob_ppm` (the effective `s` at selection), `second_matches` (bool), `third_requested` (bool), `original_judged_wrong` (bool, nullable until resolved) |
+| `mv_lot` | credit lot | `lot_id`, `member_ref`, `earned_at`, `earned_ucr`, `expires_at`, `expired_ucr`, `spent_ucr`, `lifetime_days_applied`, `assignment_id` (nullable) |
+| `mv_optin` | member opt-in axis value | `member_ref`, `axis`, `value`, `is_default` (member holds exactly the default set of `optin.default_*` for the axis) |
+| `mv_incident` | incident | `incident_id`, `incident_type`, `severity`, `status`, `occurred_at`, `resolved_at` |
+
+The views contain `member_ref` and therefore live inside the trust boundary; `MetricSnapshot` never does (`AN-04`). [D]
+
+### 13.4.2 Entities added by this part [A]
+
+Each is reported as a convention addition (see `## Issues raised`). Retention classes are those of S0.7.
+
+| Entity | Table | Prefix | Retention | Role |
+| --- | --- | --- | --- | --- |
+| `Incident` | `incidents` | `inc_` | `permanent` (typed core), free-text `note` is `moderation` | A typed record of one incident (13.4.3) |
+| `Interview` | `interviews` | `ivw_` | `permanent` | One coded qualitative interview (13.6, `MET-14`); no name, no quote, no member link |
+| `ExperimentBlock` | `experiment_blocks` | `blk_` | `permanent` | One permuted block of arm labels per experiment and stratum (13.8) |
+
+Existing entities used with their S0.7 prefixes: `Event` (`evt_`), `MetricSnapshot` (`mts_`), `CalibrationRecord` (`cal_`), `Experiment` (`exp_`), `ExperimentAssignment` (`asg_`), `PreRegistration` (`prr_`), `LaunchGateItem` (`lgi_`), `Alarm` (`alm_`). New ID schemes: `MET-nn` (metrics), `CAL-nn` (calibration statistics), `TH-nn` (pre-registered threshold), `DR-nn` (decision rule), `AN-nn` (analytics privacy rule).
+
+### 13.4.3 Incidents (typed)
+
+Enum `incident_type` (stored values): `policy_violation`, `injection_attempt`, `abuse_flag`, `provider_warning`, `provider_account_problem`, `safety_incident`. These are exactly the FD§9 list (policy violations, injection attempts, abuse flags, any provider warning or account problem), plus `safety_incident` because decision rule (c) of FD§9 speaks of "unresolved safety" incidents. Enum `incident_severity`: `info`, `minor`, `major`, `critical`. Incident status: `open`, `investigating`, `resolved` (T). [D]
+
+| Field | Type | Rule |
+| --- | --- | --- |
+| `id`, `created_at`, `row_version` | S0.7 | |
+| `incident_type`, `severity`, `status` | enum | As above |
+| `source` | enum `auto`, `manual` | `auto` rows are created by the rules below; `manual` by an operator (`perm.incident.record`) |
+| `source_ref` | json | Opaque ids only (`submission_id`, `report_id`, `service_id`, `job_id`); no member id |
+| `occurred_at`, `resolved_at` | timestamptz | `resolved_at` set only with status `resolved` |
+| `resolution_code` | enum | `no_action`, `parameter_changed`, `template_paused`, `service_suspended`, `member_actioned`, `provider_contacted`, `other` |
+| `note` | text, 0..2000 chars | Reviewer-written; no names, no quotes of volunteers' pages; purged to null `retention.moderation_days` after `resolved_at` |
+
+Automatic creation rules [D]: `submission.quarantined` with a pattern reason creates `injection_attempt` (severity `minor`); `job.policy_rejected` with `policy.R3.prohibited_content` creates `policy_violation` (`minor`); `report.actioned` creates `abuse_flag` (severity set by the actioning reviewer); `killswitch.engaged` with scope `service` creates nothing (it is a response, not an incident). `provider_warning`, `provider_account_problem` and `safety_incident` are `manual` only, because no part of the system may read a volunteer's provider page (ground rule 2); they arrive by a member report or a founder's own account. A member-facing way to report a provider warning is a `Report` kind handled in S10.* and S11.*. Events: `incident.recorded` (none to `open`), `incident.resolved`.
+
+**Unresolved safety or provider incident** (input to decision rule (c) of FD§9) means: a row with `status != 'resolved'` and `incident_type IN ('safety_incident','provider_warning','provider_account_problem')`. [D]
+
+## 13.5 Metric conventions
+
+### 13.5.1 Time windows
+
+- `day0` is `PreRegistration.content.study.cohort_start_at` (UTC), set in the pre-registration before launch (13.7). Pilot week `k` is `[day0 + (k-1)*7 d, day0 + k*7 d)`. `wk(ts) = floor((ts - day0) / 7 d) + 1`. Days are UTC calendar days (S0.6.2). Seven days is the definition of a week; it is not a parameter. [D]
+- Trailing windows (v, capacity forecasts) use their own parameters (`price.v_window_days`, `admission.throughput_window_days` where S6.* defines it). [D]
+- `as_of` is the rollup's `source_watermark`: the latest `received_at` of any source row included. A window is `closed` when `as_of >= window_end + metrics.rollup_interval_s`; open windows are published with `is_partial = true`. [D]
+
+### 13.5.2 Population
+
+Every metric has a `population` dimension: `all` or `external` (`NOT is_internal`). Donor-side metrics filter on the executing member; demand-side metrics (`MET-01` requested cells, `MET-02`) include jobs posted by internal requesters, because the FD's own trial large jobs are founder-run, and report `requester_is_internal` as a dimension. In SQL below, `pop_ok` stands for `(:population = 'all' OR NOT is_internal)`. [D]
+
+### 13.5.3 Numbers
+
+- Ratios are integer ppm (S0.6.1). A measured ratio is `round_half_up(num * 1,000,000 / den)` computed as `(2 * num * 1000000 + den) / (2 * den)` with integer division, so every implementation agrees. `den = 0` gives `NULL` and status `no_data`. [D]
+- Percentiles use the lower empirical percentile (`percentile_disc`): the median of an even count is the lower middle value. Seconds are integers (S0.6.2). [D]
+- Intervals: 95 percent Wilson score interval for a proportion `x/n`, `z = 1.96` (the two-sided 95 percent standard normal quantile): `center = (p + z^2/(2n)) / (1 + z^2/n)`, `half = z / (1 + z^2/n) * sqrt(p(1-p)/n + z^2/(4n^2))`, `p = x/n`. The 95 percent level is a reporting convention, not a decision threshold. Intervals are stored as `ci_low_ppm`, `ci_high_ppm`. [D]
+
+### 13.5.4 `MetricSnapshot` and the snapshot writer
+
+Table `metric_snapshots` (prefix `mts_`, `permanent`, append-only). [D]
+
+| Column | Type | Rule |
+| --- | --- | --- |
+| `id`, `created_at` | S0.7 | |
+| `metric_no` | text | `MET-nn`, `CAL-nn` or `EXP-nn.<outcome>` |
+| `metric_name` | text | `hamyar_<area>_<name>_<unit>` (S0.5) |
+| `definition_version` | int | Per metric, starts at 1; bumped when the definition in this part changes; a pre-registration pins it (13.7) |
+| `dims` | json | Allowed keys of 13.3.3 plus `population`, `window` |
+| `dims_hash` | text | SHA-256 of canonical `dims` (S0.6.4) |
+| `window_start`, `window_end` | timestamptz | `[start, end)` |
+| `scale` | enum `count`, `ppm`, `seconds`, `ucr` | `ppm` is also used for fixed-point reals (1.0 = 1,000,000) |
+| `value` | bigint | Null when `suppressed` or `no_data` |
+| `numerator`, `denominator` | bigint | Where applicable |
+| `ci_low_ppm`, `ci_high_ppm` | bigint | Where applicable |
+| `n_members` | int | Distinct members in the population; the suppression basis (`AN-06`) |
+| `n_obs` | int | Observations (cells, attempts, jobs) |
+| `status` | enum `ok`, `no_data`, `suppressed`, `insufficient_sample` | |
+| `is_partial` | bool | Window not closed (13.5.1) |
+| `visibility` | enum `internal`, `public` | `public` only for series that S6.* and S12.* name (v, eta, claim ratio, counters) |
+| `param_versions` | json | As in 13.3.1 |
+| `source_watermark` | timestamptz | 13.5.1 |
+| `supersedes_id` | text, nullable | A recomputation never edits; it inserts a row pointing at the one it replaces |
+
+Unique key: `(metric_no, dims_hash, window_start, window_end, definition_version, supersedes_id)` so the rollup is idempotent. Writer algorithm [D]:
+
+```
+for each (metric, dims, window) produced by a rollup query:
+    row.n_members = distinct members behind it (0 when the metric has no member population)
+    if metric.has_member_population and row.n_members < analytics.min_cohort_k and dims has any split other than population/window:
+        row.status = 'suppressed'; row.value = NULL; row.numerator = NULL; row.denominator = NULL
+    elif row.denominator == 0: row.status = 'no_data'
+    elif row.n_obs < metric.min_obs_for_value (pinned in the pre-registration, or 1): row.status = 'insufficient_sample'
+    else row.status = 'ok'
+for each split (siblings sharing every dim except one):
+    if count(siblings with status 'suppressed') == 1 and parent total is published:
+        suppress the sibling with the smallest n_members among the 'ok' ones      # AN-07
+insert rows; emit metric.snapshot_created per row
+```
+
+For metrics whose population is not members (`MET-02` per job, `MET-13` incidents) the suppression test uses `n_obs < analytics.min_cohort_k` only when a split is applied, and the unsplit total is always stored. [D]
