@@ -687,3 +687,125 @@ Each key has `fa` and `en` text and the marker `needs_human_and_legal_review` (S
 | `copy.growth.team_group_label_warning` | This team shows a label set by its creator. A label such as a place or a school can make members easier to identify. Join only if you are comfortable with that. | این تیم برچسبی دارد که سازنده‌اش تعیین کرده است. برچسبی مانند نام مکان یا مدرسه می‌تواند شناسایی اعضا را آسان کند. فقط در صورتی بپیوندید که با این موضوع راحت هستید. |
 | `copy.growth.referral_terms` | If someone you invite makes a first verified contribution, both of you may receive a small credit bonus after a short delay. The bonus is declared, can be delayed or withheld, can be reversed if the contribution is overturned, and has no cash value. | اگر فردی که دعوت کرده‌اید نخستین مشارکت تأییدشدهٔ خود را انجام دهد، هر دوی شما ممکن است پس از اندکی تأخیر یک اعتبار پاداش کوچک بگیرید. این پاداش اعلام‌شده است، ممکن است به تأخیر بیفتد یا پرداخت نشود، در صورت ابطال مشارکت قابل بازگشت است و ارزش نقدی ندارد. |
 | `copy.growth.experiments_notice` | Some features may differ between members as declared experiments. The plan and the results are published. | برخی ویژگی‌ها ممکن است به‌عنوان آزمایش‌های اعلام‌شده بین اعضا متفاوت باشد. طرح و نتایج منتشر می‌شود. |
+
+## 12.15 Public screens
+
+Content and states only; layout, typography and RTL handling are `S11.*`. Every public screen has a plain-text, no-JavaScript rendering (S12.1 rule 10) and shows `as_of`.
+
+| Screen | Shows | States beyond normal |
+| --- | --- | --- |
+| `SCR-pub-01` counter | Figures of S12.2.3, the definition copy, the next milestone if `ff.growth.v6_milestones` is on | `suppressed` (member figures), `stale` (banner with `as_of`), `unavailable` (503, no figure) |
+| `SCR-pub-02` public ledger | Latest checkpoint, invariant result, grouped flows, checkpoint hashes, `copy.public.ledger_notice` | `failed` invariant banner, `corrected` (superseded marker), `withheld` fields, `empty` before the first checkpoint |
+| `SCR-pub-03` parameters | Parameter table, `is_initial_default` marks, `next_version`, `withheld` count | `empty` filter result, `as_of` view |
+| `SCR-pub-04` change log | Entries newest first with filters | `empty`, `correction` marker |
+| `SCR-pub-05` milestone index | Milestones by state | `empty` (no milestone defined) |
+| `SCR-pub-06` milestone detail | S12.6.2 content | `reached` (no output yet), `published`, `withdrawn`, `corrections` line |
+| `SCR-pub-07` teams | Listed teams: name, member count, weekly and all-time score | `empty` (no team reaches `team.min_public_members`) |
+| `SCR-pub-08` experiments | Running and stopped experiments: arms, weights, locked pre-registration hash, dates, link to results | `empty` |
+
+## 12.16 Acceptance criteria
+
+Given / When / Then, in the ID scheme of S0.5. Tests are named in `S18.*`.
+
+### Counter, public ledger, parameter page, change log
+
+| ID | Given | When | Then |
+| --- | --- | --- | --- |
+| `AC-counter-01` | Cells accepted: 3 `primary`, 1 `rework`, 2 `gold`; plus 4 `submitted`, 2 `rejected`, 1 `overturned` | The counter is computed | `verified_output_cells_total` = 4, `verified_verification_cells_total` = 2, `overturned_cells_total` = 1; non-accepted cells are not counted |
+| `AC-counter-02` | A counted cell becomes `overturned` | The counter is recomputed | The headline falls by one, the correction figure rises by one, and a milestone already `reached` stays `reached` |
+| `AC-counter-03` | `analytics.min_cohort_k` = 10 and 9 members were active today | `GET /v1/public/counter` | `active_members_today.value` is null with `suppressed` true and no other field allows it to be derived |
+| `AC-counter-04` | The refresh job fails | `GET /v1/public/counter` | The last good snapshot is returned with `stale` true and its own `as_of`; with no snapshot the answer is `503 UNAVAILABLE`, never zero |
+| `AC-public-01` | Any public route | The body and headers are scanned | No `mem_`, `vol_`, `lac_`, `dev_`, `ses_` or `adm_` identifier (regex of S0.6.3) and no raw IP appear |
+| `AC-publedger-01` | A seeded ledger | A checkpoint is published | `in_existence_ucr` = `cumulative_mint_ucr` - `cumulative_retired_ucr`, and `invariant_difference_ucr` is "0" |
+| `AC-publedger-02` | 3 distinct members received `grant` entries and `analytics.min_cohort_k` = 10 | Flows are published | No `grant` row covers those days until 10 distinct accounts have accumulated; then one row covers the whole interval and the carried remainder is stated |
+| `AC-publedger-03` | Fewer than `analytics.min_cohort_k` open escrows | A checkpoint is published | `escrow_ucr` is null, `member_and_escrow_ucr` is present and `suppressed` lists `escrow_ucr` |
+| `AC-publedger-04` | `ledger.invariant_violated` was raised | The page loads | `last_invariant_check.result` is `failed` and visible until a full recompute passes |
+| `AC-publedger-05` | A published checkpoint was wrong | It is corrected | A new checkpoint with `corrects_checkpoint_date` and a `correction` change-log entry exist; the original is unchanged |
+| `AC-params-01` | A parameter has a future `ParameterVersion` | `GET /v1/public/parameters/{name}` | `next_version` shows its value and `effective_from`; `value` is still the current one |
+| `AC-params-02` | A parameter with `public` = false | The list is requested | It is absent by name and `withheld.count` includes it |
+| `AC-params-03` | A parameter changed two times | `?as_of=` an earlier instant | The version in force at that instant is returned |
+| `AC-chglog-01` | A `loosen` parameter change | It is submitted | A `ChangeLogEntry` with `reason` exists before it binds and `effective_from >= published_at + notice_days`; otherwise `VALIDATION_FAILED` |
+| `AC-chglog-02` | A `tighten` change | It is applied | It binds at once and its entry is published within `change.tighten_publish_within_s`, else an `Alarm` |
+| `AC-chglog-03` | `kill.member.<id>` is engaged | The change log is read | No entry exists for it |
+| `AC-chglog-04` | An entry has a mistake | It is fixed | A `correction` entry with `corrects_id` exists; the original is unchanged |
+
+### Milestones, badges, share cards, teams
+
+| ID | Given | When | Then |
+| --- | --- | --- | --- |
+| `AC-milestone-01` | A milestone with threshold T and a metric reaching T | The check runs twice | State is `reached`, `milestone.reached` was emitted once, and the page states the count and date and claims no output |
+| `AC-milestone-02` | A `reached` milestone | Publication is approved by one admin, or by two admins with the same role | Refused; with one `reviewer` and one `operator` it succeeds |
+| `AC-milestone-03` | One included cell is not `accepted` | Publication is attempted | Refused with `STATE_CONFLICT` |
+| `AC-milestone-04` | A `published` milestone with fewer than `analytics.min_cohort_k` contributors | The page loads | It shows the downstream-use copy, no contributor count, and no identifier |
+| `AC-badge-01` | A member reaches the 10-cell threshold | The event is replayed | `cells_10` is awarded once; `badge.awarded` is emitted once |
+| `AC-badge-02` | An overturn drops the member below a held threshold | Evaluation runs | The award becomes `revoked` (`badge.revoked`); reaching the threshold again awards it again |
+| `AC-badge-03` | Any badge is awarded | The ledger and tier are read | No `LedgerEntry` was created and `trust_tier`, caps and sampling are unchanged |
+| `AC-sharecard-01` | A member with a team, a label and badges | `getShareCardPayload` | The body validates against the closed schema of S12.8.2 and contains no team, label, id, service or time field |
+| `AC-sharecard-02` | The card is rendered | Network traffic is observed | No request leaves for any host other than the project's own |
+| `AC-team-01` | A member below `team.create_min_tier` | `createTeam` | `403 FORBIDDEN` |
+| `AC-team-02` | A member joins at time t | Cells were accepted before and after t | Only cells accepted at or after t count toward the team score |
+| `AC-team-03` | `public.location_display` = `never` | A team is created with a `group_label` | `VALIDATION_FAILED`; no response ever contains a label |
+| `AC-team-04` | A listed team with `team.min_public_members` - 1 members | The public list is read; then one member joins; then one leaves | Absent; present; absent |
+| `AC-team-05` | One member's accepted `gold` cell and one `primary` cell | The team score is read | Each raised it by exactly one |
+
+### Referral
+
+| ID | Given | When | Then |
+| --- | --- | --- | --- |
+| `AC-referral-01` | A refers B (flag on, `bonus_enabled` true); B has an accepted first cell | `growth.referral.hold_s` has elapsed and the sweep runs | One `LedgerTransaction` of kind `grant` holds two `grant` entries of the two bonus amounts, lots expire after `credit.lifetime_days`, the Reserve fell by their sum, state is `paid` |
+| `AC-referral-02` | B qualified less than `growth.referral.hold_s` ago | The sweep runs | No ledger entry; state `qualified` |
+| `AC-referral-03` | B's device equals a device linked to A | B joins | State `blocked`, `block_reason` `same_device`, no entry |
+| `AC-referral-04` | The Reserve is at `grant.reserve_floor_credits` | The sweep runs | No entry and no overdraw; payment occurs when funded, or the referral expires after `growth.referral.qualify_window_days` |
+| `AC-referral-05` | A holds `growth.referral.max_per_referrer_per_30d` referrals created in 30 days | A creates one more | `422 CAP_EXCEEDED` |
+| `AC-referral-06` | Today's paid referral credit equals `growth.referral.reserve_draw_cap_ratio` times the start-of-day Reserve | The sweep runs | Remaining referrals stay `qualified` |
+| `AC-referral-07` | B's qualifying cell is overturned before payout | The sweep runs | State `blocked`, `qualifying_cell_overturned` |
+| `AC-referral-08` | A paid referral whose qualifying cell is overturned inside the clawback window | The trigger fires | Reversal proposals exist for the unspent remainders only; after two operator approvals the state is `clawed_back` and `unrecovered_ucr` is recorded |
+| `AC-referral-09` | A referral in the `V5` control arm | B qualifies | State stays `qualified`, nothing is paid, and the referral is counted in the activation metric |
+| `AC-growth-01` | `launch.members_may_join` is false | A `ff.growth.*` flag is enabled | `403 LAUNCH_GATE_CLOSED` |
+| `AC-growth-02` | Every S12 flag is on | All S12 code paths run | The only `ledger_entry_type` values they create are `grant` and `reversal` |
+| `AC-growth-03` | `V1` has two arms | The required notice set is compared between arms | The sets are identical, including the mandatory first-use expansion |
+| `AC-growth-04` | `ff.growth.v5_referral` is being enabled | One operator acts | Refused; with two operators and a public `loosen` entry with notice it succeeds |
+
+### Assignment and experiments
+
+| ID | Given | When | Then |
+| --- | --- | --- | --- |
+| `AC-exp-01` | A running experiment | The same member is evaluated in two processes and after a restart | The same arm each time, and recomputing from `salt`, `seed_version`, ids and `stratum_key` equals the stored `arm_key` |
+| `AC-exp-02` | Mode `hash_bucket`, two arms at 500,000 ppm, n synthetic member ids | Arms are assigned | Each arm's count lies within 5 standard deviations, 5 x sqrt(n x p x (1 - p)) with p = 0.5, of n x p |
+| `AC-exp-03` | Mode `hash_blocked` with `block_size` b | Assignments fill complete blocks in a stratum | Each complete block holds exactly `weight_ppm` x b / 1,000,000 of each arm |
+| `AC-exp-04` | Concurrent first evaluations of one member | They run | One `ExperimentAssignment`, one `experiment.assigned`, one arm returned to all |
+| `AC-exp-05` | A decision point reached by a `control` member and a treatment member | Each reaches it | Both produce `experiment.exposed`, once per surface |
+| `AC-exp-06` | An experiment with no locked `PreRegistration`, or a locked one | Start, or a weight change, is requested | Refused with `STATE_CONFLICT`, respectively `VALIDATION_FAILED` |
+| `AC-exp-07` | A running experiment | Its flag is disabled | Evaluations return OFF, no new exposure is logged, existing assignments remain |
+| `AC-exp-08` | An experiment created with a `device` or IP-hash stratifier | It is saved | `VALIDATION_FAILED` |
+
+## 12.17 Requirements on other parts
+
+| Part | Requirement from this part |
+| --- | --- |
+| `S4.*` | Counter refresh and reconciliation job; `referral.payout_sweep`; checkpoint mirror (optional); metrics for S12.13.2 |
+| `S5.*` | Add entities `Milestone` and `TeamMembership`; states for `Referral`, `Team`, `Milestone`, `Experiment`, `BadgeAward`; fields `Referral.bonus_enabled`, accepting member and acceptance time of a `Cell` |
+| `S6.*` | Partial-amount `reversal` of a partly spent lot; the K truncation rule for `grant`; Reserve balance at UTC day start; checkpoint hash and daily checkpoint (S0.6.4) |
+| `S7.*` | Policy stamps (R7, R9) readable per cell for the milestone guard |
+| `S10.*` | Threat-model rows for counter, public ledger, share card, teams, referral, experiments; append `milestone.publish` and `flag.enable_credit_moving` to `security.two_person_actions`; confirm `join_source` storage and event retention |
+| `S11.*` | Both V1 variants; in-app offers and exposure calls; notices; layout of `SCR-pub-*` |
+| `S13.*` | Event schema for S12.13.1; metric definitions; `PreRegistration` fields of S12.11.7 and lock; analysis rules; publication of results |
+| `S14.*` | Gate rule for enabling `ff.growth.*`; `LaunchGateItem`s: public ledger page reviewed (G1), share capability and host reachability (G2), counsel memo on credit bonuses and randomized offers (G0) |
+| `S15.*` | Routes and operation ids of S12.1.2, S12.9, S12.10 |
+| `S16.*` | Complete the new parameters of S12.13.3 |
+
+## Issues raised
+
+Each resolution is already applied in this file. `C-001` consolidates them into S2.* and may record a different resolution.
+
+| id | severity | fd_ref | issue | resolution | status |
+| --- | --- | --- | --- | --- | --- |
+| `ISS-121` | major | FD Principle 5, FD§10, FD Principle 8 | FD says the ledger is public; per-member or per-entry rows would expose members' activity timing | Daily checkpoints with totals and a hash, plus grouped flows emitted only when at least `analytics.min_cohort_k` distinct accounts took part (S12.3); enabled only after a G1 review item | proposed |
+| `ISS-122` | minor | FD§6.1, FD§4.3 | “Verified cells only” does not say whether gold, audit and review cells count | Headline counts accepted `primary` and `rework` cells; verification cells are a separate figure beside it (S12.2); relates to `ISS-03` | proposed |
+| `ISS-123` | major | FD§6.2, FD§6.3, FD§9 | FD§6.3 puts the counter and basic teams in Phase 1; FD§6.2 says V2 and V4 are tested in Phase 2; FD§9 lists the public counter under Phase 2 | Both are on for everyone in Phase 1, instrumented only; randomized in Phase 2 (S12.1.3) | proposed |
+| `ISS-124` | major | FD§6.2 V1, V2, V3 | Without cookies or visitor ids, landing-to-first-cell conversion has no unique-visitor denominator; the public counter cannot be hidden from a randomized subset; V3 acquisition cannot be randomized without a member-specific token | V1 uses created-to-first-verified-cell with landing requests reported separately; V2 randomizes only the in-app widget; V3 measures share taps (randomized) and card-source arrivals (descriptive); a member-specific token is an owner decision for G1 | needs_owner |
+| `ISS-125` | major | FD§6.2 V5, FD§4.6 | Referral clawback needs a reversal of a partly spent lot, which S0.8.5 does not define; two-person reversals do not scale with volume | Clawback covers the unspent remainder only; spent credit is recorded as `unrecovered_ucr`; `S6.*` is asked for a partial-amount reversal rule; scaling is revisited with measured volume | proposed |
+| `ISS-126` | major | FD§4.4, FD§6.1 | A score, badge or team total that excludes gold cells would reveal which cells were hidden gold cells | Every member-visible count includes accepted cells of every `cell_kind` identically (S12.1 rule 6) | applied |
+| `ISS-127` | minor | FD§6.3 | FD§6.3 allows small conditional rewards in Phase 2; this part's instruction forbids rewards that move money, and the reward form for members in Iran is unresolved [V] | No money-moving reward is specified; any such feature needs a new spec decision after counsel and the FD§6.3 conditions | needs_owner |
+| `ISS-128` | minor | none | Convention gaps: entities `Milestone` (`mst_`) and `TeamMembership` (`tmm_`); states for `Referral`, `Team`, `Milestone`, `Experiment`, `BadgeAward`; enums `subject_kind`, `block_reason`, `assignment_mode`, `population`, badge `family`; events of S12.13.1; parameters of S12.13.3; `milestone.publish` and `flag.enable_credit_moving` for `security.two_person_actions`; `Referral.bonus_enabled` | Added in this file in the forms used above; `C-001` folds them into S0 | proposed |
+| `ISS-129` | minor | none | `ExperimentAssignment` is `permanent` (S0.7) yet must reference a member, and `permanent` rows hold no personal data | The row keeps only the opaque `mem_` id that the `member_bound` closure rule leaves behind, plus coarse stratifier values | proposed |
