@@ -570,3 +570,146 @@ No `PUT`, `PATCH` or `DELETE` route exists on any ledger resource.
 | `AC-param-10` | A pending loosen version | An operator withdraws it | The version is withdrawn, a retraction entry references the original entry, nothing is deleted |
 | `AC-param-11` | A threshold in a locked `PreRegistration` | An edit is attempted | `409 STATE_CONFLICT` |
 | `AC-param-12` | A `CAL` replacement with fewer than `calibration.min_samples_per_service` records per service (fixture 29 against 30) | Submitted | `422 UNPROCESSABLE` |
+
+## 11.52 Tool 8: Capacity dashboard
+
+**Purpose.** Show the operator, in one read-only screen, whether supply, demand and the credit economy are inside their declared limits, so decisions on parameters or kill switches rest on measured numbers (Principle 10). It shows aggregates only. [D]
+**Roles and permissions.** `operator`: `perm.capacity.read`. A `reviewer` call returns `403 FORBIDDEN`.
+
+### 11.52.1 `SCR-ops-10` tiles [D]
+
+Every tile shows its value, the time it was computed, and the parameter it is compared with. Rollup tiles come from `MetricSnapshot` (`metrics.rollup_interval_s`) and are marked stale when older than that interval; live tiles refresh every `ui.capacity_dashboard_refresh_s`. Breakdowns by category, template or service suppress any cohort smaller than `analytics.min_cohort_k`, showing "fewer than k" instead of a number (`AD8`).
+
+| Tile | Definition (formulas as in S0.6.1; algorithms owned by S6.*) | Compared with |
+| --- | --- | --- |
+| Active donors | Distinct donors with at least one accepted cell in the last `admission.active_donor_window_days` | |
+| Verified throughput | Accepted cells per UTC day, trailing `inflation.throughput_window_days` | |
+| Forecast capacity | `floor(active_donors * cells_per_donor_per_day * window_days * phi_ppm * (1 - haircut) / 10^6)` for the quoted window; inputs and the S6.* output are both shown [A] | `admission.phi`, `admission.forecast_haircut`, `admission.forecast_window_days` |
+| Committed and headroom | Committed cells (admitted jobs plus reservations in the window) and forecast capacity minus committed | |
+| Quote versus actual | For completed jobs, completion time divided by quoted window, and the share finished inside the quote | Phase 1 decision rule (a), FD§9 |
+| Queue depth | Queued cells by template, service requirement, purpose and sensitivity; age of the oldest | |
+| Supply gauge | Eligible active donors per opt-in category (R8), the gauge that feeds the quote (FD§5.7 failure mode 8) | |
+| Waitlist and reservations | Waitlisted jobs and oldest age; reservation share of the `phi` capacity of each day | `admission.waitlist_ttl_days`, `reservation.capacity_share_cap` |
+| Lease health | Active leases, expiry rate, decline rate, submission lag, reaper lag | `lease.timeout_s`, `lease.reap_interval_s` |
+| Verification | v over `price.v_window_days` (shown only above `price.v_min_sample_cells` cells), effective `g` and `s`, false-accept and false-reject estimates, review-queue ages | `verify.false_accept_alarm`, `verify.false_reject_alarm` |
+| Economy | `p_ucr`, `eta_ppm = floor(10^12 / p_ucr)`, claim ratio (unexpired credit divided by verified weekly throughput), mint utilization (minted this UTC month divided by `mint.monthly_cap_credits`), Reserve balance against its ceiling and floor, expiry inflow | `price.eta_alarm_threshold`, `inflation.claim_ratio_threshold_weeks`, `inflation.mint_utilization_alarm`, `reserve.ceiling_credits`, `grant.reserve_floor_credits` |
+| Concentration | Share of accepted cells from the top 10 percent of donors (a Phase 1 measure, FD§9) | |
+| Alarms and switches | Open `Alarm` rows, engaged kill switches, effective launch state | |
+
+A breach turns the tile red and raises an `Alarm`; each tile links to the parameter in `SCR-ops-08` and to the matching kill switch with the tile as `context`. The dashboard changes nothing itself. Worked fixture (the FD§3.3 inputs, not measurements): 40 active donors, 8 cells per donor per day, a 2-day window, `phi` 500,000 ppm and haircut 0 give capacity `floor(40 * 8 * 2 * 500,000 / 10^6)` = 320 cells; committed 264 cells (S0.6.1) leave a headroom of 56 cells.
+
+### 11.52.3 Bottleneck banner (carried over from the Panel concept) [D][A]
+
+The Panel highlights the not-done item with the most dependents (panel-review §3.5; FD§10) [V]. Here the banner names the open admin item that blocks the most work:
+
+```
+candidates = open TemplateVersion (in_review | awaiting_second_review | changes_requested)
+           + Service (unreviewed | in_review | review_due) that jobs or the backlog wait for
+           + ApprovalRequest (pending) + LaunchGateItem (not signed_off, required by launch.required_gate_ids)
+blocked(c) = count of waitlisted or draft jobs, Commons backlog entries and launch switches
+             that cannot move only because c is open
+bottleneck = argmax over candidates with blocked > 0; ties broken by oldest
+show: name, blocked count, age, link to its screen
+```
+
+**API.** `getCapacityDashboard` `GET /v1/admin/capacity-dashboard`; `listMetricSnapshots` `GET /v1/admin/metric-snapshots?kind=`; `getBottleneck` `GET /v1/admin/bottleneck`. Audit: reads are not logged individually; alarms are `Alarm` rows.
+
+| AC | Given | When | Then |
+| --- | --- | --- | --- |
+| `AC-capdash-01` | 40 donors, 8 cells per donor per day, 2-day window, `phi` 500,000 ppm, haircut 0, committed 264 (fixtures) | The tiles load | Capacity 320 and headroom 56 are shown |
+| `AC-capdash-02` | A category with fewer than `analytics.min_cohort_k` eligible donors | The supply gauge loads | It shows "fewer than k", not a number |
+| `AC-capdash-03` | Mint utilization at or above `inflation.mint_utilization_alarm` | The rollup runs | The tile is red and an `Alarm` exists |
+| `AC-capdash-04` | A rollup older than `metrics.rollup_interval_s` | The dashboard loads | The tile carries a stale badge and its computed time |
+| `AC-capdash-05` | A reviewer principal | `getCapacityDashboard` is called | `403 FORBIDDEN` |
+| `AC-capdash-06` | A template awaiting review that blocks 3 backlog entries and a service that blocks 5 waitlisted jobs | `getBottleneck` is called | The service is named with blocked count 5 |
+
+## 11.53 Tool 9: Launch-gate checklist
+
+**Purpose.** Make BUILDING separate from LAUNCHING: the three `launch.*` switches stay off until the gates G0..G5 that `launch.required_gate_ids` names are signed off by distinct admins with evidence (prompt; FD§8.3). Gate content, the exit rule and the switch rule are owned by S14.*; this part specifies the screens and actions. [D]
+**Roles and permissions.** `operator`: `perm.launch.evidence`, `perm.launch.signoff`. Reads for `reviewer`.
+
+**`SCR-ops-11` Checklist.** One card per gate G0..G5 listing its `LaunchGateItem` lines (data owned by S14.*, for example the G0 questions (a)..(k) of FD§8.3). Each line shows state (`open`, `evidence_attached`, `signed_off`, `reopened`), evidence list, sign-offs `n / launch.min_signoffs` and a "required" badge when the gate is in `launch.required_gate_ids` (default G0 and G1). Evidence kinds: a text note; a saved file (bytes with `sha256:` hash, bounded by `api.max_body_bytes` after base64 [A]); a reference to an existing record (`svc_`, `tcp_`, `cal_`, `prr_`). Counsel's answers and the G1 threat-model decision are attached as evidence and are [V]; the tool records them and draws no legal conclusion. The G0 card also shows the number of `approved` services against `launch.min_approved_services` and a link to `SCR-rev-03`; a documented fallback (FD§8.3 fallbacks i to iv) is an evidence kind `fallback_decision` on G0 [A].
+
+**`SCR-ops-12` Sign-off and enable.** [D]
+
+| Block | Content |
+| --- | --- |
+| A Switches | `launch.members_may_join`, `launch.member_jobs_enabled`, `launch.minting_enabled`: stored value and effective state. Effective = stored value AND no engaged kill switch of the matching scope (`kill.all_new_jobs` for jobs, `kill.all_minting` for minting; there is none for joining) |
+| B Rule | One row per requirement, each pass or fail with its source: every gate in `launch.required_gate_ids` signed off with at least `launch.min_signoffs` distinct admins; at least `launch.min_approved_services` approved services or a signed-off fallback; G0 and G1 always required (validation of the parameter); for minting, no open `ledger.invariant_violated` [A]. Any further clause S14.* adds appears as another row |
+| C Request | Choose gate items to sign off and, optionally, switches to enable, plus reason; `CT3` |
+
+A `launch.signoff` request is the only way to turn a switch on: the initiator's request is sign-off 1, further distinct admins approve until `launch.min_signoffs` is reached, then, in one transaction, the items become `signed_off` (`gate.signed_off`), the rule is re-evaluated, and if it passes the chosen switches are set (`launch.members_may_join_changed` for joining, `parameter.changed` for the other two). If the rule fails at that moment nothing changes and the request is rejected by `system` (`precondition_failed`). Turning a switch off is `launch.switch_off`: one admin, `CT2`, immediate. Reopening a gate (`launch.reopen`, `CT2`, one admin, reason required) makes the rule fail; switches already on stay on until an admin switches them off, the header shows a red banner and an `Alarm` of kind `launch.rule_failing` is raised; an automatic switch-off is for S14.* to decide (`ISS-118`). With fewer eligible `operator` admins than `launch.min_signoffs` the request is unavailable (`AD9`).
+
+**Audit events.** Codes `launch.*`; domain events `gate.evidence_attached`, `gate.signed_off`, `gate.reopened`, `launch.members_may_join_changed`, `parameter.changed`, `approval.*`.
+
+| `op` | Method and path | Notes |
+| --- | --- | --- |
+| `listLaunchGates`, `getLaunchGateItem` | `GET /v1/admin/launch-gates`, `GET /v1/admin/launch-gate-items/{lgi_id}` | Gates with items and evidence |
+| `createLaunchGateEvidence` | `POST /v1/admin/launch-gate-items/{lgi_id}/evidence` | `CT1`; `If-Match` |
+| `createLaunchGateReopening` | `POST .../{lgi_id}/reopenings` | `CT2` |
+| `createLaunchSignoff` | `POST /v1/admin/launch-signoffs` | Body `{gate_item_ids, enable_switches, reason}`; `202` |
+| `createLaunchSwitchOff` | `POST /v1/admin/launch-switch-offs` | `CT2` |
+| `getLaunchStatus` | `GET /v1/admin/launch-status` | Rule rows and effective states; feeds `BLK-header` |
+
+| AC | Given | When | Then |
+| --- | --- | --- | --- |
+| `AC-gate-01` | A fresh install | `getLaunchStatus` is called | All three switches are false and every rule row that depends on a gate fails |
+| `AC-gate-02` | G1 is `open` | A sign-off request enables `launch.members_may_join` and is approved | Execution is rejected (`precondition_failed`); the switch stays false |
+| `AC-gate-03` | `launch.min_signoffs` = 2 (fixture), all required gates have evidence | Admin A requests, A tries to approve, B approves | A's approval is refused; B's executes: items `signed_off`, the chosen switch true, `launch.members_may_join_changed` emitted |
+| `AC-gate-04` | A pending request, then the only approved service is revoked | B approves | The rule fails at execution, the request is `rejected` by `system`, switches unchanged |
+| `AC-gate-05` | `launch.members_may_join` is on and G1 is reopened | The reopening executes | An `Alarm` `launch.rule_failing` exists and the header banner is red; the switch stays on until `launch.switch_off` by one admin takes effect at once |
+| `AC-gate-06` | G0 has zero approved services and a signed-off fallback evidence | The rule is evaluated | The service clause passes through the fallback |
+| `AC-gate-07` | One active `operator` | The sign-off dialog opens | `fail_closed` is true and the button is disabled |
+| `AC-gate-08` | `kill.all_minting` engaged and `launch.minting_enabled` true | The switches block loads | Effective minting shows off |
+
+## 11.54 Tool 10: Kill switches
+
+**Purpose.** Stop a template, a service, a member, all minting or all new jobs at once, with a logged reason, and bring work back only with a second admin (`AD2`). [D]
+
+### 11.54.1 Switches, who may press them [D]
+
+| Switch (S0.10.6) | Engage (one admin, `CT2`) | Release (two admins, `CT3`) | Published |
+| --- | --- | --- | --- |
+| `kill.all_minting` | `operator` | two admins holding `perm.killswitch.release` for global scope (`operator`) | Public entry within `change.tighten_publish_within_s` |
+| `kill.all_new_jobs` | `operator` | as above | as above |
+| `kill.template.<tpl_id>` | `operator` or `reviewer`; also the system on `template.autopause_report_count` reports inside `template.autopause_window_s` | two admins holding `reviewer` or `operator` | as above |
+| `kill.service.<svc_id>` | `operator` or `reviewer` | as above | as above |
+| `kill.member.<mem_id>` | `operator`, with a `context` (11.55) | two `operator` admins | Never; counted only in the aggregate incident measure, so a member is never named or hinted at [A] |
+
+The system may also engage a switch (for example S6.* or S14.* automation on `ledger.invariant_violated`); the board shows actor `system` and the same release rule applies [A]. Reason codes: `ledger_integrity`, `abuse_wave`, `policy_or_legal_concern`, `provider_notice`, `safety_incident`, `operational`, `drill` [A]; only the code appears in a public entry, never the free text.
+
+### 11.54.2 Effects (names only; S14.* owns the full rules) [A]
+
+| Switch | While engaged | On release |
+| --- | --- | --- |
+| `kill.all_minting` | `mint` postings are refused with `503 KILL_SWITCH_ENGAGED`; effective `launch.minting_enabled` shows off; how Commons cells awaiting acceptance are held is defined by S14.*; transfers of member jobs are unaffected | Minting resumes; nothing is back-posted by the tool |
+| `kill.all_new_jobs` | Creating or admitting a job is refused with `KILL_SWITCH_ENGAGED`; jobs in flight and Commons cells in the queue continue | Creation resumes |
+| `kill.template.<id>` | `template.paused`; jobs on it get `job.paused`; their queued and leased cells get `cell.paused`, a lease being revoked first (`lease.revoked`); new jobs on it are refused | `template.resumed`, `job.resumed`, `cell.resumed` |
+| `kill.service.<id>` | `service.suspended`; jobs pinned to it (`M1`) get `job.paused`; handling of cells attested to it follows S7.* | `service.resumed` only when the cause was this switch (S0.9.6) |
+| `kill.member.<id>` | The member's leases are revoked without penalty (`lease.revoked`); new leases, submissions and escrow holds are refused with `KILL_SWITCH_ENGAGED`; status stays `active` (this is not `member.suspended`); balance and ledger are untouched | Normal operation |
+
+**`SCR-ops-13` Board.** The two global switches as large toggles, then a list of engaged and recently released template, service and member switches: state, since, by (`adm_` short id or `system`), reason code, duration, live affected counts, history drawer. Member rows (with `mem_` and context ids) are visible to `operator` only. `BLK-header` always shows the engaged count. All other admins receive an in-tool notice at the moment of every engagement.
+
+**`SCR-ops-14` Engage and release dialogs.** Engage (`CT2`): scope, reason code and text, `BLK-affected` from the preview (leases, cells, jobs, submissions that will pause), type the switch key, step-up passkey if older than `session.admin_stepup_s`, copy `copy.admin.killswitch_engage_warning`. Release (`CT3`): the preview of what resumes, reason, copy `copy.admin.killswitch_release_warning`, then the second admin's own `CT2` dialog; fail closed with fewer than two eligible admins. Engaging an already engaged switch returns `409 STATE_CONFLICT`.
+
+**Audit trail.** Every engage and release writes an `AdminAction` (`killswitch.engage`, `killswitch.release`) with reason code and text, the approving admins, the preview counts and the resulting domain events, and a `KillSwitch` state-history row; `SCR-ops-03` and the switch's history drawer read them.
+
+| `op` | Method and path | Notes |
+| --- | --- | --- |
+| `listKillSwitches`, `getKillSwitch` | `GET /v1/admin/kill-switches[/{key}]` | `key` is the dotted switch name |
+| `createKillSwitchEngagement` | `POST /v1/admin/kill-switch-engagements` | Body `{switch, reason_code, reason_text, context?}`; `CT2` |
+| `createKillSwitchRelease` | `POST /v1/admin/kill-switch-releases` | `202` with an `ApprovalRequest` |
+| `listKillSwitchHistory` | `GET /v1/admin/kill-switches/{key}/history` | |
+
+| AC | Given | When | Then |
+| --- | --- | --- | --- |
+| `AC-kill-01` | A reviewer | Engages `kill.template.<id>` | Allowed; the template is `paused`, its jobs `suspended`, their cells `suspended` with leases `revoked`; one `AdminAction` and `killswitch.engaged` exist |
+| `AC-kill-02` | A reviewer | Engages `kill.all_minting` | `403 FORBIDDEN` and a refused `AdminAction` |
+| `AC-kill-03` | An engage dialog | The typed key does not match, or the reason is shorter than `security.admin_reason_min_chars` | The confirm button stays disabled; the API returns `400 VALIDATION_FAILED` |
+| `AC-kill-04` | An engaged switch | The engager requests release and approves their own request | The approval is refused; a distinct second admin's approval releases it |
+| `AC-kill-05` | One eligible admin | The release dialog opens | `fail_closed` true; nothing can be released |
+| `AC-kill-06` | `kill.all_minting` engaged | A Commons cell reaches acceptance | No `mint` entry is written; the caller sees `503 KILL_SWITCH_ENGAGED` |
+| `AC-kill-07` | `kill.all_new_jobs` engaged | A job is created, and a running job settles | Creation returns `KILL_SWITCH_ENGAGED`; the running job completes normally |
+| `AC-kill-08` | Reports reach `template.autopause_report_count` (fixture 3) | The third arrives | The switch is engaged by principal `system`; releasing it needs two admins |
+| `AC-kill-09` | A template switch and a member switch engaged | The public change log is read | The template entry (reason code only) is present within `change.tighten_publish_within_s`; no entry exists for the member switch |
+| `AC-kill-10` | The preview counts before engaging | The switch is engaged | The counts of paused objects equal the preview |
