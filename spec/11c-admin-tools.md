@@ -324,3 +324,147 @@ All admin writes need `Idempotency-Key` (S0.11.5) and carry `RateLimit-*` header
 | `AC-svc-07` | A template with two `{prompt}` or an `http` scheme | Saved | `400 VALIDATION_FAILED` |
 | `AC-svc-08` | Egress from the admin service blocked | A copy with a `source_ref` URL is saved | It succeeds; no outbound request was attempted |
 | `AC-svc-09` | `service.min_approvers` = 2 (fixture) | One reviewer approves | The state stays `in_review`, the approval is recorded; a distinct second reviewer's approval moves it to `approved` |
+
+## 11.47 Tool 3: Audit queue
+
+**Purpose.** Give a human the cases automation cannot settle: audits that stay inconclusive after the third execution (S0.9.8 `Audit`), submissions withheld in quarantine (S0.9.3), and disputes about hidden gold cells. The queue never decides what a comparator can decide. [D]
+**Roles and permissions.** `reviewer`: `perm.audit.decide`, `perm.audit.release`, `perm.audit.view_restricted`.
+
+**`SCR-rev-06` Queue.** `BLK-list`, oldest first. Columns: item kind, `job_type`, template, age, claim holder, "pending second reviewer" badge. Kinds: `audit_inconclusive` (an `Audit` in `third_pending` or `mismatched` that the comparator cannot resolve), `quarantine` (a `Submission` in `quarantined`), `gold_dispute` (a `Report` against a gold cell, or a gold cell failed by an unusual share of executors), `anomaly` (duplicate-output or timing flags that S9.* routes to a human). Items whose job payload was purged (`retention.job_payload_days`) close as `Audit.cancelled` and leave the queue [A].
+
+**`SCR-rev-07` Item screen.** [D]
+
+| Block | Content and rules |
+| --- | --- |
+| A Header | Kind, ids, `BLK-claim`, `BLK-trail` |
+| B Cell context | The card as volunteers saw it: purpose, license, sensitivity, service requirement, template and version, `cell_kind`, attempt, policy version stamp |
+| C Evidence | Inputs and the two or three outputs side by side with comparator result and automatic-check results. All text is escaped and inert: markup is shown as characters, links are plain text and not clickable, nothing is executed (S9.* rules). Opening the block writes one `submission.view` read per item and session |
+| D Executors | Shown as "executor 1, 2, 3" with a reliability band; never a `mem_` or `vol_` id (`AD7`) |
+| E Quarantine findings | Highlighted spans for links, code to run and requests for action, with the rule that fired |
+| F Gold | The gold answer is hidden until the reviewer asks for it (`gold.view_answer`, reason required, logged). Messages sent to a donor never contain a gold answer, so a gold cell is not burned by a dispute |
+| G Decision | The outcomes of the table below |
+
+| Kind | Outcome | Action code and tier | Effect |
+| --- | --- | --- | --- |
+| `audit_inconclusive` | Pass | `audit.accept` `CT3` | `cell.audit_passed`, cell `accepted`, payout or mint per S6.* |
+| `audit_inconclusive` | Fail | `audit.reject` `CT1` | `cell.audit_failed`, reason `reject.audit_mismatch` |
+| `quarantine` | Release | `quarantine.release` `CT3` | `submission.released_from_quarantine` |
+| `quarantine` | Reject | `quarantine.reject` `CT1` | `submission.rejected`, reason `reject.forbidden_content` |
+| `gold_dispute` | Gold is defective | `gold.retire` `CT2` | Gold cell leaves the library; reliability observations that used it are recomputed by S8.* |
+| `gold_dispute` | Gold is fine | `report.dismiss` `CT1` | Report `dismissed` |
+| `anomaly` | Confirm or clear | `audit.reject` or `audit.accept` | As above |
+
+Two-person handling: an `audit.accept` or `quarantine.release` creates an `ApprovalRequest`; the item shows "pending second reviewer" and cannot be decided by anyone else until the request is executed, rejected or withdrawn, after which it returns to the queue. The direction rule (`AD2`) applies because both outcomes create credit or release a withheld result, the point where reviewer capture pays (FD§5.7 failure mode 10). [D]
+
+**Reviewer re-check [H].** A share `verify.reviewer_recheck_rate` of decided items is re-presented, blind to the earlier decision, to a different reviewer; a disagreement raises an `Alarm` of kind `abuse.reviewer_disagreement`. Test: disagreement rate in Phase 1 against a threshold recorded in a `PreRegistration`; kill criterion: no disagreement signal over the pilot means the parameter is set to 0 by `FND`. A reviewer is a separate pseudonymous `AdminUser` and cannot be linked to a member, so reviewing one's own cells is not detectable here; the re-check and the two-person rule reduce it, they do not remove it [V].
+
+**Audit events.** Codes `audit.*`, `quarantine.*`, `gold.*`, `submission.view`; domain events `audit.resolved`, `cell.audit_passed`, `cell.audit_failed`, `submission.rejected`, `submission.released_from_quarantine`.
+
+| `op` | Method and path | Notes |
+| --- | --- | --- |
+| `listAuditQueueItems`, `getAuditQueueItem` | `GET /v1/admin/audit-queue-items[/{id}]` | Metadata only; ids are the underlying `aud_`, `sub_` or `rpt_` ids |
+| `getAuditQueueItemEvidence` | `GET .../{id}/evidence` | Logged read (`submission.view`) |
+| `createGoldView` | `POST .../{id}/gold-views` | Reason required; logged read (`gold.view_answer`) |
+| `decideAuditQueueItem` | `POST .../{id}/decisions` | Body `{outcome, reason_code, reason_text}`; `202` with an `ApprovalRequest` for `CT3` outcomes |
+
+| AC | Given | When | Then |
+| --- | --- | --- | --- |
+| `AC-auditq-01` | An open item | The evidence is fetched | One `submission.view` `AdminAction` exists with the reviewer and item ids |
+| `AC-auditq-02` | An `audit_inconclusive` item | Reviewer A chooses Pass | `202` with an `ApprovalRequest`; the cell stays `flagged_for_audit`; A cannot approve it; reviewer B's approval executes `cell.audit_passed` |
+| `AC-auditq-03` | A submission containing `<script>alert(1)</script>` and a URL | Rendered in block C | Shown as literal characters; the URL is not a link; no script runs |
+| `AC-auditq-04` | An item with outcome Fail | A single reviewer confirms | The cell becomes `rejected` with `reject.audit_mismatch` and no second admin is needed |
+| `AC-auditq-05` | A gold dispute | The reviewer asks for the gold answer without a reason | `400 VALIDATION_FAILED`; with a reason the view is logged and the donor-facing message omits the answer |
+| `AC-auditq-06` | `verify.reviewer_recheck_rate` = 1.0 (fixture) | Reviewer A decides | The item is re-queued blind for reviewer B; if B disagrees an `Alarm` `abuse.reviewer_disagreement` exists |
+| `AC-auditq-07` | An item whose payload was purged | The retention job runs | `audit.cancelled` is emitted and the item leaves the queue |
+
+## 11.48 Tool 4: Appeals
+
+**Purpose.** Decide challenges to rejections, suspensions, bans, job and template rejections and report outcomes, with a reviewer who did not make the decision and a second reviewer where the harm is highest (S0.9.7; prompt I). Filing is a member or requester action; this tool only works the queue. [D]
+**Roles and permissions.** `reviewer`: `perm.appeal.decide`.
+
+**`SCR-rev-08` Queue.** Oldest first. Columns: `appeal_kind`, filed date, state, assignee, age with an overdue badge after `appeal.reviewer_sla_days` (a published target), "needs second reviewer" badge. Filters: kind, state, mine.
+
+**`SCR-rev-09` Detail.** [D]
+
+| Block | Content |
+| --- | --- |
+| A Header | `apl_` id, kind, state timeline, days between decision and filing against `appeal.window_days` (informational; late filings were refused at the API) |
+| B Original decision | Type, reason code (`reject.*`, `policy.<rule>.<slug>` or a report outcome), decider (`system` or `adm_` short id), time, policy and parameter versions in force |
+| C Appellant statement | Escaped text, bounded by `api.max_body_bytes`, no attachments |
+| D Evidence by kind | `cell_rejection`: submission, check results, audit comparison, executors anonymised. `member_suspension` and `member_ban`: the reports and flags that led to the sanction and counts, never member-written content. `job_rejection`: the policy evaluation trace with the failing rule and the declarations. `template_rejection`: the version and review comments. `report_outcome`: the report and the action taken |
+| E Decision | Uphold or overturn, reason code, consequence preview from the server |
+
+**Guards.** Assignment refuses the admin who made, triaged or reviewed the original decision (`appeal.reassigned` is the conflict-of-interest path, reason code `conflict_of_interest`). One appeal per decision (`appeal.max_per_decision`). For `member_ban` and `template_rejection` the decision needs `appeal.ban_min_reviewers` distinct reviewers: the first moves the appeal to `awaiting_second_review`. If the reviewers disagree, a further distinct reviewer breaks the tie; with no further reviewer available the original decision stands [A] (`ISS-118`).
+
+**Remedies on overturn** [A]. Terminal states are never revived; a remedy creates a successor object.
+
+| Kind | Remedy applied by the server after `appeal.overturned` |
+| --- | --- |
+| `cell_rejection` | If the cell is still unaccepted the submission is reinstated; if another attempt was already accepted no second credit is created and the reliability record is corrected. Any further compensation is an owner decision (`ISS-119`) |
+| `member_suspension` | `member.reinstated` (status `active`) |
+| `member_ban` | `member.reinstated` from `banned`, a transition S0.9.4 lacks (`ISS-118`) |
+| `job_rejection` | No revival of the `rejected` job; the requester is told to submit again; no credit moved because escrow is held only at admission |
+| `template_rejection` | A new `draft` `TemplateVersion` cloned from the rejected one and linked to the appeal enters the normal review (S0.9.5) |
+| `report_outcome` | A new `Report` linked to the old one is opened for triage |
+
+The appellant receives a reason code rendered as copy, never reviewer notes.
+
+**Audit events.** Codes `appeal.*`; domain events `appeal.assigned`, `appeal.review_started`, `appeal.reassigned`, `appeal.second_review_requested`, `appeal.upheld`, `appeal.overturned`, plus the remedy events.
+
+| `op` | Method and path | Notes |
+| --- | --- | --- |
+| `listAppeals`, `getAppeal` | `GET /v1/admin/appeals[/{apl_id}]` | `ETag` |
+| `assignAppeal`, `reassignAppeal` | `POST .../{apl_id}/assignments`, `.../reassignments` | Conflict guard |
+| `startAppealReview` | `POST .../{apl_id}/reviews` | |
+| `requestAppealSecondReview` | `POST .../{apl_id}/second-reviews` | |
+| `decideAppeal` | `POST .../{apl_id}/decisions` | `{outcome, reason_code, reason_text}`; `If-Match` |
+
+| AC | Given | When | Then |
+| --- | --- | --- | --- |
+| `AC-appl-01` | A suspension decided by admin A | A is assigned the appeal | `403 FORBIDDEN`; another reviewer can be assigned |
+| `AC-appl-02` | A `member_ban` appeal, `appeal.ban_min_reviewers` = 2 (fixture) | Reviewer B overturns | State `awaiting_second_review`, status still `banned`; C's agreeing decision yields `overturned` and `member.reinstated` |
+| `AC-appl-03` | B overturns and C upholds, and no third reviewer exists | C decides | The appeal is `upheld` and the ban stands |
+| `AC-appl-04` | A `template_rejection` overturned | Executed | The rejected version is unchanged and a new `draft` version linked to the appeal exists |
+| `AC-appl-05` | An appeal older than `appeal.reviewer_sla_days` | The queue loads | The overdue badge shows; nothing is auto-decided |
+| `AC-appl-06` | An appellant statement containing markup | Rendered | Escaped literal text |
+
+## 11.49 Tool 5: Abuse flags and reports
+
+**Purpose.** Triage reports from volunteers and requesters and system abuse flags, and take proportionate, logged, appealable action. [D]
+**Roles and permissions.** `reviewer`: `perm.report.triage`, `perm.member.sanction`, `perm.member.ban`, `perm.cell.void`, `perm.cell.overturn`, `perm.job.stop`; `operator` holds the same plus `perm.cell.release`.
+
+**`SCR-rev-10` Queue.** Rows come from `Report` (S0.9.8) and from `Alarm` rows whose kind starts with `abuse.` (for example `abuse.grant_farming`, `abuse.invite_tree`, `abuse.referral_farming`, `abuse.timing_anomaly`, `abuse.duplicate_output`, `abuse.injection_attempt`; the list is owned by S9.* and S10.* [A]). Reports on the same subject collapse into one row with a count. Columns: source, category (an opaque enum owned by S10.*), subject kind, count, age with a badge after `report.triage_sla_days`, severity (set at triage), "auto-paused" badge. Oldest first.
+
+**`SCR-rev-11` Item screen.** [D]
+
+| Block | Content and rules |
+| --- | --- |
+| A Header | Source, category, `BLK-claim`, `BLK-trail` |
+| B Subject | Minimal summary of the subject; for a member subject the `SCR-rev-12` view opened with this item as its context (11.55) |
+| C Evidence | The reported cell or submission (escaped, inert), report texts. The reporter is shown only as "member, tier" or "requester"; no admin screen or API exposes a reporter's id (`AD7`) |
+| D Related | Other open items on the same subject; for templates, the report count in the last `template.autopause_window_s` against `template.autopause_report_count` |
+| E Action ladder | Dismiss; triage; `killswitch.engage` on a template or service; `job.stop`; `cell.void`; `cell.overturn` (bundle of cells, one `ApprovalRequest`); `member.restrict`; `member.suspend`; `member.ban`. Nothing is automatic and the ladder is a menu, not a sequence. Closing the item with an action records the `AdminAction` ids in `report.action` (`actioned`); with none, `report.dismiss` |
+
+When reports on a template reach `template.autopause_report_count` inside `template.autopause_window_s` the system engages `kill.template.<tpl_id>` with actor `system`; releasing it is two-person (11.54). A member sanction is appealable (`appeal_kind` `member_suspension` or `member_ban`) and the member sees only a reason code. Takedown of an already delivered or published deliverable is outside this tool and is named as an open item for S10.* and S12.* [V].
+
+**Context rule.** Every action whose subject is a member needs a `context` `{kind, id}` naming an open report, appeal or alarm that links to that member; otherwise `422 UNPROCESSABLE`. This keeps member ids out of free browsing (`AD7`).
+
+**Audit events.** Codes `report.*`, `member.*`, `job.stop`, `cell.*`; domain events `report.triaged`, `report.actioned`, `report.dismissed`, `member.restricted`, `member.suspended`, `member.banned`, `member.reinstated`, `member.restriction_lifted`, `cell.voided`, `cell.overturned`, `job.stop_requested`.
+
+| `op` | Method and path | Notes |
+| --- | --- | --- |
+| `listAbuseItems`, `getAbuseItem` | `GET /v1/admin/abuse-items[/{id}]` | `id` is an `rpt_` or `alm_` id |
+| `triageAbuseItem`, `dismissAbuseItem`, `recordAbuseItemAction` | `POST .../{id}/triages`, `.../dismissals`, `.../actions` | `If-Match` |
+| `restrictMember`, `suspendMember`, `banMember`, `reinstateMember`, `liftMemberRestriction` | `POST /v1/admin/members/{mem_id}/restrictions`, `.../suspensions`, `.../bans`, `.../reinstatements`, `.../restriction-lifts` | Body carries `context`; `banMember` returns `202` |
+| `stopJob` | `POST /v1/admin/jobs/{job_id}/stop-requests` | `CT2` |
+| `voidCell` | `POST /v1/admin/cells/{cel_id}/voidings` | `CT2` |
+| `createCellOverturn` | `POST /v1/admin/cell-overturns` | Body `{cell_ids, reason}`; `202` |
+
+| AC | Given | When | Then |
+| --- | --- | --- | --- |
+| `AC-abuse-01` | `template.autopause_report_count` = 3 (fixture) and three reports on one template inside the window | The third arrives | The queue shows one row with count 3 and a `killswitch.engaged` for `kill.template.<id>` with principal `system` exists |
+| `AC-abuse-02` | A `suspendMember` call with no `context` | Sent | `422 UNPROCESSABLE`; a refused `AdminAction` is written |
+| `AC-abuse-03` | A ban initiated by reviewer A | A confirms | `202`, member status unchanged; the ban executes only after distinct admin B approves |
+| `AC-abuse-04` | Any response of the abuse and appeal APIs | Checked against the schema | No field contains a reporter's `mem_` or `vol_` id |
+| `AC-abuse-05` | A `createCellOverturn` for accepted cells | Approved by a second admin | For each cell `cell.overturned`, a ledger `reversal` and a `rework` cell (S0 `ISS-05`) exist, or the whole request is rejected by the guard of 11.50.3 |
+| `AC-abuse-06` | An item older than `report.triage_sla_days` | The queue loads | The overdue badge shows |
