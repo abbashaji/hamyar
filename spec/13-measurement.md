@@ -229,7 +229,7 @@ Automatic creation rules [D]: `submission.quarantined` with a pattern reason cre
 ### 13.5.1 Time windows
 
 - `day0` is `PreRegistration.content.study.cohort_start_at` (UTC), set in the pre-registration before launch (13.7). Pilot week `k` is `[day0 + (k-1)*7 d, day0 + k*7 d)`. `wk(ts) = floor((ts - day0) / 7 d) + 1`. Days are UTC calendar days (S0.6.2). Seven days is the definition of a week; it is not a parameter. [D]
-- Trailing windows (v, capacity forecasts) use their own parameters (`price.v_window_days`, `admission.throughput_window_days` where S6.* defines it). [D]
+- Trailing windows (v, capacity forecasts) use their own parameters (`price.v_window_days`, `inflation.throughput_window_days`, `admission.forecast_window_days`). [D]
 - `as_of` is the rollup's `source_watermark`: the latest `received_at` of any source row included. A window is `closed` when `as_of >= window_end + metrics.rollup_interval_s`; open windows are published with `is_partial = true`. [D]
 
 ### 13.5.2 Population
@@ -398,4 +398,120 @@ SELECT count(*) FILTER (WHERE original_judged_wrong IS NOT NULL)                
        sum(1e6 / sampling_prob_ppm) FILTER (WHERE original_judged_wrong)               AS wrong_w,
        sum(1e6 / sampling_prob_ppm) FILTER (WHERE original_judged_wrong IS NOT NULL)   AS resolved_w
 FROM mv_audit WHERE template_id = COALESCE(:template_id, template_id);
+```
+
+### 13.6.6 `MET-06` Verification overhead v and implied eta
+
+| Field | Value |
+| --- | --- |
+| Names | `hamyar_credit_v_measured_ppm`, `hamyar_credit_eta_implied_ppm`, `hamyar_credit_commons_verification_share_ppm` |
+| Ownership | The definition, the trailing window per job type, the minimum sample and the publication of v and eta belong to S6.* and its public series. This part fixes the Phase 1 evaluation: weekly series, comparison with the prior, and the pre-registered eta threshold. If S6.* defines v differently from the reference query below, S6.* wins and this query is changed (`ISS-138`) |
+| Definition (reference, consistent with S0.6.1) | Over the trailing `price.v_window_days` (initial configurable default 28) and per `job_type`: `v_ppm = ceil(1e6 * verification_cells / accepted_primary_cells)`, where `verification_cells` are accepted cells of kind `gold`, `audit`, `third`, `review` and `rework` that S6.* attributes to member jobs of that type, and `accepted_primary_cells` are accepted `primary` cells of those jobs. If `accepted_primary_cells < price.v_min_sample_cells` (initial configurable default 100) the value is `insufficient_sample` and the published v stays `price.v_prior` |
+| Implied eta | `p_ucr = 1,000,000 + v_ppm + lambda_ppm` with `lambda_ppm` the value of `price.levy_lambda` in force; `eta_ppm = floor(1e12 / p_ucr)` (S0.6.1). Alarm when `eta_ppm < price.eta_alarm_threshold * 1e6` (initial configurable default 0.80, pre-registered by `FND`) |
+| Commons verification share | `verification_cells / accepted_cells` over Commons jobs, published beside v so that make-work minting is visible (`ISS-03`) |
+| Cadence | Daily; the weekly row is the one the pre-registration reads |
+| Known biases | v measured on a thin sample is dominated by the first audits. Gold cells inserted into Commons work count as verification but are not paid by any requester. `s` and `g` are configuration, so v is partly a policy outcome rather than a discovery; report it next to `verify.audit_rate_s` and `verify.gold_rate_g` in force. The prior `0.10` is the FD§3.3 illustrative input, not a measurement |
+
+```sql
+SELECT job_type,
+       count(*) FILTER (WHERE cell_kind IN ('gold','audit','third','review','rework')) AS verification_cells,
+       count(*) FILTER (WHERE cell_kind = 'primary')                                    AS primary_cells
+FROM mv_attempt
+WHERE outcome = 'accepted' AND NOT is_commons
+  AND decided_at >= :we - (:v_window_days * interval '1 day') AND decided_at < :we
+GROUP BY job_type;
+-- v_ppm = ceil(1e6 * verification_cells / primary_cells); eta_ppm = floor(1e12 / (1000000 + v_ppm + :lambda_ppm))
+```
+
+### 13.6.7 `MET-07` Week-2 return and week-4 return
+
+| Field | Value |
+| --- | --- |
+| Names | `hamyar_member_return_week2_ppm`, `hamyar_member_return_week4_ppm` |
+| Definition (FD§9: share of week-1 contributors active in week 2, also week 4) | A *contributor* has at least one submission (`submitted_at` not null), whatever its outcome; this measures behavior, not verification quality. A companion value counts only accepted cells (`verified_only = true`). *Active in week k* means at least one submission in week `k`. Return = `returned_n / cohort_n` in ppm with its Wilson interval |
+| Basis (pre-registered, `ISS-131`) | `return_basis = pilot_calendar` (default): week `k` is pilot week `k` (13.5.1), the cohort is members with a submission in pilot week 1. `return_basis = member_relative`: week `k` is `[t0 + (k-1)*7 d, t0 + k*7 d)` with `t0` the member's first submission; only members with `t0 + k*7 d <= as_of` are eligible (right-censoring). The basis is part of the pre-registration because it changes the answer |
+| Cadence | Daily; each value is final when its window is closed |
+| Known biases | Under `pilot_calendar`, members who joined late in week 1 have had one day to be a contributor and are measured against a full week-2: this lowers the return. Under `member_relative`, a 30-day pilot can observe week 4 only for members whose `t0` is in about the first two days (`30 - 28 = 2`), so the week-4 cohort is tiny (`ISS-131`). Return measures staying, not satisfaction. Invited, motivated participants overstate return relative to an open beta. Members who stop for safety reasons look like churn; `MET-14` carries the reasons |
+
+```sql
+-- pilot_calendar basis
+WITH act AS (SELECT DISTINCT member_ref, wk(submitted_at) AS wk
+             FROM mv_attempt WHERE submitted_at IS NOT NULL AND pop_ok)
+SELECT count(*) AS cohort_n, count(ak.member_ref) AS returned_n
+FROM act a1 LEFT JOIN act ak ON ak.member_ref = a1.member_ref AND ak.wk = :k
+WHERE a1.wk = 1;
+
+-- member_relative basis
+WITH t0 AS (SELECT member_ref, min(submitted_at) AS t0 FROM mv_attempt
+            WHERE submitted_at IS NOT NULL AND pop_ok GROUP BY 1),
+elig AS (SELECT * FROM t0 WHERE t0 + :k * interval '7 days' <= :as_of)
+SELECT count(*) AS cohort_n,
+       count(*) FILTER (WHERE EXISTS (SELECT 1 FROM mv_attempt a
+            WHERE a.member_ref = elig.member_ref AND a.submitted_at IS NOT NULL
+              AND a.submitted_at >= elig.t0 + (:k - 1) * interval '7 days'
+              AND a.submitted_at <  elig.t0 + :k * interval '7 days')) AS returned_n
+FROM elig;
+```
+
+### 13.6.8 `MET-08` Time per contribution, and the share under 60 s
+
+| Field | Value |
+| --- | --- |
+| Names | `hamyar_cell_contribution_time_seconds` (stat `median`, `p90`), `hamyar_cell_fast_contribution_share_ppm` |
+| Definition | For every attempt with a submission: `T = submitted_at - start`, where `start = card_opened_at` when a `ui.card_opened` was received before submission (the latest one), else `issued_at`; the dimension `time_source` is `card_opened` or `lease_issued`. Median and p90 use 13.5.3. `fast_share = count(T < ui.fast_contribution_threshold_s) / count(*)`, with `ui.fast_contribution_threshold_s` = 60 (initial configurable default, FD§6.2 V1, `FND`). The comparison is strict: exactly 60 s is not under 60 s. Also reported for the newcomer's first contribution only (`first_only = true`), because the 60-second path of FD§3.2 is about the first one |
+| Cadence | Daily |
+| Known biases | The clock includes the provider's response time, which the platform neither controls nor sees. Members who lease several cards (`lease.max_active_per_member`, initial configurable default 3) inflate `T` when `card_opened` is missing, so the lease-issued fallback is biased upward; compare the two `time_source` values and never mix them in one number. Abandoned attempts have no `submitted_at` and are excluded, which biases `T` downward (survivorship); the abandonment share `1 - submitted/issued` is reported beside it. Members who disable client events (`AN-10`) fall into the fallback. Calibration times (`CAL-02`) come from founders and are not a substitute for donor times [H] |
+
+```sql
+SELECT time_source,
+       percentile_disc(0.5) WITHIN GROUP (ORDER BY secs) AS median_s,
+       percentile_disc(0.9) WITHIN GROUP (ORDER BY secs) AS p90_s,
+       count(*) AS n,  count(*) FILTER (WHERE secs < :fast_s) AS n_fast,
+       count(DISTINCT member_ref) AS n_members
+FROM (SELECT member_ref,
+             CASE WHEN card_opened_at BETWEEN issued_at AND submitted_at THEN 'card_opened' ELSE 'lease_issued' END AS time_source,
+             extract(epoch FROM submitted_at - CASE WHEN card_opened_at BETWEEN issued_at AND submitted_at
+                                                   THEN card_opened_at ELSE issued_at END)::int AS secs
+      FROM mv_attempt WHERE submitted_at IS NOT NULL AND pop_ok
+        AND submitted_at >= :ws AND submitted_at < :we) t
+GROUP BY time_source;
+```
+
+### 13.6.9 `MET-09` Time to first verified cell for newcomers
+
+| Field | Value |
+| --- | --- |
+| Name | `hamyar_member_time_to_first_verified_seconds` |
+| Definition | For members created on or after `day0`: `first_accepted_at - created_at` (the first accepted cell of any kind executed by that member). Reported as median, p90, and the survival points `share_verified_within` 1 hour, 24 hours and 7 days (3,600; 86,400; 604,800 s: units of time, not thresholds), plus `never_verified_n` (right-censored: members with no accepted cell by `as_of`, shown as a count and never dropped). Phase intervals `created -> first lease`, `first lease -> first submission`, `first submission -> accepted` are reported separately so friction and verification delay can be told apart (FD§9 rule: diagnose capacity, verification and friction separately) |
+| Cadence | Daily |
+| Known biases | New donors run `verify.new_donor_blanket_cells` (initial configurable default 5) blanket-redundancy cells, whose acceptance waits for other executions, so the last interval measures queue supply as well as the member. Members invited in a batch share a start time. A median over a handful of members is not stable (S13.11). Members who never start are included in `never_verified_n` only if they were created; the pre-creation funnel is not observable (`AN-02`) |
+
+```sql
+SELECT percentile_disc(0.5) WITHIN GROUP (ORDER BY extract(epoch FROM first_accepted_at - created_at)::bigint)
+         FILTER (WHERE first_accepted_at IS NOT NULL) AS median_s,
+       count(*) FILTER (WHERE first_accepted_at IS NULL)                                    AS never_verified_n,
+       count(*) FILTER (WHERE first_accepted_at - created_at <= interval '1 hour')          AS within_1h,
+       count(*) FILTER (WHERE first_accepted_at - created_at <= interval '24 hours')        AS within_24h,
+       count(*) FILTER (WHERE first_accepted_at - created_at <= interval '7 days')          AS within_7d,
+       count(*)                                                                             AS n_members
+FROM mv_member WHERE created_at >= :day0 AND pop_ok_member;
+```
+
+### 13.6.10 `MET-10` Active capacity per member per day
+
+| Field | Value |
+| --- | --- |
+| Names | `hamyar_capacity_active_member_day_cells_ppm` (mean, median, p90), `hamyar_capacity_per_member_day_ppm` |
+| Definition | `active member-day` = a (member, UTC day) with at least one accepted cell. `cells_per_active_day` = accepted cells in that member-day; reported as mean, median and p90 per pilot week. `capacity_per_member_day = accepted_cells(w) / (active_members(w) * 7)`, where `active_members(w)` have at least one accepted cell in week `w`. The result is compared with the illustrative 8 cells per day of the FD§3.3 example and with `mint.per_member_daily_cap_credits` (initial configurable default 30); the example is an input, not a finding. This is the observation that feeds `admission.phi`, the forecast of S6.* and `mint.monthly_cap_credits` |
+| Cadence | Weekly; daily partial |
+| Known biases | It measures realised supply of members who showed up, not the supply of members who did not. Supply is shaped by backlog availability: an empty queue looks like low capacity. Large-job weeks distort it. Per-service allowance limits (`CAL-01`) cap what one account can do and are a different quantity: realised donor capacity is bounded by it but also by willingness |
+
+```sql
+WITH md AS (SELECT member_ref, (decided_at AT TIME ZONE 'UTC')::date AS d, count(*) AS cells
+            FROM mv_attempt WHERE outcome = 'accepted' AND pop_ok AND decided_at >= :ws AND decided_at < :we GROUP BY 1, 2)
+SELECT count(DISTINCT member_ref) AS active_members, count(*) AS active_member_days, sum(cells) AS cells,
+       percentile_disc(0.5) WITHIN GROUP (ORDER BY cells) AS median_cells_per_active_day,
+       percentile_disc(0.9) WITHIN GROUP (ORDER BY cells) AS p90_cells_per_active_day
+FROM md;
+-- mean = sum(cells) * 1e6 / active_member_days (ppm); per_member_day = sum(cells) * 1e6 / (active_members * 7)
 ```
