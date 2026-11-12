@@ -850,7 +850,7 @@ S0.10.6 says names are stable and S16.* completes the table. This part needs the
 | `ui.capacity_dashboard_refresh_s` | duration_s | 60, the initial value of `public.counter_refresh_s` | 5..3600 | `operator` | `OPS` |
 | `verify.reviewer_recheck_rate` | ratio | 0.10 | 0..1 [H] | `operator` | `P1M` disagreement rate between first and re-check reviewers |
 
-The `security.two_person_actions` default grows from four names to ten: `ledger.reversal`, `launch.signoff`, `parameter.loosen`, `killswitch.release` (S0.10.6) plus `member.ban`, `audit.accept`, `quarantine.release`, `cell.overturn`, `member.resolve_handle`, `launch.signoff` already counted; the list therefore adds five new names (`ISS-117`).
+The `security.two_person_actions` default grows from four names to nine: `ledger.reversal`, `launch.signoff`, `parameter.loosen`, `killswitch.release` (S0.10.6) plus `member.ban`, `audit.accept`, `quarantine.release`, `cell.overturn`, `member.resolve_handle`; the list therefore adds five new names (`ISS-117`).
 
 ## 11.59 Dependencies on other parts and open [V] items
 
