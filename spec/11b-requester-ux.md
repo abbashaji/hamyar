@@ -344,3 +344,71 @@ Finding kinds the screen can display (detection is owned by S9.*; the set is a d
 - **AC-req-12** Given `screen_status` = `flagged_for_review` because of `url_present`, When Continue is pressed, Then the wizard proceeds to declarations and the page states that a reviewer will look before acceptance.
 - **AC-req-13** Given `screen_status` = `pending`, When the tab is hidden, Then polling stops, and it refreshes once when the tab becomes visible again.
 - **AC-req-14** Given `requestUploadReview` was already used `screen.requester_review_requests_per_day` times today, When the person presses Ask a reviewer, Then the action is disabled with the reset time in local time.
+
+### SCR-req-05 Declarations (wizard step 4)
+
+| Row | Content |
+| --- | --- |
+| Purpose | Collect the four mandatory declarations (purpose, license, sensitivity, service requirement; FD§5.2) in plain language, then submit the job for checking |
+| Entry conditions | Job `draft`; at least one upload with `screen_status` `passed` or `flagged_for_review` |
+| Blocks | Four option groups in this order: Purpose `P0`..`P3`, License `L0`..`L3`, Sensitivity `S0`..`S3`, Service `M0`..`M2`. Each option shows its code, a short name and the plain-language explanation of 11.44 (what it means, what it allows, what it does not). Options the active allowlist locks are shown disabled with the reason `copy.req.locked_phase` or `copy.req.locked_unreviewed` (for `P2`, `P3`, `L3`, `M2` in Phases 1-2; the data comes from `getPolicyProfile`, RD-03). Under License `L1`/`L2`: an optional `license_spdx_id` chosen from `license_options` [V counsel], and the downstream notice (11.45). Under Sensitivity `S1`: a required tick "I accept that a stranger will read this". Under Service `M1`: a list from `listServices`. A live volunteer-card preview (`previewCells`) updates with the choices. A read-only summary and the notices `copy.req.notice_declared`, `copy.req.notice_screening_limits`. Button Check my request |
+| States | `incomplete` (groups missing; the button is disabled and names them, which is the client form of `R1`), `combination_hint` (the allowlist says the combination is not accepted now: an inline explanation with the reason code; the button stays enabled because the server decides, RD-03), `s2_s3_chosen` (the definition is shown and the page says it will not be accepted now; the choice is allowed so that an honest answer is recorded and explained, RD-05) |
+| Actions | `getPolicyProfile`, `listServices`, `patchJob` (merge patch with `If-Match`), `previewCells`, `submitJob` (Check my request) |
+| Copy intent | Explain each code by its consequence for the requester, not by legal categories; always say "declared"; never imply that a declaration is verified or that output use can be controlled downstream |
+| Accessibility | Each group is a `fieldset` with a `legend`; options are radio buttons whose accessible description is the explanation; disabled options remain focusable and announce their reason; no information is carried only by the code letter |
+
+- **AC-req-15** Given no purpose is chosen, When the page renders, Then Check my request is disabled and the missing group names are listed.
+- **AC-req-16** Given the active allowlist locks `P2` and `P3`, When the page renders, Then both options are disabled, focusable and announce their reason.
+- **AC-req-17** Given the person chooses `L2`, When the choice is made, Then the downstream-use notice appears on this step before submission.
+- **AC-req-18** Given the person chooses `S1`, When the acknowledgement tick is empty, Then Check my request stays disabled.
+- **AC-req-19** Given a valid set of declarations, When Check my request is pressed, Then one `patchJob` and one `submitJob` are sent with their own `Idempotency-Key`, the Job becomes `screening` and `SCR-req-06` opens.
+
+### SCR-req-06 Policy result (wizard step 5)
+
+| Row | Content |
+| --- | --- |
+| Purpose | Show whether the request was accepted by the policy engine and, if not, exactly why, in the requester's language, with what can be changed |
+| Entry conditions | Job `screening`, `rejected` or just `quoted`; polled with `getJob` while `screening` |
+| Blocks | `waiting`: text that the check may include a reviewer for sampled or flagged inputs (`screen.review_rate_new_requester`, `screen.review_rate_established_requester`), no time promise. `passed`: the policy version stamped (short `plv_` id and date), a list of `R1`..`R7` each marked checked, plus plain notes for `R8` (volunteers see a request only if their opt-ins cover it), `R9` (the version is stamped now and re-checked when each result is accepted) and `R10` (rules can tighten at once; they loosen only with a public entry); button Continue to quote. `rejected`: the ordered `reasons` (11.43.1), each with its change advice; nothing was charged; buttons Fix and resubmit (`createJob` with `copy_from_job_id`) and Ask for a human review (`SCR-req-18`, shown while `rejection.appeal.allowed_until` is in the future) |
+| States | `waiting`, `passed`, `rejected` |
+| Actions | `getJob`, `createJob`, `createAppeal` (via `SCR-req-18`) |
+| Copy intent | A rejection is information, not blame; every reason has its own sentence and its own next step; no legal conclusions; no reveal of which exact detector fired for `R3` |
+| Accessibility | The result region is `aria-live="polite"` and receives focus once when the state changes to `passed` or `rejected`; reasons are an ordered list with the code as a visually secondary, copyable string |
+
+- **AC-req-20** Given the job is `rejected` with `policy.R2.sensitivity_not_accepted`, When the page renders, Then the `R2` sentence in the active locale is shown, the code is shown as secondary text, no charge is mentioned as made, and Fix and resubmit is offered.
+- **AC-req-21** Given `rejection.appeal.allowed_until` is in the past, When the page renders, Then Ask for a human review is absent and the page states that the window (`appeal.window_days`) has ended.
+- **AC-req-22** Given the job is `screening` for longer than the page was open, When the state becomes `quoted`, Then polling stops, focus moves to the result heading and Continue to quote is enabled.
+
+### SCR-req-07 Price and window quote (wizard step 6)
+
+| Row | Content |
+| --- | --- |
+| Purpose | Show what the request costs, how the price is made, and when it will be done, before any credit is held |
+| Entry conditions | Job `quoted` (a live quote), `waitlisted` re-quoted by `job.waitlist_released`, or `quote_expired` |
+| Blocks | (1) The p line: `p = 1 + v + lambda` written with this quote's numbers, e.g. "1 + 0.10 + 0.05 = 1.15 credits per cell"; each term has a one-line meaning (11.37). (2) Whether `v` is `measured` over the trailing `price.v_window_days` days from `v_sample_cells` cells, or the `prior` (`price.v_prior`) because fewer than `price.v_min_sample_cells` cells exist. (3) Escrow breakdown: volunteer pay, verification pool (and the number of verification cells it buys), reserve levy, total. (4) Round-trip efficiency `eta`. (5) Balance before and after, and which credit lots are used (oldest first) with their expiry. (6) The window: quoted duration, `deadline_at` (local time, both calendars in detail), the latest automatic stop `latest_stop_at` derived by the server from `job.max_overrun_ratio`, and the supply gauge for this kind of request when present. (7) A live countdown to `quote_expires_at` (`price.quote_ttl_s`). (8) Notices `copy.req.notice_no_instant`, `copy.req.notice_credit_not_money` |
+| States | `available`, `unavailable` (the window cannot be honoured now: alternatives `waitlist` and `reservation` are offered, S0.9.2 `job.waitlisted`), `expired` (read-only; Fix and resubmit), `v_prior` (the `v` line is labelled estimated), `insufficient_credit` (balance below `escrow.total_ucr`: shows the shortfall and `floor(balance / p)` cells the person could request now) |
+| Actions | Continue to confirm (opens `SCR-req-08`), Refresh quote (`getQuote`), Join waitlist (`createWaitlistEntry`), Book a reservation (`SCR-req-10`), Cancel this request (`cancelJob`; no credit is held so nothing is refunded) |
+| Copy intent | Show cost as a sum the person can check; show verification cost as a cost, not hidden; call the window a quote based on measured capacity; never "within X hours guaranteed" |
+| Accessibility | The breakdown is a real table; the countdown is announced at coarse intervals only (not every second); amounts are read with units ("credits") |
+
+- **AC-req-23** Given the FD§3.3 inputs (`v_ppm` 100000, `lambda_ppm` 50000, N = 240, balance 300 credits), When the quote renders, Then it shows p = 1.15, total 276, volunteer pay 240, verification pool 24 buying 24 verification cells, levy 12, balance after 24, `eta` 0.870 and a 2-day window as returned by the server (these are the FD's illustrative inputs, not measurements).
+- **AC-req-24** Given `v_source` is `prior`, When the quote renders, Then the `v` line is labelled "estimated, not yet measured" and shows `price.v_prior` as its value.
+- **AC-req-25** Given `window.status` is `unavailable`, When the quote renders, Then Continue to confirm is absent and Join waitlist and Book a reservation are offered; with `ff.job.reservations` off only the waitlist is offered.
+- **AC-req-26** Given balance 100 credits and `p_ucr` 1,150,000, When `escrow.total_ucr` exceeds the balance, Then the screen shows the shortfall and the affordable cell count 86 (`floor(100,000,000 / 1,150,000)`), and Continue is disabled.
+
+### SCR-req-08 Escrow confirmation (wizard step 7)
+
+| Row | Content |
+| --- | --- |
+| Purpose | The single, explicit act that holds credit and admits the job |
+| Entry conditions | Job `quoted`, `window.status` `available`, quote not expired, balance sufficient |
+| Blocks | A summary (template, `cell_count`, declarations in words, window, total to hold, balance after) in a region that receives initial focus. Required acknowledgements, each a separate tick with its own text: `window_is_quote` (always) and `downstream_use_uncontrolled` (only when the license is `L1` or `L2`, RD-09). The notices `copy.req.notice_declared` and `copy.req.notice_credit_not_money`. Button "Confirm and hold {total} credits" |
+| States | `ready`, `submitting`, `conflict_quote_changed` (`409 STATE_CONFLICT`, `details.reason` `quote_changed`: reloads the quote and returns to `SCR-req-07`), `conflict_policy_changed` (`details.reason` `policy_version_changed`: the quote is void, Fix and resubmit is offered, nothing was charged), `insufficient_credit`, `at_job_cap` (`CAP_EXCEEDED`, `details.cap` `concurrent_jobs`) |
+| Actions | `confirmEscrow` with `{quote_hash, acknowledgements}` and one `Idempotency-Key` (11.33.4) |
+| Copy intent | Say exactly what happens: credit is held now, volunteers are paid per accepted cell, unspent credit returns, results arrive in the quoted window or in part; the button states the amount |
+| Accessibility | Ticks are native checkboxes; the button's accessible name contains the amount; the result (`admitted`) is announced and focus moves to the progress heading |
+
+- **AC-req-27** Given a license of `L2`, When the acknowledgement `downstream_use_uncontrolled` is not ticked, Then the Confirm button is disabled; given license `L0` the tick is not rendered and is not sent.
+- **AC-req-28** Given the person double-taps Confirm, When both requests carry the same `Idempotency-Key`, Then exactly one `escrow_hold` exists, the second response is a replay, and the screen shows one admitted job.
+- **AC-req-29** Given the quote changed since it was shown (different `quote_hash`), When Confirm is pressed, Then the server answers `409 STATE_CONFLICT` with `details.reason` `quote_changed`, no credit moves, and the new quote is shown for a fresh decision.
+- **AC-req-30** Given the active policy version changed after the quote, When Confirm is pressed, Then the job is not admitted, `copy.req.err_policy_changed` is shown and Fix and resubmit is offered.
