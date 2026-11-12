@@ -508,3 +508,114 @@ Labels (copy keys; every row carries `needs_human_and_legal_review`):
 - **AC-req-37** Given a `held` reservation cancelled before `free_until`, When the person confirms, Then the receipt shows the returned amount equal to the held amount, and the restored credit lots show their original expiry (`ISS-07`).
 - **AC-req-38** Given a `held` reservation whose job has more cells than were booked, When `activateReservation` is sent, Then `422 CAP_EXCEEDED` with `details.cap` `reservation_cells` is shown and the reservation stays `held`.
 - **AC-req-39** Given the reservation reached `expired`, When the page loads, Then the state, the date and the refund shown are those returned by the server, with no client-side computation.
+
+## 11.39 Job progress screens
+
+### 11.39.1 Status vocabulary [D]
+
+The requester sees two vocabularies: the job state (S0.9.2, 15 states) and a per-cell status derived from the `Cell` state (S0.9.3). Both are fixed lists so the map, the counts and the copy always agree.
+
+| Job state | EN label | FA label | Requester actions |
+| --- | --- | --- | --- |
+| `draft` | Draft | پیش‌نویس | Continue, Delete (`job.cancel_requested`) |
+| `screening` | Being checked | در حال بررسی | Wait |
+| `rejected` | Not accepted | پذیرفته نشد | Fix and resubmit, Ask for review |
+| `quoted` | Quote ready | قیمت و بازه اعلام شد | Continue, Cancel |
+| `quote_expired` | Quote expired | قیمت منقضی شد | Fix and resubmit |
+| `waitlisted` | On the waitlist | در فهرست انتظار | Leave the waitlist |
+| `admitted` | Queued | در صف اجرا | View progress, Cancel |
+| `running` | In progress | در حال اجرا | View progress, Cancel |
+| `suspended` | Paused | موقتاً متوقف | View progress, Cancel |
+| `assembling` | Putting results together | در حال آماده‌سازی نتایج | Wait |
+| `settling` | Settling credit | در حال تسویهٔ اعتبار | Wait |
+| `completed` | Completed | تکمیل شد | Results, Receipt, Rate |
+| `cancelling` | Cancelling | در حال لغو | View progress |
+| `cancelled` | Cancelled | لغو شد | Receipt (when credit was held) |
+| `failed` | Ended incomplete | ناتمام ماند | Partial results, Receipt, Rate |
+
+| Code | Cell status | Derived from `Cell` state | EN | FA | Shape (never colour alone) |
+| --- | --- | --- | --- | --- | --- |
+| `w` | `waiting` | `queued`, attempt 1 | Waiting for a volunteer | در انتظار داوطلب | hollow circle |
+| `r` | `retrying` | `queued`, attempt above 1 (after `rejected` or `expired`) | Trying again | تلاش دوباره | hollow circle with arrow |
+| `p` | `in_progress` | `leased` | With a volunteer | در دست اجرا | half-filled circle |
+| `c` | `checking` | `submitted` | Being checked | در حال بررسی | filled circle with dot |
+| `d` | `double_checking` | `flagged_for_audit` | Being double-checked | بررسی دوباره | double ring |
+| `a` | `done` | `accepted` | Done | انجام شد | filled circle with tick |
+| `s` | `paused` | `suspended` | Paused | متوقف | two bars |
+| `x` | `stopped` | `cancelled`, `voided` | Stopped | بسته شد | square with cross |
+| `f` | `failed` | `exhausted` (`cell.max_attempts` reached) | Could not be completed | انجام نشد | triangle with bar |
+| `o` | `redo` | `overturned` (a `rework` cell takes over) | Being redone | در حال تکرار | circular arrow |
+
+One index shows its latest effective cell: after `cell.overturned` the index shows `o` until the `rework` cell is accepted, then `a` (`ISS-05`). Gold cells are never indexed (RD-08). Statuses `c` and `d` never reveal who or why. [D]
+
+Pause and stop causes (`pause_reason` values are convention additions [A]; `closure_reason` is S0.9.2):
+
+| Value | Copy key | EN | FA |
+| --- | --- | --- | --- |
+| `kill_switch` | `copy.req.pause_kill` | The operators paused work for a moment. Your credit stays held and the request may continue when work resumes. | مدیران پلتفرم کار را موقتاً متوقف کرده‌اند. اعتبار شما همچنان نگه‌داشته می‌ماند و ممکن است با ازسرگیری کار ادامه یابد. |
+| `template_paused` | `copy.req.pause_template` | The template used by this request was paused for review. | قالبِ این درخواست برای بازبینی موقتاً متوقف شده است. |
+| `service_paused` | `copy.req.pause_service` | A service this request depends on was paused. | سرویسی که این درخواست به آن وابسته است موقتاً متوقف شده است. |
+| `policy_tightened` | `copy.req.pause_policy` | A rule was tightened and this request is being re-checked. | یکی از قواعد سخت‌تر شده و این درخواست دوباره بررسی می‌شود. |
+| `policy_stopped` | `copy.req.close_policy` | This request was stopped because a rule changed. Finished results are kept; unspent credit returns to you. | این درخواست به‌دلیل تغییر یک قاعده متوقف شد. نتایج انجام‌شده حفظ می‌شود و اعتبار مصرف‌نشده به شما برمی‌گردد. |
+| `service_revoked` | `copy.req.close_service` | A service this request depends on is no longer approved. Finished results are kept; unspent credit returns to you. | سرویسی که این درخواست به آن وابسته بود دیگر تأیید نشده است. نتایج انجام‌شده حفظ می‌شود و اعتبار مصرف‌نشده به شما برمی‌گردد. |
+| `template_retired` | `copy.req.close_template` | The template of this request was retired. Finished results are kept; unspent credit returns to you. | قالبِ این درخواست بازنشسته شد. نتایج انجام‌شده حفظ می‌شود و اعتبار مصرف‌نشده به شما برمی‌گردد. |
+| `operator_killed` | `copy.req.close_operator` | The operators stopped this request. Finished results are kept; unspent credit returns to you. | مدیران پلتفرم این درخواست را متوقف کردند. نتایج انجام‌شده حفظ می‌شود و اعتبار مصرف‌نشده به شما برمی‌گردد. |
+| `overrun_timeout` | `copy.req.close_overrun` | This request reached its latest stop time ({stop}) before every cell was finished. Finished results are kept; unspent credit returns to you. | این درخواست پیش از پایان همهٔ سلول‌ها به آخرین زمان توقف ({stop}) رسید. نتایج انجام‌شده حفظ می‌شود و اعتبار مصرف‌نشده به شما برمی‌گردد. |
+
+### 11.39.2 Map encoding, bottleneck and on-track rules [D][A]
+
+The progress response carries the map as one string of exactly `cells_primary` characters (code letters above, index order) plus an `attempts` object for indices whose attempt is above 1. Size is N bytes of map (derived: one character per cell), so 300 cells need about 300 bytes before the other fields; this suits low bandwidth and lets one request refresh the whole screen. The server builds it from `Cell` rows of `cell_kind` `primary` and their `rework` successors only.
+
+```
+function bottleneck(cells, now):                    # server side (S6.*/S8.* own the data); this file owns the display contract
+  open = [c for c in cells if c.status not in (done, stopped, failed)]
+  if open is empty: return null
+  kind_of = { waiting: awaiting_volunteer, retrying: retrying, in_progress: in_progress,
+              checking: awaiting_check, double_checking: awaiting_second_check, paused: paused }
+  groups  = group open by kind_of[c.status]
+  top     = group with the largest size; ties: oldest state_since, then the order above
+  at_risk = [c for c in open if c.attempt >= cell.max_attempts - 1]      # one more failure exhausts it and fails the job
+  return { kind: top.kind, cells: size(top), since: min(state_since of top), at_risk_cells: size(at_risk) }
+
+function show_bottleneck_banner(progress):          # a neutral summary is always shown; the banner is the highlighted form
+  return progress.timing.on_track == behind or progress.bottleneck.kind in (retrying, paused) or progress.bottleneck.at_risk_cells > 0
+
+function on_track(job, now):                         # initial linear baseline, replaceable by an S6.* forecast; hypothesis [H]
+  if job.done == 0: return unknown
+  elapsed = (now - admitted_at) / (deadline_at - admitted_at)
+  return on_track if job.done / job.cells_primary >= elapsed else behind
+```
+
+The linear baseline is crude because volunteer supply arrives in daily batches; whether `behind` predicts a missed quote is measured in Phase 1 (`P1M`, FD§9 "time to complete a large job versus quote") [H]. This borrows the panel's bottleneck idea (a banner naming the one thing holding work up) and its fixed status vocabulary, not its dependency graph: primary cells are independent, so there is nothing to lay out as a graph (11.48) [V].
+
+### SCR-req-12 Job progress
+
+| Row | Content |
+| --- | --- |
+| Purpose | Show where the request stands: overall progress, the per-cell status map, what is holding it up, and what the requester can do |
+| Entry conditions | Job in `admitted`, `running`, `suspended`, `assembling`, `settling` or `cancelling` (terminal jobs redirect to `SCR-req-16` or `SCR-req-15`) |
+| Blocks | (1) Header: job state label, template, `cell_count`, `deadline_at` in local time and `latest_stop_at`. (2) Summary: "{done} of {n} done" as text plus a bar, and `on_track` in words. (3) Status map: a grid of N tiles in index order, direction following the page direction (index 1 at the start edge), a row label every ten tiles, the legend of 11.39.1; a List view toggle shows the same data as a table. (4) Counts per status. (5) Bottleneck summary or banner (11.39.2). (6) Checking counters: "verification and redo cells used: {used} of {pool}" (gold cells are not distinguished) and "{n} results are held for a reviewer" from `withheld_for_review` (outputs with links, code or requests for action are withheld, FD§5.5). (7) Pause or closure banner with the copy of 11.39.1. (8) Actions |
+| States | `queued_only` (`admitted`, no cell leased yet), `running`, `behind` (banner), `suspended`, `closing` (`settling` or `cancelling`), `stale` (last update older than twice `ui.requester.progress_poll_s`: the page says so and shows the update time) |
+| Actions | Open a cell (`SCR-req-13`), Cancel this request (`SCR-req-14`), Refresh now, Report a problem (`createReport`). Polling `getJobProgress` every `ui.requester.progress_poll_s` with `If-None-Match`; polling stops while the tab is hidden and when the job is terminal |
+| Copy intent | Calm and specific about the cause of delay; never blame volunteers; never promise a faster finish; say what the person can do (wait, cancel) |
+| Accessibility | The map is a `role="grid"` with roving tabindex, arrow keys that follow the visual direction, and each tile named "cell 17, {status label}"; the List view is the default for screen-reader users who toggle it and its choice is remembered in memory only; counts are real text; updates are announced at most once per poll and only when a status count changes; `prefers-reduced-motion` removes tile transitions |
+
+- **AC-req-40** Given `cells_primary` 240 and a `map` of 240 characters, When the page renders, Then 240 tiles appear in index order with shape and label per code; given a `map` whose length differs from `cells_primary`, Then the page shows `error_retry` and renders no partial map.
+- **AC-req-41** Given an unchanged progress `ETag`, When the poll runs, Then a `304` leaves the DOM untouched; given the tab is hidden, Then no poll is sent until it is visible again.
+- **AC-req-42** Given `on_track` = `behind` and the largest group is `awaiting_volunteer` with 150 cells, When the page renders, Then the banner says most remaining cells are waiting for volunteers and shows `at_risk_cells` when above zero.
+- **AC-req-43** Given `pause_reason` = `kill_switch`, When the page renders, Then the paused banner shows `copy.req.pause_kill`, Cancel stays available and the credit is stated as still held.
+- **AC-req-44** Given the page direction is RTL, When the map renders, Then index 1 is at the right edge, arrow-key navigation moves visually, and the legend uses shapes, not colour alone.
+
+### SCR-req-13 Cell sheet
+
+| Row | Content |
+| --- | --- |
+| Purpose | Explain one tile without exposing anyone or showing output early (RD-08, RD-10); the analogue of the panel's inspector [V] |
+| Entry conditions | A tile chosen on `SCR-req-12` |
+| Blocks | Index; status with label and shape; "attempt {n} of {max}" (`cell.max_attempts`); time in this state rounded to whole hours; "at risk" tag when the bottleneck rule marks it; an attempt list with outcome classes only (`not returned in time` for `lease_expired`, `did not pass the checks` for every other `reject.*` reason, `held for a reviewer` for a quarantined submission); for `double_checking` the line "another volunteer is double-checking this cell" |
+| States | `ready`, `not_found` (the cell no longer maps to this job) |
+| Actions | `getJobCell`; Report a problem with this cell (`createReport`); Close |
+| Copy intent | Explain what the status means and what will happen next; keep outcome classes coarse so the sheet does not teach anyone how to beat verification |
+| Accessibility | Opens as a dialog that returns focus to its tile; Escape closes it; the attempt list is an ordered list |
+
+- **AC-req-45** Given a cell on attempt 3 with `cell.max_attempts` 5, When the sheet opens, Then it shows "attempt 3 of 5" from the parameter value, an "at risk" tag, and no volunteer identifier, no `vol_` handle and no output text anywhere in the response or the page.
