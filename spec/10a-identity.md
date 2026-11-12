@@ -735,7 +735,7 @@ Metrics (no id or IP in any label): `hamyar_identity_registrations_total`, `hamy
 
 ### 10.18.3 Parameters this part adds [A]
 
-All are initial configurable defaults, owned by the `operator` role (S0.10.5), public except none (they are not `security.*` secrets), and reported as convention gaps for `S16.*` to complete.
+All are initial configurable defaults, owned by the `operator` role (S0.10.5), public (none holds a secret), and reported as convention gaps for `S16.*` to complete.
 
 | Name | Type | Initial configurable default | Validation | Replaced by |
 | --- | --- | --- | --- | --- |
@@ -756,7 +756,7 @@ All are initial configurable defaults, owned by the `operator` role (S0.10.5), p
 | `security.admin_min_credentials` | int | 2 | 1..5 | `SEC` |
 | `retention.sweep_interval_s` | duration_s | 3600 | 60..86400 | `OPS` |
 
-New cross-parameter constraint `C9` [A]: `session.member_abs_ttl_s <= retention.session_days x 86,400`. Changed default (`ISS-102`): `security.two_person_actions` starts as the four of S0.10.6 plus `member.ban`, `invite.seed_issue`, `admin.role_grant`, `admin.credential_add`, `admin.credential_unlock`, `disclosure.release`. Because members cannot be hurt by a tightening, every parameter above follows R10 (tighten at once, loosen with notice).
+New cross-parameter constraint `C9` [A]: `session.member_abs_ttl_s <= retention.session_days x 86,400`. Changed default (`ISS-102`): `security.two_person_actions` starts as the four of S0.10.6 plus `member.ban`, `invite.seed_issue`, `admin.role_grant`, `admin.credential_add`, `admin.credential_unlock`, `disclosure.release`. Every parameter above follows the tighten-at-once, loosen-with-notice workflow of R10 and S0.10.3.
 
 ### 10.18.4 Hooks this part needs from other S10 files [A]
 
