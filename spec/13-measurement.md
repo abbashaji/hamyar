@@ -515,3 +515,76 @@ SELECT count(DISTINCT member_ref) AS active_members, count(*) AS active_member_d
 FROM md;
 -- mean = sum(cells) * 1e6 / active_member_days (ppm); per_member_day = sum(cells) * 1e6 / (active_members * 7)
 ```
+
+### 13.6.11 `MET-11` Concentration (top 10 percent share)
+
+| Field | Value |
+| --- | --- |
+| Name | `hamyar_capacity_top_decile_share_ppm` |
+| Definition | Over members with at least one accepted cell in the window, rank by accepted cells descending, ties broken by `member_ref` ascending (deterministic, never exported). Top group size `t = ceil(n * metrics.concentration_top_fraction)` (new parameter, initial configurable default 0.10, FD§9 "top 10% of donors"; integer form `(n * fraction_ppm + 999,999) / 1,000,000`). Share = cells of the top group / all cells in the window. Reported weekly and cumulative, with `n_members`, `t`, and the equal-contribution baseline `t / n` so that the reader sees how far the share is from an even split |
+| Cadence | Weekly; daily partial |
+| Known biases | With `n` of 30 to 50 members, `t` is 3 to 5 people (`ceil(0.1 * 30) = 3`, `ceil(0.1 * 50) = 5`) and one very active member moves the value by tens of points. The metric is published only when `n >= analytics.min_cohort_k`; when `t < analytics.min_cohort_k` the value is shown in the admin dashboard with `individual_exposure = true` and is never exported or made public (`AN-06`, `AN-09`). Backlog availability and throttling by `lease.max_active_per_member` shape concentration as much as willingness does |
+
+```sql
+WITH per AS (SELECT member_ref, count(*) AS cells FROM mv_attempt
+             WHERE outcome = 'accepted' AND pop_ok AND decided_at >= :ws AND decided_at < :we GROUP BY 1),
+ranked AS (SELECT cells, row_number() OVER (ORDER BY cells DESC, member_ref) AS rk, count(*) OVER () AS n FROM per)
+SELECT max(n) AS n_members, (max(n) * :top_fraction_ppm + 999999) / 1000000 AS t,
+       sum(cells) FILTER (WHERE rk <= (n * :top_fraction_ppm + 999999) / 1000000) AS top_cells, sum(cells) AS all_cells
+FROM ranked;
+```
+
+### 13.6.12 `MET-12` Decline and opt-out rates by category
+
+| Field | Value |
+| --- | --- |
+| Names | `hamyar_policy_decline_rate_ppm`, `hamyar_policy_optout_narrowed_share_ppm` |
+| Decline rate | `declined / issued` over leases (a decline is `cell.declined`, `leased -> queued`, no penalty by FD§5.5), split by one category at a time: `purpose`, `sensitivity`, `license`, `service_requirement`, `topic_category_id`, `job_type`, `service_id`, and by `decline_reason`. Releases count as declines only when the member used the decline button; reaper expiries are `expiry_rate` |
+| Opt-out rate | Share of active members whose current opt-in set on an axis is narrower than the default set (`optin.default_purposes`, `optin.default_sensitivities`, `optin.default_licenses`, `optin.default_service_requirements`, `optin.sensitive_topics_default`), from `mv_optin.is_default = false`, per axis and per `top_` category. Also the event rate `member.optin_changed` with `direction = removed` per 100 active members per week. Opt-outs are a requirement of R8, not misbehavior |
+| Cadence | Daily |
+| Known biases | A card that is declined is leased again by someone else, so decline rates measure what members will not touch, not what the platform could not place. Members only see cards that already match their opt-ins (R8), so declines are conditional on a filter and understate unwillingness (the rejected axis does not appear as a decline at all); opt-out shares therefore carry the signal for categories. Axis splits are suppressed below `analytics.min_cohort_k` members (`AN-06`); in a pilot expect most topic splits to be suppressed |
+
+```sql
+SELECT cat, val,
+       count(*) FILTER (WHERE outcome = 'declined') AS declined, count(*) AS issued, count(DISTINCT member_ref) AS n_members
+FROM mv_attempt,
+     LATERAL (VALUES ('purpose', purpose), ('sensitivity', sensitivity), ('license', license),
+                     ('service_requirement', service_requirement), ('topic', topic_category_id),
+                     ('job_type', job_type), ('service', service_id)) AS c(cat, val)
+WHERE issued_at >= :ws AND issued_at < :we AND pop_ok GROUP BY 1, 2;
+
+SELECT axis, value, count(DISTINCT member_ref) FILTER (WHERE NOT is_default) AS narrowed, count(DISTINCT member_ref) AS members
+FROM mv_optin JOIN mv_member USING (member_ref) WHERE status = 'active' AND pop_ok_member GROUP BY 1, 2;
+```
+
+### 13.6.13 `MET-13` Incidents, typed
+
+| Field | Value |
+| --- | --- |
+| Name | `hamyar_safety_incidents_total` (dims `incident_type`, `severity`, `status`) |
+| Definition | Count of `Incident` rows (13.4.3) by type, severity and status, per window; open count at `as_of`; median time from `occurred_at` to `resolved_at`; rate per 1,000 accepted cells `round_half_up(1000 * incidents / accepted_cells)` for context. Every incident is reported individually in the decision report (id, type, severity, resolution code), because FD§9 says "each reported"; the dashboard shows counts and the report lists rows without volunteer identifiers |
+| Cadence | Hourly; an `Alarm` when a `critical` or any `safety_incident` row is created |
+| Known biases | Under-reporting: `provider_warning`, `provider_account_problem` and `safety_incident` exist only if a person tells the founders, because the system cannot and must not read provider pages. Auto-created types depend on screening patterns and miss what the patterns do not match. A rate per 1,000 cells has a denominator that grows while incidents are rare, so it falls without anything improving. Zero incidents in `n` cells bounds the rate only to about `3 / n` (S13.11) |
+
+```sql
+SELECT incident_type, severity, status, count(*) AS n,
+       percentile_disc(0.5) WITHIN GROUP (ORDER BY extract(epoch FROM resolved_at - occurred_at)::bigint)
+         FILTER (WHERE resolved_at IS NOT NULL) AS median_resolution_s
+FROM mv_incident WHERE occurred_at >= :ws AND occurred_at < :we
+GROUP BY GROUPING SETS ((), (incident_type), (incident_type, severity, status));
+```
+
+### 13.6.14 `MET-14` Qualitative interview tracking
+
+FD§9 asks for 8 to 10 interviews including reasons for stopping. The platform tracks the interviews, not their content: no name, no quote, no recording and no link to a `mem_` id is stored. Interview notes stay with the founders outside the system (a pointer such as a private file name MAY be kept in `notes_ref`, text up to 200 chars, purged with `retention.moderation_days`). [D]
+
+| Field of `Interview` (`ivw_`) | Type | Rule |
+| --- | --- | --- |
+| `segment` | enum `active_donor`, `stopped_donor`, `requester`, `never_started`, `reviewer_or_operator` | Who was interviewed |
+| `held_on` | date (UTC) | Date only |
+| `consent_recorded` | bool | Must be true to insert; the interviewee consented to coded notes (`AN-11`) |
+| `stop_reason_codes` | json array of enum | `too_slow`, `too_many_rejections`, `unclear_task`, `service_limit_or_warning`, `safety_concern`, `no_work_available`, `credit_expired`, `lost_interest`, `other` (convention addition; coded by the interviewer, empty for active participants) |
+| `theme_codes` | json array of text, each matching `^[a-z][a-z0-9_]{2,39}$` | Free coding vocabulary kept in a `json` parameter-free list owned by the founders; no sentences |
+| `notes_ref` | text, 0..200 | Optional pointer |
+
+Reporting: counts by `segment` against the target range stored in the pre-registration (`qualitative_plan.min_interviews` = 8, `max_interviews` = 10, FD§9), counts by `stop_reason_codes`, and the coverage flag `has_stopped_donor` (an interview set with no `stopped_donor` cannot report reasons for stopping). Counts under `analytics.min_cohort_k` are shown as ranges only in the admin report, never published. Cadence: on record. Known biases: interviewees are self-selected and reachable, which excludes members who left because of safety concerns and went silent; eight to ten interviews support hypothesis generation, not frequencies (S13.11). [D]
