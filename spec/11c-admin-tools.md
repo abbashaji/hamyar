@@ -234,3 +234,93 @@ All admin writes need `Idempotency-Key` (S0.11.5) and carry `RateLimit-*` header
 | `AC-appr-05` | Between request and second approval the target entry was already reversed | B approves | Execution fails its guard, the request becomes `rejected` by `system` with `precondition_failed`, no ledger entry is written |
 | `AC-trail-01` | An action whose state change succeeds but whose `AdminAction` insert fails | The transaction commits | It does not: both roll back and the client gets `503 UNAVAILABLE` |
 | `AC-trail-02` | An `AdminAction` row edited directly in the database | `verifyAdminActionChain` runs over its day | The result names the first row whose `entry_hash` no longer matches |
+
+## 11.45 Tool 1: Template review queue
+
+**Purpose.** Move each `TemplateVersion` through the machine of S0.9.5 with published criteria, a second-reviewer rule for new templates and no way to approve one's own work (FD§5.7 failure mode 10). [D]
+**Roles and permissions.** `reviewer`: `perm.template.review`, `perm.template.retire`. Guard on every approval: the approver is not the author and is distinct from earlier approvers of that version. Pausing a template is a kill switch (11.54).
+
+**`SCR-rev-01` Queue.** `BLK-list`, oldest first (the one exception to newest-first, so nothing starves). Columns: template name, version, `new` or `edit`, state, approvals `n / required`, age, claim holder, and for approved templates the report count inside `template.autopause_window_s` against `template.autopause_report_count`. Filters: state (`in_review`, `awaiting_second_review`, `changes_requested`, `approved`, `paused`), `job_type`, unclaimed, claimed by me.
+
+**`SCR-rev-02` Review screen.** [D]
+
+| Block | Content |
+| --- | --- |
+| A Header | `tpv_` id, state, author (`adm_` short id), `BLK-claim`, `BLK-trail` |
+| B Diff | `BLK-diff` against the previous approved version: prompt body, data slots, delimiters, output schema, automatic checks, comparator, envelope |
+| C Render | The prompt exactly as the volunteer card will show it, with sample data inside the delimiters, escaped; length against `cell.envelope.max_input_chars`; a bidirectional preview with Persian and Latin sample data (S0.6.2 locale rules) |
+| D Machine checks | `runTemplateChecks`: schema compiles, checks are deterministic, comparator present, expected output within `cell.envelope.max_output_chars`, `lease.timeout_s >= cell.envelope.expected_time_s` (constraint `C3`). Findings are `blocking` or `advisory`; a blocking finding disables Approve and has no override |
+| E Injection and scope lint | Rules of S9.*: links, instruction-like phrases, any slot that could carry a URL or file, any step beyond copy, press Send, return text (`R3`). Same blocking / advisory split |
+| F Checklist | The published review criteria, versioned data owned by S8.* [A]; each item ticked by the reviewer; answers stored in the `AdminAction.detail` of the approval |
+| G Profile | Purposes, sensitivities, licenses and service requirements the template declares; a warning when it leaves the two active Phase 1 profiles of FD§5.7 failure mode 5 |
+| H Effectiveness | A fixed label "effectiveness is a hypothesis [H]"; the screen has no field for an accuracy claim |
+
+**Actions.** `claim.acquire`; `template.comment` (internal text); `template.request_changes` (at least one itemized change, each pointing at a block); `template.approve` (all checklist items ticked, no blocking finding, distinct non-author reviewers; the summary says whether this is approval `n` of `template.min_reviewers_new` or `template.min_reviewers_edit` and that a public change-log entry will follow, an entry owned by S8.* [A]); `template.reject` (reason code, appealable); `template.retire` (`CT2`, preview of jobs that receive `job.stop_requested` with `closure_reason` `template_retired`). A successful approval releases the reviewer's claim so a second reviewer can claim the item.
+
+**Audit events.** `AdminAction` codes `template.*` and `claim.*`; domain events `template.first_approved`, `template.second_approved`, `template.changes_requested`, `template.rejected`, `template.retired`, `template.paused`, `template.resumed`.
+
+| `op` | Method and path | Notes |
+| --- | --- | --- |
+| `listTemplateVersions` | `GET /v1/admin/template-versions` | Filters above; `ETag` per row |
+| `getTemplateVersion` | `GET /v1/admin/template-versions/{tpv_id}` | Includes diff base and lint results |
+| `runTemplateChecks` | `POST /v1/admin/template-versions/{tpv_id}/check-runs` | Deterministic, no side effects; result hash is stored in the approval `detail` |
+| `createTemplateVersionComment` | `POST .../{tpv_id}/comments` | `CT0` |
+| `requestTemplateChanges` | `POST .../{tpv_id}/change-requests` | `If-Match` |
+| `approveTemplateVersion` / `rejectTemplateVersion` | `POST .../{tpv_id}/approvals`, `.../rejections` | `If-Match`; `409 STATE_CONFLICT` if another admin holds the claim |
+| `retireTemplateVersion` | `POST .../{tpv_id}/retirements` | `CT2` |
+
+| AC | Given | When | Then |
+| --- | --- | --- | --- |
+| `AC-tplq-01` | A version authored by admin A in `in_review` | A calls `approveTemplateVersion` | `403 FORBIDDEN` and a refused `AdminAction` |
+| `AC-tplq-02` | A new template with `template.min_reviewers_new` = 2 (fixture) | Reviewer B approves, then B approves again | The first call moves it to `awaiting_second_review`; the second returns `409 STATE_CONFLICT`; reviewer C's approval then yields `approved` and a second `AdminAction` |
+| `AC-tplq-03` | A version whose lint reports a blocking finding | A reviewer opens Approve | The button is disabled; the API returns `422 UNPROCESSABLE` with `details.fields` naming the finding |
+| `AC-tplq-04` | Two reviewers open the same version, one saves a change request first | The second submits with a stale `If-Match` | `412 PRECONDITION_FAILED`; no state change |
+| `AC-tplq-05` | A change request with no items | Submitted | `400 VALIDATION_FAILED` |
+| `AC-tplq-06` | An approved template with live jobs | A reviewer retires it | The preview lists the jobs; after confirm each receives `job.stop_requested` with `closure_reason` `template_retired` |
+| `AC-tplq-07` | A claim older than `ui.admin_claim_ttl_s` | Another reviewer opens the item | The claim shows as expired and can be acquired without takeover |
+
+## 11.46 Tool 2: Service review
+
+**Purpose.** Record what a service's terms permit as dated yes / no / unknown answers against a saved copy of those terms, and approve or revoke the service. Every service starts `unreviewed`, which counts as no; no job can be created for a service until a reviewer has recorded the gate flags with a saved copy (prompt; S0.9.6). All facts are entered by a human and are [V]; nothing is hardcoded. [D]
+**Roles and permissions.** `reviewer`: `perm.service.review`, `perm.service.approve`, `perm.service.revoke`. Approval needs `service.min_approvers` distinct reviewers (default 1; 2 is an owner decision, `ISS-119`).
+
+**`SCR-rev-03` Registry list.** Columns: name, `svc_` id, state (a badge "unreviewed counts as no"), last approval date, days to `review_due` (from `service.review_max_age_days`), grace countdown for `review_due` (`service.review_grace_days`), one square per gate flag (yes, no, unknown shown as no), adapter mode (prefill or copy-only), live counts of cells attested to the service and of jobs pinned to it (`M1`). Action: `service.create` (name; state `unreviewed`).
+
+**`SCR-rev-04` Entry screen.** [D]
+
+| Block | Content and rules |
+| --- | --- |
+| A Header | Name, state timeline, `BLK-claim`, `BLK-trail` |
+| B Terms copies | Table of `TermsCopy`: `document_kind` (`terms`, `usage_policy`, `written_permission`) [A], reviewer-entered `captured_on` date, `source_ref` (free text, a URL or a description), size, `sha256:` hash, uploader, `created_at`. Upload: file bytes up to `service.terms_copy_max_bytes`, hash computed on the server, copy immutable and never deleted (a new copy supersedes). `source_ref` is text only; the server never requests it (`AD10`). Text copies render escaped; other types are download-only with `nosniff` from the sandbox origin; two text copies can be compared with `BLK-diff`, otherwise only hashes are compared |
+| C Flag matrix | One row per `flag_key` of S0.8.3 (nine gate flags, four `info.*` flags in a separate "advice, never gates" block). Shows the effective answer (newest `FlagAnswer` per flag and region), its date, reviewer short id, terms copy, a short locator (where in the copy; a pointer, not a quotation), and a "stale" marker when a newer copy of the same `document_kind` exists. `regional_availability` expands into one row per region code (ISO 3166-1 alpha-2) the reviewer adds. Helper text under `unknown`: `copy.admin.unknown_is_no` |
+| D Adapter capabilities | `adapter.supports_prefill`, `adapter.prefill_url_template`, `adapter.max_url_chars`, `adapter.clean_chat_hint_key`; `adapter.copy_only` is shown read-only and derived (true unless `supports_prefill` and the effective `prefilled_link_use` is `yes`). Validation: the template contains exactly one `{prompt}` and the `https` scheme; `max_url_chars` is a positive integer. A preview substitutes a sample prompt of a chosen length into the template locally and reports its length against `max_url_chars`; no request leaves the browser or the server. Real phone behavior is G2 and is [V]. There is no field for a credential, cookie or session, by design |
+| E Readiness | Computed checklist: `third_party_task_use` and `prohibited_content_compatible` are `yes` with a saved copy (hard requirement, S0.8.3); what the other flags unlock (`commercial_use_of_output` for `P2`, `training_use_of_output` for `P3`, `open_publication_of_output` for `P1` licenses under `R7`, `prefilled_link_use` for prefill); warnings for `no` or `unknown` on `human_copy_paste_use`, `access_pooling_or_crediting` and `regional_availability`, each needing a written rationale at approval [A] |
+| F History | Every `FlagAnswer` and copy upload, newest first |
+
+**Record answer dialog** (`CT1`): answer `yes`, `no` or `unknown`; terms copy (required for `yes` and `no` on gate flags, optional for `unknown`); locator; note; region for `regional_availability`; `answered_on` date. Saving creates a new `FlagAnswer` row; earlier rows are never edited.
+
+**`SCR-rev-05` Approve, reject, revoke.** Approve (`CT1`): the readiness block frozen as a summary, the rationale for warnings, `n of service.min_approvers`; effects: state `approved`, the review clock starts, a public `ChangeLogEntry` names the service and date, never the reviewer [A]. Revoke (`CT2`): `BLK-affected` shows cells in flight and `M1` jobs, handled per S7.* after `service.revoked`. A service in `review_due` blocks new jobs at once and lets in-flight cells continue until the grace period ends, when the system emits `service.review_lapsed` (actor `system`). Re-review: `service.start_review` is available from `unreviewed`, `rejected`, `review_due` and `revoked` only (S0.9.6); an early re-review of an approved service has no transition, see `ISS-118`.
+
+**Audit events.** `service.*` codes of 11.44.3; domain events `service.created`, `service.review_started`, `service.approved`, `service.rejected`, `service.revoked`, `service.review_due`, `service.review_lapsed`, `service.suspended`, `service.resumed`, `changelog.entry_published`.
+
+| `op` | Method and path | Notes |
+| --- | --- | --- |
+| `listServices`, `createService`, `getService` | `GET`, `POST /v1/admin/services`, `GET .../{svc_id}` | `ETag` on the entry |
+| `startServiceReview` | `POST /v1/admin/services/{svc_id}/reviews` | |
+| `uploadTermsCopy` | `POST /v1/admin/services/{svc_id}/terms-copies` | JSON with the bytes as base64; body limit `ceil(4 * service.terms_copy_max_bytes / 3) + 4096` bytes, derived because base64 adds one third [A] (`ISS-117`) |
+| `listTermsCopies`, `getTermsCopy`, `getTermsCopyContent` | `GET .../terms-copies`, `GET /v1/admin/terms-copies/{tcp_id}[/content]` | Content is returned as JSON `{content_base64, hash}` |
+| `recordFlagAnswer`, `listFlagAnswers` | `POST`, `GET .../{svc_id}/flag-answers` | Append-only |
+| `updateServiceAdapter` | `PATCH /v1/admin/services/{svc_id}/adapter` | JSON Merge Patch, `If-Match` |
+| `approveService`, `rejectService`, `revokeService` | `POST .../{svc_id}/approvals`, `.../rejections`, `.../revocations` | `revokeService` is `CT2` |
+
+| AC | Given | When | Then |
+| --- | --- | --- | --- |
+| `AC-svc-01` | A new entry | Created | State `unreviewed`; Approve is disabled; S7.* refuses job creation for it |
+| `AC-svc-02` | `third_party_task_use` is `unknown` | Approve is called | `422 UNPROCESSABLE`, `details.fields` names the flag; unknown is treated as no |
+| `AC-svc-03` | A gate flag answered `yes` with no terms copy | `recordFlagAnswer` is called | `422 UNPROCESSABLE` with `copy_key` `copy.admin.terms_copy_required` |
+| `AC-svc-04` | A file one byte over `service.terms_copy_max_bytes` | Uploaded | `413 PAYLOAD_TOO_LARGE`; a file within the limit is stored and its returned hash equals SHA-256 of the uploaded bytes |
+| `AC-svc-05` | A flag with answers `yes` (earlier) and `no` (later) | The matrix loads | The effective answer is `no`, both rows remain in the history, no row was edited |
+| `AC-svc-06` | `adapter.supports_prefill` true while `prefilled_link_use` is `unknown` | The adapter is read by the volunteer app | `adapter.copy_only` is true |
+| `AC-svc-07` | A template with two `{prompt}` or an `http` scheme | Saved | `400 VALIDATION_FAILED` |
+| `AC-svc-08` | Egress from the admin service blocked | A copy with a `source_ref` URL is saved | It succeeds; no outbound request was attempted |
+| `AC-svc-09` | `service.min_approvers` = 2 (fixture) | One reviewer approves | The state stays `in_review`, the approval is recorded; a distinct second reviewer's approval moves it to `approved` |
