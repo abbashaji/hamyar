@@ -54,3 +54,117 @@ Phase 1 only instruments the mechanics, because 30-50 members cannot test them s
 | `ff.public.ledger_page` | not tiered in FD | Enabled only after the G1 item “public ledger page reviewed” is signed off (S12.3) | Same |
 
 FD§6.3 lists the counter and basic teams under Phase 1 while FD§6.2 says V2 and V4 are tested in Phase 2; this part resolves that by enabling both for everyone in Phase 1 and randomizing only in Phase 2 (`ISS-123`).
+
+## 12.2 Live counter
+
+### 12.2.1 Definition [D]
+
+- **Verified cell** = a `Cell` whose `state` is `accepted` (S0.9). It passed the verification the pipeline applied to it (automatic checks and, where sampled, an audit). “Verified” means accepted under the declared checks, never “correct”; the measured false-accept estimate is published beside it (`S13.*`, FD§4.4).
+- **Headline `verified_output_cells_total`** counts accepted cells of `cell_kind` `primary` and `rework` (cells that produce deliverable output). **`verified_verification_cells_total`** counts accepted `gold`, `audit`, `third` and `review` cells and is always shown next to the headline, so verification overhead (v) and make-work minting stay visible (`ISS-03`, `ISS-122`). Reason: a headline that mixed both would inflate with verification effort, which FD§4.3 already treats as overhead.
+- **Split by job family:** `commons_output_cells_total` (Commons jobs) and `member_job_output_cells_total`.
+- **Active members:** `active_members_today` = distinct members with at least one accepted cell of any kind whose `accepted_at` falls in the current UTC day; `active_members_window` = the same over the last `admission.active_donor_window_days` UTC days including today.
+- **Corrections:** `overturned_cells_total` = cells that were `accepted` and became `overturned`. The headline is a current count and can fall when a cell is overturned; it is not monotone, and the correction figure is shown beside it. Reason: a counter that never falls would overstate (FD Principle 11).
+- **Freshness:** “live” means recomputed at most every `public.counter_refresh_s`, not real time. Member-count figures use the same lag as the ledger (`public.ledger_lag_s`) so one member's action is not visible as a +1 within seconds. Residual: an observer who can trigger a contribution and watch the counter can see a +1; that reveals activity, not identity [H: acceptable; reviewed in the G1 threat model].
+
+### 12.2.2 Query (source of truth) [D]
+
+Column names `accepted_member_id` and `accepted_at` stand for whatever `S5.*` names the accepting submission's member and acceptance time; `S5.*` wins on naming.
+
+```sql
+-- full recount; the incremental counter (if S4.* builds one) must equal this
+SELECT count(*) FILTER (WHERE cell_kind IN ('primary','rework'))              AS verified_output_cells_total,
+       count(*) FILTER (WHERE cell_kind IN ('gold','audit','third','review')) AS verified_verification_cells_total,
+       count(*) FILTER (WHERE cell_kind IN ('primary','rework') AND job_family = 'commons') AS commons_output_cells_total
+FROM cells WHERE state = 'accepted';
+
+SELECT count(DISTINCT accepted_member_id) FROM cells
+WHERE state = 'accepted' AND accepted_at >= :window_start AND accepted_at < :window_end;
+
+SELECT count(*) FROM cell_state_history WHERE from_state = 'accepted' AND to_state = 'overturned';
+```
+
+### 12.2.3 Response, suppression, failure [D]
+
+```
+GET /v1/public/counter  ->  200 (object)
+  schema_version: int
+  as_of: timestamp (RFC 3339 UTC)
+  stale: bool                       // true when the refresh job failed; as_of is then the last good time
+  verified_output_cells_total: int
+  verified_verification_cells_total: int
+  commons_output_cells_total: int
+  member_job_output_cells_total: int
+  overturned_cells_total: int
+  active_members_today:  { value: int or null, suppressed: bool, min_cohort_k: int }
+  active_members_window: { value: int or null, suppressed: bool, window_days: int, min_cohort_k: int }
+  next_milestone: { milestone_key: string, threshold: int } or null   // only when ff.growth.v6_milestones is on
+```
+
+- A member figure below `analytics.min_cohort_k` returns `value: null, suppressed: true`; no other field may allow it to be derived.
+- Failure never shows zero or an invented value: the last good snapshot is served with `stale: true` and its own `as_of`; if none exists the route returns `503 UNAVAILABLE`.
+- Daily at the UTC day boundary the counter values are stored as `MetricSnapshot` rows (`permanent`) with the counter definition version; milestone checks (S12.6) read these and the live recount.
+- If `S4.*` implements the counter incrementally, a reconciliation job compares it with the full recount every `metrics.rollup_interval_s`, publishes the recount, and raises an `Alarm` on any difference.
+
+## 12.3 Public ledger
+
+### 12.3.1 What is shown and what is not [D]
+
+FD Principle 5 makes the ledger public; FD Principle 8 forbids exposing members. Resolution (`ISS-121`): the public ledger is a **series of daily checkpoints plus grouped flows**, never per-member or per-entry rows. It is enabled by `ff.public.ledger_page` only after the G1 threat-model item “public ledger page reviewed” is signed off: [V] whether even aggregated flows are acceptable for members at risk; checked by the G1 reviewers; stored as a `LaunchGateItem` under G1.
+
+| Shown | Not shown |
+| --- | --- |
+| Totals at each checkpoint: cumulative mint, cumulative retired, credit in existence, Reserve balance and ceiling, member balances total, escrow total | Any `lac_`, `mem_` or `vol_` id; any per-member or per-job row; any timestamp finer than the UTC day |
+| Grouped flows per `ledger_entry_type` (S0.8.5) | Recipient or payer of any entry |
+| The result of the latest invariant checks, failures included | Operator identities (`adm_`) on reversals: only the count of approvers |
+| A hash per checkpoint | The entries behind the hash |
+
+### 12.3.2 Checkpoint record [D]
+
+One immutable record per UTC day, published `public.ledger_lag_s` after the checkpoint boundary (`ledger.checkpoint_interval_s`).
+
+```
+LedgerCheckpoint (public projection)
+  checkpoint_date: date (UTC)           through_seq: int (last ledger seq included)
+  schema_version: int                   published_at: timestamp
+  cumulative_mint_ucr: string           cumulative_retired_ucr: string
+  in_existence_ucr: string              // = cumulative_mint_ucr - cumulative_retired_ucr  (INV)
+  reserve_ucr: string                   reserve_ceiling_ucr: string
+  members_ucr: string or null           escrow_ucr: string or null
+  member_and_escrow_ucr: string or null // present when either of the two above is withheld
+  invariant_difference_ucr: string      // in_existence - (members + escrow + reserve); must be "0"
+  suppressed: [field names]             last_invariant_check: { at, result: passed or failed }
+  checkpoint_hash: sha256:<hex>         // entry_hash of the ledger entry at through_seq (S0.6.4)
+  prev_checkpoint_hash: sha256:<hex>    corrects_checkpoint_date: date or null
+```
+
+- `members_ucr` is withheld (and merged into `member_and_escrow_ucr`) when fewer than `analytics.min_cohort_k` member accounts hold a nonzero balance; `escrow_ucr` is withheld likewise when fewer than that many escrows are open. Reason: on a quiet day the difference of two daily totals would otherwise be one job.
+- The hash commits to the full ledger without disclosing it. Whether an audit export that replaces account ids with per-export random pseudonyms is ever published is an owner decision [A], deferred to `S10.*`.
+- Mirroring checkpoint hashes to a second host is a hosting decision (`S4.*`) [A].
+
+### 12.3.3 Grouped flows: emit-when-k algorithm [D]
+
+A flow row covers an interval and is emitted only when at least `analytics.min_cohort_k` distinct non-system accounts took part, so no row describes a small group and published rows partition time (no complementary-suppression leak).
+
+```
+for each ledger_entry_type T:
+    if T == retire:                       // system-only; no member involved
+        emit one row per entry {from=to=day, count=1, amount}
+        continue
+    acc = carried_state[T]                // entries, amount, set of non-system accounts, from_day
+    for each UTC day d after the last emitted day up to the latest published checkpoint date:
+        acc.add(all entries of type T with day == d and seq <= checkpoint.through_seq)
+        if len(acc.accounts) >= analytics.min_cohort_k:
+            emit {entry_type: T, from: acc.from_day, to: d, count: len(acc.entries),
+                  amount_ucr: acc.amount}
+            acc.reset(from_day = d + 1)
+    carried_state[T] = acc                // unpublished remainder; counted nowhere
+```
+
+Consequences [D]: founders' `reserve_donation` rows appear only once at least `analytics.min_cohort_k` distinct donors have contributed; until then they are inside the Reserve total only. Row sums through a date equal the totals at that date's checkpoint minus the carried remainder, which each row set states as `carried_not_published: true`.
+
+### 12.3.4 Versioning, corrections, failures [D]
+
+- Checkpoints and rows are immutable. An error is fixed by a **correction checkpoint** with `corrects_checkpoint_date` set and a `ChangeLogEntry` of `subject_kind` `correction`; the original stays visible, marked superseded.
+- `schema_version` increases only for breaking shape changes (which need `/v2`, S0.11.1); additive fields stay in `/v1`.
+- A failed invariant check is published, not hidden: after `ledger.invariant_violated` the page shows `last_invariant_check.result` = `failed` until a full recompute passes (`ledger.full_recompute_interval_s`). Disabling `ff.public.ledger_page` is an operator action recorded in `AdminAction` and the change log.
+- Copy: `copy.public.ledger_notice` (S12.14). The page says figures are as declared by the system's own checks at the time shown.
