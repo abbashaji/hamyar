@@ -860,3 +860,72 @@ The public key set for `signature.key_id` would be published on the public param
 - **AC-req-61** Given a manifest whose `cells` and `missing_cells` indices cover 1..N exactly once, When Verify runs, Then `ok_cells` is true; given an index missing or repeated, Then it is false and the checklist names the index.
 - **AC-req-62** Given a manifest body altered by one character, When Verify runs, Then `ok_hash` is false and the page states that the manifest does not match its recorded hash.
 - **AC-req-63** Given the requester profile, When the manifest is parsed, Then no key named `volunteer_handle` exists at any depth and no `accepted_at` has a finer granularity than `job.manifest_time_granularity_s`.
+
+## 11.43 Rejection reasons, errors and appeal
+
+All rows of 11.43 to 11.45 carry the marker `needs_human_and_legal_review` (S0.5). Placeholders in braces are filled from parameters or server fields (RD-15). No row states a legal conclusion; wording about what terms "permit" refers to the reviewed Service Registry flags, where `unknown` counts as `no` (S0.8.3).
+
+### 11.43.1 Requester-visible policy rejection reasons [D]
+
+Reasons arrive as `policy.<policy_rule_id>.<slug>` (S0.8.4) in `rejection.reasons` (a `Job` in `rejected`) or `details.reasons` (`422 POLICY_REJECTED`). Reasons are shown in the order received. `R10` is a change workflow, not a job rejection: it has no requester copy and appears only in the public change log.
+
+| Code | Copy key | EN (reason, then what to change) | FA |
+| --- | --- | --- | --- |
+| `policy.R1.metadata_missing_or_inconsistent` | `copy.req.reason_r1` | Some declarations are missing or do not fit together, for example a purpose and a license that are not allowed together. Complete all four declarations and check the combination. | بعضی از اعلام‌ها ناقص است یا با هم سازگار نیست؛ برای نمونه هدف و مجوزی که با هم مجاز نیستند. هر چهار اعلام را کامل کنید و ترکیب آن‌ها را بررسی کنید. |
+| `policy.R2.sensitivity_not_accepted` | `copy.req.reason_r2` | This request was declared, or found by the checks, to contain sensitive material or personal data of other people. In this phase Hamyar accepts only public (S0) or private but non-sensitive (S1) material. Remove that material, or do not use Hamyar for this job. | این درخواست حاوی مطالب حساس یا اطلاعات شخصِی دیگران اعلام شده یا بررسی‌ها چنین نشانه‌ای یافته‌اند. همیار در این مرحله فقط مطالب عمومی (S0) یا خصوصیِ غیرحساس (S1) را می‌پذیرد. آن مطالب را حذف کنید، یا برای این کار از همیار استفاده نکنید. |
+| `policy.R3.prohibited_content` | `copy.req.reason_r3` | The request touches content Hamyar does not accept, or asks volunteers to do more than copy text, press Send and return text. We do not say which check applied. Change the request so that it only needs text to be returned. | این درخواست به محتوایی مربوط است که همیار نمی‌پذیرد، یا از داوطلب بیش از کپی متن، زدن ارسال و بازگرداندن متن می‌خواهد. نمی‌گوییم کدام بررسی اعمال شد. درخواست را طوری تغییر دهید که فقط بازگرداندن متن لازم باشد. |
+| `policy.R4.template_required` | `copy.req.reason_r4` | Requests can only be made from reviewed templates. Choose a template; writing your own prompt is not available. | درخواست‌ها فقط از روی قالب‌های بازبینی‌شده ثبت می‌شوند. یک قالب انتخاب کنید؛ نوشتن دستور دلخواه ممکن نیست. |
+| `policy.R5.commercial_needs_flag` | `copy.req.reason_r5` | Commercial use of results needs a service whose reviewed terms permit commercial use of outputs. None is available now, so this purpose cannot be accepted. | استفادهٔ تجاری از نتایج به سرویسی نیاز دارد که شرایط بازبینی‌شدهٔ آن این کار را مجاز کرده باشد. اکنون چنین سرویسی در دسترس نیست و این هدف پذیرفته نمی‌شود. |
+| `policy.R6.training_needs_m2_or_flag` | `copy.req.reason_r6` | Using results to train or build other models needs an open-weight model with a checked license, or a service whose reviewed terms permit it, and only for public material. That is not available for this request. | استفاده از نتایج برای آموزش یا ساخت مدل‌های دیگر به مدلی با وزن‌های باز و مجوز بررسی‌شده، یا سرویسی که شرایط بازبینی‌شدهٔ آن اجازه دهد، و فقط برای مطالب عمومی نیاز دارد. این برای درخواست شما در دسترس نیست. |
+| `policy.R7.license_exceeds_service_flags` | `copy.req.reason_r7` | The license you chose is wider than what the reviewed terms of the available services permit. Choose a narrower license, or a different service requirement. | مجوزی که انتخاب کرده‌اید گسترده‌تر از چیزی است که شرایط بازبینی‌شدهٔ سرویس‌های در دسترس اجازه می‌دهد. مجوز محدودتری انتخاب کنید یا الزام سرویس را تغییر دهید. |
+| `policy.R8.volunteer_optin_mismatch` (not a rejection) | `copy.req.note_r8` | Few volunteers currently accept this kind of request, so the window may be longer. | اکنون داوطلبان کمی این نوع درخواست را می‌پذیرند، پس ممکن است بازهٔ زمانی بلندتر شود. |
+| `policy.R9.policy_version_stale` | `copy.req.err_policy_changed` | The rules changed after your request was checked. Check it again; nothing was charged. | پس از بررسی درخواست شما، قواعد تغییر کرد. دوباره بررسی کنید؛ هیچ اعتباری کسر نشده است. |
+
+For an unknown code the screen shows `copy.req.reason_unknown` (EN "This request was not accepted. The code below identifies the reason.", FA «This request...» is replaced by: «این درخواست پذیرفته نشد. کد زیر دلیل آن را مشخص می‌کند.») and still shows the code.
+
+### 11.43.2 Errors and conditions [D]
+
+`details.reason` and `details.cap` values are convention additions [A] (11.49).
+
+| Condition | Copy key | EN | FA |
+| --- | --- | --- | --- |
+| `403 LAUNCH_GATE_CLOSED` | `copy.req.err_gate_closed` | Requests are not open yet. Nothing has been charged. | ثبت درخواست هنوز باز نشده است. هیچ اعتباری کسر نشده است. |
+| `503 KILL_SWITCH_ENGAGED` | `copy.req.err_kill_switch` | New requests are paused by the operators. Try again later. Requests already running are not changed unless they show a pause. | ثبت درخواست جدید را مدیران پلتفرم موقتاً متوقف کرده‌اند. بعداً دوباره امتحان کنید. درخواست‌های در حال اجرا تغییر نمی‌کنند، مگر آنکه توقف نشان دهند. |
+| `422 INSUFFICIENT_CREDIT` | `copy.req.err_insufficient_credit` | You need {needed} credits and have {have}. You can request up to {affordable} cells now. | به {needed} اعتبار نیاز دارید و {have} اعتبار دارید. اکنون می‌توانید تا {affordable} سلول درخواست کنید. |
+| `422 CAP_EXCEEDED`, `cap` = `concurrent_jobs` | `copy.req.err_cap_jobs` | You already have the maximum number of active requests ({max}). Wait for one to finish or cancel one. | شما هم‌اکنون بیشترین تعداد درخواست فعال ({max}) را دارید. منتظر پایان یکی بمانید یا یکی را لغو کنید. |
+| `CAP_EXCEEDED`, `cap` = `job_cells` | `copy.req.err_cap_cells` | A request can have at most {max} cells; this one has {n}. | هر درخواست حداکثر {max} سلول دارد؛ این درخواست {n} سلول دارد. |
+| `CAP_EXCEEDED`, `cap` = `waitlist_entries` | `copy.req.err_cap_waitlist` | You can be on at most {max} waitlist(s) at a time. | هم‌زمان می‌توانید در حداکثر {max} فهرست انتظار باشید. |
+| `CAP_EXCEEDED`, `cap` = `reservations` | `copy.req.err_cap_reservations` | You already have the maximum number of reservations ({max}). | شما هم‌اکنون بیشترین تعداد رزرو ({max}) را دارید. |
+| `CAP_EXCEEDED`, `cap` = `reservation_cells` | `copy.req.err_cap_reservation_cells` | This request has more cells than your reservation covers ({max}). | این درخواست سلول بیشتری از مقدار پوشش رزرو شما ({max}) دارد. |
+| `422 NO_CAPACITY` | `copy.req.err_no_capacity` | There is no capacity for this request within the longest window now. You can join the waitlist or book a reservation. | اکنون برای این درخواست در بلندترین بازهٔ ممکن ظرفیتی نیست. می‌توانید در فهرست انتظار بمانید یا رزرو کنید. |
+| `422 UNPROCESSABLE`, `reason` = `no_approved_service` | `copy.req.err_no_service` | No approved service is available for this request right now. Nothing has been charged. | اکنون برای این درخواست سرویس تأییدشده‌ای در دسترس نیست. هیچ اعتباری کسر نشده است. |
+| `413 PAYLOAD_TOO_LARGE` | `copy.req.err_too_large` | The file is larger than the limit ({max}). | حجم فایل از حد مجاز ({max}) بیشتر است. |
+| `400 VALIDATION_FAILED` | `copy.req.err_validation` | Please check the marked fields. | لطفاً بخش‌های مشخص‌شده را بررسی کنید. |
+| `429 RATE_LIMITED` | `copy.req.err_rate_limited` | Too many attempts. Try again in {wait}. | تلاش‌ها زیاد بوده است. {wait} دیگر دوباره امتحان کنید. |
+| `409 STATE_CONFLICT`, `reason` = `quote_changed` | `copy.req.err_quote_changed` | The price or window changed. Please review the new quote; nothing was charged. | قیمت یا بازهٔ زمانی تغییر کرد. لطفاً قیمت جدید را بررسی کنید؛ هیچ اعتباری کسر نشده است. |
+| `STATE_CONFLICT`, other reasons | `copy.req.err_state` | This request changed in the meantime. The current state is shown. | وضعیت این درخواست میان این مدت تغییر کرده است. وضعیت فعلی نمایش داده می‌شود. |
+| `412 PRECONDITION_FAILED` | `copy.req.err_stale` | This page was out of date and has been reloaded. | این صفحه قدیمی بود و دوباره بارگذاری شد. |
+| Quote expired (`Job.quote_expired`) | `copy.req.err_quote_expired` | The quote expired. Nothing was held. Start again from this request. | قیمت منقضی شد. اعتباری نگه‌داشته نشد. از همین درخواست دوباره شروع کنید. |
+| `member_blocked`: `403 FORBIDDEN` | `copy.req.err_member_blocked` | Your account cannot start requests right now. | حساب شما اکنون نمی‌تواند درخواست جدید شروع کند. |
+| `member_blocked`: recovery cooldown | `copy.req.err_recovery_cooldown` | After an identity is recovered, requests and spending wait until {time}. | پس از بازیابی هویت، ثبت درخواست و مصرف اعتبار تا {time} ممکن نیست. |
+| `500/503 INTERNAL`, `UNAVAILABLE` | `copy.req.err_internal` | Something went wrong on our side. Your data is kept; try again. | مشکلی از سمت ما پیش آمد. اطلاعات شما حفظ شده است؛ دوباره امتحان کنید. |
+| Quote fails `quote_is_consistent` | `copy.req.err_quote_inconsistent` | The numbers in this quote do not add up, so confirmation is disabled. A report was sent. | اعداد این قیمت با هم نمی‌خواند، پس تأیید غیرفعال شد. گزارشی ارسال شد. |
+| Receipt fails the equality | `copy.req.err_receipt_inconsistent` | These figures do not add up and are not final. A report was sent. | این ارقام با هم نمی‌خوانند و نهایی نیستند. گزارشی ارسال شد. |
+
+### SCR-req-18 Ask for a human review (appeal of a job rejection)
+
+| Row | Content |
+| --- | --- |
+| Purpose | Let a requester challenge a `rejected` job once, within the appeal window (`appeal_kind` `job_rejection`, S0.9.7) |
+| Entry conditions | Job `rejected`; `rejection.appeal.allowed_until` in the future; fewer than `appeal.max_per_decision` appeals filed for this decision |
+| Blocks | The recorded reasons; a note field up to `ui.requester.appeal_note_max_chars` ("why do you think this is wrong"); a statement that a reviewer who did not make the decision will look, that the target time is `appeal.reviewer_sla_days` days and is a target, not a promise, and that the decision can be upheld or overturned; Send. After filing: the appeal state in words (`filed`, `assigned`, `in_review`, `awaiting_second_review`, `upheld`, `overturned`, `withdrawn`) |
+| States | `open`, `filed` (read-only, polled with `getAppeal`), `window_closed`, `already_filed`, `overturned` (banner and Continue: Fix and resubmit creates a copy whose screening records the appeal id; how the reversal is applied to the copy is S7.* and S10.* [V]) |
+| Actions | `createAppeal` with `{appeal_kind: "job_rejection", job_id, note}`, `getAppeal` |
+| Copy intent | A request for a second pair of eyes, not a fight; no promise of outcome; no new sensitive material should be pasted into the note (say so) |
+| Accessibility | The note field has a counter with the limit as text; the status is `role="status"` |
+
+Appeal state labels (`copy.req.appeal_<state>`): `filed` Filed / ثبت شد; `assigned` Assigned to a reviewer / به بازبین سپرده شد; `in_review` Being reviewed / در حال بررسی; `awaiting_second_review` Waiting for a second review / در انتظار بررسی دوم; `upheld` Decision upheld / تصمیم تأیید شد; `overturned` Decision overturned / تصمیم لغو شد; `withdrawn` Withdrawn / پس گرفته شد.
+
+- **AC-req-64** Given a `rejected` job inside the window, When the person files with a note, Then one `createAppeal` with `appeal_kind` `job_rejection` is sent with its `Idempotency-Key`, an `Appeal` in `filed` is shown, and the form becomes read-only.
+- **AC-req-65** Given an appeal already filed for this decision and `appeal.max_per_decision` = 1, When the page loads, Then no second form is offered and the existing appeal's state is shown.
+- **AC-req-66** Given the appeal is `overturned`, When the person presses Continue, Then a new job is created with `copy_from_job_id`, no credit has moved, and the wizard resumes at the step the server returns.
