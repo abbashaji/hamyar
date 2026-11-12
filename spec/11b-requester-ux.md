@@ -412,3 +412,99 @@ Finding kinds the screen can display (detection is owned by S9.*; the set is a d
 - **AC-req-28** Given the person double-taps Confirm, When both requests carry the same `Idempotency-Key`, Then exactly one `escrow_hold` exists, the second response is a replay, and the screen shows one admitted job.
 - **AC-req-29** Given the quote changed since it was shown (different `quote_hash`), When Confirm is pressed, Then the server answers `409 STATE_CONFLICT` with `details.reason` `quote_changed`, no credit moves, and the new quote is shown for a fresh decision.
 - **AC-req-30** Given the active policy version changed after the quote, When Confirm is pressed, Then the job is not admitted, `copy.req.err_policy_changed` is shown and Fix and resubmit is offered.
+
+## 11.37 Quote and escrow as displayed
+
+The numbers come from the server (RD-01). The client may check that the quote is internally consistent before enabling Confirm; this is an integrity check, not a second price calculation.
+
+```
+function quote_is_consistent(q):                      # all arithmetic on arbitrary-precision integers
+  N = q.cells_primary
+  return q.price.p_ucr           == 1_000_000 + q.price.v_ppm + q.price.lambda_ppm          # S0.6.1
+     and q.escrow.primary_pay_ucr        == N * 1_000_000
+     and q.escrow.verification_pool_ucr  == N * q.price.v_ppm
+     and q.escrow.levy_ucr               == N * q.price.lambda_ppm
+     and q.escrow.total_ucr              == N * q.price.p_ucr
+     and q.escrow.total_ucr              == primary_pay + verification_pool + levy
+     and q.escrow.verification_cells     == floor(q.escrow.verification_pool_ucr / 1_000_000)
+     and q.balance.after_ucr             == q.balance.before_ucr - q.escrow.total_ucr
+# if false: Confirm stays disabled, copy.req.err_quote_inconsistent is shown, and the quote_hash is attached to an automatic createReport
+
+function affordable_cells(balance_ucr, p_ucr): return floor(balance_ucr / p_ucr)           # shown when balance is short
+```
+
+Worked example (FD§3.3 inputs; reproduces S0.6.1; illustrative, not measured):
+
+| Quote field | Value | Derivation |
+| --- | --- | --- |
+| `p_ucr` | 1,150,000 (shown 1.15) | 1,000,000 + 100,000 + 50,000 |
+| `escrow.total_ucr` | 276,000,000 (276 credits) | 240 x 1,150,000 |
+| `primary_pay_ucr` / `verification_pool_ucr` / `levy_ucr` | 240,000,000 / 24,000,000 / 12,000,000 | 240 x 1,000,000; 240 x 100,000; 240 x 50,000 |
+| `verification_cells` | 24 | `floor(24,000,000 / 1,000,000)` |
+| `balance.after_ucr` | 24,000,000 (24 credits) | 300,000,000 - 276,000,000 |
+| `eta_ppm` | 869,565 (shown 0.870) | `floor(10^12 / 1,150,000)` |
+| Window | 2 days as returned by admission (S6.*) | The client does not compute it; the FD§3.3 capacity arithmetic (320 cells >= 264 committed) is S6.* |
+
+Labels (copy keys; every row carries `needs_human_and_legal_review`):
+
+| Key | EN | FA |
+| --- | --- | --- |
+| `copy.req.quote_p_line` | Price per cell = 1 + verification + reserve levy | قیمت هر سلول = ۱ + هزینهٔ راست‌آزمایی + عوارض ذخیره |
+| `copy.req.quote_volunteer_pay` | Credit paid to volunteers for the cells themselves | اعتباری که به ازای انجام خود سلول‌ها به داوطلبان پرداخت می‌شود |
+| `copy.req.quote_verification` | Checking: extra cells that verify and redo work | راست‌آزمایی: سلول‌های اضافی برای بررسی و تکرار کار |
+| `copy.req.quote_levy` | Reserve levy: goes to the public Commons Reserve | عوارض ذخیره: به ذخیرهٔ عمومی مشترک می‌رود |
+| `copy.req.quote_total` | Total credit held now | جمع اعتباری که همین الان نگه‌داشته می‌شود |
+| `copy.req.quote_eta` | Round-trip efficiency: cells you can request per cell you contribute | بازدهی رفت‌وبرگشت: به ازای هر سلول مشارکت، چند سلول می‌توانید درخواست کنید |
+| `copy.req.quote_v_measured` | Measured over the last {days} days from {cells} cells | اندازه‌گیری‌شده در {days} روز گذشته از {cells} سلول |
+| `copy.req.quote_v_prior` | Estimated, not yet measured | برآوردی؛ هنوز اندازه‌گیری نشده |
+| `copy.req.quote_window` | Quoted window (not a promise of instant completion) | بازهٔ زمانی اعلام‌شده (نه وعدهٔ انجام فوری) |
+
+## 11.38 Waitlist and reservation screens
+
+### SCR-req-09 Waitlist
+
+| Row | Content |
+| --- | --- |
+| Purpose | Show a requester whose window cannot be honoured now where they stand and what happens next |
+| Entry conditions | Job `waitlisted` (a `WaitlistEntry` exists) |
+| Blocks | Position (`position`, first-come within the deadline class, FD§4.8), the date the place lapses (`admission.waitlist_ttl_days`), the supply gauge for the request kind, a plain statement that **no credit is held while waiting**, what happens on release (the job is re-quoted and the person has `admission.waitlist_claim_ttl_s` to confirm), and the alternative Book a reservation |
+| States | `waiting`; `released` (banner and link to `SCR-req-07`, with the claim countdown); `expired` (`job.waitlist_expired`: the job is `cancelled`, nothing was held); `left` |
+| Actions | `getWaitlistEntry` (polled), `deleteWaitlistEntry` (Leave the waitlist), open `SCR-req-10` |
+| Copy intent | Honest about uncertainty: position can change; no estimate of a date is invented; the person may leave at any time at no cost |
+| Accessibility | Position and lapse date are plain text; the released banner is `role="alert"` only when the person is on the page, otherwise it waits on the home screen under Needs attention |
+
+- **AC-req-31** Given a `waitlisted` job, When the page loads, Then it shows the position, the lapse date in local time, and the statement that no credit is held.
+- **AC-req-32** Given `job.waitlist_released` occurs, When the person opens the app, Then the home screen lists the job under Needs attention with the remaining claim time, and `SCR-req-07` shows the new quote with `quote_expires_at` set by `admission.waitlist_claim_ttl_s`.
+- **AC-req-33** Given `admission.waitlist_max_per_member` is 1 and an entry exists, When the person joins a second waitlist, Then `422 CAP_EXCEEDED` with `details.cap` `waitlist_entries` is answered and `copy.req.err_cap_waitlist` is shown.
+
+### SCR-req-10 Reservation booking
+
+| Row | Content |
+| --- | --- |
+| Purpose | Book capacity for a future date (exam week, a deadline) with credit held at booking (FD§4.8) [H: flattens bursts] |
+| Entry conditions | `ff.job.reservations` on; fewer than `reservation.max_active_per_member` active reservations; entered from home, the quote, or the waitlist |
+| Blocks | Job type, number of cells, date within `reservation.max_horizon_days`; a calendar with Jalali and Gregorian shown together where `i18n.dual_calendar_detail` is true, each day marked available or not from `getReservationAvailability` (days at the share cap `reservation.capacity_share_cap` are unavailable); the four declarations in compact form (a reservation is policy-checked at booking and again at activation, `R9`); the hold: `escrow_ucr` as the server computes it; the terms object: free cancellation until a stated time (`reservation.free_cancel_notice_s` before the start), what applies after it, and what happens if the reservation is not activated; the sentence that the final job still passes screening and policy when activated |
+| States | `no_availability` (no day offered; says so), `policy_rejected` (reasons as in 11.43.1), `insufficient_credit`, `at_reservation_cap` |
+| Actions | `getReservationAvailability`, `createReservation` |
+| Copy intent | Present a reservation as a hold with a date and conditions, never as a guarantee of completion; show every term the server returns, and for an enum value the client does not know show the generic line `copy.req.reservation_terms_generic` rather than guessing [V S6] |
+| Accessibility | The calendar is operable by keyboard and has a list alternative ("available dates"); unavailable days state a reason, not only a style |
+
+- **AC-req-34** Given `reservation.max_horizon_days` = 30, When a date 31 days ahead is chosen, Then it cannot be selected and the list alternative omits it.
+- **AC-req-35** Given the booking passes, When Book is pressed, Then one `createReservation` is sent with its `Idempotency-Key`, the Reservation is `held`, `escrow_hold` is posted once, and `SCR-req-11` opens.
+- **AC-req-36** Given the declared combination is not allowed by the active allowlist, When Book is pressed, Then `422 POLICY_REJECTED` shows the reasons and nothing is held.
+
+### SCR-req-11 Reservation detail
+
+| Row | Content |
+| --- | --- |
+| Purpose | Show a booking, let the requester activate it with a real job, or cancel it |
+| Entry conditions | A `Reservation` of this member |
+| Blocks | State (`held`, `activated`, `cancelled`, `expired`) with its date; booked cells and date; the held amount; the terms object; the cancellation terms in force now (`free_until` and `fee_ucr_if_cancelled_now`, both server values); when `held` and the start has arrived or is near: Create the job now |
+| States | `held`, `activated` (links to the job), `cancelled` (refund shown as in `SCR-req-15`), `expired` (`reservation.expired`: refund shown) |
+| Actions | `getReservation`, `cancelReservation`, Create the job now: starts the wizard with the reservation attached (`createJob` with `reservation_id` [A]); on `SCR-req-08` the button reads "Use my reserved credit" and calls `activateReservation` with `{job_id}` instead of `confirmEscrow`; no new hold is made (`escrow_release`, S0.8.5) |
+| Copy intent | One place that shows what is held, until when, and what each choice costs |
+| Accessibility | Terms in a definition list; the cancel confirmation names the exact amount returned |
+
+- **AC-req-37** Given a `held` reservation cancelled before `free_until`, When the person confirms, Then the receipt shows the returned amount equal to the held amount, and the restored credit lots show their original expiry (`ISS-07`).
+- **AC-req-38** Given a `held` reservation whose job has more cells than were booked, When `activateReservation` is sent, Then `422 CAP_EXCEEDED` with `details.cap` `reservation_cells` is shown and the reservation stays `held`.
+- **AC-req-39** Given the reservation reached `expired`, When the page loads, Then the state, the date and the refund shown are those returned by the server, with no client-side computation.
