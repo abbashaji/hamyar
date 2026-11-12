@@ -235,3 +235,130 @@ A random walk then drives each machine for many steps with events chosen at rand
 | `T-fsm-09` | Outbox atomicity | With a failure injected between the state write and the event write (and between event write and commit), state and outbox are either both changed or both unchanged; after a crash the relay delivers each outbox row at least once and consumers are idempotent | `BM0` (generic), then per machine |
 | `T-fsm-10` | Cross-machine invariants | A `Job.cancelled` has no cell in `queued`, `leased` or `submitted`; a `Cell.leased` has exactly one `Lease.active`; a `Lease.active` has a `Cell.leased`; an `accepted` cell has exactly one accepted `Submission`; a `Job.completed` has all primary cells `accepted` and escrow 0 | `BM6`, `BM7` |
 | `T-fsm-11` | Coverage gate | Every transition of every machine is exercised by at least one test, measured by the event names of `S0.9`; the CI job fails with the list of uncovered transitions | `BM1` onward |
+
+## 18.6 Policy-engine tests (reference S7.*)
+
+The rules `R1`..`R10` are data (a `Rule` table inside a `PolicyVersion`) evaluated by a small evaluator (prompt D). These tests treat `S7.*` as authoritative: where an expected value below disagrees with `S7.*`, the `S7.*` text wins, the oracle is edited in the same change, and the difference is recorded as an issue. The oracle is written independently of the evaluator, in test code, from the text of FD§5.4 and `S0.8`. [D]
+
+### 18.6.1 Oracle (independent of the evaluator)
+
+```
+PAIRS_OK = {(P0,L0), (P1,L1), (P1,L2), (P2,L3), (P3,L0), (P3,L1), (P3,L2)}     # license pairing, FD5.3 (P3 pairing: ISS-186)
+ALLOWLIST_V1 = {P0} x {L0} x {S0,S1} x {M0,M1}  U  {P1} x {L1,L2} x {S0,S1} x {M0,M1}   # 4 + 8 = 12 combinations
+
+def oracle(job, service, template, policy_version):
+    if any declaration missing or value outside its enum or (purpose, license) not in PAIRS_OK:   return REJECT R1
+    if job.sensitivity in {S2, S3}:                                                               return REJECT R2
+    if job.content is prohibited or task asks more than copy, Send, return text:                  return REJECT R3
+    if template is not an approved, unpaused, current TemplateVersion:                            return REJECT R4
+    if job.purpose == P2 and service.commercial_use_of_output != yes:                             return REJECT R5
+    if job.purpose == P3 and not (job.service_req == M2 or service.training_use_of_output == yes
+                                  ) or (job.purpose == P3 and job.sensitivity != S0):             return REJECT R6
+    if license exceeds service flags (P1 needs open_publication_of_output == yes):                 return REJECT R7
+    if (P, L, S, M) not in policy_version.allowlist:                                              return REJECT R1 (detail allowlist_miss)   # ISS-182
+    return ACCEPT, stamped with policy_version
+```
+
+Reasons are rendered `policy.<rule>.<slug>` (`S0.8.4`). `R8` applies at display and lease time, `R9` at acceptance, `R10` at publication of a new `PolicyVersion`; they are tested separately below. [D]
+
+### 18.6.2 The exhaustive combination table (`T-policy-01`)
+
+The test enumerates every combination of purpose (4) x license (4) x sensitivity (4) x service requirement (3) = 192, with a valid approved template, content that passes `R3`, and a fixture service `svc_A` that is `approved` with every gating flag `yes` and a saved `TermsCopy`. It compares evaluator and oracle for all 192 and asserts the totals below, so a silent change in the allowlist is caught by a count as well as by a diff.
+
+| Outcome with `svc_A` | Rows | How the count is derived |
+| --- | --- | --- |
+| Rejected `policy.R1.metadata_missing_or_inconsistent` (license does not pair with purpose) | 108 | (16 - 7) inconsistent pairs x 4 sensitivities x 3 requirements |
+| Rejected `policy.R2.sensitivity_not_accepted` | 42 | 7 consistent pairs x 2 (`S2`, `S3`) x 3 requirements |
+| Rejected `policy.R6.training_needs_m2_or_flag` (`P3` with `S1`; `S0` only) | 9 | 3 `P3` pairs x `S1` x 3 requirements |
+| Rejected `policy.R1...` with detail `allowlist_miss` (passes `R1`..`R7` but is outside the allowlist) | 21 | 33 survivors reaching the allowlist (`P0` 6, `P1` 12, `P2` 6, `P3` with `S0` 9) minus 12 allowed |
+| Accepted | 12 | `P0`,`L0`,{`S0`,`S1`},{`M0`,`M1`}: 4; `P1`,{`L1`,`L2`},{`S0`,`S1`},{`M0`,`M1`}: 8 |
+| Total | 192 | 108 + 42 + 9 + 21 + 12 |
+
+The 12 accepted rows are exactly the two active profiles of FD§5.7 failure mode 5 (`P0`/`P1` x `S0`/`S1` x `M0`/`M1`, with the license pairing of FD§5.3). `R3`, `R4`, `R5` and `R7` cannot fire with `svc_A`; they are covered by the tables below. [D]
+
+### 18.6.3 Flag-dependent and ordered cases (`T-policy-02`, `T-policy-03`)
+
+| Case | Declarations (P, L, S, M) | Service or template state | Expected |
+| --- | --- | --- | --- |
+| F1 | `P2`,`L3`,`S1`,`M0` | `commercial_use_of_output` = `unknown` | `policy.R5.commercial_needs_flag` (unknown is no) |
+| F2 | same | `commercial_use_of_output` = `no` | `policy.R5.commercial_needs_flag` |
+| F3 | same | `commercial_use_of_output` = `yes`, allowlist v1 | rejected, `R1` detail `allowlist_miss` (`P2` is locked until a `PolicyVersion` unlocks it, FD§5.3) |
+| F4 | `P3`,`L1`,`S0`,`M0` | `training_use_of_output` = `unknown` | `policy.R6.training_needs_m2_or_flag` |
+| F5 | `P3`,`L1`,`S0`,`M2` | allowlist v1 | rejected, `R1` detail `allowlist_miss` |
+| F6 | `P3`,`L1`,`S1`,`M2` | any | `policy.R6.training_needs_m2_or_flag` (`S0` only) |
+| F7 | `P1`,`L2`,`S0`,`M0` | `open_publication_of_output` = `unknown` | `policy.R7.license_exceeds_service_flags` |
+| F8 | `P1`,`L1`,`S0`,`M1` pinned service | `open_publication_of_output` = `no` | `policy.R7.license_exceeds_service_flags` |
+| F9 | `P0`,`L0`,`S0`,`M0` | every output flag `unknown`; `third_party_task_use` and `prohibited_content_compatible` `yes` | accepted (`L0` needs no output-publication flag) |
+| O1 | `P0`,`L1`,`S3`,`M0`, no template | | `R1` (first failing rule wins) |
+| O2 | `P0`,`L0`,`S3`,`M0`, free-form prompt | | `R2` (before `R4`) |
+| O3 | `P2`,`L3`,`S1`,`M0`, free-form prompt, flag `unknown` | | `R4` (before `R5`) |
+| O4 | `P0`,`L0`,`S2`,`M0`, prohibited content | | `R2` (before `R3`) |
+| O5 | valid declarations, task text asks the volunteer to open a link, download a file, install something or enter a credential | | `policy.R3.prohibited_content` |
+| O6 | valid declarations, `TemplateVersion` in `paused` or `retired`, or a prompt not from any template | | `policy.R4.template_required` |
+
+The flag matrix (`T-policy-03`) additionally runs every gating flag key of `S0.8.3` through `yes`, `no` and `unknown`, asserting that `unknown` and `no` give identical results everywhere and that no info flag (`info.*`) ever changes an outcome (`ISS-02`).
+
+### 18.6.4 Catalogue
+
+| Id | Subject | Assertion | BM |
+| --- | --- | --- | --- |
+| `T-policy-01` | Exhaustive combinations | The 192-row table above, evaluator versus oracle, with the totals | `BM3` |
+| `T-policy-02` | Rule order | Cases `O1`..`O6` and a generated set in which two or more rules fail: the reported reason is the first failing rule only | `BM3` |
+| `T-policy-03` | Flags | Cases `F1`..`F9`, plus the flag matrix; `unknown` equals `no` | `BM3` |
+| `T-policy-04` | Approval guard | `service.approved` is refused unless `third_party_task_use` and `prohibited_content_compatible` are `yes`, a `TermsCopy` (bytes, hash, source reference, capture date) is saved and a reviewer is recorded; with `service.min_approvers` = 2 a single approval is refused; every `FlagAnswer` is dated and points at its `TermsCopy` | `BM3` |
+| `T-policy-05` | Rules are data | A fixture `PolicyVersion` that adds one allowlist row and disables nothing else changes the evaluator's outcome for exactly that row, with no code change and no restart; the rules table has one row per `R1`..`R10` per version; the evaluator contains no rule-specific branch on a rule id outside the data (static check) | `BM3` |
+| `T-policy-06` | Stamp and re-check (`R9`) | A job stamped with version n and accepted under version n passes; if version n+1 tightens the rule the job touches, acceptance is refused with `reject.policy_changed` and the job is paused or stopped as `S7.*` says; if version n+1 loosens, work already done under n is not retroactively legitimized: results produced before the loosening stay judged under n | `BM3`, `BM6` |
+| `T-policy-07` | Tighten and loosen (`R10`) | A tightening takes effect at once and its public entry follows within `change.tighten_publish_within_s`; a loosening without a change-log entry and a stated reason is refused; a loosening takes effect only after `policy.loosen_min_notice_days`; `change_class` is computed by the system from the diff, not supplied by the editor | `BM3` |
+| `T-policy-08` | Opt-in matching (`R8`) | A volunteer with default opt-ins (`optin.default_purposes` `P0`,`P1`; `optin.default_sensitivities` `S0`,`S1`; no sensitive topic) is offered no cell outside them; adding `P2` makes `P2` cells eligible and nothing else; an attempt to lease an uncovered cell is refused without leaking its existence (`NOT_FOUND`, [V: `S9.*`]); the supply gauge per category is computed from eligible members only | `BM3`, `BM6` |
+| `T-policy-09` | Template required (`R4`) | The job API has no free-form prompt field; a request that carries one is `VALIDATION_FAILED`; a job on a template version that is paused after admission suspends its unleased cells | `BM5` |
+| `T-policy-10` | Prohibited content (`R3`) | The prohibited-content screen and the copy-Send-return rule are applied to every template at review time and to every input at screening time; the template review checklist contains the rule; a template whose prompt asks for more than copy, Send and return text cannot reach `approved` (`T-fsm-05`) | `BM5` |
+| `T-policy-11` | Launch gate on jobs | With every `ServiceRegistryEntry` in `unreviewed`, `createJob` is refused for every combination (`policy` reason or `LAUNCH_GATE_CLOSED` as `S14.*` says) and no `Job` leaves `draft`; with `launch.member_jobs_enabled` false, member jobs are refused even for an `approved` service | `BM3` |
+| `T-policy-12` | Reason codes and copy | Every `policy.<rule>.<slug>` the evaluator can emit has a `copy.*` key with `fa` and `en` text and the review marker (`T-rtl-11`); the API puts the codes in `details.reasons` | `BM3`, `BM8` |
+| `T-policy-13` | Revocation in flight | When a service is `revoked`, new jobs stop at once; in-flight cells are handled as `S7.*` specifies (`cell.voided` or drained); no credit moves for a voided cell; the escrow share for voided cells is refunded at settlement | `BM3`, `BM7` |
+
+## 18.7 Adversarial tests
+
+### 18.7.1 Method and the guarantees under test [D]
+
+- **Controlled interleaving.** Components expose failpoints (after read, before write, after write, before commit, after commit, before outbox relay). A scheduler enumerates or samples `test.race.schedules` interleavings of the competing requests and checks the guarantees after each. Real-concurrency stress with `test.race.workers` workers repeats the same scenarios against a real database, because a controlled scheduler cannot find every storage-level anomaly.
+- **Attack scripts** call the public, member and admin APIs with crafted requests, never reaching around the API except where a test is about database privileges.
+- **Exact guarantees** (the statements are the tests' pass criteria; their normative wording is owned by `S5.*` and `S6.*` [V]):
+
+| Id | Guarantee |
+| --- | --- |
+| `X1` | At most one `Lease` is `active` per `Cell` at any time |
+| `X2` | At most one `Submission` is `accepted` per `Lease`, and at most one per `Cell` |
+| `X3` | A replayed submission (same lease and nonce) returns the stored outcome, changes nothing and emits no event |
+| `X4` | Each accepted cell is paid exactly once (one `payout` per cell) |
+| `X5` | Each `Escrow` settles at most once and closes at exactly 0 |
+| `X6` | Each job is admitted at most once; one `escrow_hold` per job |
+| `X7` | A lot's remaining amount is consumed exactly once, however many requests race for it |
+| `X8` | An operation refused by a guard leaves no partial state |
+
+### 18.7.2 Catalogue
+
+| Id | Attack or race | Expected result | Guarantee or AC | BM |
+| --- | --- | --- | --- | --- |
+| `T-adv-01` | Forgery matrix: submit with a lease id that does not exist, belongs to another member, belongs to another cell, or carries another lease's nonce; guess cell ids (ids are opaque) | `NOT_FOUND`, `FORBIDDEN` or `reject.nonce_invalid` as `S9.*` says; no state change; every attempt counted by the rate limiter and logged without personal data | `AC-return-01` | `BM6` |
+| `T-adv-02` | Replay: resubmit with the same lease and nonce (identical and altered body); submit after `lease.timeout_s`; submit within and beyond `lease.submit_grace_s`; reuse a nonce after expiry | Identical body: stored outcome, `X3`. Altered body: refused (`IDEMPOTENCY_KEY_MISMATCH` or `LEASE_CONFLICT`). After expiry and grace: `LEASE_EXPIRED` (`reject.lease_expired`). Inside grace and cell not re-leased: accepted into checks. Nonce reuse: `reject.nonce_invalid` | `AC-return-02` | `BM6` |
+| `T-adv-03` | Double submission: N concurrent submissions for one lease, with the same and with different idempotency keys | Exactly one accepted outcome, all others return it or a conflict; one payout (`X2`, `X4`) | `AC-fsm-03` | `BM6` |
+| `T-adv-04` | Idempotency abuse: the same key with a different body; the same key on another path; keys outside the allowed class; a missing key on a required route | `IDEMPOTENCY_KEY_MISMATCH`, a fresh execution scoped to its own path, `VALIDATION_FAILED`, `VALIDATION_FAILED`; no double effect | `AC-api-02` | `BM0` |
+| `T-adv-05` | Copy of another donor's output: two donors submit the same text for different leases of the same or of audit-related cells; near-duplicates above `verify.duplicate_similarity_threshold` | `reject.duplicate_of_other_output` for the later one; both recorded for the abuse queue; the first is not penalized | `AC-return-04` | `BM6` |
+| `T-adv-06` | Timing anomalies: submit faster than `verify.timing_min_s`; submit at exactly the threshold; submit with a clock-skewed client timestamp | Below the threshold `reject.timing_anomaly` and sampling rises (`T-unit-16`); the client clock is never used | `AC-return-05` | `BM6` |
+| `T-adv-07` | Size and schema abuse: body at, over and far over `cell.envelope.max_submission_bytes` and `api.max_body_bytes`; deeply nested JSON; wrong content type; invalid UTF-8; output over `cell.envelope.max_output_chars` | `PAYLOAD_TOO_LARGE`, `UNSUPPORTED_MEDIA_TYPE`, `reject.size_exceeded`, `reject.length_out_of_bounds`, `reject.schema_invalid`; parser limits stop work before allocation | `AC-return-03` | `BM6` |
+| `T-adv-08` | Leasing race: M workers lease the same queued cell; one worker leases while the cell is paused, cancelled or voided; a member at `lease.max_active_per_member` leases more | Exactly one succeeds, the rest `LEASE_CONFLICT`; paused or cancelled cells cannot be leased; the active-lease cap holds (`X1`) | `AC-fsm-03` | `BM6` |
+| `T-adv-09` | Reaper versus submit at the expiry boundary; two reapers running at once; extension request racing expiry | One of {expired, submitted} wins, never both; the cell is requeued once with `attempt + 1`; a lease extends at most `lease.max_extensions` times (`X1`, `X2`) | `AC-fsm-03` | `BM6` |
+| `T-adv-10` | Settlement races: `settle` and `cancel` together; `settle` twice; `settle` while the last `payout` is in flight; settlement concurrent with a late audit that overturns a cell | Escrow settles once and closes at 0; payouts either precede the settlement or are refused after it; an overturn after settlement uses `reversal`, never edits (`X4`, `X5`) | `AC-fsm-05` | `BM7` |
+| `T-adv-11` | Admission races: two confirmations of one quote; two jobs competing for the last capacity; quote used after `price.quote_ttl_s`; parameter changed between quote and confirmation | One `escrow_hold` per job (`X6`); the second job is re-quoted or waitlisted, never both admitted over capacity (`T-prop-17`); an expired quote is `STATE_CONFLICT`; the quote keeps its parameter versions | `AC-admit-01` | `BM7` |
+| `T-adv-12` | Expiry sweep versus spend: a spend and the sweep touch the same lot; two sweeps overlap | The lot is consumed once (`X7`); the sweep moves only the remaining amount; totals conserved (`T-prop-12`) | `AC-ledger-05` | `BM1` |
+| `T-adv-13` | Cancel versus submit: a job is cancelled as a donor submits; a kill switch engages as a lease is issued | The submission is accepted and paid or refused as a unit; no credit is paid for a cell in `cancelled`; a lease issued after the switch is impossible (`kill.*` checked inside the lease transaction) | `AC-ops-08` | `BM6` |
+| `T-adv-14` | Two-person bypass: one admin attempts `ledger.reversal`, `launch.signoff`, `parameter.loosen` or `killswitch.release` alone, with two sessions of the same admin, or with an admin who authored the change | Refused; a second distinct `AdminUser` is required (`security.two_person_actions`); every attempt writes an `AdminAction` | `AC-admin-02` | `BM2` |
+| `T-adv-15` | Scheme confusion: a member token on `/v1/admin/*`, an admin token on a member route, an expired token, a token replayed from another device, an admin call from the member origin | `AUTH_INVALID` or `AUTH_EXPIRED`, counted by the rate limiter; admin routes are not served from the member origin | `AC-ident-08` | `BM2`, `BM4` |
+| `T-adv-16` | Recovery abuse: brute-force of the recovery key; recovery start flood; a recovered identity trying to spend inside `identity.recovery_cooldown_s`; more than `identity.recovery_max_per_90d` recoveries; recovery from a freshly linked device | `RATE_LIMITED` after `ratelimit.recovery_attempts_per_day`; spending and job start refused during the cooldown; the old keys are rotated out; no response distinguishes a valid from an invalid identity | `AC-ident-02` | `BM4` |
+| `T-adv-17` | Farming: many identities from one device, one IP hash, one invite tree; grant and referral loops; self-referral; bonuses to accounts with no verified cell | Limits of `S0.10.6` hold; flags raised for the abuse queue; the Reserve never goes below its floor (`T-prop-16`) | `AC-ident-06`, `AC-public-08` | `BM4`, `BM7` |
+| `T-adv-18` | Collusion: two or more members cross-execute each other's audit cells and agree; a ring routes its own cells to itself | Audit assignment never gives a cell to its author or to a member of the same invite tree or device group where `S8.*` forbids it; agreement among ring members is not accepted as an audit pass when the assignment rule was broken; a gold-cell miss raises restriction | `AC-verify-03` | `BM6` |
+| `T-adv-19` | Rate-limit evasion: spoofed forwarding headers, many IP hashes, many sessions, slow requests | Limits key on the trusted peer address chain defined in `S10.*` [V], never on a client-supplied header; per-member limits hold across sessions | `AC-ident-06` | `BM4` |
+| `T-adv-20` | Reviewer capture: the author approves their own template; one reviewer approves twice; two reviewers from the same team approve | Refused or counted once (`T-fsm-05`); every approval is an `AdminAction`; an operator cannot approve as a reviewer unless holding both roles, and the audit trail shows it | `AC-tpl-01` | `BM5` |
+| `T-adv-21` | Ledger tampering: the application role tries `UPDATE` and `DELETE` on ledger tables; an operator edits a balance column; a restored backup with an altered entry | Privileges refuse; a column edit breaks reconciliation (`T-prop-05`) and the hash chain (`T-prop-10`) within `ledger.invariant_check_interval_s` and raises `ledger.invariant_violated` and an `Alarm`; the daily checkpoint hash disagrees | `AC-ledger-12` | `BM1` |
+| `T-adv-22` | Information leakage: responses and timing for existing versus non-existing ids of other members, other members' jobs and leases; error bodies; list endpoints | Same status and body shape (`NOT_FOUND`); no `mem_` id of another member appears anywhere; no total counts by default | `AC-ident-08` | `BM4` |
+| `T-adv-23` | Resource exhaustion: oversized uploads, zip-like archives, regular-expression-heavy input, many simultaneous large requests from one member | Parser and regex time limits; per-member and global limits; other members' latency stays inside the `T-load-09` budget | `AC-api-04` | `BM5`, `BM9` |
