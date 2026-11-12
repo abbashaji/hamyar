@@ -266,3 +266,89 @@ Per-purpose and per-region conditions (`R5` to `R7`, `regional_availability`) ar
 | `revokeService` | `POST /v1/admin/services/{svc_id}/revocations` | `admin` `SU` `perm.service.revoke` | `{reason_code (terms_changed, flag_changed, provider_notice, safety_incident, other), reason, public_text: {fa, en}}` | 200 `{service (revoked), affected: {open_jobs, queued_cells, leased_cells}}` counted at commit; event `service.revoked`; public change-log entry; single admin, because revocation tightens (R10) | `STATE_CONFLICT` (already `revoked`) | req | - | `A-W` |
 
 Suspension and resumption of a service are kill-switch operations (`kill.service.<svc_id>`, 15.28), not separate endpoints, because S0 0.9.6 ties `service.suspended` to a kill switch [D]. `service.review_due` and `service.review_lapsed` are timer events produced by the scheduler (15.34); they have no endpoint. What happens to the in-flight cells and jobs of a revoked service is decided by S7.*; the API's only contribution is the event `service.revoked` and the `affected` counts. A reviewer's revocation reason is internal; `public_text` is what the change log shows (Principle 5).
+
+## 15.24 Template review
+
+A `Template` is the stable identity of a reviewed prompt pattern; a `TemplateVersion` carries the `definition` and the `review_status` of S0 0.9.5. The `definition` format (slots, prompt body, delimiters, output schema, automatic checks, comparator, envelope) is owned by S8.*; this part validates it only against the S8.* schema and treats it as opaque otherwise. Free-form prompts do not exist (R4); a job can only name an `approved` `TemplateVersion`.
+
+**Schemas** [D]: `Template` = `{tpl_id, job_type, name, active_version_id, created_at}`. `TemplateVersion` = `{tpv_id, template_id, version (int from 1), definition, review_status, author_admin_id, required_approvals, approvals: [{admin_id, decided_at}], change_summary, content_hash, row_version, created_at}`. `required_approvals` is fixed when review is requested: `template.min_reviewers_new` (initial configurable default 2) if the template has never had an approved version, else `template.min_reviewers_edit` (1); a later parameter change does not alter a review already in progress [D].
+
+| op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `listTemplates` | `GET /v1/admin/templates` | `admin` `perm.template.read` | `?job_type`, `?review_status` (of the active version) | list of `Template` | - | n/a | cursor | `A-R` |
+| `getTemplate` | `GET /v1/admin/templates/{tpl_id}` | `admin` `perm.template.read` | - | `Template` with a version summary list | `NOT_FOUND` | n/a | - | `A-R` |
+| `createTemplate` | `POST /v1/admin/templates` | `admin` `perm.template.author` | `{job_type, name, definition, change_summary}` | 201 `{template, version}` (`draft`); event `template.version_created` | `VALIDATION_FAILED` (definition fails the S8.* schema), `ALREADY_EXISTS` | req | - | `A-W` |
+| `createTemplateVersion` | `POST /v1/admin/templates/{tpl_id}/versions` | `admin` `perm.template.author` | `{base_version_id, definition, change_summary}` | 201 `TemplateVersion` (`draft`); event `template.version_created` | `STATE_CONFLICT` (a draft or in-review version already exists for this template: one open version at a time) | req | - | `A-W` |
+| `listTemplateVersions` | `GET /v1/admin/template-versions` | `admin` `perm.template.read` | `?review_status`, `?template_id`, `?needs_my_review=true` (excludes versions I authored or already reviewed) | list; the review queue | - | n/a | cursor | `A-R` |
+| `getTemplateVersion` | `GET /v1/admin/template-versions/{tpv_id}` | `admin` `perm.template.read` | - | `TemplateVersion`, `reviews`, `ETag` | `NOT_FOUND` | n/a | - | `A-R` |
+| `updateTemplateDraft` | `PATCH /v1/admin/template-versions/{tpv_id}` | `admin` `perm.template.author` (author only) | Merge Patch of `definition`, `change_summary`; `If-Match` | 200 `TemplateVersion` | `STATE_CONFLICT` (only `draft` or `changes_requested`; an approved version is immutable), `FORBIDDEN`, `PRECONDITION_FAILED` | req | - | `A-W` |
+| `requestTemplateReview` | `POST /v1/admin/template-versions/{tpv_id}/review-requests` | `admin` `perm.template.author` | `{}` | 200 `TemplateVersion` (`in_review`); event `template.review_requested`; guard: the definition validates and its declared test vectors pass the S8.* checker | `STATE_CONFLICT`, `VALIDATION_FAILED` | req | - | `A-W` |
+| `submitTemplateReview` | `POST /v1/admin/template-versions/{tpv_id}/reviews` | `admin` `SU` `perm.template.review` | `{decision (approve, request_changes, reject), checklist: [{key, passed}], comments, reason}` | 201 `{review, version, review_round}`; used for the first and the second review | `FORBIDDEN` (author, or a reviewer who already reviewed this version), `STATE_CONFLICT` (not `in_review` or `awaiting_second_review`) | req | - | `A-W` |
+| `retireTemplateVersion` | `POST /v1/admin/template-versions/{tpv_id}/retirement` | `admin` `SU` `perm.template.retire` | `{reason_code (superseded, defect, policy, other), reason, public_text: {fa, en}}` | 200 `TemplateVersion` (`retired`); event `template.retired`; public change-log entry | `STATE_CONFLICT` | req | - | `A-W` |
+
+**Outcome mapping of `submitTemplateReview`** [D] (event names are those of S0 0.9.5):
+
+| Decision | Condition | New `review_status` | Event |
+| --- | --- | --- | --- |
+| `approve` | approvals after this one < `required_approvals` | `awaiting_second_review` | `template.first_approved` |
+| `approve` | `required_approvals` = 1 | `approved` | `template.first_approved`, then `template.second_approved` is NOT emitted; one event per state change, so a single-approval template emits `template.first_approved` with `payload.final = true` |
+| `approve` | approvals after this one = `required_approvals` > 1 | `approved` | `template.second_approved` |
+| `request_changes` | any | `changes_requested` (earlier approvals are cleared) | `template.changes_requested` |
+| `reject` | any | `rejected` (T) | `template.rejected` |
+
+**Second-reviewer rule** (FD§5.7 failure mode 10) [D]: every approving reviewer is distinct from the author and from every other approving reviewer. There is no override, not even for an operator. When a version is approved, in one transaction: `Template.active_version_id` moves to it, the previously active version becomes `retired` (event `template.retired`, `reason_code` = `superseded`), and a public change-log entry of kind `template` is written. Jobs already admitted keep the version stamped at admission (S5.*).
+
+**Deprecation** has no intermediate state in S0 0.9.5: it is `retireTemplateVersion`. A temporary stop is `template.paused`, which is a kill switch (15.28, `kill.template.<tpl_id>`), applies to the template's active version, and is released only by two admins. A template that collects `template.autopause_report_count` reports inside `template.autopause_window_s` is paused by the system the same way (15.28.3).
+
+## 15.25 Policy: rules, versions, tighten, loosen
+
+Rules `R1` to `R10` are data (S7.*); this part defines the admin operations over them. A `PolicyVersion` is immutable once created and is stamped on jobs at admission and re-checked at acceptance (R9). Nothing here edits a version; every change creates the next one.
+
+**Schemas** [D]
+
+| Object | Fields |
+| --- | --- |
+| `Policy` | `pol_id`, `name`, `active_version_id`, `scheduled_version_ids` |
+| `PolicyVersion` | `plv_id`, `policy_id`, `version` (int from 1), `status` (derived: `scheduled` while `now < effective_from`, `active`, or `superseded`), `change_class` (`tighten`, `loosen`, `neutral`), `effective_from`, `rules` (10 `Rule`), `allowlist` (list of `AllowEntry`), `changelog_entry_id`, `supersedes_id`, `content_hash`, `created_by_admin_id`, `created_at` |
+| `Rule` | `rul_id`, `policy_rule_id` (`R1`..`R10`), `slug`, `position` (1..10, the evaluation order of FD§5.4, fixed), `enabled` (bool), `params` (json defined by S7.*), `reason_code` (`policy.<rule>.<slug>`) |
+| `AllowEntry` | `purpose`, `license`, `sensitivity`, `service_requirement` (S0 0.8.1), `status` (`allowed` or `locked`); a combination that is not listed is rejected (deny by default, FD§5.1) |
+
+**Change classification** [D]. The server, never the client, classifies a proposed version by diffing it against its base:
+
+```
+classify(base, proposed):
+  tighter = any of:  rule disabled -> enabled;  allowlist entry removed or allowed -> locked;
+            a rule param moved in its declared tightening direction (S7.*)
+  looser  = any of:  rule enabled -> disabled;  allowlist entry added or locked -> allowed;
+            a rule param moved in its declared loosening direction
+  if tighter and looser:  class = mixed   -> refused by both endpoints (split the change)
+  elif tighter:           class = tighten
+  elif looser:            class = loosen
+  else:                   class = neutral -> refused: nothing to publish (UNPROCESSABLE, no_semantic_change)
+```
+
+| op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `listPolicies` | `GET /v1/admin/policies` | `admin` `perm.policy.read` | - | list of `Policy` | - | n/a | cursor | `A-R` |
+| `getPolicy` | `GET /v1/admin/policies/{pol_id}` | `admin` `perm.policy.read` | - | `Policy` with active and scheduled versions | `NOT_FOUND` | n/a | - | `A-R` |
+| `listPolicyVersions` | `GET /v1/admin/policies/{pol_id}/versions` | `admin` `perm.policy.read` | - | list of `PolicyVersion` without `rules` | - | n/a | cursor | `A-R` |
+| `getPolicyVersion` | `GET /v1/admin/policy-versions/{plv_id}` | `admin` `perm.policy.read` | - | `PolicyVersion` with `rules` and `allowlist` | `NOT_FOUND` | n/a | - | `A-R` |
+| `getPolicyRules` | `GET /v1/admin/policy-versions/{plv_id}/rules` | `admin` `perm.policy.read` | - | `{data: [Rule]}` | `NOT_FOUND` | n/a | - | `A-R` |
+| `diffPolicyVersions` | `GET /v1/admin/policy-versions/{plv_id}/diff` | `admin` `perm.policy.read` | `?against={plv_id}` | `{change_class, rule_changes, allowlist_added, allowlist_removed}` | `NOT_FOUND` | n/a | - | `A-R` |
+| `previewPolicyChange` | `POST /v1/admin/policies/{pol_id}/previews` | `admin` `perm.policy.read` | `{base_version_id, rules?, allowlist?}` | 200 `{change_class, diff, impact: {jobs_in_flight_affected, cells_queued_affected}, test_table: [{case_id, expected, actual}]}`; no state change | `VALIDATION_FAILED` | opt | - | `A-W` |
+| `evaluatePolicyDryRun` | `POST /v1/admin/policy-versions/{plv_id}/evaluations` | `admin` `perm.policy.read` | `{purpose, license, sensitivity, service_requirement, service_id?, template_version_id?}` | 200 `{verdict, first_failing_rule, reasons: ["policy.R2.sensitivity_not_accepted"]}`; creates no job | `VALIDATION_FAILED` | opt | - | `A-W` |
+| `tightenPolicy` | `POST /v1/admin/policies/{pol_id}/tightenings` | `admin` `SU` `perm.policy.tighten` | `{base_version_id, rules?, allowlist?, reason}` | 201 `{policy_version (active now), changelog_entry, impact}`; events `policy.version_published`, `policy.version_activated`, `changelog.entry_published` | `UNPROCESSABLE` (`details.reason` = `contains_loosening` with the list, `mixed_change`, `no_semantic_change`), `STATE_CONFLICT` (`base_version_id` is not the newest version) | req | - | `A-W` |
+| `loosenPolicy` | `POST /v1/admin/policies/{pol_id}/loosenings` | `admin` `SU` `2P` `policy.loosen` `perm.policy.loosen` (approver `perm.policy.approve_loosen`) | `{base_version_id, rules?, allowlist?, reason, public_text: {fa, en}, effective_from?}` | 202 approval; on approval 201 `{policy_version (scheduled), changelog_entry}`; events `policy.version_published`, `changelog.entry_published`; later `policy.version_activated` | `UNPROCESSABLE` (`contains_tightening`, `mixed_change`, `no_semantic_change`, `public_text_required`), `STATE_CONFLICT` (`notice_too_short` at execution) | req | - | `A-W` |
+| `cancelScheduledPolicyVersion` | `POST /v1/admin/policy-versions/{plv_id}/cancellations` | `admin` `SU` `perm.policy.tighten` | `{reason}` | 200 `PolicyVersion` (`superseded` before it ever activated); event `policy.version_cancelled`; one change-log note. Single admin: cancelling a loosening is tightening | `STATE_CONFLICT` (already active) | req | - | `A-W` |
+
+### 15.25.1 Tighten, loosen, changelog (R10) [D]
+
+- **Tighten.** `tightenPolicy` takes effect at once (`policy.tighten_immediate` is the constant `true`). The version is active when the call returns. In the same transaction a `ChangeLogEntry` is created with a machine-generated summary (which rules and allowlist rows changed) and `explanation_due_at = now + change.tighten_publish_within_s` (initial configurable default 86,400). The reviewer adds the human explanation as an `amends` note (`POST /v1/admin/changelog-entries`, below) within that time, otherwise the alarm `changelog.explanation_overdue` is raised (15.29.5). In-flight work is stopped by consumers of `policy.version_activated`: R9 re-checks at acceptance and the job service pauses what no longer passes; the change never makes earlier work legitimate retroactively.
+- **Loosen.** `loosenPolicy` needs a stated `reason`, a public `public_text` in `fa` and `en`, and a second admin. At approval the entry is published (this is the "public change-log entry" of R10) and the new version is scheduled with `effective_from = approved_at + policy.loosen_min_notice_days * 86,400 s` (initial configurable default 7 days, never below `change.notice_days_default`). A requested `effective_from` earlier than that is refused at execution as `notice_too_short`; omitting it is the normal use. The version becomes active at `effective_from` through the scheduler (15.34).
+- **Why mixed changes are refused** [D]: a loosening that also contains a tightening would delay the tightening by the notice period. Submit the tightening first.
+
+| op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `annotateChangeLog` | `POST /v1/admin/changelog-entries` | `admin` `perm.policy.tighten` or `perm.parameter.edit.<owner>` of the amended entry | `{amends_id, public_text: {fa, en}}` | 201 `ChangeLogEntry` (kind `note`, `amends_id` set); event `changelog.entry_published` | `NOT_FOUND`, `STATE_CONFLICT` (already annotated) | req | - | `A-W` |
+
+Change-log entries are immutable; an annotation is a new entry that points at the one it explains.
