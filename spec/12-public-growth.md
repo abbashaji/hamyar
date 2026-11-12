@@ -314,7 +314,7 @@ Reason for revocation on overturn only: one honest overturn should not strip rec
 | `card_version` | int | no |
 | static strings | `copy.growth.share_card_footer`, mission line | yes |
 
-**Forbidden on any card or payload:** any id (`mem_`, `vol_`, `lac_`, `dev_`, `ses_`); a handle, alias or name; team name or label; join date or any time other than none; per-day activity; service, provider or model names and logos; job content or titles; trust tier; credit balance or amounts; rank; location, time zone, device or browser data; a QR code or link that encodes anything member-specific.
+**Forbidden on any card or payload:** any id (`mem_`, `vol_`, `lac_`, `dev_`, `ses_`); a handle, alias or name; team name or label; join date or any other time; per-day activity; service, provider or model names and logos; job content or titles; trust tier; credit balance or amounts; rank; location, time zone, device or browser data; a QR code or link that encodes anything member-specific.
 
 ### 12.8.3 Attribution and measurement limits [D]
 
@@ -353,3 +353,73 @@ Events: `team.created`, `team.joined`, `team.left`, `team.locked`, `team.unlocke
 | `joinTeam` | `POST /v1/teams/{team_id}/memberships` | required |
 | `leaveTeam` | `DELETE /v1/team-memberships/{membership_id}` (sets `left_at`; the row stays) | required |
 | `reportTeam` | `POST /v1/teams/{team_id}/reports` | required |
+
+## 12.10 Referral (V5)
+
+### 12.10.1 Design decisions [D]
+
+- **A referral rides on an `Invite`.** The referral link is a vouched invitation (`Invite`, `invite.*` rules, S0.7), so invite-tree limits apply unchanged. A `Referral` (`ref_`, `member_bound`) adds the bonus state: `invite_id`, `referrer_member_id`, `referred_member_id` (null until joined), `state`, `qualified_at`, `paid_at`, `block_reason`, `grant_txn_id`, `unrecovered_ucr`. A referral link is sent person to person; it is never put on a share card (S12.8), because a public single-use link would be claimed by strangers.
+- **Funding: the Reserve, never mint** (`ISS-06`). Both bonuses are `grant` entries `reserve` to `member` with lot lifetime `credit.lifetime_days` (S0.8.5). They pause, never overdraw, at or below `grant.reserve_floor_credits` (FD§4.6: grants are never printed).
+- **Two-sided, after the newcomer's verified first cell** (FD§6.2 `V5`): the referrer receives `growth.referral.bonus_referrer_credits`, the newcomer `growth.referral.bonus_newcomer_credits`. This is in addition to the newcomer's starter grant G, which is unaffected.
+- **Credit only.** No money, no cash value, non-transferable (`grant.non_transferable`), expiring like any lot (S12.1 rule 4).
+- **Phase:** disabled in Phase 1; Phase 2 experiment (S12.12 `V5`).
+
+### 12.10.2 States and events [D][A]
+
+States: `issued`, `joined`, `qualified`, `paid`, `clawed_back` (T), `blocked` (T), `expired` (T). `paid` is terminal except for the clawback transition inside its window (convention addition, `ISS-128`).
+
+```
+(none)    --referral.created-->     issued        flag on; referrer caps pass; Invite issued under invite.* rules
+issued    --referral.joined-->      joined        newcomer identity created through the invite; device check passes
+issued    --referral.expired-->     expired (T)   invite.ttl_days elapsed without a join
+joined    --referral.qualified-->   qualified     newcomer has >= growth.referral.min_newcomer_verified_cells accepted cells
+joined    --referral.expired-->     expired (T)   growth.referral.qualify_window_days elapsed after joining
+qualified --referral.paid-->        paid          payout guards pass; one atomic grant transaction
+qualified --referral.blocked-->     blocked (T)   a hard guard fails (see block_reason)
+qualified --referral.expired-->     expired (T)   not payable within growth.referral.qualify_window_days of qualified_at (budget paused)
+paid      --referral.clawed_back--> clawed_back (T)  clawback triggers below, within growth.referral.clawback_window_days
+issued|joined --referral.blocked--> blocked (T)  device match, member status, flag disabled with kill
+```
+
+`block_reason` [A]: `same_device`, `referrer_cap`, `tree_cap`, `member_not_in_good_standing`, `qualifying_cell_overturned`, `fraud_finding`, `flag_disabled`.
+
+### 12.10.3 Payout algorithm [D]
+
+A background sweep (`referral.payout_sweep`, every `metrics.rollup_interval_s` [A]) examines `qualified` referrals oldest `qualified_at` first.
+
+```
+for ref in referrals where state = qualified order by qualified_at:
+    if now < ref.qualified_at + growth.referral.hold_s:                    continue   # delayed payout
+    if flag ff.growth.v5_referral is off or kill switch covers it:         block(flag_disabled)
+    if either member status != active or tier == restricted:               block(member_not_in_good_standing)
+    if newcomer accepted cells (current) < growth.referral.min_newcomer_verified_cells:
+                                                                          block(qualifying_cell_overturned)
+    if count(paid or qualified refs of referrer, rolling 30*86400 s) > growth.referral.max_per_referrer_per_30d:   block(referrer_cap)
+    if count(same for invite tree)  > growth.referral.max_per_invite_tree_per_30d:                                 block(tree_cap)
+    # soft guards: wait, do not block
+    pair = growth.referral.bonus_referrer_credits + growth.referral.bonus_newcomer_credits   # in ucr
+    if paid_today_pairs >= growth.referral.max_per_day:                    continue
+    if reserve_balance - pair < grant.reserve_floor_credits:               continue
+    if paid_today_ucr + pair > growth.referral.reserve_draw_cap_ratio * reserve_balance_at_utc_day_start:   continue
+    post ONE LedgerTransaction kind=grant with two grant entries (reserve->referrer, reserve->newcomer),
+         amounts truncated by the K rule of S6.* if a member is at the cap; unique on ref_id (natural idempotency)
+    state = paid; emit referral.paid
+```
+
+- The `device` check (S0.7 `Device`) runs at `joined`: a newcomer device equal to any device linked to the referrer is `blocked` (`same_device`). **Same IP hash is not a blocking rule**: shared and carrier-grade networks are common, so it would punish real households [H: tested through farming flags, `P1M`]; the caps bound the damage instead.
+- **Caps are also enforced at creation:** `createReferral` returns `422 CAP_EXCEEDED` when the referrer already holds `growth.referral.max_per_referrer_per_30d` referrals created in the rolling 30 days, or the tree is at `growth.referral.max_per_invite_tree_per_30d`; and `invite.max_active_per_member`, `invite.min_accepted_cells_to_issue`, `invite.tree_max_members`, `invite.tree_max_depth` apply as for any invite.
+- **Worst-case Reserve draw per UTC day** = `growth.referral.max_per_day` x (referrer bonus + newcomer bonus); with the initial defaults that is 5 x 2 = 10 credits, and never more than `growth.referral.reserve_draw_cap_ratio` of the Reserve balance at the start of the day, so the starter grants of FD§4.6 are not starved. Farming economics are a hypothesis [H]: a fake identity costs one verified cell plus an identity, and yields the bonus pair plus G; the per-device, tree, referrer and day caps are the control, measured as farming flags in `P1M`.
+
+### 12.10.4 Clawback [D]
+
+Triggers inside `growth.referral.clawback_window_days` after `paid_at`: (1) the newcomer's accepted cells fall below `growth.referral.min_newcomer_verified_cells` through `cell.overturned`; (2) `member.banned` for either party with a fraud finding; (3) an operator finding. The system opens, for each of the two `grant` entries, a **reversal proposal for the unspent remainder of its lot** only: `ledger.allow_negative_balance` is false, so a spent portion cannot be recovered. A reversal needs two operator approvals (`ledger.reversal_min_approvers`, `security.two_person_actions`); when both commit the referral becomes `clawed_back` and `unrecovered_ucr` records what was already spent. A partial-amount reversal of a partly spent lot is not defined in S0.8.5 and is requested from `S6.*` (`ISS-125`). Until approved the credit remains the member's; a delay is accepted and published as a gauge (`hamyar_growth_referral_unrecovered_ucr_total`).
+
+### 12.10.5 Interfaces [D][A]
+
+| Operation (proposal) | Route | Notes |
+| --- | --- | --- |
+| `createReferral` | `POST /v1/referrals` | `Idempotency-Key` required; returns the invitation link once; caps checked |
+| `listReferrals`, `getReferral` | `GET /v1/referrals[/{referral_id}]` | The referrer sees counts and states only, never who joined or what they did; the newcomer sees only their own bonus state |
+| payout, clawback | system and admin only | No member-callable payout route exists |
+
+Copy: `copy.growth.referral_terms` (S12.14): bonuses are declared, may be delayed or withheld, can be reversed, and have no cash value.
