@@ -542,8 +542,59 @@ SLAs are published defaults, configurable parameters, and targets, not promises 
 
 1. Proportionality: the lowest action that stops the harm; escalation needs a recorded reason code.
 2. A ban is never automatic, never produced by a classifier alone, and never propagates to an invite tree; tree members are reviewed individually (`THR-06`).
-3. A ban or suspension never edits the ledger and never confiscates credit: the member's lots expire normally into the Reserve (FD§4.5), escrow refunds proceed under S6.*, accepted cells stand unless a fraud finding leads to `cell.overturned` and a two-approver `reversal`. Involuntary forfeiture is not specified (`ISS-104` records why: no entry type exists for it and it would reward false reports).
+3. A ban or suspension never edits the ledger and never confiscates credit: the member's lots expire normally into the Reserve (FD§4.5), escrow refunds proceed under S6.*, accepted cells stand unless a fraud finding leads to `cell.overturned` and a two-approver `reversal`. Involuntary forfeiture is not specified: no ledger entry type exists for it (S0.8.5) and it would reward false reports.
 4. A suspended or banned member can still authenticate to a restricted scope: read history, export own data, file an appeal, close the account (constraint on S10.*).
 5. A ban does not trigger tracking of the person elsewhere: evasion is limited by `grant.max_per_device` and the sybil limits only; no extra fingerprinting is added to detect it (S10.13.1 item 4). Residual evasion is accepted.
 6. The platform does not report members to any authority on its own initiative unless counsel determines the law compels it [V].
+
+### 10.16.5 Takedown [D]
+
+| Object | What takedown does | What it cannot do |
+| --- | --- | --- |
+| Job or in-flight cells | `reject_job` or `void_cells`; leases revoked; unstarted cells refunded under S6.* | Recall text volunteers already saw |
+| Template version | Paused, then retired (`template.retired`); a new version needs the normal review | Undo outputs already produced |
+| Service | Suspended or revoked; in-flight cells handled per S7.* | |
+| Published Commons output or deliverable | The hosted copy and its public listing are withdrawn and marked withdrawn with a reason code | Recall copies already downloaded under an open license ("downstream use uncontrolled", FD§5.7 item 3); the notice says so |
+| Public team, display name or label | Removed from public surfaces at once | |
+| Output of a requester's own `P0` job | Stays with the requester unless it is illegal content or the subject of a legal notice [V] | |
+
+A takedown on a legal notice (copyright, defamation, privacy or similar) is routed to counsel; any counter-notice process is designed with counsel [V]. Material that counsel identifies as requiring special handling (for example child sexual abuse material) is handled under a counsel-approved runbook that preserves only what the law requires and exposes it to as few people as possible [V].
+
+### 10.16.6 Appeals [D]
+
+Kinds, states and events are in S0.9.7. This file fixes the process.
+
+```
+subject or reporter files appeal within appeal.window_days of the decision (else API error, not a state)
+  limit: appeal.max_per_decision per decision
+  -> appeal.filed ; acknowledgment shown at once
+assign to a reviewer who is not the original decider and has no declared conflict -> appeal.assigned
+  conflict found -> appeal.reassigned
+reviewer reads the evidence bundle (reporter identity removed) -> appeal.review_started
+ban or template rejection -> appeal.second_review_requested ; needs appeal.ban_min_reviewers distinct reviewers
+outcome -> appeal.upheld or appeal.overturned ; reason code and a short written reason are stored
+target: decision within appeal.reviewer_sla_days (published target, initial configurable default 7)
+```
+
+**Effects of `appeal.overturned`** [D]: a ban or suspension is lifted (`member.reinstated`); a restriction ends (`member.restriction_lifted`, tier returns to `tier_before_restriction`); a withdrawn output may be restored by a decider; a cell outcome follows S8.* and S9.*; ledger effects are only by two-approver `reversal`. An overturned appeal where the report was abusive is itself input to `THR-29` (restriction of the reporter, S10.16.8). The appellant sees the reason code, the object and the decision, never the reporter.
+
+### 10.16.7 Evidence retention [D]
+
+| Evidence | Kept | Access | Rule |
+| --- | --- | --- | --- |
+| Report text, category, reporter id, decision, reason code | `retention.moderation_days` after resolution, then reduced to counts (S0.7) | Reviewers; reporter id never to the subject | Notes are append-only, each with the `adm_` id |
+| Object ids, hashes (submission, template version), `policy_version`, rule results | Same | Reviewers | Hashes keep the evidence verifiable after payloads are purged |
+| Payload text of a reported cell | Normally purged on the S0.7 schedule. For `prohibited_content`, `harassment` and `forged_or_junk_result` it may be held, for no longer than `retention.moderation_days` after resolution | Reviewers on the case only | Held text is listed in the case; a hold is not renewable without a second approver |
+| Payload text for `suspected_sensitive_data` and `safety_of_person` | Not held: only hash, screening result and the reviewer's note are kept | | Avoids keeping the very data the report says should not exist [D] |
+| Legal hold | Only on counsel's written instruction [V]; set by an operator, cleared only by the two-person action `report.legal_hold_clear` | Operators and counsel | Each hold is logged; a hold is never silent |
+| Disclosure records | `AdminAction`, hash of the exported bytes | Operators | No content (S10.13.5) |
+
+### 10.16.8 Safeguards against moderator abuse and weaponized reporting [D]
+
+- Decisions are logged in `AdminAction`; a second look at a random sample of closed reports (`report.decision_sample_rate`, initial configurable default 0.10) is done by a reviewer who did not decide them. A reversal rate above the founders' threshold (pre-registered, code `FND`) opens a review of the decider.
+- A reviewer declares a conflict (self, relative, a member they know) and is reassigned at once; undeclared conflicts found later are grounds for removal of the role.
+- Reporters with a high share of dismissed reports are first warned, then restricted (`member.restricted`); the share and the threshold are reviewed, not automatic.
+- A re-review of a sample of approved templates and service entries by a different reviewer runs each rotation cycle (`THR-23`).
+- Aggregate counts of reports, actions, appeals and outcomes are published every `report.transparency_publish_days` (initial configurable default 30), unless counsel advises a delay [V].
+- Reporter anonymity from the subject is a constant (`report.reporter_identity_hidden` = true).
 
