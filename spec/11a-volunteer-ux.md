@@ -202,3 +202,291 @@ Convention additions requested by this part (C-022 completes the table; names ar
 | `ui.status_poll_max_s` | duration_s | 60 (upper bound of the polling backoff) | 5..600 | `OPS` |
 | `appeal.reason_max_chars` | int | 1000 | 100..10000 | `OPS` |
 | `invite.required_to_join` | bool | true (closed Phase 1 pilot, FD§9) | | `FND` |
+
+## 11.6 SCR-vol-01 Landing
+
+**Purpose.** Explain in one screen what Hamyar is, what the volunteer does and the risks they take, and get them to the first contribution without sign-up. [D]
+
+**Entry conditions.** Public URL, an invite link (`#invite=<token>` in the URL fragment, never sent to analytics), or a returning visitor with no valid session. A visitor with a valid session goes straight to the offer list (`SCR-vol-03`).
+
+**Wireframe**
+
+```
++--------------------------------------------------+
+| Hamyar (fa wordmark)               [FA | EN] [=] |
++--------------------------------------------------+
+| H1  One minute a day. Reviewed tasks. Your own    |
+|     account. You press Send.                      |
+| P   What you do: copy a task, press Send in the   |
+|     chat service you already use, paste the answer|
+|     back. Verified answers earn expiring credit.  |
+| [ Start: about 2 minutes the first time ] (primary)|
+| ( I already have an identity )  (secondary link)  |
++--------------------------------------------------+
+| What Hamyar never does   (4 icon+word rows)       |
+|  - never presses Send for you                     |
+|  - never reads your chat or asks for passwords    |
+|  - never asks you to bypass any limit or rule     |
+|  - never shows your identity to anyone            |
++--------------------------------------------------+
+| Risks to you, in plain words (collapsed, 1 line)  |
+|  > Your provider's terms and your country's rules |
+|    may limit this. Read before you start.         |
++--------------------------------------------------+
+| Live counter (only if ff.growth.v2_live_counter): |
+|  N verified cells   (verified only; hidden if off)|
+| Footer: Help | Privacy | Public ledger (if on)     |
++--------------------------------------------------+
+```
+
+**States**
+
+| State | Condition | Behavior |
+| --- | --- | --- |
+| Empty | Not applicable (static content) | The page never depends on data to be useful |
+| Loading | `getPublicStatus` in flight | Static content and primary action render at once; the counter area shows a placeholder, never a spinner over the whole page |
+| Error | `getPublicStatus` fails | Counter area omitted silently; the rest is unchanged |
+| Offline or low bandwidth | No network | Static shell from the local copy if previously loaded; a first-ever visit shows the browser's own offline page (unavoidable); the primary action is disabled with `copy.landing.offline` |
+| Blocked: not open | `launch.members_may_join` = false (`LAUNCH_GATE_CLOSED`) | Primary action replaced by a notice `copy.landing.not_open`; no member is created; an existing member can still sign in to see balance and history [D] |
+| Blocked: join by invite only | `invite.required_to_join` = true and no invite token | Primary action opens the invite-code field (`copy.landing.invite_needed`); no identity is created without a valid token |
+| Blocked: paused | `kill.all_new_jobs` or `kill.all_minting` engaged | Landing is unchanged; the offer list shows the paused state (11.8) |
+
+**Actions**
+
+| Action | Result |
+| --- | --- |
+| Start | Enters `SCR-vol-02`; the identity is created at flow step F2, not here |
+| I already have an identity | Opens `SCR-vol-13` restore mode, or signs in silently if this device holds a key |
+| Language switch | Changes `locale` on this device only |
+| Expand risks | Shows the full risk notice (`copy.risk.provider_and_law`) |
+
+**API calls.** `getPublicStatus`.
+
+**Copy intent.** Plain, calm, short. State the human-presses-Send model and the "never" list before any benefit claim. No claim of anonymity (promise minimization, never anonymity, FD Principle 8), no claim about speed of completion, no political framing (FD§6.1 rank 2). The counter line says "verified cells" and nothing else.
+
+| Copy key | `fa` (draft) | `en` |
+| --- | --- | --- |
+| `copy.landing.headline` | یک دقیقه در روز، کارهای بازبینی‌شده، حساب خودِ شما. دکمهٔ ارسال را شما می‌زنید. | One minute a day. Reviewed tasks. Your own account. You press Send. |
+| `copy.landing.never_list` | همیار هرگز به جای شما ارسال نمی‌کند، صفحهٔ گفت‌وگوی شما را نمی‌خواند، رمز نمی‌خواهد، و هیچ‌وقت شما را به دور زدن محدودیت‌ها تشویق نمی‌کند. | Hamyar never presses Send for you, never reads your chat, never asks for passwords, and never encourages you to bypass any limit. |
+| `copy.landing.not_open` | همیار هنوز برای عضویت باز نیست. | Hamyar is not open for new members yet. |
+
+All keys carry `needs_human_and_legal_review`.
+
+**Accessibility.** One `h1`; the primary action is the first focusable element after the language switch; the "never" list is a real list; the risk disclosure is a `details` element that works without scripts.
+
+**Acceptance criteria**
+
+- `AC-vol-01` Given `launch.members_may_join` is false, When a visitor opens the landing, Then the primary action is replaced by `copy.landing.not_open` and no `createMember` call is possible from the UI.
+- `AC-vol-02` Given the visitor's locale is unset, When the landing loads, Then it renders `fa` with `dir="rtl"` and Persian numerals, and the language switch shows `EN` as one tap.
+- `AC-vol-03` Given `ff.growth.v2_live_counter` is off, When the landing loads, Then no counter, number of members or number of active members is rendered or requested.
+- `AC-vol-04` Given the network is unavailable after a previous visit, When the landing loads, Then the shell, headline, never-list and risk notice render from the local copy and the primary action is disabled with `copy.landing.offline`.
+- `AC-vol-05` Given the landing is loaded, When network requests are inspected, Then no request goes to a third-party host and no cookie is set.
+
+## 11.7 SCR-vol-02 First-contribution flow (the sub-60-second path)
+
+**Purpose.** Take a newcomer from landing to a pasted-back first result with the fewest screens, in about 2 minutes the first time and under 60 seconds once practiced (FD§3.2 step 2). Both figures are hypotheses [H]. [D]
+
+**Entry conditions.** `launch.members_may_join` true; invite token present when `invite.required_to_join` is true; at least one approved service and at least one offerable Commons cell exist, otherwise the flow stops at the empty state (below).
+
+**Step list and time budget.** Budgets are hypothesis targets [H] to be replaced by server-measured timings (measurement `CAL` in Phase 0, `P1M` in Phase 1). The flow's success metric is `submission.received` minus `flow_started` and the share at or under `ui.fast_contribution_threshold_s` (`initial configurable default` 60, FD§6.2 V1). `flow_started` is the event `member.created` for a first-time member and the `lease.issued` of the first lease for a returning member.
+
+| Step | Screen | Volunteer action | First-time budget [H] | Practiced budget [H] | Stakes before the step |
+| --- | --- | --- | --- | --- | --- |
+| F1 | Landing | Tap Start | 3 s | 0 s (returning members skip it) | none |
+| F2 | Identity created | None (automatic): device key generated, `createMember`, `createSession` | 2 s | 0 s | no personal data; no key shown yet (V-09) |
+| F3 | One-time notice | Read three short facts, tap "I understand" (shown once; version-stamped) | 10 s | 0 s | none |
+| F4 | Offer list | Tap the first card (`ui.offer_list_size` offers) | 5 s | 3 s | none |
+| F5 | Card | Read the 8-field card; expand the full prompt (required on first use) | 20 s | 5 s | decline is free |
+| F6 | Hand-off | Tap Copy (or Open in service) | 3 s | 3 s | none |
+| F7 | Provider page | Paste, press Send, wait for the answer, copy it (outside Hamyar; time depends on the provider) | 60 s [H] | 25 s [H] | volunteer's own account |
+| F8 | Paste-back | Return, tap Paste (or long-press paste), tap Submit | 10 s | 8 s | none |
+| F9 | Feedback | See "received, being checked" and later the outcome | 2 s | 2 s | none |
+| | | **Sum** | **115 s** (about 2 minutes) | **46 s** | |
+
+The sums are plain arithmetic of the columns (3 + 2 + 10 + 5 + 20 + 3 + 60 + 10 + 2 = 115; 0 + 0 + 0 + 3 + 5 + 3 + 25 + 8 + 2 = 46). They are targets that make the claim testable, not measurements. Step F7 dominates and is outside the platform's control and observation (X2). [H]
+
+**Wireframe (progress strip shown on F3..F9)**
+
+```
++--------------------------------------------------+
+| (*)--(*)--( )--( )--( )   Step 2 of 5: The card   |
++--------------------------------------------------+
+|  (content of the current screen: 03, 04, 05, 06)  |
++--------------------------------------------------+
+| [ primary action ]            ( Decline this one )|
++--------------------------------------------------+
+```
+
+Five visible steps: Notice, Card, Hand-off, Paste-back, Done. Identity creation is not a visible step.
+
+**One-time notice (F3), copy intent.** Exactly three facts and one button: (1) you use your own account and press Send yourself; (2) the text you copy comes from a stranger, was reviewed, can be read in full, and any task may be declined; (3) your provider's terms and your country's rules may limit this, which is your decision [V]. No checkbox wall. The notice version is stored with the member; a changed version is shown again once.
+
+| Copy key | `fa` (draft) | `en` |
+| --- | --- | --- |
+| `copy.notice.first_use` | ۱) از حساب خودتان استفاده می‌کنید و خودتان دکمهٔ ارسال را می‌زنید. ۲) متنی که کپی می‌کنید از طرف یک ناشناس است؛ بازبینی شده و همهٔ آن را می‌توانید بخوانید و هر کاری را رد کنید. ۳) شرایط سرویس شما و قوانین کشورتان ممکن است این کار را محدود کند؛ تصمیم با شماست. | 1) You use your own account and press Send yourself. 2) The text you copy comes from a stranger; it was reviewed, you can read all of it, and you may decline any task. 3) Your provider's terms and your country's rules may limit this; the decision is yours. |
+
+**States**
+
+| State | Condition | Behavior |
+| --- | --- | --- |
+| Empty | `listOffers` returns no offers | `copy.flow.no_offers`: no work fits your opt-ins or nothing is queued right now; actions: "Review opt-ins" (`SCR-vol-09`), "Check again"; nothing is lost |
+| Loading | Identity creation or `listOffers` in flight | Progress strip with a text label; never a blocking spinner longer than `ui.status_poll_max_s` without a retry button |
+| Error | `createMember` fails | Retry with the same `Idempotency-Key`; the device key is kept so a retry never creates two members; after a failed retry, show Help |
+| Offline or low bandwidth | No network at F2 | Flow pauses with `copy.error.try_again`; nothing is created locally except the key pair |
+| Blocked: rate limited | `ratelimit.device_new_members_per_day` or tree limit (`RATE_LIMITED`) | `copy.error.rate_limited` with the time; no reason is given about which limit applied (abuse-safe) |
+| Blocked: no approved service | `listApprovedServices` empty | `copy.flow.no_service`: contributions are not available yet; no cell is offered (launch-gate machinery, S14.*) |
+
+**Actions.** Start, I understand, Take this card, Decline, Back (never destroys a lease), Cancel flow (releases the lease with no penalty).
+
+**API calls.** `createMember`, `createSession`, `getMember`, `listApprovedServices`, `listOffers`, then those of 11.8 to 11.11.
+
+**Accessibility.** The progress strip is a labeled ordered list with `aria-current="step"`; each step change moves focus to the new heading and announces it; the whole flow works with one hand and with the keyboard.
+
+**Acceptance criteria**
+
+- `AC-vol-06` Given a visitor with a valid invite and the gate open, When they tap Start, Then a `Member` is created with `status` = `active` and `trust_tier` = `new`, no e-mail is asked, and no recovery key screen blocks the next step.
+- `AC-vol-07` Given a first-time member at F3, When they tap "I understand", Then the notice version is stored and the notice is not shown again until its version changes.
+- `AC-vol-08` Given the flow is complete, When `submission.received` is stored, Then the elapsed time between `member.created` and `submission.received` is recorded server-side and the share of durations at or under `ui.fast_contribution_threshold_s` is available to metrics (S13.*); the UI states no such figure to the volunteer.
+- `AC-vol-09` Given no offers match the member's opt-ins, When F4 loads, Then `copy.flow.no_offers` is shown with a link to `SCR-vol-09` and no card is fabricated.
+- `AC-vol-10` Given `createMember` times out and is retried with the same `Idempotency-Key`, When the first request had succeeded, Then exactly one `Member` exists and the UI continues as if once.
+
+## 11.8 SCR-vol-03 Cell card (offer list and card detail)
+
+### 11.8.1 Purpose and entry [D]
+
+Show, before any prompt is copied, who asked for what under which declarations, so that the volunteer can decide to take, decline or report. The offer list shows up to `ui.offer_list_size` card summaries; the card detail is the full card of one leased cell. Entry: signed-in member with `status` = `active`.
+
+### 11.8.2 Offer list wireframe
+
+```
++--------------------------------------------------+
+| Tasks for you (3)                                |
++--------------------------------------------------+
+| +----------------------------------------------+ |
+| | Template: Translation with glossary    ~2 min | |
+| | P1 | L2 | S0 | service: any approved (M0)     | |
+| | [ Take ]                                     | |
+| +----------------------------------------------+ |
+| (two more summaries)                             |
+| Why am I seeing these?  -> Opt-ins (SCR-vol-09)  |
++--------------------------------------------------+
+```
+
+The list is filtered server-side by `R8` (opt-ins cover purpose, sensitivity, license, service, topic); the client never filters on its own to hide a mismatch and never shows a cell the server did not offer. A summary shows the card fields in abbreviated form; `Take` calls `createLease` and opens the card detail. [D]
+
+### 11.8.3 Card detail wireframe and fields
+
+```
++--------------------------------------------------+
+| < Back                      lease time left 18:40|
++--------------------------------------------------+
+| 1 Purpose      P1  Open publication               |
+| 2 License      L2  Open license with attribution  |
+|                    (anyone may reuse the result)  |
+| 3 Sensitivity  S0  Public material                |
+| 4 Service      M0  Any approved service you choose|
+| 5 Template     Translation with glossary  v3      |
+| 6 Expected     about 2 min                        |
+| 7 Category     default | topic: general           |
+| 8 Credit       +1 credit when accepted            |
++--------------------------------------------------+
+| A stranger asked for this; the text below was     |
+| reviewed by a reviewer on {date, both calendars}  |
++--------------------------------------------------+
+| v Read the full prompt (required)                 |
+|   [expanded: full prompt text, dir=auto, scroll]  |
+|   length: 1,842 characters                        |
++--------------------------------------------------+
+| [ Copy prompt ]  [ Open in service ]  (SCR-vol-04)|
+| ( Decline )                      ( Report )       |
++--------------------------------------------------+
+```
+
+Field definitions [D]:
+
+| # | Field | Source | Display rule |
+| --- | --- | --- | --- |
+| 1 | Purpose | `purpose` of the job | Code plus plain name from `copy.taxonomy.purpose.<code>` |
+| 2 | License | `license` | Code plus name; for `L1` and `L2` adds "anyone may reuse the result" (FD§5.7 failure mode 3; "downstream use uncontrolled") |
+| 3 | Sensitivity | `sensitivity` | Code plus name; only `S0` or `S1` can appear in Phases 1-2 (S0.8.1) |
+| 4 | Service | `service_requirement`, plus for `M1` the pinned service names from the registry | `M0` says the volunteer chooses and that the choice is recorded |
+| 5 | Template | `TemplateVersion` name and version | Always with the version |
+| 6 | Expected time | `cell.envelope.expected_time_s` | Rounded up to whole minutes; labeled "expected", never "takes" [H] |
+| 7 | Category | Opt-in category of the cell (default, or a non-default purpose, license, service or topic category) | Drives the expansion rule (11.8.4) |
+| 8 | Credit | 1 credit when accepted | Says "when accepted"; never "you will earn" |
+| 9 | Lease time left | `expires_at` of the lease | Visible countdown with an extend action (11.10) |
+
+**Provenance line (fixed sentence) [D].** `copy.card.provenance`: `fa` «یک ناشناس این را خواسته است؛ متن زیر در تاریخ {date} توسط یک بازبین بررسی شده است.» and `en` "A stranger asked for this; the text below was reviewed by a reviewer on {date}." `{date}` is the template version's approval date in the member's calendar, the other calendar in the detail view. The sentence is exactly one sentence, is never shortened away, and is not a promise about quality or safety. Wording `needs_human_and_legal_review`.
+
+### 11.8.4 Mandatory expansion rules [D]
+
+The server decides; the client enforces display. `createLease` returns `expand_required` as a list of reasons (empty means not required):
+
+| Reason code | Condition | Source |
+| --- | --- | --- |
+| `expand.first_use_of_template` | This member has never acknowledged this `Template` (any version) | FD§5.5; `ui.card.expand_required_first_use` = true (constant) |
+| `expand.new_template_version` | The `TemplateVersion` differs from the one last acknowledged | [A]: a new version is new text |
+| `expand.non_default_purpose` | `purpose` not in `optin.default_purposes` | FD§5.5 |
+| `expand.non_default_sensitivity` | `sensitivity` not in `optin.default_sensitivities` | FD§5.5 |
+| `expand.non_default_license` | `license` not in `optin.default_licenses` [A] | FD§5.5 |
+| `expand.non_default_service` | `service_requirement` not in `optin.default_service_requirements` [A] | FD§5.5 |
+| `expand.sensitive_topic` | Topic category with `optin.sensitive_topics_default` = false (opt-in only) | FD§5.4 R8 |
+| `expand.comprehension_check` | Selected at random with probability `ui.comprehension_check_rate` (default 0.00) [H] | FD§5.7 failure mode 6 |
+
+Pseudocode:
+
+```
+function cardGate(card, expand_required, ui_state):
+    # expanded = the prompt text was rendered and its container scrolled to the end
+    if expand_required is empty:
+        copy_enabled = true
+        open_enabled = card.adapter.prefill_allowed
+    else:
+        copy_enabled = ui_state.expanded
+        open_enabled = ui_state.expanded and card.adapter.prefill_allowed
+    if ui_state.expanded and not ui_state.ack_sent:
+        call acknowledgePrompt(lease_id, reasons_covered = expand_required)   # idempotent
+        ui_state.ack_sent = true
+    decline_enabled = true      # always
+    report_enabled  = true      # always
+```
+
+Rules:
+
+- Expanded means the full prompt text was rendered and the scroll container reached its end (or the prompt fits without scrolling). `acknowledgePrompt` records that the prompt was displayed, not that it was read; copy never says "you confirmed you read it" (FD§0.1 item 7: "can see" is enforced, "has read" is not). [D]
+- When the rule applies and the prompt is collapsed, Copy and Open are disabled with the visible reason `copy.card.expand_first`, so a keyboard or screen-reader user finds the reason next to the disabled control. Decline and Report are never disabled. [D]
+- For `expand.comprehension_check`, the card asks one multiple-choice question about the card's own fields (for example "What is the purpose of this task?"); a wrong answer re-shows the card and never penalizes the member, never reduces credit and is not stored as a per-member score; the aggregate wrong-answer rate measures banner blindness [H] (S13.*). Off by default. [D]
+- Even when no expansion is required, the expander is visible and works. [D]
+
+### 11.8.5 Decline and report [D]
+
+- **Decline** is one tap with no dialog. It calls `releaseLease`, emits `cell.declined`, returns the cell to `queued` with no penalty, no cooldown (`lease.decline_cooldown_s` = 0) and no change to trust tier or sampling (FD§5.5). The next offer list excludes that cell for this member for the rest of its current attempt [A]. An optional reason is chosen from a short fixed list (too long, not my topic, I do not want to, other) and used only as an aggregate demand-quality signal, never per member; skipping it is one tap.
+- **Report** opens `SCR-vol-16` and does not release the lease unless the member also chooses Decline. Reporting is never penalized.
+
+### 11.8.6 States
+
+| State | Condition | Behavior |
+| --- | --- | --- |
+| Empty | `listOffers` returns none | As `AC-vol-09`; copy `copy.offers.empty` |
+| Loading | `createLease` in flight after Take | The tapped summary shows "Reserving..."; double taps are ignored (one `Idempotency-Key` per tap) |
+| Error: taken | `LEASE_CONFLICT` | `copy.error.cell_taken`; the list refreshes |
+| Error: lease cap | `lease.max_active_per_member` reached | `copy.offers.lease_cap`: finish or decline an active task; the active leases are listed |
+| Offline | No network after the lease was issued | Card, countdown label and prompt stay usable; Decline is queued locally and sent when online; the countdown shows "time left (last known)" |
+| Blocked: restricted | `trust_tier` = `restricted` | Offers continue; banner `copy.account.restricted` states a temporary review with its end date (`trust.restriction_days`); no reason about gold failures is shown [D] |
+| Blocked: suspended or banned | `member_status` not `active` | No offers; banner and Appeal action (`SCR-vol-14`) |
+| Blocked: paused | `kill.template.<tpl_id>`, `kill.service.<svc_id>` or `kill.all_new_jobs` engaged | Affected cells are absent from the list; if all are, `copy.offers.paused`; a lease open at the moment of the pause is revoked server-side and the card shows `copy.card.revoked` with a one-tap return, telling the volunteer a pasted result for it can no longer be accepted (`reject.policy_changed` or `reject.lease_expired`) |
+
+**API calls.** `listOffers`, `createLease`, `getLease`, `acknowledgePrompt`, `releaseLease`, `getMember`.
+
+**Copy intent.** Neutral and factual; no urgency language, no "hurry", no social proof. The credit line never promises credit. The license line always states reuse plainly. Category names come from data (`TopicCategory`), not from code.
+
+**Accessibility.** The card is one `article` with a labeled heading; the eight fields are a description list so a screen reader reads label and value pairs; the expander is a `button` with `aria-expanded` and `aria-controls`; the prompt container is focusable with an accessible name and its text is not hidden from assistive technology by truncation; disabled Copy uses `aria-disabled` with a described-by reason and stays in the tab order.
+
+**Acceptance criteria**
+
+- `AC-vol-11` Given a member who has never acknowledged template `tpl_x`, When the card opens, Then `expand_required` contains `expand.first_use_of_template`, Copy and Open are disabled with `copy.card.expand_first`, Decline and Report are enabled, and after the prompt is expanded and scrolled to its end Copy is enabled and `acknowledgePrompt` is called once.
+- `AC-vol-12` Given a cell whose `license` is outside `optin.default_licenses` but inside the member's opt-ins, When the card opens, Then `expand.non_default_license` is present and the expansion gate applies.
+- `AC-vol-13` Given the member taps Decline, When the call completes, Then the cell is `queued`, no cooldown applies, the member's `trust_tier` and sampling are unchanged, and the next `listOffers` excludes that cell for that member for the current attempt.
+- `AC-vol-14` Given a card is rendered, When its fields are inspected, Then purpose, license, sensitivity, service, template with version, expected time, category and credit all appear before the full prompt, and the provenance sentence appears exactly once with the approval date.
+- `AC-vol-15` Given the template is paused by `kill.template.<tpl_id>` while the member holds a lease, When the member returns to the card, Then the lease is shown revoked with `copy.card.revoked`, Copy is disabled, and no submission can be created for it.
+- `AC-vol-16` Given a prompt containing Persian text, Latin words and digits, When Copy is tapped, Then the clipboard holds the exact prompt string whose hash equals the lease's `prompt_hash`, with no added marks and no digit conversion.
