@@ -285,3 +285,117 @@ insert rows; emit metric.snapshot_created per row
 ```
 
 For metrics whose population is not members (`MET-02` per job, `MET-13` incidents) the suppression test uses `n_obs < analytics.min_cohort_k` only when a split is applied, and the unsplit total is always stored. [D]
+
+## 13.6 Phase 1 metrics: definitions, queries, cadence, known biases
+
+Each metric lists: exact definition, reference query over the views of 13.4.1 (`:population`, `:day0` and the other `:name` values are bind parameters), rollup cadence, and the known biases. "Hourly" means every `metrics.rollup_interval_s` (initial configurable default 3,600 s); "daily" means once per UTC day at `metrics.daily_rollup_offset_s` after 00:00 UTC (new parameter, initial configurable default 1,800 s); "weekly" means when a pilot week closes (13.5.1); "on event" means in the transaction-after hook of the named event. [D]
+
+### 13.6.1 `MET-01` Deposit-to-withdrawal ratio (weekly)
+
+| Field | Value |
+| --- | --- |
+| Name | `hamyar_credit_deposit_withdrawal_ratio_ppm` |
+| Definition (FD§9: cells contributed / cells requested) | `contributed(w)` = accepted cells of every `cell_kind`, Commons and member jobs, decided in week `w`. `requested(w)` = sum of `n_primary_cells` of jobs whose `job.escrow_confirmed` falls in week `w`. Ratio = `contributed / requested` in ppm (values above 1,000,000 mean more supply than admitted demand). Reported with the split `contributed_commons` and `contributed_member_jobs`, and a cumulative value over weeks `1..w` |
+| Variant `B` | Same numerator; denominator `committed_cells` (primary plus verification pool) of the same jobs. It matches the admission arithmetic of S0.6.1 (committed 264 against capacity 320 in the FD§3.3 example) |
+| Cadence | Weekly; daily partial |
+| Known biases | Commons cells inflate the numerator: a member who only does Commons work raises the ratio without funding anyone's job, so the split is mandatory. The planned large-job event in weeks 3 and 4 makes the weekly series lumpy; read the cumulative value. Gold, audit and review cells count as contributed (they mint, `ISS-03`) but are not demand. Internal trial jobs count as demand by design (13.5.2). A ratio over a week with `requested = 0` is `no_data`, not infinity |
+
+```sql
+WITH c AS (
+  SELECT wk(decided_at) AS wk,
+         count(*) FILTER (WHERE is_commons)     AS commons,
+         count(*) FILTER (WHERE NOT is_commons) AS member_jobs
+  FROM mv_attempt WHERE outcome = 'accepted' AND pop_ok GROUP BY 1),
+r AS (
+  SELECT wk(escrow_confirmed_at) AS wk, sum(n_primary_cells) AS requested, sum(committed_cells) AS committed
+  FROM mv_job WHERE NOT is_commons AND escrow_confirmed_at IS NOT NULL GROUP BY 1)
+SELECT g.wk, c.commons + c.member_jobs AS contributed, r.requested, r.committed
+FROM generate_series(1, :n_weeks) g(wk) LEFT JOIN c USING (wk) LEFT JOIN r USING (wk);
+-- value = round_half_up(contributed * 1e6 / requested); variant B divides by committed
+```
+
+### 13.6.2 `MET-02` Time to complete a large job versus its quote
+
+| Field | Value |
+| --- | --- |
+| Names | `hamyar_job_completion_vs_quote_ppm` (per large job), `hamyar_job_large_within_quote_total` |
+| Large job | `n_primary_cells >= metrics.large_job_min_cells` (new parameter, initial configurable default 240, the size of the FD§3.3 reference job; validation `1..admission.max_job_cells`) |
+| Definition | Two intervals per large job. `t_submit_to_done_s = all_accepted_at - submitted_at` (FD§9 wording: submission to all cells accepted). `t_admit_to_done_s = all_accepted_at - escrow_confirmed_at`, compared with `quoted_window_s`: `completion_vs_quote_ppm = round_half_up(t_admit_to_done_s * 1e6 / quoted_window_s)`. **Within quote** means `t_admit_to_done_s <= quoted_window_s`, that is ppm <= 1,000,000 (`ISS-136`). The quote window runs from admission, so waitlist and quote time are excluded from the comparison and reported separately as `t_submit_to_admit_s` |
+| Job states | `completed` with `all_accepted_at` set: measured. `running` / `suspended`: reported as `open` with `elapsed_ratio_ppm = elapsed / quoted_window_s` (right-censored, never counted as within quote until done). `failed`, `cancelled` after admission: counted as not within quote, with `final_state` shown |
+| The first three | `first_m_large(m)`: the first `m` large jobs ordered by `escrow_confirmed_at` after `day0`; FD§9 rule (a) uses `m = 3` ("two of three trial large jobs") |
+| Cadence | On `job.all_cells_accepted`, `job.settled_partial`, `job.stop_requested`; daily for open jobs |
+| Known biases | With three jobs the result is a count from 0 to 3, not an estimate (S13.11). Founder-run trial jobs may be unrepresentative. A quote that is padded makes "within quote" easy; always show `quoted_window_s` next to the measured time and the `committed_cells / capacity` at admission. Overrun stop at `job.max_overrun_ratio` truncates the worst cases at 2.0 |
+
+```sql
+SELECT job_id, n_primary_cells, quoted_window_s,
+       extract(epoch FROM all_accepted_at - submitted_at)::bigint          AS t_submit_to_done_s,
+       extract(epoch FROM all_accepted_at - escrow_confirmed_at)::bigint   AS t_admit_to_done_s,
+       extract(epoch FROM escrow_confirmed_at - submitted_at)::bigint      AS t_submit_to_admit_s,
+       CASE WHEN all_accepted_at IS NULL THEN NULL
+            ELSE all_accepted_at <= escrow_confirmed_at + quoted_window_s * interval '1 second' END AS within_quote,
+       row_number() OVER (ORDER BY escrow_confirmed_at) AS large_rank, final_state
+FROM mv_job
+WHERE NOT is_commons AND escrow_confirmed_at >= :day0 AND n_primary_cells >= :large_job_min_cells;
+-- large_within_quote_total = count(*) FILTER (WHERE within_quote AND large_rank <= :m)
+```
+
+### 13.6.3 `MET-03` Rejection rate, overall and by template
+
+| Field | Value |
+| --- | --- |
+| Name | `hamyar_verify_rejection_rate_ppm` (dims `template_id`, `reason`, `cell_kind`) |
+| Definition | Over attempts with a submission: `rejected / submitted`. `rejected` = outcome `rejected` (automatic checks failed, audit failed, gold mismatch, forbidden content, nonce invalid). Lease expiries and declines are not submissions and are excluded; they are reported as `expiry_rate` and `decline_rate` beside it. Also the automatic-check pass rate `auto_check_passed / submitted` (FD§9 Phase 0 measure, also useful in Phase 1). `by reason` splits `rejected` by `reject.*` code |
+| Cadence | Daily |
+| Known biases | A rejection is not an error: a correct output can be rejected (`MET-04`) and a wrong one accepted (`MET-05`); the rate mixes donor quality, template strictness and verification design. Templates with fewer than `analytics.min_cohort_k` distinct donors are suppressed (`AN-06`), so in a pilot most per-template cells show only the pooled rate. Rejections raised by a changed policy (`reject.policy_changed`) are excluded from quality views and shown separately. An overturned acceptance (`cell.overturned`) moves the attempt to `rejected` retroactively; recomputation therefore supersedes earlier snapshots |
+
+```sql
+SELECT template_id, reject_reason,
+       count(*) FILTER (WHERE outcome = 'rejected')                              AS rejected,
+       count(*) FILTER (WHERE submitted_at IS NOT NULL)                          AS submitted,
+       count(*) FILTER (WHERE auto_check_passed)                                 AS auto_pass,
+       count(DISTINCT member_ref)                                                AS n_members
+FROM mv_attempt
+WHERE decided_at >= :ws AND decided_at < :we AND pop_ok
+  AND (reject_reason IS NULL OR reject_reason <> 'reject.policy_changed')
+GROUP BY GROUPING SETS ((), (template_id), (template_id, reject_reason), (reject_reason));
+```
+
+### 13.6.4 `MET-04` False-reject rate from gold cells
+
+| Field | Value |
+| --- | --- |
+| Name | `hamyar_verify_false_reject_rate_ppm` |
+| Problem (`ISS-133`) | A gold pass or fail only says whether the output matched the key. A failed gold submission can still be a correct output that the comparator or the key did not accept (for example a valid alternative translation). FD§9 asks for the false-reject rate "from gold cells"; without a ground-truth label for the failures it cannot be computed |
+| Resolution | Reviewer adjudication of gold failures. Every failed gold submission is eligible; a reviewer labels it `correct` or `incorrect` (stored as a `VerificationRecord` with `verification_method` = `human_review` and `is_adjudication` = true, a convention addition). When adjudication is sampled, each failure carries `adjudication_prob_ppm`. A donor is never penalised for a failure that adjudication labels correct (S8.*) |
+| Definition | `judged_correct` = gold passes + failures adjudicated correct (weighted by `1e6 / adjudication_prob_ppm`). `false_reject_rate = adjudicated_correct_failures_weighted / judged_correct`. The Wilson interval of 13.5.3 is applied to the unweighted counts when `adjudication_prob_ppm = 1,000,000` for all rows (the default); a weighted estimate carries `ci = NULL` and the status `insufficient_sample` unless S8.* supplies its variance formula |
+| Alarm | `verify.false_reject_alarm` (initial configurable default 0.10, pre-registered by `FND`, S0.10.6): `Alarm` when the lower interval bound exceeds it |
+| Cadence | Daily |
+| Known biases | Gold cells may be recognisable to donors, so behavior on gold cells may differ from behavior on ordinary cells [H]. The key, not the output, can be wrong. Gold coverage per template is thin: the expected number of gold executions is `g * cells` (`verify.gold_rate_g`, initial configurable default 0.05), so a half-width of 0.10 at `p = 0.5` needs about `1.96^2 * 0.25 / 0.10^2 = 96.04` gold executions, that is about `96.04 / 0.05 = 1,921` cells through that template. Adjudicators are fallible and are not blinded to the comparator's verdict unless S8.* blinds them |
+
+```sql
+SELECT count(*) FILTER (WHERE outcome = 'pass')                              AS passes,
+       count(*) FILTER (WHERE outcome = 'fail')                              AS fails,
+       count(*) FILTER (WHERE outcome = 'fail' AND adjudicated)              AS fails_adjudicated,
+       sum(1e6 / adjudication_prob_ppm) FILTER (WHERE outcome = 'fail' AND adjudicated_correct) AS fr_weighted,
+       count(*) FILTER (WHERE outcome = 'fail' AND adjudicated_correct)      AS fr_n
+FROM mv_gold WHERE template_id = COALESCE(:template_id, template_id);
+-- false_reject = fr_weighted / (passes + fr_weighted)
+```
+
+### 13.6.5 `MET-05` False-accept estimate from audits
+
+| Field | Value |
+| --- | --- |
+| Name | `hamyar_verify_false_accept_estimate_ppm` |
+| Definition | Among audited cells (second execution of a cell that passed automatic checks; third execution on mismatch, S0.9.8, `verify.third_exec_on_mismatch`), `original_judged_wrong` is true when the audit resolution (S8.*) finds the first output wrong. The estimate is the inverse-probability weighted share: `sum(1e6 / sampling_prob_ppm over original_judged_wrong) / sum(1e6 / sampling_prob_ppm over resolved audits)`. Weights are needed because sampling is adaptive: tiers multiply `s` (`trust.audit_multiplier.*`) and `verify.adapt.*` steps it (`ISS-134`; `Audit` and `GoldCell` insertion must store the effective probability, a convention addition) |
+| Alarm | `verify.false_accept_alarm` (initial configurable default 0.05, `FND`): `Alarm` when the lower Wilson bound of the unweighted share exceeds it |
+| Cadence | Daily |
+| Known biases | It is a **lower bound**: when the audit executor makes the same mistake as the original (same service, same model, same ambiguity) the two agree and the error is not seen [H]. Audited cells are only those that passed automatic checks. Cells that are never audited have no estimate; no claim is made about them. With zero observed false accepts in `n` resolved audits the 95 percent upper bound is about `3 / n` (rule of three; for example `3 / 30 = 0.10`), so a small audit count cannot show that the rate is below 0.05 |
+
+```sql
+SELECT count(*) FILTER (WHERE original_judged_wrong IS NOT NULL)                       AS resolved,
+       count(*) FILTER (WHERE original_judged_wrong)                                   AS wrong,
+       sum(1e6 / sampling_prob_ppm) FILTER (WHERE original_judged_wrong)               AS wrong_w,
+       sum(1e6 / sampling_prob_ppm) FILTER (WHERE original_judged_wrong IS NOT NULL)   AS resolved_w
+FROM mv_audit WHERE template_id = COALESCE(:template_id, template_id);
+```
