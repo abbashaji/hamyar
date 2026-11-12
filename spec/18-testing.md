@@ -433,3 +433,68 @@ Persian is the default locale (`i18n.default_locale` = `fa`). Every screen of `S
 | `T-rtl-12` | Clipboard fidelity | The copy button puts exactly the rendered prompt (bytes, including ZWNJ, bidirectional marks and line breaks) on the clipboard; paste-back normalizes line endings only; a prompt that exceeds `adapter.max_url_chars` is never truncated into a link, and falls back to copy-only (`adapter.copy_only`) | `BM8` |
 | `T-rtl-13` | Text expansion | Persian strings 40 percent longer than their English source, very long unbroken words and four-digit Persian numerals do not clip, overlap or force horizontal scrolling at 360 px | `BM8` |
 | `T-rtl-14` | Time display | A stored UTC instant displays in the device zone or the chosen IANA zone, in both calendars, and the cap or reset time next to a limit shows its local equivalent (`S0.6.2`); a zone change shows the same instant | `BM8` |
+
+## 18.10 Load tests
+
+### 18.10.1 Targets (derived from configuration, not from observation) [D][A]
+
+Load targets are formulas over the `test.load.*` keys of `S18.2.3`. They state a capacity the system must have with headroom, not a forecast of real use: Phase 1 has 30 to 50 members (FD§9 [P]) and the average load is tiny. The targets are `initial configurable default` values to be replaced by `TEC` and `OPS` measurements. [H]
+
+| Quantity | Formula | Value at the defaults |
+| --- | --- | --- |
+| Cells per day | `members x active_fraction x cells_per_active_member_day` = 5,000 x 0.20 x 10 | 10,000 |
+| Average cell rate | 10,000 / 86,400 | 0.1157 cells per second |
+| Peak cell rate with headroom | `ceil(average x burst_factor x headroom_factor)` = ceil(0.1157 x 20 x 10) | 24 cells per second |
+| Peak API rate | peak cell rate x `api_calls_per_cell` = 24 x 6 | 144 requests per second |
+| Public read spike | `public_spike_factor` x the steady API rate for `spike_duration_s` | 100 x, 60 s |
+
+Additional load-test keys (same status as `S18.2.3`): `test.load.public_spike_factor` = 100, `test.load.spike_duration_s` = 60, `test.load.p95_lease_ms` = 300, `test.load.p95_submit_ms` = 500, `test.load.p99_ms` = 1,500, `test.load.max_5xx_rate` = 0.001, `test.load.soak_hours` = 24, `test.load.lag_factor` = 2 (a background job may lag at most this multiple of its configured interval). All are `initial configurable default` and arbitrary.
+
+### 18.10.2 Rules [D]
+
+- Load tests run only against an isolated, production-like environment with synthetic data and a database tagged `env=load`; the tool refuses to start otherwise (the same guard as `T-sim-20`).
+- A load test passes only if both the latency targets *and* the correctness checks hold: after the run the full ledger recompute (`T-prop-01`..`T-prop-05`, `T-prop-10`) has zero violations, no cell has two active leases, no cell is paid twice, every settled escrow is 0, and every outbox row was delivered.
+- Mixed workloads follow the member behavior of the model in `S18.12.6` for the honest classes only; adversarial traffic is the `T-load-09` scenario.
+
+### 18.10.3 Catalogue
+
+| Id | Scenario | Pass criteria | BM |
+| --- | --- | --- | --- |
+| `T-load-01` | Steady mix at the peak API rate: lease, card read, submit, status, balance, feedback | p95 lease and submit within `test.load.p95_lease_ms` and `test.load.p95_submit_ms`; p99 within `test.load.p99_ms`; 5xx rate within `test.load.max_5xx_rate`; correctness checks hold | `BM9` |
+| `T-load-02` | Landing spike: public and anonymous-bootstrap endpoints at the spike factor | Public responses served with `ETag` and `max-age`; origin load stays flat after the first refresh (`public.counter_refresh_s`); identity creation stays inside its rate limits and member traffic stays inside its latency targets | `BM9` |
+| `T-load-03` | Admission and escrow storm: many members request quotes and confirm escrow together, with the run-on-the-bank shape of `SIM-05` | Over-commit property holds (`T-prop-17`); one `escrow_hold` per job; waitlist ordering preserved; quotes stay deterministic | `BM9` |
+| `T-load-04` | Hot accounts: every mint touches `issuance`, every levy and expiry touches the Reserve | Throughput at the peak cell rate with the per-ledger sequence serializing writers; if latency targets fail, an issue against `S6.*` is raised, not a test change | `BM9` |
+| `T-load-05` | Background jobs under load: lease reaper, escrow settlement, credit expiry sweep, audit scheduling, metric rollup, invariant checks | Each job's lag stays within `test.load.lag_factor` x its interval (`lease.reap_interval_s`, `credit.expiry_sweep_interval_s`, `metrics.rollup_interval_s`, `ledger.invariant_check_interval_s`); jobs are idempotent when run twice; foreground latency stays within target while they run | `BM9` |
+| `T-load-06` | Cacheability of public pages | Counter, public ledger and parameter pages are served from cache within their refresh parameters and trail the ledger by no more than `public.ledger_lag_s` | `BM9` |
+| `T-load-07` | Soak | `test.load.soak_hours` at 50 percent of the peak rate: no memory or connection growth beyond a stated bound, no clock-dependent drift, hash chain still valid, expiry sweeps ran | `BM9` |
+| `T-load-08` | Failover and restore under load | A database restart and a restore to a point in time during load: no acknowledged write is lost, no double effect after retries (idempotency), invariants hold after recovery, `ledger.invariant_violated` does not fire | `BM9` |
+| `T-load-09` | Abusive neighbour | One member or one IP hash at 100 times the rate limit: it receives `RATE_LIMITED`; other members' p95 stays within target; limits are keyed per member and per IP hash | `BM9` |
+
+## 18.11 End-to-end tests
+
+Every journey is run by a scripted client against a deployed build, using the stub service for the "AI" step. The script plays a human pressing Send; the platform never contacts the stub or any service. Each journey ends with the invariant checks of `S18.4.2`. [D]
+
+| Id | Journey | Key assertions | BM |
+| --- | --- | --- | --- |
+| `T-e2e-01` | FD§3.3 end to end: requester with 300 credits requests a 240-cell job; donors execute 264 cells including 24 verification cells; the job settles | The table of `S18.3.1` holds as observed through the API and the public ledger; the requester's balance is 24 credits; the Reserve gained 12; the escrow is 0; the manifest lists every cell | `BM7` |
+| `T-e2e-02` | First contribution: a new visitor opens the landing page, creates an identity, sees a card, expands the prompt if required, uses copy or open, pastes back, sees the result | The path has no sign-up, no install and no e-mail; the number of screens and taps is within the budget recorded in `S11.*`; the stub timing is recorded but no claim is made that real people finish in under `ui.fast_contribution_threshold_s` [H], `ISS-187` | `BM8` |
+| `T-e2e-03` | Commons mint and cap: donors complete Commons cells until `mint.monthly_cap_credits` is reached in a UTC month | The cap stops minting; further accepted cells are handled as `S6.*` specifies; the cap resets at the UTC month boundary; `inflation.mint_utilization_alarm` fires | `BM6` |
+| `T-e2e-04` | Cancel mid-job: a job is cancelled with some cells accepted, some leased, some queued | Unstarted cells refunded, in-flight cells drained, accepted cells paid, escrow 0, state `Job.cancelled` | `BM7` |
+| `T-e2e-05` | Service revoked in flight | New jobs stop, in-flight cells handled as `S7.*` says, no credit moves for voided cells, requesters see the reason | `BM7` |
+| `T-e2e-06` | Launch gate: a fresh build has `launch.members_may_join`, `launch.member_jobs_enabled` and `launch.minting_enabled` false; two admins sign off `G0` and `G1` with evidence; an approved service exists; a switch is flipped | Before sign-off every attempt to flip is refused with the gate rule; after sign-off the flip succeeds and is an `AdminAction`; re-opening a gate item turns the switch's guard red again; the build's defaults are false again after a redeploy to a new environment | `BM2` |
+| `T-e2e-07` | Identity lifecycle: create, add optional e-mail, link a second device, rotate the key, lose the device and recover with the recovery key | `AC-ident-01`..`AC-ident-05`; the recovery cooldown applies; old session tokens stop working | `BM4` |
+| `T-e2e-08` | Appeal overturns a rejection: a rejected cell is appealed within `appeal.window_days`; a second reviewer overturns | `Cell.overturned` or a re-accept as `S9.*` says, a `reversal` with two approvers where credit moved, a `rework` cell, notification of the member | `BM6` |
+| `T-e2e-09` | Expiry, Reserve and retirement: lots expire (accelerated arm), credit moves to the Reserve, the Reserve exceeds its ceiling and the excess is retired | Public ledger shows each step; totals conserved; every retirement logged | `BM7` |
+| `T-e2e-10` | Template review: an author submits a template; one reviewer approves; the second approves; it is used by a Commons job | The second-reviewer rule; the version is immutable after approval; an edit makes a new version | `BM5` |
+| `T-e2e-11` | Kill switches: engage each of `kill.all_minting`, `kill.all_new_jobs`, `kill.template.<id>`, `kill.service.<id>`, `kill.member.<id>` and release it | Effects are immediate and exact (`T-adv-13`); each engage and release is logged with a reason; a release needs a second operator | `BM2`, `BM6` |
+| `T-e2e-12` | Public pages scan: crawl every `/v1/public/*` route and public page | No `mem_`, `dev_`, e-mail, IP, location or free-text member content appears; counters count verified cells only; share cards carry no personal data or location (`public.location_display` = `never`) | `BM8` |
+| `T-e2e-13` | Growth flags: with every `ff.growth.*` flag off nothing changes; turn one on for an experiment | Assignments are random per `experiment.assignment_seed_version`, logged and reproducible; the flag defaults to off in a new environment | `BM8` |
+| `T-e2e-14` | Measurement coverage: run `T-e2e-01`..`T-e2e-13` and then query each Phase 1 measure of `S13.*` | Every measure of FD§9 has a query that returns a defined value (or a defined "insufficient data" result below `analytics.min_cohort_k`): deposit-to-withdrawal ratio, time to complete a large job against its quote, rejection, false-reject and false-accept rates, v and η, week-2 and week-4 return, time to first verified cell, share of contributions under 60 seconds, capacity concentration, decline and opt-out rates, incidents | `BM9` |
+| `T-e2e-15` | Drills: backup and restore into a clean environment; rotate each secret named in `S10.*` | After restore the hash chain verifies and the invariants hold; after rotation old secrets stop working and `member.key_rotated`-style events are logged; the drill is recorded as evidence for the pre-build checklist (`S19.*`) | `BM9` |
+| `T-e2e-16` | Requester wizard: template choice, upload and screening, declarations, policy result, quote, escrow, progress map, download with manifest, rating | Every wizard state of `S11.*`; a rejected job shows `policy.<rule>.<slug>` reasons in the requester's language; the download's manifest hashes match | `BM8` |
+| `T-e2e-17` | Volunteer settings: opt-ins, history, balance and expiry view, team creation, share card, invite, recovery-key handling | Opt-ins change what is offered (`T-policy-08`); the balance view lists every lot with its expiry date; teams and sharing are opt-in; the recovery key is shown once with the warning | `BM8` |
+| `T-e2e-18` | Report, takedown, ban and appeal | A report reaches the triage queue; a template is auto-paused at `template.autopause_report_count`; a ban needs `appeal.ban_min_reviewers`; the member can appeal; every step is an `AdminAction` | `BM8` |
+| `T-e2e-19` | Data inventory and compelled-disclosure bundle | A script lists every table and column, checks each against the classification and retention class of `S0.7` and `S10.*`, and builds the bundle that would exist for a given member; the bundle contains only what the retention rules keep, and no raw IP, clear e-mail, provider credential, provider session or chat text exists anywhere | `BM4`, `BM9` |
+| `T-e2e-20` | Log scan | After all journeys, every log line, metric label and trace attribute is scanned: no personal data, no raw IP, no token, no submitted text; ids and hashes only | `BM9` |
+| `T-e2e-21` | Human-review channel (experimental arm `ff.channel.human_review`) | A review cell is executed by a member with no provider account; review cells have their own gold cells; accepted review cells mint like any Commons cell (`ISS-03`) | `BM6` |
+| `T-e2e-22` | Service adapter | An entry with `adapter.supports_prefill` shows an open-in-service button built from `adapter.prefill_url_template` and never exceeds `adapter.max_url_chars`; an entry with `adapter.copy_only` shows copy only; no provider name or URL pattern exists in source code (a grep test over the repository); changing the registry changes the buttons with no deploy | `BM8` |
