@@ -408,3 +408,104 @@ Storage and privacy [D]:
 - If storage is unavailable (private browsing) or full, drafts live in memory only, the field keeps its text, and a status message says that reloading will lose it. Nothing is silently dropped.
 - Two tabs: the draft is keyed by lease, the last write wins, and a `storage` event refreshes the other tab.
 - A service worker MAY cache the application shell and the notices for offline reading. It never caches API responses beyond the cell card of an active lease, which follows the same time-to-live. [A]
+
+## 11.50 Copy system
+
+**Storage and delivery** [D]. Copy is a set of versioned resource files shipped with the front-end build, one record per key, not rows in the database and not editable by the parameter editor: legal text changes only by a reviewed release. The build also emits a `copy_manifest` (key, version, hash, review status) that the API reads. Keys follow S0.5: `copy.<area>.<key>`, with an optional last segment (`.title`, `.body`, `.chip`, `.ack`).
+
+```
+copy_entry:
+  key:            copy.<area>.<key>[.<part>]
+  fa:             text                       # Persian first
+  en:             text | {one, other}        # plural forms only where a count is shown
+  promise:        bool                       # true when the key holds a promise-like sentence
+  placeholders:   [ {name, type} ]           # identical set in fa and en
+  review_status:  copy_review_status
+  reviewed:       {fa_by, en_by, legal_ref, at}   # opaque admin ids and a memo reference
+  version:        int                        # +1 on every text change
+  hash:           sha256:<hex> over RFC 8785 canonical JSON of {key, fa, en, version}   # S0.6
+```
+
+**Review status** `copy_review_status` [D][A] (the value `needs_human_and_legal_review` is the marker of S0.5; the others are added here, `ISS-118`):
+
+| Value | Meaning | Allowed next values |
+| --- | --- | --- |
+| `needs_human_and_legal_review` | Initial value of every row; any text change returns here. Shown to no member of a launched system. | `human_reviewed` |
+| `human_reviewed` | A native-speaking reviewer for each language recorded that the text passes the checklist of S11.53 | `legal_reviewed`, `needs_human_and_legal_review` |
+| `legal_reviewed` | Counsel's memo is referenced in `reviewed.legal_ref` [V] | `approved`, `needs_human_and_legal_review` |
+| `approved` | Two distinct admins signed off (the rule of `launch.min_signoffs`, S14.*) | `withdrawn`, `needs_human_and_legal_review` |
+| `withdrawn` | Taken out of use; the key is not deleted | none |
+
+Changing the text of either language resets both to `needs_human_and_legal_review`, so the two languages never drift apart under an old approval. [D]
+
+**Promise-like sentence** [D]: any sentence in which Hamyar, a reviewer or the operator says what it does, does not do, or will do, or what will happen in the future (including *we do not collect*). Every such sentence says *declared* (`اعلام‌شده` in Persian) in the sentence itself, so that the reader sees that it is a stated policy and not a guarantee (FD Principle 11). A key containing one has `promise: true`.
+
+**Writing rules for both languages** [D]
+
+- Short sentences, one idea each, the actor named, active voice, second person (`شما` in Persian, never the informal form).
+- No legal conclusion (what a law or a terms-of-service clause means) and no statement about a provider's terms; such a dependence is a registry value rendered as a placeholder or stays [V].
+- No provider name, no law name, no URL inside a notice.
+- No absolute about something the project cannot show; *never* appears only inside a sentence that also says declared.
+- No tip for getting around a limit; no politics; no humor.
+- Any number that comes from a parameter is a placeholder (registry in S11.52). Literal digits do not appear in Persian copy.
+- Paragraph break `¶`, list item `•` and placeholder `{name}` are the only markup. No HTML, no Markdown.
+- Persian orthography and terminology follow S11.53.
+
+**Copy checks in CI** (they fail the build; AC-i18n-31, AC-i18n-32)
+
+| Check | Rule |
+| --- | --- |
+| Complete | Every key has `fa`, `en`, `promise`, a status and a placeholder list; both languages have the same placeholder set |
+| Declared | A key with `promise: true` contains `اعلام‌شده` (also in its ezafe forms) in `fa` and `declared` in `en` |
+| No guarantee claims | The words *guarantee*, *guaranteed*, *تضمین* and *ضمانت* occur only in negated or contrasting sentences from an allowlist kept with the key (for example *not a guarantee*, *تضمین نیست*) |
+| Persian characters | No Arabic yeh or kaf (U+064A, U+0643); no Arabic-Indic digits; no ASCII digits and no Latin punctuation `, ; ?` outside placeholders and the allowlisted tokens (for example `IP`) |
+| ZWNJ | No *می* or *نمی* followed by a space and a letter; no space before the plural suffix *ها*; both are written with ZWNJ |
+| Direction controls | No bidi controls other than U+200C and U+200D in copy |
+| No markup | No `<`, no URL, no Markdown |
+| Status | A key whose text changed without a version bump or a status reset fails |
+
+## 11.51 The notices: keyed copy table
+
+The table lists the copy of every policy, privacy and risk notice required by prompt scope F. Columns: `key`; `FA` (Persian first); `EN`; `review status`. The machine value of the review status of every row is `needs_human_and_legal_review` (S11.50), written in the last column as *needs human and legal review*. All rows have `promise: true` unless the text contains no promise-like sentence. `¶` is a paragraph break and `•` a list item. [D]
+
+No text below has been checked by a lawyer, a safety advisor or a native-speaking reviewer. The wording of the contributor waiver and of every statement about law, terms or safety is a draft for counsel and for a qualified safety advisor [V: counsel in the operator's jurisdiction, FD§8.3 G0; a person qualified to advise on safety, FD§8.3 G1].
+
+### 11.51.A Account risk
+
+| key | FA | EN | review status |
+| --- | --- | --- | --- |
+| `copy.risk.account_notice.title` | خطر برای حساب‌های خودتان | Risk to your own accounts | needs human and legal review |
+| `copy.risk.account_notice.body` | همیار از شما می‌خواهد با حساب شخصی خودتان در یک سرویس هوش مصنوعی، کارهای کوچکی به نام «سلول کار» را برای دیگران انجام دهید. هر سرویس شرایط استفادهٔ خودش را دارد. ممکن است آن شرایط چنین کاری را مجاز ندانند، بدون اطلاع قبلی تغییر کنند، یا در محل زندگی شما به شکل دیگری اعمال شوند. اگر سرویسی تشخیص دهد که شرایط آن را نقض کرده‌اید، ممکن است حساب شما را محدود یا مسدود کند. همیار نمی‌تواند جلوی این اتفاق را بگیرد، از طرف شما پیگیری نمی‌کند و هیچ سرویسی را کنترل نمی‌کند. ¶ • اعلام‌شده: هر سرویس تنها وقتی در همیار عرضه می‌شود که یک بازبین شرایط آن را ثبت کرده و نسخهٔ تاریخ‌دارش را ذخیره کرده باشد. این بازبینی اعلام‌شده است و تضمین نمی‌کند که سرویس کار شما را بپذیرد. • اعلام‌شده: دکمهٔ ارسال را همیشه خودتان می‌زنید. همیار هرگز گذرواژه‌تان را نمی‌خواهد، به حساب شما وصل نمی‌شود و صفحهٔ گفتگوی شما را نمی‌خواند. • اعلام‌شده: می‌توانید از هر سلول کار انصراف دهید و هر زمان که خواستید کنار بگذارید، بدون هیچ جریمه‌ای. • پیش از استفاده از هر سرویس، شرایط آن را خودتان بخوانید. اگر مطمئن نیستید، از آن استفاده نکنید. | Hamyar asks you to use your own account on a third-party AI service to do small tasks, called cells, for other people. That service has its own terms. Those terms may not allow this, may change without notice, or may be applied differently where you live. If a service decides that you broke its terms, it may limit or suspend your account. Hamyar cannot prevent that, cannot follow up with the service for you and does not control any service. ¶ • Declared: a service is offered in Hamyar only when a reviewer has recorded its terms and saved a dated copy. This is a declared review, not a guarantee that the service will accept what you do. • Declared: you press Send yourself every time. Hamyar never asks for your password, never connects to your account and never reads your chat page. • Declared: you may decline any cell and stop at any time, without penalty. • Read the terms of a service yourself before you use it. If you are not sure, do not use it. | needs human and legal review |
+| `copy.risk.service_review_line` | شرایط این سرویس آخرین بار در {review_date} بازبینی شده است. این بازبینی اعلام‌شده است و تضمین نیست. | The terms of this service were last reviewed on {review_date}. This is a declared review, not a guarantee. | needs human and legal review |
+
+### 11.51.B Privacy
+
+| key | FA | EN | review status |
+| --- | --- | --- | --- |
+| `copy.privacy.pseudonymity_notice.title` | همیار چه چیزی را جمع‌آوری می‌کند و چه چیزی را نه | What Hamyar collects and what it does not | needs human and legal review |
+| `copy.privacy.pseudonymity_notice.body_collected` | اعلام‌شده: همیار یک کلید عمومی را که دستگاه شما می‌سازد ذخیره می‌کند تا بدون نام، شما را بشناسد. ¶ • اعلام‌شده: سوابق اعتبار شما، نتیجه‌هایی که ارسال می‌کنید، انتخاب‌های شما و گزارش‌ها یا درخواست‌های بازبینی‌ای که ثبت می‌کنید ذخیره می‌شود. • اعلام‌شده: برای جلوگیری از سوءاستفاده فقط هش کلیددار شناسه‌های دستگاه و شبکه به‌مدت {ip_hash_ttl_days} روز نگهداری می‌شود و نشانی IP خام شما هرگز ذخیره نمی‌شود. • اعلام‌شده: متن هر کار و نتیجه‌های آن {job_payload_days} روز پس از پایان کار حذف می‌شود؛ هش‌ها و سوابق فاقد اطلاعات شخصی باقی می‌مانند. • ثبت نشانی ایمیل اختیاری است. اعلام‌شده: همیار فقط در صورتی ایمیل شما را نگه می‌دارد که خودتان آن را اضافه کنید. | Declared: Hamyar stores a public key that your device creates, so that it can recognise you without a name. ¶ • Declared: it stores your credit records, the results you submit, your opt-in choices, and any reports or appeals you file. • Declared: to limit abuse it stores only keyed hashes of device and network identifiers, for {ip_hash_ttl_days} day(s), and never your raw network address. • Declared: the text of a job and of its results is deleted {job_payload_days} days after the job ends; hashes and records without personal data remain. • An e-mail address is optional. Declared: Hamyar stores one only if you choose to add it. | needs human and legal review |
+| `copy.privacy.pseudonymity_notice.body_not_collected` | اعلام‌شده: همیار نام واقعی، شمارهٔ تلفن یا هیچ مدرک هویتی از شما نمی‌خواهد. ¶ • اعلام‌شده: گذرواژه یا نشست ورود شما در هیچ سرویسی را ذخیره نمی‌کند و متن صفحهٔ گفتگوی شما را نگه نمی‌دارد. • اعلام‌شده: محل اعضا را نمایش نمی‌دهد و از ردیاب یا کوکی شخص ثالث استفاده نمی‌کند. • اعلام‌شده: درخواست‌دهندگان هرگز نمی‌بینند چه کسی سلول کار را انجام داده است. | Declared: Hamyar does not ask for your real name, phone number or any identity document. ¶ • Declared: it does not store your password or session for any service, and it does not keep the text of your chat page. • Declared: it does not show where members are, and it does not use third-party trackers or cookies. • Declared: requesters never see who completed a cell. | needs human and legal review |
+| `copy.privacy.pseudonymity_notice.body_limits` | آنچه همیار نمی‌تواند وعده دهد: ¶ • همیار «با نام مستعار» است، نه «ناشناس». ما وعده نمی‌دهیم که هیچ‌کس نتواند شما را شناسایی کند. • ارائه‌دهندهٔ میزبانی همیار و شبکه‌هایی که میان دستگاه شما و همیار قرار دارند ممکن است ببینند که دستگاه شما به همیار وصل شده است، هرچند طبق سیاست اعلام‌شدهٔ ما، نشانی خام شبکه ذخیره نمی‌شود. • اگر کسی با اختیار قانونی یا دسترسی فیزیکی داده‌ای بخواهد یا دستگاهی را بردارد، نتیجه به قانون و به چیزی که وجود دارد بستگی دارد. اعلام‌شده: ما تا جای ممکن کم نگه می‌داریم تا چیز کمتری برای تحویل وجود داشته باشد. • همیار نمی‌تواند اطلاعاتی را که خودتان بیرون از همیار منتشر می‌کنید کنترل کند. | What Hamyar cannot promise: ¶ • Hamyar is pseudonymous, not anonymous. We do not promise that nobody can identify you. • The provider that hosts Hamyar, and the networks between your device and Hamyar, may be able to see that your device connected, even though our declared policy is not to store raw network addresses. • If someone with legal power or physical access asks for data or takes a device, the outcome depends on the law and on what exists to be taken. Declared: we keep as little as we can, so that there is less to hand over. • Hamyar cannot control what other people do with information that you share outside Hamyar. | needs human and legal review |
+
+### 11.51.C Safety of members in Iran
+
+The notice is shown to every new member and does not depend on any guess about location: Hamyar never infers where a member is (S0.6, S10.*). It is also on the public notices page. [D]
+
+| key | FA | EN | review status |
+| --- | --- | --- | --- |
+| `copy.safety.iran_notice.title` | یادداشتی ساده دربارهٔ ایمنی شخصی | A plain note on personal safety | needs human and legal review |
+| `copy.safety.iran_notice.body` | اگر در ایران هستید، یا در جایی که مشارکت می‌تواند خطرناک باشد، پیش از عضویت این یادداشت را بخوانید. اعلام‌شده: همیار تلاش نمی‌کند بفهمد شما کجا هستید و این یادداشت را به همهٔ اعضای جدید نشان می‌دهد. ¶ مشارکت ممکن است برای شما خطر شخصی داشته باشد؛ این به محل زندگی شما، قانون همان‌جا و شرایط سرویس‌هایی که استفاده می‌کنید بستگی دارد. همیار نمی‌تواند این را به‌جای شما ارزیابی کند و مشاورهٔ حقوقی نمی‌دهد. ¶ • همیار «با نام مستعار» است، نه «ناشناس». اعلام‌شده: ما تا جای ممکن کمترین اطلاعات را جمع می‌کنیم. وعده نمی‌دهیم که هیچ‌کس نتواند شما را شناسایی کند. • هر چیزی که در یک کار، گزارش یا درخواست بازبینی می‌نویسید ممکن است کسانی آن را بخوانند که ما کنترلی بر آن‌ها نداریم. نام، راه‌های تماس یا هر چیزی را که بتواند خودتان یا دیگری را شناسایی کند ننویسید. • هر چیزی که روی دستگاه شما ذخیره شود، مثل پیش‌نویس‌ها، برای هرکس که بتواند از دستگاه استفاده کند یا آن را بررسی کند قابل دیدن است. هر زمان می‌توانید آن را پاک کنید. • همیار از شما نمی‌خواهد و به شما توصیه نمی‌کند که محدودیتی را دور بزنید یا شرایط استفادهٔ سرویسی را نقض کنید. اگر سرویسی برای شما در دسترس یا مجاز نیست، از آن استفاده نکنید. • اعلام‌شده: همیار محل اعضا را نمایش نمی‌دهد و مدرک هویتی نمی‌خواهد. • می‌توانید از هر سلول کار انصراف دهید، کنار بگذارید یا حساب خود را ببندید. اگر احساس امنیت نمی‌کنید، کنار گذاشتن انتخابی معقول است. | If you are in Iran, or anywhere else where taking part may be risky, please read this note before you join. Declared: Hamyar does not try to work out where you are, and it shows this note to every new member. ¶ Taking part may carry personal risk, depending on where you are, what the law says there, and what the services you use allow. Hamyar cannot judge this for you and gives no legal advice. ¶ • Hamyar is pseudonymous, not anonymous. Declared: we collect as little as we can. We do not promise that nobody can identify you. • Anything you write in a job, a report or an appeal may be read by people we do not control. Do not include your name, your contacts or anything that could identify you or another person. • Anything saved on your device, such as drafts, can be seen by anyone who can use or inspect that device. You can clear it at any time. • Hamyar does not ask or advise you to get around any restriction or to break any service's terms. If a service is not available or not allowed for you, do not use it. • Declared: Hamyar does not show where members are, and it does not require an identity document. • You may decline any cell, stop, or close your account at any time. If you do not feel safe, stopping is a reasonable choice. | needs human and legal review |
+
+### 11.51.D Open license, declared not guaranteed, credit is not money
+
+| key | FA | EN | review status |
+| --- | --- | --- | --- |
+| `copy.license.downstream_uncontrolled.title` | مجوز باز: استفادهٔ بعدی از نتیجه‌ها خارج از کنترل است | Open license: downstream use is uncontrolled | needs human and legal review |
+| `copy.license.downstream_uncontrolled.body` | نتیجهٔ کارهایی که با مجوز باز منتشر می‌شوند را هر کسی می‌تواند کپی، بازاستفاده و اقتباس کند، برای هر استفاده‌ای که آن مجوز اجازه می‌دهد؛ حتی استفاده‌هایی که همیار اعلام یا تأیید نکرده است. ¶ • اعلام‌شده: درخواست‌دهنده هدف و مجوز را اعلام می‌کند. هدف اعلام‌شده، درخواست‌دهنده و خود همیار را مقید می‌کند، نه کسانی را که بعدها نتیجهٔ منتشرشده را می‌خوانند. • اعلام‌شده: همیار برای هیچ نتیجه‌ای ادعای مالکیت ندارد. با مشارکت، ادعاهای شخصی خودتان را همان‌طور که در شرایط مشارکت‌کنندگان آمده است کنار می‌گذارید. • همیار نمی‌تواند ببیند یا جلوگیری کند که پس از انتشار با متن منتشرشده چه می‌شود. | Results of jobs published under an open license can be copied, reused and adapted by anyone, for any use that the license allows, including uses that Hamyar did not declare or approve. ¶ • Declared: a requester declares a purpose and a license. The declared purpose binds the requester and Hamyar itself, not the people who later read an open result. • Declared: Hamyar claims no ownership of any result. By taking part you give up your own claims, as described in the contributor terms. • Hamyar cannot see or stop what happens to openly published text after it is published. | needs human and legal review |
+| `copy.license.downstream_uncontrolled.chip` | مجوز باز: هر کسی می‌تواند از آن استفاده کند | Open license: anyone may reuse this | needs human and legal review |
+| `copy.declared.not_guaranteed.title` | اعلام‌شده، نه تضمین‌شده | Declared, not guaranteed | needs human and legal review |
+| `copy.declared.not_guaranteed.body` | بسیاری از چیزها در همیار را افراد اعلام می‌کنند. درخواست‌دهنده هدف، مجوز و حساسیت کار را اعلام می‌کند. مشارکت‌کننده گزارش می‌دهد که نتیجه را کدام سرویس و مدل ساخته است. بازبین در یک تاریخ اعلام می‌کند که یک قالب یا سرویس بازبینی شده است. ¶ • اعلام‌شده: همیار این اعلام‌ها را تا جایی که از نظر فنی ممکن است بررسی می‌کند. با این حال، اعلام، تضمین نیست و همیار نمی‌تواند آنچه را که بیرون از همیار رخ می‌دهد ببیند. • اعلام‌شده: زمان‌هایی که برای تکمیل کار اعلام می‌شود، بازه‌هایی بر پایهٔ ظرفیت اندازه‌گیری‌شده است و وعدهٔ تکمیل فوری یا قطعی نیست. • اعلام‌شده: عددهای منتشرشده همان‌هایی است که در تاریخِ نمایش‌داده‌شده اندازه‌گیری شده‌اند. ممکن است تغییر کنند و تغییرشان از پیش در سابقهٔ تغییرات اعلام می‌شود. | Many things in Hamyar are declared by people. A requester declares the purpose, license and sensitivity of a job. A volunteer reports which service and model produced a result. A reviewer declares, on a date, that a template or a service has been reviewed. ¶ • Declared: Hamyar checks these declarations as far as is technically possible. A declaration is still not a guarantee, and Hamyar cannot observe what happens outside Hamyar. • Declared: quoted times are windows based on measured capacity. They are not a promise of instant or certain completion. • Declared: published numbers are those measured on the date shown. They can change, with advance notice in the change log. | needs human and legal review |
+| `copy.declared.window_quote` | بازهٔ اعلام‌شده: حدود {window}. این بازه بر پایهٔ ظرفیت اندازه‌گیری‌شده است و تضمین نیست. | Declared window: about {window}. This is based on measured capacity and is not a guarantee. | needs human and legal review |
+| `copy.declared.reported_service` | سرویس و مدل را مشارکت‌کننده گزارش کرده است و راستی‌آزمایی نشده است. | The service and model are reported by the volunteer and have not been verified. | needs human and legal review |
+| `copy.credit.not_money.title` | اعتبار، پول نیست | Credit is not money | needs human and legal review |
+| `copy.credit.not_money.body` | اعتبار در همیار واحد حسابِ کارهایی است که بررسی و پذیرفته شده‌اند. اعتبار پول نیست، دارایی نیست و حقِ وعده‌داده‌شده‌ای هم به شمار نمی‌رود. ¶ • اعلام‌شده: اعتبار فقط با انجام کار جابه‌جا می‌شود. نه خرید و فروش می‌شود، نه مستقیم برای عضو دیگری فرستاده می‌شود و نه با پول مبادله می‌شود. • اعلام‌شده: اعتبار تاریخ انقضا دارد و هر موجودی تاریخ‌های انقضای خود را نشان می‌دهد. اعتبارِ حاصل از کار {credit_lifetime_days} روز ماندگار است، مگر آنکه قوانین با اطلاع قبلی در سابقهٔ تغییرات عوض شوند. • اعلام‌شده: قیمت هر کار پیش از تأیید درخواست‌دهنده نشان داده می‌شود و کار فقط وقتی پذیرفته می‌شود که ظرفیت اعلام‌شده اجازه بدهد. • همیار دربارهٔ اینکه قانون با اعتبار چگونه رفتار می‌کند هیچ ادعایی ندارد. | Credit in Hamyar is a unit of account for work that has been checked and accepted. It is not money, not property and not a promised entitlement. ¶ • Declared: credit moves only through completed work. It is not bought or sold, it is not sent directly to another member, and it is not exchanged for money. • Declared: credit expires, and each balance shows its expiry dates. Credit earned by work lasts {credit_lifetime_days} days, unless the rules change with advance notice in the change log. • Declared: the price of a job is shown before the requester confirms, and a job is accepted only when the declared capacity allows it. • Hamyar makes no statement about how any law treats credit. | needs human and legal review |
