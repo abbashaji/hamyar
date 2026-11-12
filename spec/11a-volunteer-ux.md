@@ -773,3 +773,274 @@ The volunteer also has "flagged" in the sense of their own report on a card (`SC
 - `AC-vol-32` Given `Submission.quarantined`, When the screen renders, Then it shows `set_aside`, no credit and no link to the submitted text as clickable content.
 - `AC-vol-33` Given the first accepted cell and an unsaved recovery key, When the outcome is `accepted`, Then the screen offers `SCR-vol-13` once and keeps the key marker visible until `confirmRecoveryKey`.
 - `AC-vol-34` Given the network is lost while the screen is open, When status polling fails, Then polling backs off up to `ui.status_poll_max_s`, the last known outcome stays visible, and no error blocks the page.
+
+## 11.12 SCR-vol-07 Balance and expiry view
+
+**Purpose.** Show the volunteer what credit they hold, when each part expires, what is near the cap, and why, with every number taken from the ledger. [D]
+
+**Entry conditions.** Signed-in member; opened from the header credit chip.
+
+**Wireframe**
+
+```
++--------------------------------------------------+
+| Credit                                           |
++--------------------------------------------------+
+| Balance            12 credits                    |
+| Expires soonest    3 credits on {date J / G}     |
+| Cap                12 of 350 (credit.member_cap)  |
++--------------------------------------------------+
+| Lots, oldest first (spent in this order)         |
+|  # | Credits | Earned    | Expires    | Source   |
+|  1 |    3    | {date}    | {date}  !  | task     |
+|  2 |    5    | {date}    | {date}     | task     |
+|  3 |    3    | {date}    | {date}     | starter  |
+|  4 |    1    | {date}    | {date}     | referral |
+|  ! = expires within credit.expiry_notice_days     |
++--------------------------------------------------+
+| What expiry means (declared rules):              |
+|  Credit expires {E} days after it is earned and   |
+|  is spent oldest first. Expired credit moves to   |
+|  the public Commons Reserve.        [ Read more ] |
+| [ Take a task ]          ( View my ledger entries)|
++--------------------------------------------------+
+```
+
+**Content rules [D]**
+
+- Balance is the sum of unexpired `CreditLot` amounts of the member's `member` ledger account, from `getBalance`; lots from `listCreditLots`; entries from `listMemberLedgerEntries`. Display rounds balances down (S0.6.1) and shows whole credits plus a fraction only when non-zero. The client never sums, rounds, or computes expiry itself.
+- Each lot row shows credits, earned date, expiry date (`expires_at = earned_at + credit.lifetime_days x 86,400 s` with the parameter version in force at `earned_at`, S0.6.2), source (`mint`, `transfer`, `grant` starter, `grant` referral, `refund` restored), and an expiry warning when within `credit.expiry_notice_days`. Both calendars appear in the detail tooltip.
+- The starter-grant lot shows its own shorter expiry (`grant.starter_lifetime_days`) and is labeled non-transferable (`grant.non_transferable`).
+- When a member is in the accelerated-expiry arm (`ff.experiment.expiry_arm` on and an `ExperimentAssignment` exists), the screen shows only the member's own declared lifetime in days and never the word "experiment" or the other arm's value; the assignment itself is logged server-side (S12.*, S13.*) and its disclosure is part of the pilot opt-in notice (FD§9 Phase 1 setup, participants informed). [D][A]
+- Cap: shows balance against the member's effective cap (`credit.member_cap_credits` times the tier multiplier `trust.cap_multiplier.<tier>`). At the cap, `copy.balance.at_cap` states that new credit cannot be added until some is spent or expires (`CAP_EXCEEDED`), and that nothing is lost. [D]
+- A note states that credit is not money, property or an entitlement, that it cannot be cashed out, and that its legal character is not decided (FD§4.1; `needs_human_and_legal_review` [V: counsel]).
+- Nothing promises a future job will be completed; the line about spending says "you can use credit to request work when requests are open; completion is within a quoted window, declared at the time of the request" (FD Principle 10). When `launch.member_jobs_enabled` is false, the line is replaced by `copy.balance.requests_not_open`. [D]
+
+**States**
+
+| State | Condition | Behavior |
+| --- | --- | --- |
+| Empty | No lots | `copy.balance.empty`: "No credit yet. Your first accepted task adds 1 credit." with Take a task |
+| Loading | Fetching | Balance and lots show placeholders; static explanation text renders at once |
+| Error | `getBalance` fails | Last cached balance shown only if marked "last known" with its time, otherwise `copy.error.try_again` |
+| Offline or low bandwidth | No network | Cached values labeled last known; no calculation on the device |
+| Blocked: suspended or banned | `member_status` not `active` | Balance readable; spending actions blocked; Appeal link |
+| Blocked: minting off | `launch.minting_enabled` false or `kill.all_minting` engaged | A line: "Tasks may be unavailable or may not add credit right now" (`copy.balance.minting_off`); no promise on when it returns |
+
+**Actions.** Take a task, View ledger entries (list only, own entries), Read more (expiry explainer), Back.
+
+**API calls.** `getBalance`, `listCreditLots`, `listMemberLedgerEntries`, `getMember`.
+
+**Copy intent.** Dates before percentages; no loss framing ("you will lose") beyond the plain expiry date; no countdown animation; the expiry notice is shown on this screen and as a header dot, never as a push message (V-11, V-12).
+
+**Accessibility.** The lots list is a real table with captions and column headers; the near-expiry mark has a word, not only an icon; the dual-calendar dates are available as text, not only on hover.
+
+**Acceptance criteria**
+
+- `AC-vol-35` Given lots with expiry dates, When the screen renders, Then lots are listed oldest first and each shows an expiry date from the server; none is computed on the device.
+- `AC-vol-36` Given a lot expiring within `credit.expiry_notice_days`, When the screen renders, Then the lot shows the word "expires soon" and the header chip shows a dot, and no notification is sent outside the app.
+- `AC-vol-37` Given a member at the cap, When the screen renders, Then `copy.balance.at_cap` is shown and the member can still open History and Help.
+- `AC-vol-38` Given `launch.member_jobs_enabled` is false, When the screen renders, Then no text states that credit can be spent on requests, and `copy.balance.requests_not_open` is shown.
+- `AC-vol-39` Given the member is in the accelerated-expiry arm, When the screen renders, Then the lifetime shown is the member's own `credit.lifetime_days_accelerated` and the other arm's value and the word "experiment" are absent.
+
+## 11.13 SCR-vol-08 History
+
+**Purpose.** A member's own record of cells and outcomes, a place to find a rejection to appeal and a report to follow up. [D]
+
+**Entry conditions.** Signed-in member; menu entry.
+
+**Wireframe**
+
+```
++--------------------------------------------------+
+| History                       [Filter: all v]    |
++--------------------------------------------------+
+| {date}  Translation w/ glossary v3   Accepted +1 |
+| {date}  Classification v2   Not accepted   [ > ] |
+| {date}  Summarize v1        Set aside              |
+| {date}  Translation v3      Received (checking)    |
+| {date}  Classification v2   Declined               |
+|                           [ Load more ]          |
++--------------------------------------------------+
+| Detail (tap a row): template and version, service |
+| you reported, outcome, reason copy, credit and     |
+| expiry, both calendars, [Appeal] [Report]         |
++--------------------------------------------------+
+```
+
+**Rules [D]**
+
+- Newest first with cursor pagination (`api.page_size_default`); no total count (S0.11.6). Filters: all, accepted, not accepted, set aside, declined, appeals.
+- Row detail shows what the volunteer submitted only as inert text and only while the payload is retained (`retention.job_payload_days`); after purge it shows hashes and the outcome (`copy.history.payload_purged`). The prompt text of a past cell is not re-shown after purge. [D]
+- The Appeal action appears only for a rejected or overturned cell within `appeal.window_days` of the decision and only if `appeal.max_per_decision` is not reached; otherwise the action is replaced by a reason (window closed or already appealed). [D]
+- Overturned items show the reversal in plain words (`copy.feedback.overturned`); no entry is ever hidden or deleted (corrections are new rows, S0.7).
+- A volunteer's own history never reveals another member, a requester, a job's subject, or the content of other submissions. [D]
+- Export: a plain `.csv` of the member's own rows is allowed [A] (dates in Gregorian ISO, S0.6.2), generated on request; it excludes submitted text.
+
+**States.** Empty: `copy.history.empty` with Take a task. Loading: skeleton rows. Error: `copy.error.try_again`. Offline: the last loaded page, labeled "last known"; Load more disabled. Blocked: suspended or banned members can read history and use Appeal; closed members see nothing.
+
+**Actions.** Filter, Load more, Open detail, Appeal, Report, Export.
+
+**API calls.** `listCellHistory`, `getSubmission`, `listAppeals`.
+
+**Copy intent.** Neutral list language; outcome words match 11.11.2; no ranking against others.
+
+**Accessibility.** Rows are a list of buttons with full text names ("Accepted, translation, {date}"); detail opens inline, not as a modal; focus returns to the row.
+
+**Acceptance criteria**
+
+- `AC-vol-40` Given a rejected cell decided 3 days ago and `appeal.window_days` = 14, When its detail opens, Then Appeal is offered; and Given the decision is 15 days old, Then Appeal is replaced by `copy.appeal.window_closed`.
+- `AC-vol-41` Given a cell whose payload was purged after `retention.job_payload_days`, When its detail opens, Then no prompt or submitted text is shown and `copy.history.payload_purged` is shown.
+- `AC-vol-42` Given more rows than `api.page_size_default`, When Load more is tapped, Then the next page is fetched by cursor and no total count is shown.
+
+## 11.14 SCR-vol-09 Opt-in settings
+
+**Purpose.** Let the volunteer choose which cells they may be offered, per axis and per topic category, with the safe defaults on and everything else off (`R8`; FD§5.4 R8). Backed by the `OptIn` entity. [D]
+
+**Entry conditions.** Signed-in member; menu entry; "Why am I seeing these?" from the offer list.
+
+**Wireframe**
+
+```
++--------------------------------------------------+
+| What tasks may I be offered?                     |
++--------------------------------------------------+
+| Purpose          [x] P0 personal/study (default) |
+|                  [x] P1 open publication (default)|
+|                  [ ] P2 commercial  (locked*)     |
+|                  [ ] P3 training    (locked*)     |
+| Sensitivity      [x] S0 public (default)          |
+|                  [x] S1 private, non-sensitive    |
+|                  (S2, S3 are never offered)       |
+| License          [x] L0 [x] L1 [x] L2 [ ] L3      |
+| Service          [x] M0 [x] M1 [x] M2             |
+| Topic categories (each is opt-in):                |
+|    [ ] {category from data} ...                   |
+| Services I can use:  [x] ServiceA [ ] ServiceB    |
+| * locked until the platform declares it open      |
+| [ Save ]                           ( Reset to defaults )|
++--------------------------------------------------+
+```
+
+**Rules [D]**
+
+- Initial values: `optin.default_purposes` (`P0`, `P1`), `optin.default_sensitivities` (`S0`, `S1`), `optin.default_licenses` (`L0`, `L1`, `L2`), `optin.default_service_requirements` (`M0`, `M1`, `M2`); `optin.sensitive_topics_default` = false, so every sensitive topic category starts off (S0.10.6).
+- `P2` and `P3` appear greyed with the reason "not open yet" while locked per S0.8.1 (`P2` unlocks per service after its terms are verified [V]; `P3` needs `M2` or a service whose `training_use_of_output` is `yes`, `S0` only). Enabling a locked axis is impossible in the UI; the server also refuses it.
+- `S2` and `S3` are shown as "never offered", not as options.
+- Topic categories come from `listTopicCategories` (`TopicCategory`, data-defined); each has a plain description and a sensitivity note, and enabling a sensitive category shows a confirmation (`copy.optin.sensitive_confirm`) that lists what such tasks can contain in plain words.
+- Changes apply to future offers only; held leases are not changed; the server emits `member.optin_changed`. Opting out never penalizes, never lowers trust tier, and the opt-out rates are tracked per category only in aggregate (FD§9 measures; S13.*). [D]
+- Fewer opt-ins mean fewer or slower offers; the screen says so once in neutral words (`copy.optin.fewer_tasks`), and does not nudge toward opting in (FD§5.7 failure mode 8 is handled by the supply gauge in the quote, not by pressure).
+- Service choices list only `approved` registry entries and let the volunteer say which they can use; this is a preference, not an attestation, and no credential is requested (X3).
+
+**States.** Empty: topic list empty shows `copy.optin.no_topics`. Loading: current values placeholders. Error: `VALIDATION_FAILED` with `details.fields`. Offline: edits kept locally as unsaved and Save disabled until online. Blocked: a locked axis is shown disabled; a paused category shows "paused"; suspended members can view but not change.
+
+**Actions.** Toggle, Save, Reset to defaults, Back (asks before discarding unsaved changes).
+
+**API calls.** `getOptIns`, `updateOptIns`, `listTopicCategories`, `listApprovedServices`.
+
+**Copy intent.** Respectful and neutral; each item says what the volunteer will see, not what they should choose.
+
+**Accessibility.** Fieldsets with legends per axis; locked items are `aria-disabled` with the reason read out; the confirmation for sensitive topics is a sheet with focus trapped and Escape to cancel.
+
+**Acceptance criteria**
+
+- `AC-vol-43` Given a new member, When the screen opens, Then exactly the values in `optin.default_*` are selected, `P2` and `P3` are disabled, `S2` and `S3` are not selectable, and no topic category is selected.
+- `AC-vol-44` Given the volunteer enables a sensitive topic category, When they tap Save, Then a confirmation listing what such tasks can contain is shown first, `updateOptIns` is called only after confirmation, and `member.optin_changed` is emitted.
+- `AC-vol-45` Given the volunteer disables `P1`, When they next open the offer list, Then no `P1` cell is offered and their trust tier and credit are unchanged.
+- `AC-vol-46` Given a request that enables a locked axis is forced, When the server evaluates it, Then it returns `UNPROCESSABLE` and the stored `OptIn` is unchanged.
+
+## 11.15 SCR-vol-10 Teams
+
+**Purpose.** Opt-in, self-created groups scored only on verified cells (FD§6.1 rank 5; V4). Entirely behind `ff.growth.v4_teams` and the randomized offer logic of S12.*. Never shown in the first-contribution flow. [D]
+
+**Entry conditions.** Flag on; the member is offered teams by the experiment assignment (`ExperimentAssignment`, S12.*, S13.*); creating a team needs `team.create_min_tier` (`established`); joining needs no tier.
+
+**Wireframe**
+
+```
++--------------------------------------------------+
+| Teams (optional)                                 |
++--------------------------------------------------+
+| Your team: {name chosen by its creator}           |
+|  Members: 7   Verified cells this week: 142       |
+|  Your own verified cells: 11                      |
+|  [ Leave team ]                                  |
++--------------------------------------------------+
+| No team yet:  [ Create a team ]  [ Join with code ]|
+|  Teams are optional. Joining shows only your       |
+|  verified-cell count to your team, as a number.    |
++--------------------------------------------------+
+```
+
+**Rules [D]**
+
+- A team has a name, a join code and aggregate counts of verified cells; it shows no member list, handles, ids, avatars, places or affiliations to anyone, including other members (X7). Only the member's own count is shown to the member. A team smaller than `team.min_public_members` is never shown on any public surface (S12.*).
+- A team name is free text chosen by the creator, checked by the server for length and prohibited content; it is never a location or institution field, and the screen has no field for city, country or university (`public.location_display` = `never`; FD§6.1 row 5).
+- `team.max_members` bounds a team; joining by code is rate-limited; leaving is one tap and removes the member's future contribution from that team's count only.
+- Scoring counts verified cells only (accepted, not overturned), so a team cannot be raised by volume of unverified work; the screen says "verified cells".
+- Teams are never required for anything, never gate credit, and never create a leaderboard of individuals. [D]
+
+**States.** Empty: no team (as drawn). Loading: placeholders. Error: `ALREADY_EXISTS` for a duplicate name, `NOT_FOUND` for a bad code (same message for wrong and expired, no probing). Offline: read-only cached values labeled last known. Blocked: flag off, tier too low (`copy.teams.needs_tier`, no number given beyond the declared rule), member suspended.
+
+**Actions.** Create, Join with code, Leave, Copy invite code (the code, never a link containing identity).
+
+**API calls.** `createTeam`, `getTeam`, `joinTeam`, `leaveTeam`.
+
+**Copy intent.** Light and optional; no pressure, no "your team is losing".
+
+**Accessibility.** Counts are text; join code field has a visible label and paste support; no color-coded ranking.
+
+**Acceptance criteria**
+
+- `AC-vol-47` Given `ff.growth.v4_teams` is off, When the member opens the menu, Then no Teams entry is present and `createTeam` is not callable from the UI.
+- `AC-vol-48` Given a member in a team, When any screen is inspected, Then no other member's id, handle, name or contribution count is shown, only team aggregates and the member's own count.
+- `AC-vol-49` Given a team with fewer than `team.min_public_members` members, When public surfaces render, Then the team does not appear.
+- `AC-vol-50` Given a member whose cell is later `Cell.overturned`, When the team count refreshes, Then that cell no longer counts.
+
+## 11.16 SCR-vol-11 Share card
+
+**Purpose.** Let a volunteer share a small image or text card that contains only aggregate, non-identifying facts (FD§6.2 V3). Behind `ff.growth.v3_share_card` and never shown in the first-contribution flow. [D]
+
+**Entry conditions.** Flag on; the member has at least one verified cell; entry from the accepted-result screen or the menu.
+
+**Wireframe**
+
+```
++--------------------------------------------------+
+| Share a card                                     |
++--------------------------------------------------+
+|  +--------------------------------------------+  |
+|  |  Hamyar                                    |  |
+|  |  12 verified cells so far                  |  |
+|  |  Badge: First 10                           |  |
+|  |  (no name, no place, no id, no date of join)|  |
+|  +--------------------------------------------+  |
+|  What is on this card:  count, badge, project name |
+|  [ Share ]   [ Copy text ]   [ Save image ]       |
++--------------------------------------------------+
+```
+
+**Rules [D]**
+
+- Allowed content: a count of the member's verified cells (rounded down to a bucket, for example the nearest 10, to resist fingerprinting [A]), a badge name from `Badge` (criteria in verified cells only), the project name and an optional public milestone. Never: handle, member id, e-mail, location, institution, team name, dates of activity, service names, template names or the volunteer's time zone.
+- The image is drawn on the device from `getShareCard` data; the server never receives the image; the card links to the public landing and carries the member's invite token only if the member explicitly adds it (that link is covered by 11.17 and is the only identifying-by-tree element, and is shown as such).
+- The Share button uses the platform share sheet if present and otherwise copies text; no social SDK is loaded, no tracking pixel, no short-link service (`analytics.third_party_trackers` = false).
+- A one-line notice says that sharing tells others the member uses Hamyar, which may matter for personal safety, and that not sharing is always fine (`copy.share.safety_notice`, member safety outranks growth, FD Principle 8). `needs_human_and_legal_review`.
+- Share events are instrumented in aggregate only (S12.*, S13.*).
+
+**States.** Empty: no verified cell yet (`copy.share.not_yet`, no card). Loading: card skeleton. Error: `copy.error.try_again`. Offline: card can still be drawn from last known data and saved. Blocked: flag off; member suspended.
+
+**Actions.** Share, Copy text, Save image, Toggle "add my invite link" (default off).
+
+**API calls.** `getShareCard`, `createInvite` (only if the toggle is on).
+
+**Copy intent.** Matter-of-fact, no boasting language; the safety notice precedes the Share button.
+
+**Accessibility.** The card image has a text alternative with the same content; the toggle is a labeled switch; the share sheet is the platform's own.
+
+**Acceptance criteria**
+
+- `AC-vol-51` Given the share card is generated, When its data and image are inspected, Then it contains no member id, handle, e-mail, location, team, date or service name.
+- `AC-vol-52` Given the member has 0 verified cells, When they open the screen, Then no card is shown and `copy.share.not_yet` is displayed.
+- `AC-vol-53` Given the share card is saved, When network requests are inspected, Then no image or card data was sent to the server and no third-party host was contacted.
+- `AC-vol-54` Given the invite-link toggle is off by default, When the card is shared, Then no invite token appears in the shared text or image.
