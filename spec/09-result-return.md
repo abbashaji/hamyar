@@ -817,7 +817,7 @@ Problems and gaps found while specifying the return path. Each resolution is alr
 - Operations `submitResult`, `validateSubmission`, `rotateLeaseNonce` and their paths (9.3, 9.5); response fields `lease_nonce`, `details.reject_code`, `details.reason`, `details.nonce_redelivery`, `details.stored_submission_id`.
 - Entity field requirements on `Lease` and `Submission`, and the table `submission_fingerprints` (9.4.5, 9.14.3).
 - The 17 added parameters and constraints `S9-C1`..`S9-C3` (9.18).
-- Signal names `signal.forgery_attempt`, `signal.conflicting_resubmit`, `signal.timing_below_floor`, `signal.timing_soft_fast`, `signal.timing_regular`; flag names in 9.9 and 9.21 of the check pseudocode; ops log event `submission.gate_rejected`; metrics of 9.17.
+- Signal names `signal.forgery_attempt`, `signal.conflicting_resubmit`, `signal.timing_below_floor`, `signal.timing_soft_fast`, `signal.timing_regular`; flag names in 9.9 and in SC-21 of 9.14.1; ops log event `submission.gate_rejected`; metrics of 9.17.
 - `slot_context` (`prose`, `code`, `structured`) as a required declaration of every template output slot (S8.*), and the template output exemption list for flag classes (9.7.1, 9.9.1).
 - Test ids numbered from 901 in each layer, and acceptance-criteria area `submit` (9.16).
 - File name: the owner cell writes `spec/09-result-return.md`, whereas S0.13 lists `spec/09-result-return-abuse.md`.
