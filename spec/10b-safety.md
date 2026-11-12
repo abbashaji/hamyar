@@ -336,3 +336,72 @@ The outcome is an `AdminAction` (`safety_review`: `passed` or `rejected`). A cha
 | Backup key custodians | Two named people each hold half of the wrapping key; neither alone can decrypt a backup |
 | Admin tool | Shows secret names, versions, created and rotated times, never values |
 
+### 10.14.4 Rotation [D]
+
+**Cadence.** Every secret rotates at most `security.secret_rotation_days` (initial configurable default 90) after creation, except where S10.14.2 gives a shorter rule (`secret.ip_hash_key` daily). Rotation is a calendar item owned by the `operator` role; a missed rotation raises an `Alarm` (`hamyar_secret_rotation_overdue_total`). Each rotation cycle also includes an access review of `AdminUser` accounts and the threat-model re-read (S10.12.2).
+
+**Procedure** (generic; each secret's "overlap" is in S10.14.2)
+
+```
+rotate(secret):
+  assert no incident open that needs a different order
+  v_new := create version n+1 in SecretsPort (CSPRNG, length per table)
+  mark v_new as "write"; keep v_old as "verify only" for the overlap window
+  deploy; run the rotation canary (a request signed or hashed under v_new succeeds, one under a wrong key fails)
+  after the overlap window: mark v_old "retired"; destroy it when its destroy rule (S10.14.2) allows
+  write AdminAction{kind: secret.rotated, secret: name, from: n, to: n+1}   # never the value
+  if the secret has a public part (signing key): publish the new public key in a ChangeLogEntry
+```
+
+**Legacy secrets: exact steps** (all [V]; the panel has not been run by the author of this spec)
+
+| Secret | Steps | Verification |
+| --- | --- | --- |
+| `PANEL_TOKEN` | Generate a new random value; set it in the Worker's secret store; redeploy | An old cookie and the old password are refused; the new password works (every cookie ends, because the cookie is signed with this token) |
+| `ADMIN_TOKEN` | Generate; set; redeploy; clear every `bp_owner_key` in browsers that used the panel; treat any copy that reached a chat transcript, a URL or a log as exposed | The old value is refused by release, takedown and publish-plan; the new value works |
+| `GITHUB_TOKEN` | Create a replacement with the narrowest scope that works [V: scope is not determinable from code]; set it; redeploy; revoke the old token at GitHub; narrow `ALLOWED_REPOS` to the needed repositories; confirm whether `main` is branch-protected | Old token returns an authentication error; Worker calls succeed; GitHub's audit log shows no unexpected use [V] |
+| `MCP_AUTH_TOKEN` | Generate; set; redeploy; invalidate every issued OAuth grant and registered client, by replacing the KV namespace the connector library uses (its key layout was not read [V]); re-consent from the owner's own client only | Old password refused; an old grant is refused; the owner's new consent works |
+| `EXT_TOKEN` | Unset the secret so the legacy endpoints answer 404 | Endpoint returns 404 |
+
+### 10.14.5 Rotate before any public exposure, and the launch-gate items [D]
+
+**Rule.** All existing secrets (`secret.legacy_*`) are rotated before any public exposure. `security.rotate_before_public_exposure` = true is a constant (S0.10.6). "Public exposure" is the earliest of: (a) `launch.members_may_join` becomes true; (b) `/v1/public/*` or the panel's `/panel/*` is reachable by anyone outside the founders; (c) the repository holding the panel or this spec becomes public; (d) any non-founder receives any credential. The rotation must be dated after the last moment the old value could have been seen by anyone else (a transcript, a URL, browser storage, a screen share) and recorded by `AdminAction` (`secret.rotated`).
+
+**Launch-gate items** contributed by this file. Item keys and the gate assignment are proposed [A] for S14.*, which owns `LaunchGateItem`. Evidence never contains a secret value. Sign-off needs `launch.min_signoffs` distinct admins.
+
+| Proposed item key | Gate | Evidence required | Test |
+| --- | --- | --- | --- |
+| `g1.secrets_rotated` | G1 (always required, S0.10.6 `launch.required_gate_ids`) | One `secret.rotated` record per `secret.legacy_*`, each dated before the exposure event, plus the verification result of S10.14.4 | `AC-safety-05` |
+| `g1.secrets_inventory_complete` | G1 | S10.14.2 matches the deployed `SecretsPort` listing, no extra names | `AC-safety-06` |
+| `g1.no_raw_ip_audit` | G1 | Audit of storage and logs finding no raw IP in the app; statement of host-level logging [V] | `AC-safety-01` |
+| `g1.retention_jobs_verified` | G1 | Each sweep ran on synthetic data and removed what S10.13.2 states | `AC-safety-03` |
+| `g1.disclosure_runbook_reviewed` | G1 | S10.13.5 reviewed by counsel [V] | review record |
+| `g1.member_notice_reviewed` | G1 | The notice of S10.13.7 reviewed by someone qualified to advise [V] | review record |
+| `g1.threat_model_accepted` | G1 | Founders' acceptance of every `high` row (S10.12.2) | review record |
+| `g1.abuse_contact_published` | G1 | `report.external_contact` set and shown on the public pages | `AC-safety-12` |
+| `g4.secret_handling_audited` | G4 | The audit FD§8.3 G4 asks for, covering panel-review §4.5 items 1 to 15 | review record |
+| `g2.reachability_recorded` | G2 | Reachability evidence of S10.15.4 | S10.15.4 |
+
+While `g1.secrets_rotated` is open, `launch.members_may_join` refuses to turn on (`LAUNCH_GATE_CLOSED`).
+
+### 10.14.6 Compromise response [D]
+
+```
+on suspected_compromise(secret or class):
+  open an incident; engage kill.all_new_jobs (and kill.all_minting if the ledger path is involved)
+  revoke sessions that the secret could have forged or read (member, admin, or panel cookies)
+  rotate(secret) immediately; for a class (host seizure) rotate every secret in S10.14.2
+  for secret.ledger_checkpoint_signing_key: publish a signed ChangeLogEntry naming the last trusted checkpoint
+  record AdminAction entries; release kill switches only by two-person killswitch.release
+  publish what members need to know in the change log, if safe and lawful [V]
+  threat-model re-read (S10.12.2)
+```
+
+### 10.14.7 Hygiene [D]
+
+- **Scanning.** A secret scanner runs before each commit and in CI over the whole history of any branch before it is made public. Patterns include the GitHub token forms the panel already redacts (`ghp_`, `github_pat_` and the like, panel-review §4.3) [V].
+- **Redaction.** Error and log text passes a redactor that masks token-shaped strings; a user-supplied string is never concatenated into a log format.
+- **No secrets in URLs.** Query strings carry none (S0.11.1); one-time codes are never placed in a URL.
+- **CI separation.** Jobs that run untrusted code get no secrets and a read-only token (the panel's own design comment, panel-review §4.5 item 13 [V]).
+- **Drill.** A rotation drill and a compromise drill run in `BM9`; both are logged and reviewed.
+
