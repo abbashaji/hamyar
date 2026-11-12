@@ -184,3 +184,99 @@ Numbered for reference as "S10.13.1 item n".
 | Public visitor | Counter, public ledger aggregates, parameters, change log, milestones | Per-member rows; trees; places | Suppression below `analytics.min_cohort_k`; `public.ledger_lag_s` | Inference from small or timed aggregates beyond the suppression |
 | `provider_service` | The prompt and the volunteer's reply, tied to the volunteer's own account | Nothing is sent to it by us; no automation exists | Template and registry review | Everything the volunteer's own account exposes (`THR-31`) |
 
+### 10.13.4 Device-side data and device seizure [D]
+
+| On the device | Where | Rule |
+| --- | --- | --- |
+| Private key | Non-extractable key handle where the platform supports it [V: target phones]; otherwise the weakest case is stated to the member | Never sent, never logged, never copied to the clipboard by the app |
+| Session token | Browser storage, expires by `session.member_idle_ttl_s` | Revocable server-side by deleting its hash |
+| Recovery key | Shown once at creation; not stored by the app afterwards | No automatic clipboard write; the member is told to store it offline |
+| Pasted result before acknowledgment | Memory only; if the network drops, kept until the retry succeeds, then cleared | Cleared by "forget this device" |
+| Preferences (locale, digits, calendar) | Browser storage | Harmless; no identifiers |
+| History, balances | Not cached beyond the open screen | Fetched from the server |
+
+**"Forget this device"** is a visible action: it deletes all local data above, revokes the session (`sessions` hash removed) and removes the `Device` record. The page title, icon and any notification text are neutral and carry no political or sensitive words. The design cannot protect an unlocked or already-inspected device or the volunteer's chat history at the provider (`THR-21`).
+
+### 10.13.5 Subpoena, seizure and compelled disclosure [D]
+
+All legal points here are [V] for counsel in the operator's jurisdiction (measurement code `CNS`); this section says only what technically exists and what the process is.
+
+**What exists to disclose, by what the requesting party already holds**
+
+| The party holds | What exists | What does not exist |
+| --- | --- | --- |
+| A real name | Nothing maps a name to a member | Any name field |
+| An e-mail address | Only if that member supplied one: ciphertext, decryptable by the operators, giving a `mem_` id | Plaintext e-mail anywhere |
+| An IP address and time | The app stores none. IP-hash counters exist for at most `retention.ip_hash_ttl_days` day(s); a holder of that day's key can test whether an IP was seen, but counters carry no member id; after the key is destroyed they cannot be tested at all. Provider-level and network-layer logs are outside the app [V per host] | Raw IPs in the app, an IP-to-member join |
+| A `mem_` id (learned from a seized device) | `members` row; public keys; status and tier history; ledger activity at day granularity; accepted-cell counts; reports and appeals inside retention; `AdminAction` rows about it; submission hashes; cell text only inside `retention.job_payload_days` of the job's terminal state | Locations, device hardware, anything about the volunteer's provider account |
+| A piece of output text ("who produced this?") | A `vol_` handle in the manifest; it maps to a `mem_` id only while the key version `secret.volunteer_handle_key[version]` still exists | The mapping after that key version is destroyed |
+| A requester | Job records, declared metadata, uploads and results inside `retention.job_payload_days` | Provider-side data |
+| A device | Keyed device hash, useless without the device's token | Hardware ids |
+| Backups | The same as above for up to `retention.backup_days`, encrypted | Plaintext backups |
+
+**Handling procedure** (no one discloses on their own initiative)
+
+```
+on legal_request(r):
+  record AdminAction{kind: disclosure.received, ref: r.request_id, scope: category only}   # no content
+  route r to counsel [V]                       # validity, jurisdiction, scope, gag terms
+  scope := narrowest set of rows the order names (by 10.13.5 table)
+  if scope is empty: respond that nothing exists, per counsel
+  require two distinct admins approve action disclosure.release   # security.two_person_actions
+  produce export(scope) with no extra fields; hash and store the export bytes' hash in AdminAction
+  notify the affected member only if counsel confirms it is lawful and safe [V]
+  count it in the aggregate disclosure total published each rotation cycle if lawful [V]
+```
+
+The platform adds no backdoor, no unlogged access path, no identity collection in response to a request without an owner decision, and promises no gag-order behavior. It specifies no warrant canary; whether one is lawful or wise is [V].
+
+**Seizure of a server or host.** Assume disk and possibly memory are taken. Obtainable: the database, secrets in the process, and the logs of S10.13.2 (no IPs, no content). Not obtainable without a separate key held off-host: backups. Response: engage `kill.all_new_jobs` and `kill.all_minting`, revoke sessions, rotate every secret (S10.14.6). Data already taken cannot be recalled.
+
+### 10.13.6 Identity, location and public-surface rules [D]
+
+| Surface | Rule | Source |
+| --- | --- | --- |
+| Identity | No mandatory identity field anywhere; display name optional, generated by default | FD Principle 8 |
+| Public ledger page | Aggregates by entry type and day; never `lac_` or `mem_` ids; trails the ledger by `public.ledger_lag_s`; checkpoints published (`THR-12`) | `ISS-104` |
+| Live counter | Verified cells and members active today, suppressed when a cohort is below `analytics.min_cohort_k` | FD§6.2 V2 |
+| Share card | Cell count and badge only; no handle, no timestamp finer than a week, no place | FD§6.2 V3 |
+| Teams | Public only at `team.min_public_members` or more; totals only, no member rows; leaving is always possible | FD§6.2 V4 |
+| Place or affiliation | Never collected; `opt_in` shows a typed, unverified label with a warning | FD§6.1 rank 5 |
+| Invite trees | Never public; visible only to reviewers during farming review | `THR-06` |
+
+### 10.13.7 What the platform cannot promise [D]
+
+Each item has a copy key (`copy.privacy.cannot_promise.nn`) written in `fa` and `en` by S11.* and marked `needs_human_and_legal_review`; items 1 to 14 appear together in the first-run notice.
+
+1. Anonymity. The design minimizes data; it does not make anyone anonymous (FD Principle 8).
+2. That a network provider, employer or government cannot see that a device connects to this service.
+3. That the host or the operators cannot see what the system handles; the ways they can are listed in S10.13.3.
+4. That data cannot be compelled from the operator, the host or the member; what exists in S10.13.5 could be handed over.
+5. The safety of the member's device: a lost, seized or infected device exposes the identity on it.
+6. Deletion from other places: the volunteer's chat history at the provider, a requester's downloaded copies, openly licensed outputs ("downstream use uncontrolled"), and backups for up to `retention.backup_days`.
+7. That a service's terms allow the member's use, or that the member's account will not be limited or suspended. Reviews are recorded; their result is [V].
+8. That requesters follow what they declared about purpose, license and sensitivity ("declared", FD§5.7 item 2).
+9. That cell text is harmless: prompt injection can still affect the volunteer's chat (FD§5.5).
+10. That participation is lawful where the member lives; sanctions, terms and local law differ and this is not advice [V].
+11. Availability: reachability from the member's location, uptime, or completion within a quoted window (FD Principle 10).
+12. That timing patterns cannot link activity to a person.
+13. That credit is money, property or an entitlement (FD§4.1).
+14. That the code and the people running it are free of mistakes or pressure.
+
+The member-facing notice (FD§8.3 G1) is drafted with someone qualified to advise, and that review is G1 evidence (`g1.member_notice_reviewed`) [V].
+
+### 10.13.8 Safety review for new data, features and parameters [D]
+
+Before any new field, event, log line, `ff.*` flag turning on, or change to a `retention.*`, `public.*`, `analytics.*` or `security.*` parameter takes effect, a reviewer answers the table. One "yes" in the fail column rejects the change (FD Principle 8).
+
+| Question | Fail if |
+| --- | --- |
+| Does it collect, infer or display location, identity or contacts? | Yes |
+| Does it add a request to a host the project does not run? | Yes |
+| Does it lengthen retention or add a copy of data outside the sweep? | Yes |
+| Can a small cohort or a time pattern identify a member? | Yes, unsuppressed |
+| Does it show one pseudonym's activity to another member? | Yes |
+| If it fails or leaks, could a member come to harm? | Yes, without a stated mitigation |
+
+The outcome is an `AdminAction` (`safety_review`: `passed` or `rejected`). A change that loosens privacy (a larger `retention.*` value, a wider `public.*` setting) is a `loosen` change: public change-log entry, `change.notice_days_default` notice, second `operator` approval (S0.10.3). A tightening change takes effect at once (R10 applies by analogy).
+
