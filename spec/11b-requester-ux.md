@@ -105,3 +105,161 @@ for every write action (S0.11.5 requires a key on job, escrow, report, appeal wr
 ```
 
 The key lives in memory for the duration of one user action. A double tap on Confirm therefore sends the same key twice and the server replays the stored response (`Idempotent-Replayed: true`), so credit cannot be spent twice (S0.11.5, natural idempotency of `escrow_hold`).
+
+## 11.34 API operations used by the requester screens
+
+Operation ids (lowerCamelCase, S0.5) are the contract between the screens and S15.*; the paths are proposals in the shapes of S0.11 [A]. Every write carries an `Idempotency-Key` (S0.11.5). Every response is `Cache-Control: no-store`. Amount fields are integer strings, ratio fields are `*_ppm` integers. Operations marked `+` are convention additions (11.49).
+
+| Operation id | Method and path (proposal) | Used by |
+| --- | --- | --- |
+| `listJobs` | `GET /v1/jobs?state=&cursor=&limit=` | 01 |
+| `getBalance` | `GET /v1/members/me/balance` (`balance_ucr`, `cap_ucr`, `member_status`, `cooldown_ends_at`) | 01, 07, 08 |
+| `listCreditLots` | `GET /v1/members/me/credit-lots` (`lot_id`, `amount_ucr`, `expires_at`) | 07, 08, 15 |
+| `listTemplates` | `GET /v1/templates?job_type=` (approved versions only) | 02 |
+| `getTemplate` | `GET /v1/templates/{template_id}` | 02, 03 |
+| `getPolicyProfile` | `GET /v1/policy-versions/current` (allowlist, phase locks, `license_options`) | 05 |
+| `listServices` | `GET /v1/services?state=approved` (`service_id`, display names) | 05 |
+| `createJob` | `POST /v1/jobs` body `{template_id, copy_from_job_id?}` -> `Job` in `draft` | 02, 06, 18 |
+| `getJob` | `GET /v1/jobs/{job_id}` | all |
+| `patchJob` | `PATCH /v1/jobs/{job_id}` (JSON Merge Patch, `If-Match` = `row_version`) | 05 |
+| `createUpload` | `POST /v1/jobs/{job_id}/uploads` JSON body `{file_name, encoding, content}`; `encoding` is `utf8` or `base64`; size limit `job.max_upload_bytes` | 03 |
+| `getUpload` | `GET /v1/uploads/{upload_id}` | 03, 04 |
+| `deleteUpload` | `DELETE /v1/uploads/{upload_id}` | 03 |
+| `requestUploadReview`+ | `POST /v1/uploads/{upload_id}/review-requests` body `{note?}` | 04 |
+| `createGlossary` | `POST /v1/jobs/{job_id}/glossaries` body `{entries:[{source,target}]}` | 03 |
+| `previewCells`+ | `GET /v1/jobs/{job_id}/cell-preview` (up to three sample cells exactly as a volunteer sees them) | 03, 05 |
+| `submitJob` | `POST /v1/jobs/{job_id}/submission` -> `202`, Job `screening` (or already `quoted` / `rejected` when screening finished synchronously) | 05 |
+| `getQuote` | `GET /v1/jobs/{job_id}/quote` | 07, 08 |
+| `createWaitlistEntry` | `POST /v1/jobs/{job_id}/waitlist-entries` | 07 |
+| `getWaitlistEntry` | `GET /v1/waitlist-entries/{waitlist_entry_id}` | 09 |
+| `deleteWaitlistEntry` | `DELETE /v1/waitlist-entries/{waitlist_entry_id}` | 09 |
+| `confirmEscrow` | `POST /v1/jobs/{job_id}/escrow-confirmation` body `{quote_hash, acknowledgements:[string]}` | 08 |
+| `getReservationAvailability`+ | `GET /v1/reservations/availability?from=&to=&cells=&job_type=` | 10 |
+| `createReservation` | `POST /v1/reservations` | 10 |
+| `listReservations` / `getReservation` | `GET /v1/reservations`, `GET /v1/reservations/{reservation_id}` | 01, 11 |
+| `cancelReservation` | `POST /v1/reservations/{reservation_id}/cancellation` | 11 |
+| `activateReservation` | `POST /v1/reservations/{reservation_id}/activation` body `{job_id}` | 11 |
+| `getJobProgress`+ | `GET /v1/jobs/{job_id}/progress` (ETag, conditional `If-None-Match`) | 12 |
+| `listJobCells` / `getJobCell` | `GET /v1/jobs/{job_id}/cells`, `GET /v1/jobs/{job_id}/cells/{cell_id}` (primary cells only) | 13 |
+| `getCancellationPreview`+ | `GET /v1/jobs/{job_id}/cancellation-preview` | 14 |
+| `cancelJob` | `POST /v1/jobs/{job_id}/cancellation` | 14 |
+| `getSettlementReceipt`+ | `GET /v1/jobs/{job_id}/receipt` | 15 |
+| `getDeliverable` | `GET /v1/jobs/{job_id}/deliverable` | 16 |
+| `downloadDeliverableFile` | `GET /v1/deliverables/{deliverable_id}/files/{file_name}` (bytes via `fetch` with the Bearer header; no query-string secrets, S0.11.1) | 16 |
+| `getManifest` | `GET /v1/jobs/{job_id}/manifest?profile=requester` | 16 |
+| `createJobRating`+ / `getJobRating`+ | `POST` and `GET /v1/jobs/{job_id}/rating` | 17 |
+| `createAppeal` / `getAppeal` | `POST /v1/appeals` with `appeal_kind` = `job_rejection`; `GET /v1/appeals/{appeal_id}` | 18 |
+| `createReport` | `POST /v1/reports` | 13, 16 |
+
+### 11.34.1 Response shapes the screens depend on [A]
+
+Only fields the screens read are listed; unknown fields are ignored (S0.11.1). `*_ucr` are strings.
+
+```json
+// Job view (getJob)
+{ "id": "job_01j9...", "state": "quoted", "row_version": 7,
+  "template": { "template_id": "tpl_...", "template_version_id": "tpv_...", "job_type": "translation_glossary",
+                "display_name": { "fa": "...", "en": "..." } },
+  "declarations": { "purpose": "P1", "license": "L2", "license_spdx_id": null, "sensitivity": "S0",
+                    "service_requirement": "M0", "pinned_service_ids": [] },
+  "cell_count": 240, "upload_ids": ["upl_..."], "glossary_id": "gls_...",
+  "policy": { "policy_version_id": "plv_...", "stamped_at": "2026-11-12T09:30:00Z" },
+  "rejection": null,   // or { "reasons": ["policy.R2.sensitivity_not_accepted"], "decided_at": "...", "appeal": { "allowed_until": "...", "appeal_id": null } }
+  "quote_expires_at": "2026-11-12T10:00:00Z", "pause_reason": null, "closure_reason": null,
+  "created_at": "...", "updated_at": "..." }
+
+// Upload view (getUpload)
+{ "id": "upl_...", "file_name": "chapter1.txt", "bytes": 18233, "content_hash": "sha256:...",
+  "screen_status": "flagged_for_review",          // pending | passed | flagged_for_review | rejected
+  "cell_count": 240, "chars_available_per_cell": 3100, "cells_over_envelope": [],
+  "findings": [ { "kind": "url_present", "severity": "review", "locations": [ { "row": 12, "start": 40, "end": 71 } ] } ] }
+
+// Quote (getQuote)  -- shown on SCR-req-07 and SCR-req-08
+{ "job_id": "job_...", "quote_hash": "sha256:...", "quote_expires_at": "...",
+  "cells_primary": 240,
+  "price": { "v_ppm": 100000, "v_source": "prior", "v_window_days": 28, "v_sample_cells": 0,
+             "lambda_ppm": 50000, "p_ucr": "1150000", "eta_ppm": 869565 },
+  "escrow": { "total_ucr": "276000000", "primary_pay_ucr": "240000000", "verification_pool_ucr": "24000000",
+              "levy_ucr": "12000000", "verification_cells": 24 },
+  "balance": { "before_ucr": "300000000", "after_ucr": "24000000",
+               "lots_consumed": [ { "lot_id": "lot_...", "amount_ucr": "100000000", "expires_at": "..." } ] },
+  "window": { "status": "available", "window_s": 172800, "deadline_at": "...", "latest_stop_at": "...", "supply_level": "normal" },
+  "alternatives": ["waitlist", "reservation"],            // offered only when window.status is unavailable
+  "versions": { "policy_version_id": "plv_..." } }
+
+// Progress (getJobProgress)
+{ "job_id": "job_...", "version": 42, "state": "running", "cells_primary": 240,
+  "counts": { "waiting": 150, "retrying": 3, "in_progress": 20, "checking": 5, "double_checking": 2, "done": 58, "paused": 0, "stopped": 0, "failed": 0, "redo": 2 },
+  "map": "dddd...",                 // exactly cells_primary characters, one status code per cell (11.39.2)
+  "attempts": { "17": 3 },        // only cells whose attempt is above 1; key = cell index
+  "withheld_for_review": 0,
+  "verification": { "pool_cells": 24, "used_cells": 9 },
+  "timing": { "admitted_at": "...", "deadline_at": "...", "latest_stop_at": "...", "on_track": "unknown" },
+  "bottleneck": { "kind": "awaiting_volunteer", "cells": 150, "since": "..." },
+  "pause_reason": null, "closure_reason": null }
+
+// Settlement receipt and cancellation preview (same shape; kind = preview | receipt)
+{ "job_id": "job_...", "kind": "receipt", "held_ucr": "276000000",
+  "paid_to_volunteers_ucr": "264000000", "levy_ucr": "12000000",
+  "refund": { "total_ucr": "0", "unstarted_primary_ucr": "0", "unspent_verification_ucr": "0", "unearned_levy_ucr": "0" },
+  "cells": { "primary_accepted": 240, "verification_accepted": 24, "in_flight": 0 },
+  "transactions": [ { "txn_id": "txn_...", "txn_kind": "settle" } ],
+  "restored_lots": [ { "lot_id": "lot_...", "amount_ucr": "0", "expires_at": "...", "already_expired": false } ] }
+
+// Deliverable (getDeliverable)
+{ "id": "dlv_...", "job_id": "job_...", "manifest_id": "mfs_...", "completeness": "complete",
+  "available_until": "...", "files": [ { "name": "output-001.txt", "media_type": "text/plain", "bytes": 91234, "hash": "sha256:..." } ] }
+```
+
+**Which codes the requester screens must handle** (messages in 11.43): `400 VALIDATION_FAILED` (with `details.fields`), `401` family, `403 FORBIDDEN | LAUNCH_GATE_CLOSED`, `404 NOT_FOUND`, `409 STATE_CONFLICT | ALREADY_EXISTS | IDEMPOTENCY_IN_PROGRESS`, `412 PRECONDITION_FAILED`, `413 PAYLOAD_TOO_LARGE`, `422 POLICY_REJECTED | INSUFFICIENT_CREDIT | CAP_EXCEEDED | NO_CAPACITY | UNPROCESSABLE | IDEMPOTENCY_KEY_MISMATCH`, `429 RATE_LIMITED`, `500/503 INTERNAL | UNAVAILABLE | KILL_SWITCH_ENGAGED`. Where one code has several causes the cause is `details.reason` (values in 11.43.2) [A].
+
+## 11.35 Wizard architecture
+
+### 11.35.1 Steps, Job states and events [D]
+
+The wizard has seven steps. The Job is created when the first step is completed and stays in `draft` until the person presses Check my request. Two different screenings exist and must not be confused: **upload screening** (automatic checks on one `Upload`, during `draft`, S9.*) and **job screening** (`Job.screening`: policy rules `R1`..`R7` over the declarations plus the upload result, plus a reviewer for sampled or flagged inputs, `screen.review_rate_*`). [D]
+
+| Step | Screen | Job state while on it | Server events (S0.9) |
+| --- | --- | --- | --- |
+| 1 Template | `SCR-req-02` | `draft` (created on choosing) | `job.created` |
+| 2 Data | `SCR-req-03` | `draft` | `upload.accepted`+ or `upload.screen_failed`+ (11.49) |
+| 3 Data check result | `SCR-req-04` | `draft` | `upload.screen_passed`+, `upload.screen_flagged`+, `upload.screen_rejected`+ |
+| 4 Declarations and Check my request | `SCR-req-05` | `draft`, then `screening` | `job.submitted` |
+| 5 Policy result | `SCR-req-06` | `screening`, then `rejected` or `quoted` | `job.policy_rejected` or `job.policy_passed` |
+| 6 Price and window | `SCR-req-07` | `quoted` (or `waitlisted`) | `job.quote_expired`, `job.waitlisted`, `job.waitlist_released` |
+| 7 Escrow confirmation | `SCR-req-08` | `quoted`, then `admitted` | `job.escrow_confirmed` |
+
+An abandoned draft is cancelled by the system after `job.draft_ttl_days` with the existing event `job.cancel_requested` (actor type `system`); its uploads are purged under the `job_bound` class (S0.7). [A][D]
+
+### 11.35.2 Resume and navigation [D]
+
+```
+function resume_screen(job):            # derived from server state only, so reload, a second tab and a lost session resume correctly
+  switch job.state:
+    draft:           if no upload with screen_status in (passed, flagged_for_review): return SCR-req-03 or SCR-req-04
+                     else: return SCR-req-05
+    screening:       return SCR-req-06 (waiting view)
+    rejected:        return SCR-req-06 (rejected view)
+    quoted:          return SCR-req-07
+    quote_expired:   return SCR-req-07 (expired view)
+    waitlisted:      return SCR-req-09
+    admitted | running | suspended | assembling | settling | cancelling: return SCR-req-12
+    completed | failed:  return SCR-req-16 (and SCR-req-15 for the receipt)
+    cancelled:       return SCR-req-15
+```
+
+- Back is available only inside `draft`. Changing the template after an upload exists asks for confirmation and deletes the uploads and glossary, because the slots differ (`deleteUpload`). [D]
+- Declarations are read-only after `job.submitted`. To change them the person uses Fix and resubmit (a new job, RD-11). [D]
+- Two tabs: a write with a stale `row_version` returns `412 PRECONDITION_FAILED`; the screen reloads the job and shows `copy.req.err_stale`. [D]
+
+### 11.35.3 Job-fit check shown during the wizard (FD§2) [D]
+
+| FD§2 condition | Evaluated by | Shown where | Failure behaviour |
+| --- | --- | --- | --- |
+| (1) Splits into independent cells | server splitter (S8.*): `cell_count`, `cells_over_envelope` | `SCR-req-03` | Cells over `cell.envelope.max_input_chars` are listed by index; the person edits or splits the file; `Continue` disabled while any remain |
+| (2) Data is `S0` or `S1` | the declaration and upload screening | `SCR-req-04`, `SCR-req-05` | `R2` reject, honestly declared (RD-05) |
+| (3) Each cell has an automatic or sampled check | template (S8.*) | `SCR-req-02` card line "How results are checked" | Not shown for templates without a check (such templates cannot be approved) |
+| (4) The requester accepts a queue window of hours to days | requester acknowledgement | `SCR-req-07` text, not a checkbox | The quote states the window; cancelling is free before escrow |
+| (5) Each cell fits one Send | server: `chars_available_per_cell` against the envelope | `SCR-req-03` | As (1) |
+
+The fit check is advice with reasons, never a score. [D]
