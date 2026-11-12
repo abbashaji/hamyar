@@ -202,6 +202,7 @@ Convention additions requested by this part (C-022 completes the table; names ar
 | `ui.status_poll_max_s` | duration_s | 60 (upper bound of the polling backoff) | 5..600 | `OPS` |
 | `appeal.reason_max_chars` | int | 1000 | 100..10000 | `OPS` |
 | `invite.required_to_join` | bool | true (closed Phase 1 pilot, FD§9) | | `FND` |
+| `ui.lease_warning_ratio` | ratio | 0.25 (warn when this share of `lease.timeout_s` remains) | 0..1 | `CAL` |
 
 ## 11.6 SCR-vol-01 Landing
 
@@ -1319,3 +1320,69 @@ The volunteer also has "flagged" in the sense of their own report on a card (`SC
 - `AC-vol-72` Given the member changes language, digits and calendar, When any screen renders, Then the choices apply immediately, are stored only on the device and no server call carries them.
 - `AC-vol-73` Given a link code older than `identity.device_link_code_ttl_s`, When it is redeemed, Then it is refused with `NOT_FOUND` and the same message as an unknown code.
 - `AC-vol-74` Given the member confirms Close account, When `closeMember` completes, Then the identity status is `closed`, the device key and session are removed and the confirmation shows what was kept.
+
+## 11.22 Policy, privacy and risk notices (both languages)
+
+All text below is draft copy, marked `needs_human_and_legal_review`; none is a legal conclusion and each depends on facts that are [V]. Any sentence that promises something says "declared" (FD Principle 11). Notices are bundled with the app (V-14), version-stamped, and shown where named in the screens above. [D]
+
+| Copy key | Shown at | `fa` (draft) | `en` |
+| --- | --- | --- | --- |
+| `copy.risk.provider_and_law` | Landing (expandable), Help, F3 | شرایط استفادهٔ سرویس گفت‌وگوی شما و قوانین کشورتان ممکن است استفاده از آن برای انجام کار دیگران را محدود کند. همیار دربارهٔ مجاز بودن آن نظر حقوقی نمی‌دهد. تصمیم و مسئولیت با شماست. | Your chat service's terms and your country's laws may limit using it to do tasks for other people. Hamyar gives no legal opinion on whether it is allowed. The decision and the responsibility are yours. |
+| `copy.privacy.pseudonymity_notice` | Landing footer, Help, Settings | همیار تلاش می‌کند کمترین داده را نگه دارد: بدون ایمیل اجباری، بدون نمایش مکان، بدون نشانی IP خام. این به معنای ناشناس بودن مطلق نیست؛ شبکه یا میزبان ممکن است ببیند که از همیار استفاده می‌شود. | Hamyar tries to keep the least data possible: no required e-mail, no location display, no raw IP address stored. This is not absolute anonymity; a network observer or the host may see that Hamyar is being used. |
+| `copy.privacy.what_we_keep` | Help | حساب شما یک کلید است، نه نام. نتیجه‌هایی که می‌فرستید برای مدت اعلام‌شده نگه داشته می‌شوند و سپس حذف می‌شوند؛ ثبت‌های اعتبار بدون داده شخصی دائمی هستند. | Your account is a key, not a name. Results you send are kept for the declared period and then deleted; credit records without personal data are permanent. |
+| `copy.policy.declared_rules` | Card detail, Help | هدف، مجوز، حساسیت و سرویس هر کار را درخواست‌دهنده اعلام کرده است. همیار تا حد امکان فنی بررسی می‌کند اما درستی آن‌ها را تضمین نمی‌کند. | The requester has declared the purpose, license, sensitivity and service of each task. Hamyar checks as far as technically possible but does not guarantee they are true. |
+| `copy.policy.open_license_reuse` | Card detail (L1, L2) | خروجی این کار با مجوز آزاد منتشر می‌شود و هر کسی ممکن است دوباره از آن استفاده کند. | The output of this task is published under an open license, and anyone may reuse it. |
+| `copy.risk.injection` | Hand-off | متن کار از طرف یک ناشناس است. اگر پاسخ پیوند، کدِ اجرایی یا درخواستی از شما داشت، اجرا نکنید؛ آن را بفرستید تا کنار گذاشته شود. | The task text comes from a stranger. If the answer contains links, code to run, or requests for you to act, do not follow them; submit it and it will be set aside. |
+| `copy.risk.clean_chat` | Hand-off | کار را در یک گفت‌وگوی تازه انجام دهید و اگر سرویس اجازه می‌دهد حافظه و اتصال‌ها را خاموش کنید. این خطر را کم می‌کند، حذف نمی‌کند. | Run the task in a new chat and, where the service allows, turn memory and connectors off. This reduces the risk; it does not remove it. |
+| `copy.risk.account_may_be_limited` | F3, Help | سرویس شما ممکن است حساب شما را محدود کند. هر کاری که می‌کنید روی حساب خودتان است. | Your service may limit your account. Everything you do is on your own account. |
+| `copy.credit.not_money` | Balance | اعتبار پول، دارایی یا حق مسلم نیست و نقد نمی‌شود. مقررات آن اعلام‌شده است و ممکن است با اطلاع قبلی تغییر کند. | Credit is not money, property or an entitlement and cannot be cashed out. Its rules are declared and may change with advance notice. |
+| `copy.safety.share_and_invite` | Share, Invite | با هم‌رسانی کارت یا دعوت، دیگران می‌فهمند که شما از همیار استفاده می‌کنید؛ این ممکن است برای امنیت شخصی شما اهمیت داشته باشد. هم‌رسانی نکردن همیشه مجاز است. | By sharing a card or inviting someone, others learn that you use Hamyar; this may matter for your personal safety. Not sharing is always fine. |
+| `copy.help.cannot_promise` | Help | همیار نمی‌تواند وعده دهد که ناشناس بمانید، که سرویس‌ها از حساب شما محافظت می‌کنند، یا که کلید گم‌شده بازیابی شود. | Hamyar cannot promise that you will stay anonymous, that services will protect your account, or that a lost key can be recovered. |
+
+## 11.23 Cross-screen acceptance criteria
+
+- `AC-vol-75` Given any volunteer screen, When its text is searched in both locales, Then no promise of quality, safety, anonymity, speed or credit uses the word "guaranteed" or its Persian equivalent, and every promise-like sentence uses "declared".
+- `AC-vol-76` Given any volunteer screen, When all network requests are listed, Then none goes to a third-party host, none sets a cookie, and none reads the provider's page or the clipboard outside a tap handler.
+- `AC-vol-77` Given every screen of 11.6 to 11.21, When RTL rendering tests run in `fa` and LTR tests in `en`, Then no wireframe element overlaps, punctuation does not flip next to Latin fragments, and prompts and outputs with mixed Persian, Latin and digits keep their per-paragraph direction (`T-rtl-nn`).
+- `AC-vol-78` Given a throttled link and a first-load budget of `ui.first_load_budget_bytes`, When the landing loads on a mid-range phone, Then the shell and primary action are usable before data calls complete and the budget is met or the shortfall is recorded for measurement `TEC` [V].
+- `AC-vol-79` Given each state named in the screen sections (empty, loading, error, offline, blocked), When it is forced in a test, Then the named copy key appears in both locales and the volunteer has one visible next action.
+- `AC-vol-80` Given each screen's accessibility notes, When a keyboard-only and a screen-reader pass runs, Then every action is reachable, focus order follows reading order in `fa` and `en`, and status changes are announced politely.
+- `AC-vol-81` Given a member who is `suspended`, `banned` or `closed`, When they use the app, Then only the screens allowed in the Blocked rows of their sections are reachable and Help stays available.
+
+## 11.24 Traceability to the prompt scope F (volunteer)
+
+| Prompt scope F item | Where specified |
+| --- | --- |
+| Landing | 11.6 |
+| First contribution flow (sub-60-second path) | 11.7 (step list with time budget, labeled [H]) |
+| Cell card: purpose, license, sensitivity, service, template, expected time, one-sentence provenance line, expandable full prompt, mandatory expansion rules, decline and report | 11.8 |
+| Copy and open-in-service through the service-adapter layer (prefill only where a registry entry says so, copy-only otherwise) | 11.9 |
+| Paste-back | 11.10 |
+| Result feedback (accepted, rejected with reason, flagged) | 11.11 |
+| Balance and expiry (lots with expiry dates) | 11.12 |
+| History | 11.13 |
+| Opt-in settings | 11.14 |
+| Teams | 11.15 |
+| Share card | 11.16 |
+| Invite flow | 11.17 |
+| Recovery key handling | 11.18 |
+| Appeal | 11.19 |
+| Help | 11.20 |
+| Report; identity and display settings | 11.21 |
+| Persian first: RTL, numerals, Jalali and Gregorian, mixed-direction text, fonts; accessibility; low bandwidth | 11.4 |
+| Copy for policy, privacy and risk notices in both languages, marked for human and legal review | 11.22 and the copy tables of 11.6, 11.7, 11.18 |
+| "Declared", never "guaranteed" | 11.1 rule, 11.22, `AC-vol-75` |
+| Never reads the chat page, never submits for the volunteer | 11.1 exclusions X1..X7, 11.9, 11.10 |
+
+## Issues raised
+
+Found while specifying the volunteer screens. Each resolution is already applied in this file; C-001 consolidates and may record a different one. This file is assumed to sort first among the S11 files, so it uses `ISS-111`..`ISS-113` [A].
+
+| id | severity | fd_ref | issue | resolution | status |
+| --- | --- | --- | --- | --- | --- |
+| `ISS-111` | major | FD§4.4, FD§5.5 | FD§5.5 says a rejected cell shows the donor why (and the donor can appeal), but showing exact check names (gold, audit, timing) would teach a bad actor how to evade the verifier and would reveal hidden gold cells | Volunteer-facing reasons for `reject.gold_mismatch`, `reject.audit_mismatch`, `reject.duplicate_of_other_output` and `reject.timing_anomaly` use the generic copy `copy.reject.generic_check`; the exact code is visible in the member's own history only if S9.* allows it; appeal remains available for all (11.11) | proposed |
+| `ISS-112` | minor | none | The conventions lack names this part needs: UI parameters `ui.first_load_budget_bytes`, `ui.offer_list_size`, `ui.recovery_confirm_groups`, `ui.status_poll_max_s`, `ui.lease_warning_ratio`, `appeal.reason_max_chars`, `invite.required_to_join`; expansion reason codes `expand.*`; the member-facing outcomes `received`, `accepted`, `rejected`, `set_aside`; the operation names of 11.5.1 | Added as `[A]` in 11.5 and 11.8.4 with `initial configurable default` values; C-022 should add the parameters to the table, S15.* the operations | proposed |
+| `ISS-113` | major | FD§3.2 | FD§3.2 step 1 says the identity and recovery key are created locally at first use, but showing and confirming a recovery key before the first contribution blocks the under-60-second path while the identity holds no credit to protect | The key is generated at join and displayed after the first accepted cell, with a visible "key not saved" marker until confirmed (11.18). Risk: a member who loses the device before the first accepted cell loses nothing but the identity. Whether to show the key earlier is an owner decision [H] | needs_owner |
+| `ISS-114` | minor | FD§6.2 V5, S0.8.5 | The invite flow shows referral rules while the FD does not say what an invitee learns about the issuer; telling them would create a social link that could expose members | An invitation carries no issuer identity and is delivered in a URL fragment; the issuer sees only invite state, not who joined (11.17) | proposed |
+
+Note on the block: `ISS-114` exceeds the three ids assumed for this file (`ISS-111`..`ISS-113`); if C-001 assigns this file a three-id block, `ISS-114` is to be renumbered by C-001 [A].
