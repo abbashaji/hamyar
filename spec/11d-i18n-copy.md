@@ -735,3 +735,106 @@ Test cases are named here by acceptance id; S18.* assigns `T-*` ids and layers (
 | `AC-i18n-35` | a member accepts the consent boxes | the consent is recorded | the stored record holds `copy_key`, `copy_hash` and `accepted_at` for each box and no text; a hash that is in neither the current nor the previous manifest is refused |
 | `AC-i18n-36` | the join page | it loads | all notices are shown in full in the order of S11.52, every box is unticked, and the continue button stays focusable and says what is missing |
 | `AC-i18n-37` | a new member from any network | the join page is shown | the safety note appears for everyone, and no code path reads or derives a location |
+
+## 11.55 Parameters introduced by this part
+
+Names follow S0.10.1 (areas `i18n`, `ui`, `screen`, `identity`). Every default is an `initial configurable default` or a formula shown in the row; S16.* completes the rows without renaming (convention gap, `ISS-119` and the note after the issues table). Owner is `operator` except `screen.*`, which is `reviewer`. `Replaced by` uses the codes of S0.10.4. [D]
+
+| Name | Type | Initial configurable default | Validation | Replaced by |
+| --- | --- | --- | --- | --- |
+| `i18n.digits_default_en` | enum | `latin` | constant | `CON` |
+| `i18n.calendar_default_fa` | enum | `jalali` | `jalali`, `gregorian` | `FND` |
+| `i18n.calendar_default_en` | enum | `gregorian` | `jalali`, `gregorian` | `FND` |
+| `i18n.week_start_fa` | enum | `saturday` [V] | `saturday`, `sunday`, `monday` | `FND` |
+| `i18n.clock_24h` | bool | true | | `FND` |
+| `i18n.first_visit_locale_from_browser` | bool | true | | `FND` |
+| `ui.credit.display_decimals` | int | 2 | 0..6 | `P1M` interviews |
+| `ui.ratio.display_decimals` | int | 3 (the FD§3.3 example shows 0.870) | 0..6 | `FND` |
+| `ui.font.third_party_allowed` | bool | false | constant | `CON` |
+| `ui.font.max_weights` | int | 2 | 1..4 | `TEC` |
+| `ui.font.fa_stack` | string | `"Hamyar Sans", system-ui, "Segoe UI", Tahoma, sans-serif` | non-empty; ends with a generic family | `TEC` fallback check on real phones (G2) |
+| `ui.budget.js_bytes` | int | 100,000 | 1..10,000,000 | `TEC` |
+| `ui.budget.css_bytes` | int | 20,000 | 1..10,000,000 | `TEC` |
+| `ui.budget.fonts_bytes` | int | 80,000 | 1..10,000,000 | `TEC` |
+| `ui.budget.first_load_bytes` | int | 204,096 = 100,000 + 20,000 + 80,000 + 4,096 | at least js + css + fonts | `TEC` |
+| `ui.budget.cell_card_bytes` | int | 16,096 = 4,000 x 3 + 4,096 | at least `cell.envelope.max_input_chars` x 3 | `CAL` envelope, then `TEC` |
+| `ui.budget.repeat_view_bytes` | int | 65,248 = 16,096 + 32,768 + 16,384 | positive | `TEC` |
+| `ui.budget.test_profile` | json | `{downlink_kbps: 400, rtt_ms: 400}` (a test input, not a claim about any network) | both positive | `TEC` |
+| `ui.budget.first_interactive_s` | duration_s | 7 = `ceil(204,096 x 8 / 400,000 + 6 x 0.4)` | positive | `TEC` |
+| `ui.draft.ttl_s` | duration_s | 3,600 | at least `lease.timeout_s + lease.max_extensions x lease.extend_s + lease.submit_grace_s` (1,200 + 600 + 120 = 1,920 with the defaults); at most 86,400 | `OPS` |
+| `ui.lease.warn_remaining_s` | duration_s | 300 | 0 to `lease.timeout_s` | `CAL`, then `P1M` |
+| `ui.a11y.min_target_css_px` | int | 44 | 24..64 | `TEC` |
+| `ui.retry.max_attempts` | int | 5 | 1..20 | `OPS` |
+| `ui.retry.base_delay_s` | duration_s | 2 | 1..30 | `OPS` |
+| `ui.retry.max_delay_s` | duration_s | 60 | at least `ui.retry.base_delay_s`; at most 600 | `OPS` |
+| `screen.bidi_control_action` | enum | `flag_for_review` | `reject`, `flag_for_review`, `ignore_display_only` | `P1M` incident log |
+| `identity.min_age_years` | int | 0 (zero means the age line is not shown; a legal decision, `ISS-119`) | 0..99 | `CNS` |
+
+Existing parameters used by this part: `i18n.default_locale`, `i18n.supported_locales`, `i18n.digits_default_fa`, `i18n.dual_calendar_detail`, `public.counter_refresh_s`, `lease.timeout_s`, `lease.max_extensions`, `lease.extend_s`, `lease.submit_grace_s`, `cell.envelope.*`, `retention.*`, `identity.recovery_cooldown_s`, `report.triage_sla_days`, `appeal.window_days`, `analytics.third_party_trackers`, `analytics.cookies_enabled`, `launch.min_signoffs`.
+
+## 11.56 Assumptions and items to verify
+
+**Assumptions [A] introduced by this part** (S3.* collects them; the right column is the owner decision that could overturn each)
+
+| Assumption | Could be overturned by |
+| --- | --- |
+| Heading numbers of this file start at 11.40; issue ids `ISS-117` to `ISS-119` are used (S11.40) | the plan, at assembly |
+| WCAG 2.2 level AA is the target, with the lease-timing deviation (S11.48) | the owner choosing another level, or a lower one for operator tools |
+| `fa` defaults to Persian digits (S11.43) | the Phase 1 interview result |
+| The clock is 24-hour in both locales (S11.44) | the owner or interview feedback |
+| Public pages carry a `/fa/` or `/en/` path prefix (S11.41) | the stack decision in S4.* |
+| Locale, digits, calendar and time zone live on the device, not on the server (S11.41) | a decision to sync preferences |
+| The calendar range to validate is 2026-01-01 to 2040-12-31 (S11.44) | the longest horizon that S6.* decides |
+| The copy review statuses and the manifest (S11.50) | `ISS-118` resolution |
+| `appeal` is rendered `درخواست بازبینی` (S11.53) | the native-speaking reviewer |
+| English is written first for counsel, no precedence clause is written (S11.47) | counsel |
+| Hashed font files are cached as immutable; a service worker may cache the shell (S11.46, S11.49) | S10.* policy on service workers |
+| Six round trips in the first-interactive formula (S11.49) | measurement on real networks (`TEC`) |
+| Time axes run in reading direction (S11.42) | the interview read test, an [H] |
+| The safety note is shown to every new member, not by location (S11.51.C) | the safety advisor (G1) |
+| The `opt-in`, `escrow` and `operator` terms in Persian (S11.53) | the native-speaking reviewer |
+
+**Items to verify [V]** (every inline [V] in this file maps to one row)
+
+| What is verified | By whom | Where the answer is stored |
+| --- | --- | --- |
+| Persian wording, orthography and terminology of every notice, and the Persian names of months and weekdays | native-speaking reviewers | `reviewed` fields and review status of each copy key |
+| Wording of the account-risk, credit, license, waiver and no-circumvention notices; declared-claim register; which language prevails | counsel in the operator's jurisdiction | counsel memo, referenced in `reviewed.legal_ref` |
+| Safety and privacy-limit statements and the join-page order | a person qualified to advise on safety (FD§8.3 G1) | G1 `LaunchGateItem` evidence |
+| Golden table of Jalali boundary dates and its source | a native-speaking reviewer | a CI fixture with its source reference |
+| Platform support for `Intl` calendar and number formatting, data-saver signals, font metric overrides | an engineer on the target phones | G2 `LaunchGateItem` evidence |
+| Font license, glyph coverage, redistribution and subsetting rights | a reviewer | license file and check date beside the font files |
+| System fonts that render Persian on the target phones; Persian speech output | a tester on real devices | G2 evidence; accessibility statement |
+| Whether the essential-limit exception applies to the lease timer | an accessibility auditor | accessibility statement |
+| Week start and regional picker defaults | a native-speaking reviewer | `i18n.week_start_fa` and its change-log entry |
+| Claims marked [V] in the declared-claim register (S8.*, S9.*, S10.*, operator procedure) | the owners of those parts and the operator | this file's register until closed, then S14.* launch items |
+
+## 11.57 Requirements on other parts
+
+Each row is a requirement that this part places on another part. If the owner of that part cannot meet it, they record an issue in their own block. [D]
+
+| Part | Requirement |
+| --- | --- |
+| S4.* | Choose the calendar library to the requirement of S11.44; keep fonts behind the storage and host interface; decide the service-worker policy of S11.49 |
+| S5.*, S7.*, S8.* | Member-visible human-authored strings are `{fa, en}` pairs or copy keys (S11.41); templates declare `lang` on slots and output fields (S11.45); comparators declare their `fold_fa` options; declines are never counted in reliability or trust (declared-claim register) |
+| S9.* | Screen bidi controls per `screen.bidi_control_action` and quarantine flagged submissions; judge size and schema on the raw text, with no trimming (S11.45); lease responses carry `expires_at` and `server_time` (S11.49) |
+| S10.* | Content security policy limited to the page and API origins; recovery key alphabet without ambiguous characters; *clear local data* versus key deletion (S11.49); e-mail storage form; validate consent hashes against the current and previous `copy_manifest`; no code path that derives location; add `identity.min_age_years` |
+| S12.* | A public notices page (S11.52); weekly aggregates labeled as UTC weeks; share-card text follows S11.42 to S11.45; a change-log kind for notice text that changes a promise (`ISS-118`) |
+| S13.* | Add to the Phase 1 interview guide: digits preference, time-axis read test, the terms `انصراف` and `درخواست بازبینی`, comprehension of the consent boxes |
+| S14.* | Launch gate items: all required copy keys `approved` before `launch.members_may_join` can be true (`AC-i18n-34`); the G1 safety-note item; the G2 items for RTL rendering, accessibility pass and low-bandwidth budgets on real devices; the recovery-key procedure of the team |
+| S15.* | Error bodies keep `details.copy_key` and carry no prose; no locale parameter; the consent write accepts `copy_key` and `copy_hash`; lease responses carry `server_time` |
+| S16.* | Complete the parameter rows of S11.55 and the placeholder sources of S11.52 |
+| S18.* | Number the acceptance ids of S11.54 as tests; state that simulation output is not evidence about human reading or reaction |
+| S19.*, S20.*, S21.* | Risks: dependence on human and legal review of the notices, font license, device variation in Persian rendering; glossary from S11.53; the Persian summary uses the same terms |
+
+## Issues raised
+
+Problems and gaps found while writing this part. Each resolution is already applied in this file; C-001 consolidates them into S2.* and may record a different one. [D]
+
+| id | severity | fd_ref | issue | resolution | status |
+| --- | --- | --- | --- | --- | --- |
+| `ISS-117` | minor | prompt | S0.4 gives a split part three issue sub-blocks and S0.13 gives no heading-number plan, but part 11 has at least four files, so a fourth file has no sub-block and its `S11.<m>` headings could collide with the other three | This file uses `ISS-117` to `ISS-119` and headings from `11.40`; the plan or C-001 assigns final blocks and numbers at assembly and updates references | proposed |
+| `ISS-118` | major | FD§5.5, FD§9, prompt F | The FD requires explicit, informed opt-in (FD§9) and notices that change only in public, but S0 has no place to record which notice text a member accepted, no review state for legal text, and no change-log kind for notices | (a) `OptIn` rows of a new kind `consent` carry `copy_key`, `copy_hash`, `accepted_at` and no text; (b) a new enum `copy_review_status` (S11.50); (c) a `copy_manifest` shipped with each build; (d) a change-log entry kind `notice` for any approved text change that alters a promise | proposed |
+| `ISS-119` | major | FD§5.3 (S3 includes minors' data), FD§8.3 | The FD keeps minors' data out of jobs but says nothing about a minimum age for members, and consent text normally needs one; setting it is a legal decision this spec cannot make | A parameter `identity.min_age_years`, default 0 (the age line `copy.consent.join.age_confirmation` is not rendered); counsel sets it [V]; also listed as an owner decision in S3.* | needs_owner |
+
+Convention additions made by this part (not issues, listed so C-001 can fold them back): the parameters of S11.55 (names are new, no existing name is changed); the enum `copy_review_status` and the copy record of S11.50; the copy key groups of S11.51 beyond the example key of S0.5; the client-local draft states of S11.49 (explicitly not domain states); the `OptIn` kind `consent` and the change-log kind `notice` (`ISS-118`); the use of `fa` and `en` pairs for stored human-authored strings (S11.41).
