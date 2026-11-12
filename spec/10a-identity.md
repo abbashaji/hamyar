@@ -451,3 +451,81 @@ Legend: `Y` allowed when the conditions hold; `2P` allowed only with two-person 
 3. Deliberately absent permissions: no principal can read e-mail addresses, private keys or recovery keys, restore or reassign a member's keys, read a provider credential, or read a volunteer's chat page. Operators cannot create members.
 4. Members who are also admins hold two unlinked principals; `AdminUser.declared_member_ids` is optional, used only by assignment logic to apply X11, and shown only to the admin concerned and to operators approving `admin.role_grant`. Without it X11 rests on honesty [V: process].
 5. One person alone cannot satisfy X9. With a single admin, two-person actions (including launch sign-off) cannot run and there is no bypass; whether to add a second person is an owner decision (`S3.*`, `ISS-102`).
+
+## 10.12 Admin authentication
+
+**Decision** [D]: admins (`AdminUser`, roles `reviewer` and `operator`) authenticate with **WebAuthn passkeys** on a **separate origin**, with **two-person approval** for dangerous actions. No shared password, no password at all, no TOTP seed, no SMS, no e-mail link, no third-party single sign-on exists for admins. Reason: WebAuthn signs a challenge that is bound to the exact origin, so a look-alike site cannot harvest a usable login; the server stores only public keys, so a database leak contains nothing to replay; it needs no call to any third party, which matters for reachability from Iran [V: WebAuthn support and reachability of the admin origin from where each admin sits].
+
+| Alternative | Rejected because |
+| --- | --- |
+| One shared admin token (the existing panel's model, FD§10) | A shared secret has no individual accountability and one leak is total; prompt scope A forbids it |
+| Per-admin password | Phishable, reusable, needs a slow hash and a reset path |
+| TOTP | The shared seed lives on the server and the code is phishable |
+| SMS or e-mail codes | SIM swap, mailbox takeover, ties admins to a phone or provider |
+| Third-party SSO | External dependency, possible blocking, a tracker of admin activity |
+| Client TLS certificates | Hard to issue, rotate and recover for a small volunteer team |
+
+| WebAuthn setting | Value | Reason |
+| --- | --- | --- |
+| Relying party id and origin | The admin host only, for example `admin.<domain>`, never the member origin; exact origin match is checked server-side | A passkey made for the admin site cannot sign in anywhere else; a separate origin also separates storage and CORS (S0.11.4) |
+| `userVerification` | `required` | The authenticator checks a PIN or biometric locally; a stolen unlocked key is not enough |
+| `residentKey` | `preferred` (discoverable credentials allow usernameless sign-in) | Fewer typed identifiers |
+| `attestation` | `none` | No authenticator model data is collected; the cost is that hardware binding cannot be proven by the server |
+| Algorithms | EdDSA (-8) and ES256 (-7) | Broad support [V] |
+| Authenticator advice | Operators SHOULD hold at least one roaming hardware security key; synced platform passkeys depend on a vendor cloud account whose availability and terms for admins in some countries are [V] | Whether to require hardware keys (attestation `direct` plus an allowlist) is an owner decision (`S3.*`) |
+| Credentials per admin | At least `security.admin_min_credentials` active (a primary and an offline backup) | A lost authenticator must not lock an admin out |
+
+```
+sign-in:  POST /v1/admin/auth-challenges  -> {challenge (32 random bytes, single use, ttl identity.challenge_ttl_s)}
+          POST /v1/admin/sessions {assertion}
+  server: exact origin and rpIdHash match; UP and UV flags set; signature valid for the stored public key;
+          challenge matches and is unused; if sign_count is non-zero it must be greater than the stored one,
+          else the credential is locked, the alarm admin.credential_cloned is raised and no session is issued;
+          create session (scheme admin), emit admin.signed_in
+```
+
+**Enrollment** [D]: the first `AdminUser` is created by a bootstrap command run by whoever holds infrastructure access (the trust root): it prints a single-use 128-bit enrollment code valid `identity.device_link_code_ttl_s`. After that, every new admin or new credential needs two-person approval (`admin.role_grant`, `admin.credential_add`): admin A proposes, admin B approves with a payload-bound assertion, the system issues an enrollment code that A hands over out of band, and the new person registers a passkey at the admin origin. The last active `operator` can never be disabled or locked by the system (the request is refused). Credentials are `pending` until the second approval.
+
+**Two-person protocol** [D]
+
+```
+propose:  AdminAction(state proposed, action, target_ref, params_hash = SHA-256(canonical params),
+          proposed_by = P, expires_at = now + security.two_person_ttl_s)      # needs X8
+approve:  admin Q (Q != P, required role, X8) completes a WebAuthn assertion whose challenge =
+          SHA-256(action_id || params_hash || nonce), so the assertion itself attests approval of that exact payload
+execute:  only after approval and before expiry; parameters cannot change after proposal;
+          outcome and both admin ids are written to AdminAction; emit admin_action.executed
+```
+
+The set of two-person actions is `security.two_person_actions`. This part defines the action names and proposes the initial default below (`ISS-102`): `ledger.reversal`, `launch.signoff`, `parameter.loosen`, `killswitch.release` (from S0.10.6), plus [A] `member.ban`, `invite.seed_issue`, `admin.role_grant`, `admin.credential_add`, `admin.credential_unlock`, `disclosure.release`. Locking a credential is deliberately single-admin (an emergency brake: `perm.admin.credential_lock`); unlocking is two-person. Two accounts held by one human cannot be detected by software; distinct humans per approval is a process rule [V: operating procedure]. Every `AdminAction` records who, what, target, payload hash, outcome and `request_id`; rows are append-only and hash-chained like the ledger [A].
+
+Admin surface hardening [D]: strict Content-Security-Policy with no third-party script, font or frame; the token is held in page memory only, so a reload requires a new assertion; `ratelimit.admin_api_rpm`; CORS allows only the admin origin; a member token sent to an admin route is `AUTH_INVALID` and counted (S0.11.4).
+
+## 10.13 Session handling
+
+| Aspect | Member session | Admin session |
+| --- | --- | --- |
+| Token | Opaque 256-bit CSPRNG value, base64url, sent as `Authorization: Bearer`; no cookie, no JWT, so no CSRF surface and no claims to forge | Same |
+| Storage | Server: SHA-256 of the token in `Session`; device: IndexedDB | Server: same; page memory only |
+| Issued by | A signed challenge with an active `MemberKey` (purpose `session`) or by registration or recovery | WebAuthn assertion (10.12) |
+| Idle TTL | `session.member_idle_ttl_s` (2,592,000 s = 30 days) | `session.admin_idle_ttl_s` (1,800 s) |
+| Absolute TTL | `session.member_abs_ttl_s` (7,776,000 s = 90 days) | `session.admin_abs_ttl_s` (28,800 s) |
+| Step-up | A fresh signature (purpose `step_up`) sets `step_up_at`; valid `session.step_up_max_age_s` | Same with a new assertion |
+| Binding | To one `key_id`; one active session per key | To one credential |
+
+**Rotation** [D]: a session is never extended in place beyond its absolute TTL. The client re-authenticates silently by signing a fresh challenge (no user action), which issues a new token and atomically revokes the previous session of the same key; clients do this on `AUTH_EXPIRED` and before the idle limit, and coordinate between tabs with the Web Locks API where available [V]. Short TTLs are therefore a security setting, not a usability cost. Tokens are also re-issued on step-up, key rotation and recovery. `last_used_at` is written at most once per `session.touch_min_interval_s`, to avoid a write per request.
+
+**Validation** (every request) [D]
+
+```
+h = SHA-256(token); s = sessions.get(h)                         # constant-time compare on the hash
+reject AUTH_INVALID  if s is null, s.state != active, or s.principal_type != endpoint auth_scheme
+reject AUTH_EXPIRED  if now > s.abs_expires_at or now > s.idle_expires_at
+reject AUTH_INVALID  if the bound key is revoked, or retiring and past not_after
+reject FORBIDDEN     if the permission or a condition X3..X8 fails (10.11)
+then: touch last_used_at (rate-limited); idle_expires_at = last_used_at + idle TTL, never past abs_expires_at
+```
+
+**Revocation** [D]: (1) 'log out' revokes the current session; (2) 'log out everywhere' revokes all sessions of the member (`POST /v1/members/me/session-revocations`, step-up); (3) revoking or rotating a key revokes the sessions bound to it; (4) recovery revokes all; (5) `member.banned` revokes all sessions at once and `member.suspended` or an engaged `kill.member.<id>` blocks X3 permissions on the next request; (6) locking an admin credential revokes that admin's sessions and raises an alarm. Revoked and expired rows are deleted by the retention sweep every `retention.sweep_interval_s`; a row never outlives `retention.session_days` (constraint C9 [A]: `session.member_abs_ttl_s <= retention.session_days x 86,400`).
+
+**Considered and rejected** [D]: per-request signatures binding the token to the device key (DPoP style). They cost CPU and battery on low-end phones and add little against the main threat, a script injected into the page, which can ask a non-extractable key to sign. The defences are a strict Content-Security-Policy, no third-party scripts, escaping of all submitted text (`S9.*`), step-up for sensitive actions and short admin lifetimes.
