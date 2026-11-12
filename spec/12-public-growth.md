@@ -358,7 +358,7 @@ Events: `team.created`, `team.joined`, `team.left`, `team.locked`, `team.unlocke
 
 ### 12.10.1 Design decisions [D]
 
-- **A referral rides on an `Invite`.** The referral link is a vouched invitation (`Invite`, `invite.*` rules, S0.7), so invite-tree limits apply unchanged. A `Referral` (`ref_`, `member_bound`) adds the bonus state: `invite_id`, `referrer_member_id`, `referred_member_id` (null until joined), `state`, `qualified_at`, `paid_at`, `block_reason`, `grant_txn_id`, `unrecovered_ucr`. A referral link is sent person to person; it is never put on a share card (S12.8), because a public single-use link would be claimed by strangers.
+- **A referral rides on an `Invite`.** The referral link is a vouched invitation (`Invite`, `invite.*` rules, S0.7), so invite-tree limits apply unchanged. A `Referral` (`ref_`, `member_bound`) adds the bonus state: `invite_id`, `referrer_member_id`, `referred_member_id` (null until joined), `state`, `bonus_enabled`, `qualified_at`, `paid_at`, `block_reason`, `grant_txn_id`, `unrecovered_ucr`. A referral link is sent person to person; it is never put on a share card (S12.8), because a public single-use link would be claimed by strangers.
 - **Funding: the Reserve, never mint** (`ISS-06`). Both bonuses are `grant` entries `reserve` to `member` with lot lifetime `credit.lifetime_days` (S0.8.5). They pause, never overdraw, at or below `grant.reserve_floor_credits` (FD§4.6: grants are never printed).
 - **Two-sided, after the newcomer's verified first cell** (FD§6.2 `V5`): the referrer receives `growth.referral.bonus_referrer_credits`, the newcomer `growth.referral.bonus_newcomer_credits`. This is in addition to the newcomer's starter grant G, which is unaffected.
 - **Credit only.** No money, no cash value, non-transferable (`grant.non_transferable`), expiring like any lot (S12.1 rule 4).
@@ -366,7 +366,7 @@ Events: `team.created`, `team.joined`, `team.left`, `team.locked`, `team.unlocke
 
 ### 12.10.2 States and events [D][A]
 
-States: `issued`, `joined`, `qualified`, `paid`, `clawed_back` (T), `blocked` (T), `expired` (T). `paid` is terminal except for the clawback transition inside its window (convention addition, `ISS-128`).
+States: `issued`, `joined`, `qualified`, `paid`, `clawed_back` (T), `blocked` (T), `expired` (T). `paid` is terminal except for the clawback transition inside its window (convention addition, `ISS-128`). When `bonus_enabled` is false (the control arm of `V5`) the referral is measured but never paid: `qualified` is then terminal and the payout sweep skips it.
 
 ```
 (none)    --referral.created-->     issued        flag on; referrer caps pass; Invite issued under invite.* rules
@@ -536,3 +536,154 @@ This part defines the fields; the founders fill them (`FND`) and lock them befor
 ### 12.11.8 What this cannot show [D]
 
 With 30-50 members, Phase 1 cannot test any mechanic statistically (FD§6.2). Phase 2 estimates can still be confounded by contamination (members talk; the public counter is visible to all). Simulation output is never evidence about people (prompt K). Results, bad ones included, are published (FD Principle 11, `S13.*`).
+
+## 12.12 Growth mechanics V1-V6
+
+Each mechanic below is a flag, an instrumented surface and, in Phase 2, a randomizable `Experiment` (S12.11). All six hypotheses are [H]: the measurement named is the test; success and kill criteria are `PreRegistration` fields, unset until the founders fill and lock them (S12.11.7, `S13.*`). Metric keys follow S0.5 naming and are proposals for `S13.*` [A]. Every mechanic obeys S12.1 rules 7 and 8.
+
+### 12.12.1 V1: first contribution in under 60 seconds, no install, no signup
+
+| Item | Specification |
+| --- | --- |
+| Flag; FD§6.2 hypothesis [H] | `ff.growth.v1_fast_path`; raises landing-to-first-verified-cell conversion |
+| Phase 1 / Phase 2 | Phase 1: on for all new members, instrumented. Phase 2: A/B |
+| Variable | `fast_path`: the first Cell card appears right after identity creation and the explainer is deferred. `control` = `explained`: the explainer comes first. Unchanged in both: no install, no signup, recovery-key handling, every required notice, mandatory first-use prompt expansion. `S11.*` MUST implement both |
+| Unit, population, assignment | Member, `new_members`; randomization starts at `member.created` (nothing earlier can be randomized: there is no member yet). `hash_blocked`, strata `locale` and `join_source` |
+| Exposure surface key | `onboarding.first_card` |
+| Events | `member.created`, `experiment.assigned`, `experiment.exposed`, `lease.issued`, `lease.submission_received`, `submission.accepted` |
+| Primary metric | `hamyar_growth_v1_created_to_first_verified_cell_ratio`: new members with a first accepted cell divided by new members |
+| Secondary | `hamyar_growth_v1_time_to_first_verified_cell_seconds`; `hamyar_growth_v1_contribution_under_threshold_ratio` (share of contributions up to `ui.fast_contribution_threshold_s`). Contribution time is server time from `lease.issued` to `lease.submission_received`; the platform never reads the volunteer's chat page |
+| Guardrails | Rate of `reject.timing_anomaly` and `reject.schema_invalid` among a member's first cells; decline rate; copy-paste failures reported (a faster path must not buy errors) |
+| Landing-to-created | Reported as a separate non-unique figure from `hamyar_growth_landing_requests_total`; no cookies or visitor ids exist, so it is not a conversion rate (`ISS-124`) |
+| Success / kill criteria | `success_rule`, `kill_rule`: unset until locked |
+
+### 12.12.2 V2: live counter and members active today
+
+| Item | Specification |
+| --- | --- |
+| Flag; hypothesis [H] | `ff.growth.v2_live_counter`; raises day-7 return |
+| Phase 1 / Phase 2 | Phase 1: public counter and in-app widget on for all, instrumented (FD§6.3). Phase 2: widget shown versus hidden |
+| Variable | The in-app counter widget only. The public counter page is public and cannot be hidden from a subset, so members can see it anyway; the estimate is diluted by that contamination and the analysis says so |
+| Unit, population, assignment | Member, `all_members`; `hash_bucket` or `hash_blocked`, strata `cohort_week` and `trust_tier` |
+| Exposure surface key | `home.counter` (event payload `rendered` is false when the widget has nothing to show because figures are suppressed) |
+| Events | `experiment.assigned`, `experiment.exposed`; return is derived from `submission.accepted` |
+| Primary metric | `hamyar_growth_v2_day7_return_ratio` (definition in `S13.*`) |
+| Guardrails | Share of exposures with `rendered` false; reports about the counter |
+| Success / kill criteria | Unset until locked |
+
+### 12.12.3 V3: shareable personal card
+
+| Item | Specification |
+| --- | --- |
+| Flag; hypothesis [H] | `ff.growth.v3_share_card`; brings new first contributions |
+| Phase 1 / Phase 2 | Phase 1: off. Phase 2: on, randomized offer |
+| Variable | Whether the share offer appears on the result-feedback screen after a first accepted cell or a new badge. The share control inside settings stays reachable for everyone while the flag is on |
+| Unit, population, assignment | Member, `all_members` with at least one accepted cell; `hash_bucket`, strata `locale` |
+| Exposure surface key | `result.share_offer` |
+| Events | `sharecard.rendered` (preview shown), `sharecard.shared` (the member tapped share or copy; the platform cannot know a post happened), `experiment.assigned`, `experiment.exposed`; arrivals tagged `join_source` = `card` on `member.created` |
+| Primary metric | `hamyar_growth_v3_share_tap_ratio`: members with `sharecard.shared` divided by exposed members, by arm |
+| Secondary (descriptive, not randomized) | `hamyar_growth_v3_card_source_arrivals_total` over time (`ISS-124`) |
+| Guardrails | Reports, any exposure or de-anonymization report about cards (a universal kill condition) |
+| Success / kill criteria | Unset until locked |
+
+### 12.12.4 V4: team competition scored on verified cells
+
+| Item | Specification |
+| --- | --- |
+| Flag; hypothesis [H] | `ff.growth.v4_teams`; raises week-2 return among those offered teams |
+| Phase 1 / Phase 2 | Phase 1: basic teams on for all, no experiment. Phase 2: randomized offer; full teams per S12.9 |
+| Variable | The in-app offer to create or join a team (randomize the offer, because joiners self-select: FD§6.2). Joining by code stays available to everyone |
+| Unit, population, assignment | Member, `all_members` at tier not `restricted`; `hash_blocked`, strata `trust_tier` and `cohort_week` |
+| Exposure surface key | `home.team_offer` |
+| Events | `team.created`, `team.joined`, `team.left`, `team.locked`, `experiment.assigned`, `experiment.exposed` |
+| Primary metric | `hamyar_growth_v4_week2_return_ratio` by assigned arm (intent-to-treat) |
+| Guardrails | Reports and `team.locked` per team; share of members in teams below `team.min_public_members` |
+| Success / kill criteria | Unset until locked |
+
+### 12.12.5 V5: two-sided referral
+
+| Item | Specification |
+| --- | --- |
+| Flag; hypothesis [H] | `ff.growth.v5_referral`; raises activation without enabling farming |
+| Phase 1 / Phase 2 | Phase 1: off. Phase 2: randomized bonus |
+| Variable | `bonus` versus `control`: the referral link works in both arms; only the bonus pair differs (`Referral.bonus_enabled`) |
+| Unit, population, assignment | The referrer (member), `all_members` with tier not `restricted`; the newcomer inherits the referrer's arm through the `Referral`; `hash_bucket`, strata `trust_tier` |
+| Exposure surface key | `invite.referral_offer`; also emitted server-side at `referral.created` |
+| Events | `referral.created`, `referral.joined`, `referral.qualified`, `referral.paid`, `referral.blocked`, `referral.expired`, `referral.clawed_back`, `experiment.assigned`, `experiment.exposed` |
+| Primary metric | `hamyar_growth_v5_referred_activation_ratio`: `referral.qualified` divided by `referral.created`, by arm |
+| Guardrails | `hamyar_growth_v5_blocked_total` share; Reserve draw against `growth.referral.reserve_draw_cap_ratio`; `hamyar_growth_referral_unrecovered_ucr_total`; farming flags |
+| Success / kill criteria | Unset until locked. Enabling the flag is a `loosen` change with two operators (S12.11.2) |
+
+### 12.12.6 V6: public milestones tied to real outputs
+
+| Item | Specification |
+| --- | --- |
+| Flag; hypothesis [H] | `ff.growth.v6_milestones`; strengthens mission motivation and sharing |
+| Phase 1 / Phase 2 | Phase 1: pages and in-app announcements on for all, instrumented. Phase 2: randomized announcement |
+| Variable | The in-app announcement of a reached or published milestone. Public pages cannot be hidden, so they stay visible to all |
+| Unit, population, assignment | Member, `all_members`; `hash_bucket`, strata `cohort_week` |
+| Exposure surface key | `inbox.milestone` |
+| Events | `milestone.reached`, `milestone.published`, `milestone.withdrawn`, `badge.awarded`, `experiment.assigned`, `experiment.exposed` |
+| Primary metric | `hamyar_growth_v6_return_after_milestone_ratio`: members active within the pre-registered window after a milestone event, by arm (randomized part) |
+| Descriptive only | Return and arrivals tagged `join_source` = `milestone` around milestone dates, read as an interrupted time series; not a causal estimate |
+| Success / kill criteria | Unset until locked |
+
+## 12.13 Events, metrics and new parameters
+
+### 12.13.1 Events emitted by this part [D][A]
+
+Names follow S0.9.1 (`<entity>.<past_participle>`); the analytics `Event` entity (`evt_`, `ops`) carries `event_version`, `occurred_at`, `actor` and the policy and parameter versions in force, and **no personal data, no raw IP, no cookie id**. New names are convention additions (`ISS-128`).
+
+| Event | Emitted when | Payload beyond the envelope |
+| --- | --- | --- |
+| `experiment.assigned` | An assignment row is created | `experiment_id`, `assignment_id`, `arm_key`, `stratum_key` |
+| `experiment.exposed` | First arrival at a decision point per assignment and surface | `experiment_id`, `assignment_id`, `arm_key`, `surface_key`, `rendered` (bool) |
+| `experiment.locked`, `experiment.started`, `experiment.stopped` | Experiment status changes | `experiment_id`, `reason` on stop |
+| `milestone.reached`, `milestone.published`, `milestone.withdrawn` | Milestone state changes | `milestone_key`, `reached_value` |
+| `badge.awarded`, `badge.revoked` | Award state changes | `badge_key` (the member reference is the actor) |
+| `team.created`, `team.joined`, `team.left`, `team.locked`, `team.unlocked`, `team.disbanded` | Team changes | `team_id` |
+| `referral.created`, `referral.joined`, `referral.qualified`, `referral.paid`, `referral.blocked`, `referral.expired`, `referral.clawed_back` | Referral state changes | `referral_id`, `arm_key`, `block_reason` on block |
+| `sharecard.rendered`, `sharecard.shared` | Card preview shown; member tapped share or copy | `card_version` |
+| `changelog.entry_published` | Existing in S0.9.8 | `chg_` id, `subject_kind` |
+
+Public page requests are not events: they are counted only in `hamyar_public_requests_total` by surface, with no visitor identity.
+
+### 12.13.2 Metrics (proposals for S13.*) [A]
+
+`hamyar_public_requests_total`, `hamyar_growth_landing_requests_total` (non-unique), the per-mechanic keys of S12.12, and `hamyar_growth_referral_unrecovered_ucr_total`. `S13.*` owns definitions, rollups and the rule that every aggregate respects `analytics.min_cohort_k`.
+
+### 12.13.3 New parameters [D][A]
+
+Names follow S0.10.1; all are convention additions to be folded into `S0.10.6` and completed by `S16.*` (`ISS-128`). Every default is an `initial configurable default`. Area owners per S0.10.5: `founders` for thresholds, `operator` otherwise.
+
+| Name | Type | Initial configurable default | Validation | Replaced by |
+| --- | --- | --- | --- | --- |
+| `growth.referral.max_per_day` | int | 5 referral pairs per UTC day | 0..1000 | `OPS` farming flags, Reserve inflow |
+| `growth.referral.max_per_invite_tree_per_30d` | int | 5 | 0..1000 | `OPS` farming flags |
+| `growth.referral.reserve_draw_cap_ratio` | ratio | 0.10 of the Reserve balance at the start of the UTC day | 0 < x <= 1 | `FND`, `P1M` grant demand |
+| `growth.referral.qualify_window_days` | days | 30 | 1..365 | `P1M` distribution of time from joining to first verified cell |
+| `growth.referral.clawback_window_days` | days | 30 | 0..365 | `OPS` delay between acceptance and a later overturn |
+| `growth.badge.thresholds` | json | an object with lists `cells` = 1, 10, 100, 1000; `days` = 7, 30, 100; `review_cells` = 1, 10, 100 | each list ascending positive ints | `FND` |
+| `team.label_max_chars` | int | 40 | 10..200 | `OPS` |
+| `public.change_log_service_labels` | bool | false | | `CNS` and `SEC` |
+
+Parameters of S0.10.6 used by this part, unchanged: `analytics.min_cohort_k`, `analytics.third_party_trackers`, `analytics.cookies_enabled`, `experiment.assignment_seed_version`, `experiment.assignment_log_enabled`, `experiment.expiry_arm.fraction`, `growth.referral.bonus_referrer_credits`, `growth.referral.bonus_newcomer_credits`, `growth.referral.min_newcomer_verified_cells`, `growth.referral.max_per_referrer_per_30d`, `growth.referral.hold_s`, `team.max_members`, `team.min_public_members`, `team.create_min_tier`, `public.counter_refresh_s`, `public.ledger_lag_s`, `public.location_display`, `ui.fast_contribution_threshold_s`, `grant.reserve_floor_credits`, `grant.non_transferable`, `invite.*`, `ratelimit.public_rpm`, `change.*`, `retention.event_raw_days`.
+
+## 12.14 Copy keys (Persian and English)
+
+Each key has `fa` and `en` text and the marker `needs_human_and_legal_review` (S0.5). Promises say “declared”, never “guaranteed”. Placeholders in braces are filled by the client.
+
+| Key | `en` | `fa` |
+| --- | --- | --- |
+| `copy.public.counter_definition` | A verified cell passed the declared automatic checks and, where sampled, a second execution. This figure counts verified cells only; it does not claim the answers are correct. | سلول تأییدشده یعنی سلولی که از بررسی‌های خودکارِ اعلام‌شده و، در صورت نمونه‌گیری، از اجرای دوم گذشته است. این عدد فقط سلول‌های تأییدشده را می‌شمارد و درستی پاسخ‌ها را ادعا نمی‌کند. |
+| `copy.public.counter_suppressed` | Fewer than {k} members; not shown, to protect privacy. | کمتر از {k} عضو؛ برای حفظ حریم خصوصی نمایش داده نمی‌شود. |
+| `copy.public.ledger_notice` | This page shows totals and grouped flows, never individual members. Figures are published as the system's own checks declared them at the time shown. | این صفحه مجموع‌ها و جریان‌های گروه‌بندی‌شده را نشان می‌دهد، نه اعضای منفرد را. اعداد همان‌گونه منتشر می‌شوند که بررسی‌های خودِ سامانه تا زمان نشان‌داده‌شده اعلام کرده‌اند. |
+| `copy.public.parameter_withheld` | {n} security parameters are not shown. | {n} پارامتر امنیتی نمایش داده نمی‌شود. |
+| `copy.public.milestone_downstream` | Anyone may reuse this open output; downstream use is not controlled. | هر کسی می‌تواند از این خروجی باز استفاده کند؛ کاربردهای بعدی تحت کنترل نیست. |
+| `copy.public.milestone_corrections` | {n} cells counted toward this milestone were later overturned. | {n} سلولِ شمرده‌شده برای این نقطه‌عطف بعداً ابطال شد. |
+| `copy.growth.share_card_footer` | Shared by a Hamyar member. Figures are self-shared and are not an official verification. | این کارت را یکی از اعضای همیار به اشتراک گذاشته است. اعداد را خودِ عضو منتشر کرده و تأیید رسمی نیستند. |
+| `copy.growth.share_card_preview_notice` | If you post this card, it may be linked to your account on that site. It contains no name, place or ID from Hamyar. | اگر این کارت را منتشر کنید، ممکن است در آن سایت به حساب شما مرتبط شود. این کارت هیچ نام، مکان یا شناسه‌ای از همیار ندارد. |
+| `copy.growth.team_optin_notice` | Joining a team is optional. A team sees only its total score, not what each person contributed. | پیوندن به تیم اختیاری است. تیم فقط امتیاز کل را می‌بیند، نه سهم هر نفر را. |
+| `copy.growth.team_group_label_warning` | This team shows a label set by its creator. A label such as a place or a school can make members easier to identify. Join only if you are comfortable with that. | این تیم برچسبی دارد که سازنده‌اش تعیین کرده است. برچسبی مانند نام مکان یا مدرسه می‌تواند شناسایی اعضا را آسان کند. فقط در صورتی بپیوندید که با این موضوع راحت هستید. |
+| `copy.growth.referral_terms` | If someone you invite makes a first verified contribution, both of you may receive a small credit bonus after a short delay. The bonus is declared, can be delayed or withheld, can be reversed if the contribution is overturned, and has no cash value. | اگر فردی که دعوت کرده‌اید نخستین مشارکت تأییدشدهٔ خود را انجام دهد، هر دوی شما ممکن است پس از اندکی تأخیر یک اعتبار پاداش کوچک بگیرید. این پاداش اعلام‌شده است، ممکن است به تأخیر بیفتد یا پرداخت نشود، در صورت ابطال مشارکت قابل بازگشت است و ارزش نقدی ندارد. |
+| `copy.growth.experiments_notice` | Some features may differ between members as declared experiments. The plan and the results are published. | برخی ویژگی‌ها ممکن است به‌عنوان آزمایش‌های اعلام‌شده بین اعضا متفاوت باشد. طرح و نتایج منتشر می‌شود. |
