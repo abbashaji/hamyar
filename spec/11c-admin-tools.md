@@ -713,3 +713,101 @@ The system may also engage a switch (for example S6.* or S14.* automation on `le
 | `AC-kill-08` | Reports reach `template.autopause_report_count` (fixture 3) | The third arrives | The switch is engaged by principal `system`; releasing it needs two admins |
 | `AC-kill-09` | A template switch and a member switch engaged | The public change log is read | The template entry (reason code only) is present within `change.tighten_publish_within_s`; no entry exists for the member switch |
 | `AC-kill-10` | The preview counts before engaging | The switch is engaged | The counts of paused objects equal the preview |
+
+## 11.55 Tool 11: Member lookup (minimal data)
+
+**Purpose.** Show a reviewer or operator the least about one member that a report, appeal or alarm needs, and make every look accountable. The design assumes an insider, a compelled-disclosure request and a seized admin laptop are all possible (prompt I; FD Principle 8). [D]
+**Roles and permissions.** `reviewer` and `operator`: `perm.member.lookup`. `operator`: `perm.member.resolve_handle` (two-person).
+
+### 11.55.1 Entry and limits [D]
+
+| Limit | Rule |
+| --- | --- |
+| No search | No screen or API searches or lists members. `SCR-rev-12` opens only from a "View member" button inside a report, appeal, alarm, abuse item or ledger view, which passes that object as `context` |
+| Context linkage | The server checks that the member is linked to the context object (open, or an appeal inside its window); otherwise `422 UNPROCESSABLE` |
+| Reason | `CT1`: reason code pre-filled from the context, free text of at least `security.admin_reason_min_chars` |
+| Rate | At most `ratelimit.admin_member_lookups_per_day` views per admin per UTC day; beyond it `429 RATE_LIMITED` and an `Alarm` of kind `abuse.admin_lookup_rate` for operators |
+| Logging | Each view is an `AdminAction` `member.lookup` with the `mem_` id and the context ids (`AD6`); operators can review who looked at whom in `SCR-ops-03` |
+| No persistence | `Cache-Control: no-store`; the view has no print, copy-all or export control (`AD8`) |
+
+### 11.55.2 `SCR-rev-12` What is shown and what never is [D]
+
+| Shown | Never shown by any admin screen or API |
+| --- | --- |
+| `mem_` id; `status`; `trust_tier` (and the tier before a restriction) | Raw IP, IP hash, e-mail or its hash, device records or hashes, public keys, recovery data, location (S0.7, S0.6.4) |
+| Account age in whole days | Exact creation time |
+| Accepted and rejected cell counts; a reliability band (low, medium, high from the `trust.*` thresholds) | Cell, prompt or output text beyond the single item in the context |
+| Open reports against the member (count), sanction history (type, date, reason code), appeals (kind, outcome) | The reporter's identity; the `vol_` handle; opt-in and team details; balances (use the ledger explorer with a context) |
+| Inside a farming context only (`abuse.invite_tree`, `abuse.grant_farming`, `abuse.referral_farming`): invite-tree size, depth and the member's parent and children as `mem_` ids within that subtree; the number of members sharing one device record | The device record itself or any identifier that links members outside the context |
+
+The screen states "only minimal data is shown and every view is logged" (`copy.admin.member_minimal_view`).
+
+### 11.55.3 Handle resolution [D][A]
+
+`member.resolve_handle` turns a `vol_` handle (for example from a provenance manifest in a dispute) into a `mem_` id. It is operator-only, `CT3`, needs a `context` and a reason, and the id is shown once to the initiator after execution. The server keeps no handle-to-member table: it recomputes `HMAC-SHA-256(secret.volunteer_handle_key[version], mem_id)` over members for the handle's key version, so resolution works only while that key version is retained; destroying an old version makes its handles permanently unresolvable (S0.6.4; retention decided in S10.*) [V]. The tool never shows a name, an IP or an e-mail because the platform stores none; what else exists is whatever S10.* records, and the platform cannot promise more than that. A legal request is answered outside the tool, and the tool offers no export of member data.
+
+| `op` | Method and path | Notes |
+| --- | --- | --- |
+| `createMemberView` | `POST /v1/admin/member-views` | Body `{member_id, context:{kind, id}, reason_code, reason_text}`; a POST because it writes a log row; `Cache-Control: no-store` |
+| `createHandleResolution` | `POST /v1/admin/handle-resolutions` | Body `{handle, context, reason}`; `202` with an `ApprovalRequest` |
+
+| AC | Given | When | Then |
+| --- | --- | --- | --- |
+| `AC-lookup-01` | The admin route table | Any `GET` list or search of members is requested | `404 NOT_FOUND`; no such route exists |
+| `AC-lookup-02` | A context object that does not link to the member | `createMemberView` is called | `422 UNPROCESSABLE`; a refused `AdminAction` is written |
+| `AC-lookup-03` | A valid lookup | The response is checked against an allow-list schema | It contains none of the denied fields of 11.55.2 |
+| `AC-lookup-04` | `ratelimit.admin_member_lookups_per_day` = 3 (fixture) | An admin makes a fourth lookup in one UTC day | `429 RATE_LIMITED` and an `Alarm` for operators |
+| `AC-lookup-05` | Any successful lookup | The audit trail is read | One `member.lookup` row names the admin, the `mem_` id and the context ids |
+| `AC-lookup-06` | A farming context | The view loads | Tree size, depth and device-sharing count appear; no device identifier appears |
+| `AC-lookup-07` | A handle resolution requested by operator A | A approves their own request | `403 FORBIDDEN`; with operator B's approval the `mem_` id is shown once and one `AdminAction` exists |
+| `AC-lookup-08` | The key version of the handle has been destroyed | Resolution executes | `422 UNPROCESSABLE` with `handle_unresolvable` |
+
+## 11.56 Tool 12: Release / Hand over
+
+**Purpose.** Carry over the Panel's Release and Hand over for stuck work: a reviewer or operator who is gone must not block a queue item, and a member's stuck lease must not block a cell. [D]
+
+### 11.56.1 What carries over and what does not (panel-review facts, all [V]) [D]
+
+| Panel behavior (panel-review section) | Hamyar equivalent | Decision |
+| --- | --- | --- |
+| Lock by branch with the tip's commit date as heartbeat, expiry evaluated lazily when someone asks (§3.1 to 3.3) | `WorkClaim` with `expires_at`, renewed by every write; expired by a server timer every `lease.reap_interval_s` | Keep the concept, replace the mechanism: the Panel has no active enforcer |
+| Agent Release: empty commit, expired at once, served first (§3.4) | `claim.release`: the item returns to the queue and sorts first ("released first, then oldest") | Keep |
+| Owner Release / Hand over: takeover with handoff (§3.4) | `claim.hand_over` (holder to a named admin or to the pool) and `claim.take_over` (operator, forced) | Keep |
+| `CI_RUNNING` refusal while a workflow for the cell is active (§3.4) | Refusal while the holder has an unfinished two-person request on the item (`approval_pending`), or, for a cell lease, while the lease is `submitted` | Keep the idea |
+| `NEEDS_HUMAN` and `clear_feedback` (§3.4) | No equivalent; the state machines already have `changes_requested` | Not carried |
+| Fencing by `base` (branch tip) and fast-forward-only writes (§3.3) | `ETag` and `If-Match`, plus the claim-holder check (`AD12`) | Replace |
+| Advisory reservation in KV with a self-declared `who`, ten-minute TTL, eventually consistent (§2.2, §3.4, §4.5 item 1) | Not carried: a claim is authoritative, keyed by `AdminUser`, in the primary database | Replace |
+| One shared panel password plus an admin key typed per action and optionally kept in the browser (§4.1, §4.2, §4.5 items 1, 5) | Passkeys and step-up (`AD1`, `CT2`) | Replace |
+| Bottleneck highlight (§3.5) | Bottleneck banner (11.52.3) | Keep, re-scoped |
+
+### 11.56.2 `WorkClaim` [A]
+
+Entity `WorkClaim`, table `work_claims`, prefix `clm_`, retention `moderation`. Fields: `subject_type` (`template_version`, `service`, `report`, `alarm`, `appeal`, `audit_item`), `subject_id`, `admin_user_id`, `acquired_at`, `expires_at` (= last renewal + `ui.admin_claim_ttl_s`), `ended_at`, `end_kind` (`released`, `handed_over`, `expired`, `taken_over`, `completed`), `handed_to_admin_id`. A partial unique index on `(subject_type, subject_id) WHERE ended_at IS NULL` gives exactly one active claim per item, so two simultaneous claims cannot both succeed. Events `workclaim.acquired`, `workclaim.released`, `workclaim.handed_over`, `workclaim.taken_over`, `workclaim.expired`. A write to a claimed item by anyone but the holder is `409 STATE_CONFLICT` with `details.reason` `claim_held`; the second reviewer of a two-reviewer flow claims after the first has finished (11.45). For appeals, handing over is the state machine's `appeal.reassigned` with the conflict guard of 11.48.
+
+**Rules.** Hand over needs a target holding the item's permission, else `403`; it is a single step, the target sees it in "My work" and may release. Take over (`perm.claim.take_over`, `CT2`) names a reason, is refused while `approval_pending` (the other admin must first reject or withdraw that request), and tells the former holder with `copy.admin.claim_taken_over`.
+
+**`SCR-ops-15` Work board.** "My work" and, for operators, "All claims": item, type, holder, time left, state, with Release, Hand over and Take over; queue order is released first, then oldest.
+
+### 11.56.3 Lease release for member-held cells [D][A]
+
+`SCR-ops-16` Lease inspector (operator): lists active leases by `cel_` id, job or template with template, attested service, age and time left, and no member id. `cell.release` (`CT2`, `perm.cell.release`) is allowed only for a lease in state `active`: it emits `lease.revoked`, and the cell returns to `queued` through the existing `leased --cell.declined--> queued` transition, recorded with actor `admin` and reason `operator_release`, so there is no penalty to the member (FD§5.5; no new event, `ISS-118`). An optional `requeue_at_front` puts the cell at the head of its template queue for its next lease [A]. A revoked lease gets no `lease.submit_grace_s`: a late paste-back is rejected with `reject.lease_expired`. A lease in `submitted` returns `409 STATE_CONFLICT`. Release is per cell; a larger stop is a kill switch (11.54), not a bulk release.
+
+| `op` | Method and path | Notes |
+| --- | --- | --- |
+| `listWorkClaims` | `GET /v1/admin/work-claims` | Filters `mine`, `subject_type`, `active` |
+| `createWorkClaim` | `POST /v1/admin/work-claims` | Body `{subject_type, subject_id}` |
+| `createWorkClaimRelease`, `createWorkClaimHandover`, `createWorkClaimTakeover` | `POST /v1/admin/work-claims/{clm_id}/releases`, `.../handovers`, `.../takeovers` | Takeover is `CT2` |
+| `listLeases` | `GET /v1/admin/leases` | Operator; response has no member id |
+| `createLeaseRelease` | `POST /v1/admin/leases/{lse_id}/releases` | Body `{reason_code, reason_text, requeue_at_front}`; `CT2` |
+
+| AC | Given | When | Then |
+| --- | --- | --- | --- |
+| `AC-claim-01` | Two reviewers claim one item at the same instant | Both calls run | Exactly one returns `201`; the other `409 STATE_CONFLICT` |
+| `AC-claim-02` | A claim with no write for `ui.admin_claim_ttl_s` | The timer runs | `workclaim.expired` is emitted and the item sorts first in its queue |
+| `AC-claim-03` | An item claimed by A | Reviewer B writes to it | `409 STATE_CONFLICT`, `details.reason` `claim_held` |
+| `AC-claim-04` | A hand over to an admin without the permission | Sent | `403 FORBIDDEN` |
+| `AC-claim-05` | The holder has a pending approval on the item | An operator takes over | `409 STATE_CONFLICT`, `approval_pending`; after the request is rejected the takeover succeeds and the former holder sees `copy.admin.claim_taken_over` |
+| `AC-claim-06` | An `active` lease | An operator releases it | `lease.revoked`, cell `queued`, reliability of the member unchanged, event actor `admin` |
+| `AC-claim-07` | A lease in `submitted` | An operator releases it | `409 STATE_CONFLICT` |
+| `AC-claim-08` | A release with `requeue_at_front` | The next lease in that template queue is issued | It is that cell |
+| `AC-claim-09` | `listLeases` | The response is checked against its schema | It contains no `mem_` or `vol_` id |
