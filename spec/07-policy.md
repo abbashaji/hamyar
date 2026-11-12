@@ -979,3 +979,110 @@ These are the `policy` layer tests of S18.* (`T-policy-nn`) and must run in CI a
 | `T-policy-86` | a screening rule whose validator is unregistered | its action becomes `flag_for_review` |
 
 **E. Properties** (`T-prop-policy-nn`, generated facts): `01` determinism (same facts, same decision); `02` replacing `unknown` by `no` never changes a decision; `03` the eligible set never grows during an evaluation and is a subset of `approved` services; `04` the reported rule has the smallest ordinal among failing rules; `05` an evaluation under a version never reads the clock or randomness; `06` for any pair of versions, `classifyChange` agrees with the differential test on the table above. [D]
+
+## 7.14 Acceptance criteria (Given / When / Then)
+
+| ID | Given | When | Then |
+| --- | --- | --- | --- |
+| `AC-policy-01` | an empty database after migration | a member calls `createJob`; later `launch.member_jobs_enabled` is true but no service is approved | `403 LAUNCH_GATE_CLOSED`; then `422 POLICY_REJECTED` (`policy.R7...`, `no_approved_service`); in both cases no `Job` row exists (`INV-P08`, `T-policy-37`, `T-policy-85`) |
+| `AC-policy-02` | a service `in_review` with every key of 7.11 answered, `yes` answers backed by copies and locators, hashes verified | the approver(s) approve | state `approved`, `approved_round` = `review_round`, `review_due_at` set, public `ChangeLogEntry` created, event `service.approved` |
+| `AC-policy-03` | `third_party_task_use` = `unknown` | approval is attempted | `422 UNPROCESSABLE` naming the flag; state stays `in_review` (`T-policy-80`) |
+| `AC-policy-04` | service B with `open_publication_of_output` = `unknown` | a job `P1 L1 S0 M1` pins B | `R7.license_exceeds_flags`: unknown is no (`T-policy-07`) |
+| `AC-policy-05` | a job that violates both `R2` and `R4` | `screen` runs | exactly one reason, `policy.R2...` (smallest ordinal) (`T-prop-policy-04`) |
+| `AC-policy-06` | `P0` with `L1` | the requester submits | `422` `R1.pairing_inconsistent`; the job is still `draft`; no event is emitted (`T-policy-16`) |
+| `AC-policy-07` | PV1, an approved service whose flags cover the license | a job with one of the 12 active tuples passes screening | `job.policy_passed` stamps `screened_policy_version_id`, `policy_decision` and `eligible_service_ids` (`T-policy-01`..`06`) |
+| `AC-policy-08` | PV1 and a service with `commercial_use_of_output` = `yes` | a job declares `P2 L3` | `R5.purpose_locked` (`T-policy-12`) |
+| `AC-policy-09` | PV2 (`P2` row active) and no service with the flag | a job declares `P2 L3` | `R5.no_service_with_flag`: neither change alone unlocks (`T-policy-42`) |
+| `AC-policy-10` | an `M1` job pinning `[A,B]` where B lacks a required flag | screening runs | rejected with `R7.pinned_service_ineligible` naming B (`T-policy-08`) |
+| `AC-policy-11` | input with a link and `screen.url_action = flag_for_review` | screening runs | job stays `screening`, `screen_status = awaiting_reviewer`; the requester can cancel; after the reviewer's `pass` the job continues (`T-policy-31`) |
+| `AC-policy-12` | any leased cell | the prompt is assembled | it contains the per-cell markers, every `required_clauses` item, and a token different from every other cell's; input containing the token or `<<<DATA-` is a finding, never wrapped (`T-policy-36`) |
+| `AC-policy-13` | a returned output containing a link | it is submitted | it is quarantined, not accepted and not shown as a result; the volunteer is told nothing is expected and is not penalized (`OUT-URL-01`) |
+| `AC-policy-14` | new defaults are configured after a member exists | a new member is created | the existing member's `OptIn` rows are unchanged; the new member receives the new defaults (`T-policy-57`) |
+| `AC-policy-15` | a volunteer without the cell's sensitive topic opt-in | the list is requested; a direct lease is attempted | the cell is absent from the list; the lease returns `404 NOT_FOUND` (`T-policy-51`, `T-policy-56`) |
+| `AC-policy-16` | a non-default value (for example a sensitive topic) | the member grants it | the grant is stored only with the acknowledgement and notice version; values with no active allowlist row cannot be granted; revocation always works |
+| `AC-policy-17` | a tuple with zero covered donors; another with low coverage | each is quoted | `422 NO_CAPACITY` with `policy.R8.volunteer_optin_mismatch` and the bottleneck axis; the low-coverage tuple gets a longer window, not a failure |
+| `AC-policy-18` | a quote made under PV1 and a tightening before confirmation | escrow is confirmed | `422` `R9.policy_version_stale` with the underlying reason; no escrow (`T-policy-60`, `T-policy-61`) |
+| `AC-policy-19` | a cell leased before service A was revoked, the job continuing on B | the result is submitted | no credit; `reject.policy_changed`; the cell is requeued with `attempt` unchanged; trust and reliability untouched (`T-policy-62`) |
+| `AC-policy-20` | a tightening approved by one reviewer | approval completes | the version is effective in that transaction; the next `lease` and `accept` use it; the sweep stops or narrows jobs per 7.7.5; the public entry appears within `change.tighten_publish_within_s` (`T-policy-64`, `T-policy-74`) |
+| `AC-policy-21` | a loosening | it is proposed, approved by two distinct admins with Persian and English reasons | `effective_from` = approval + 7 days; until then every evaluation uses the old version; the entry is public from approval (`T-policy-70`..`73`) |
+| `AC-policy-22` | a version with both a tightening and a loosening | it is proposed | `mixed_change` (`T-policy-75`) |
+| `AC-policy-23` | service A revoked, jobs continue on other services | the sweep runs | `eligible_service_ids` shrinks, leased cells on A return to `queued`, `attempt` unchanged, volunteers see `copy.service.removed` and no penalty |
+| `AC-policy-24` | service A revoked and it is a job's only eligible service | the sweep runs | `job.stop_requested` with `closure_reason = service_revoked`; queued and leased cells `voided`; accepted cells unchanged; unspent escrow refunded; outputs withheld pending `release_partial_deliverable` |
+| `AC-policy-25` | a frozen `PolicyVersion` | any data column is updated | the update fails (`INV-P04`) |
+| `AC-policy-26` | an approved service whose `TermsCopy` was removed by a direct database edit | `policy_invariant_check` runs | `INV-P01` violation counted and an `Alarm` raised within `policy.invariant_check_interval_s` |
+| `AC-policy-27` | a service with `regional_availability` = `no` or `unknown` for `IR` | a volunteer opens a cell using it | the card shows the declared-terms notice; no text anywhere gives guidance on bypassing a restriction (copy lint over every `copy.policy.*` and `copy.service.*` key) |
+| `AC-policy-28` | any `copy.policy.*` text | the copy lint runs | no promise uses "guarantee"; every text exists in `fa` and `en` and carries `needs_human_and_legal_review` (Principle 11) |
+
+**Definition of done for this part's implementation** [D]: the engine and registry pass `T-policy-01`..`T-policy-86` and `T-prop-policy-01`..`06`; `AC-policy-01`..`28` run as automated scenarios; `INV-P01`..`P09` run in CI and (except `INV-P08`) on the timer; the seed contains zero approved services; no rule logic exists outside data and the generic operators.
+
+## 7.15 Parameters, events, additions and operations
+
+### 7.15.1 Parameters
+
+**(a) Existing parameters read by this part** (S0.10; owners and ranges are defined there): `policy.loosen_min_notice_days`, `policy.recheck_on_accept` (constant true), `change.tighten_publish_within_s`, `screen.url_action`, `screen.max_urls_per_input`, `screen.pii_action`, `screen.output_url_action`, `screen.review_rate_new_requester`, `screen.review_rate_established_requester`, `service.review_max_age_days`, `service.review_grace_days`, `service.min_approvers`, `optin.default_purposes`, `optin.default_sensitivities`, `optin.default_licenses`, `optin.default_service_requirements`, `optin.sensitive_topics_default`, `admission.active_donor_window_days`, `analytics.min_cohort_k`, `metrics.rollup_interval_s`, `security.two_person_actions`, `launch.members_may_join`, `launch.member_jobs_enabled`, `launch.minting_enabled`. Where a name differs from S0.10 the integrator renames; the semantics are as used in this part.
+
+**(b) New parameters proposed** (all `versioned`, validated, prospective-only; defaults are initial configurable values [A], replaced by the measurement named):
+
+| Name | Type | Initial | Validation | Owner | Tightening direction | Replaced by |
+| --- | --- | --- | --- | --- | --- | --- |
+| `policy.max_pinned_services` | int | 3 | 1..10 | reviewer | lower | G5 demand check: how many services requesters actually pin |
+| `policy.tighten_min_approvers` | int | 1 | 1..3 | operator | higher | review of reviewer capacity |
+| `policy.loosen_min_approvers` | int (distinct admins, author counted) | 2 | 2..5, >= `tighten_min_approvers` | operator | higher | size of the reviewer pool |
+| `policy.loosen_reason_min_chars` | int | 40 | 0..2000 | operator | higher | review of entries actually written |
+| `policy.revert_window_s` | duration_s | 86400 | 0..604800 | operator | lower | incident review of mistaken tightenings |
+| `policy.reconcile_interval_s` | duration_s | 300 | 30..86400 | operator | lower | sweep duration measured in Phase 1 |
+| `policy.invariant_check_interval_s` | duration_s | 60 | 5..3600 | operator | lower | check cost measured in Phase 1 |
+| `screen.instruction_action` | enum | `flag_for_review` | `flag_for_review`, `reject` | reviewer | toward `reject` | false-positive rate from reviewer decisions |
+| `screen.output_request_action` | enum | `quarantine` | `quarantine`, `reject` | reviewer | toward `reject` | quarantine outcomes |
+| `screen.review_sla_s` | duration_s | 172800 | 3600..2592000 | operator | lower | measured reviewer throughput |
+| `screen.invisible_char_max` | int | 0 | 0..50 | reviewer | lower | findings on real Persian inputs |
+| `service.required_regions` | json list | `["IR"]` | ISO 3166-1 alpha-2 codes; the operator's jurisdiction is added once chosen [V] | operator | longer list | counsel's advice |
+| `service.terms_copy_allowed_types` | json list | `["text/html","application/pdf","text/plain"]` | MIME types | reviewer | shorter list | reviewer practice |
+| `service.terms_copy_max_bytes` (if absent from S0.10) | int | 10485760 | 1..104857600 | operator | lower | size of real terms documents |
+
+### 7.15.2 Events (envelope per S0.9.1)
+
+| Event | Emitted when | Payload beyond ids |
+| --- | --- | --- |
+| `policy.version_created`, `.version_proposed`, `.version_approved`, `.version_effective`, `.version_withdrawn` | steps of 7.8.4 | `change_class`, `content_hash`, `effective_from`, `reason` |
+| `policy.version_published` (S0) | at approval, when the public entry is ready | `changelog_entry_id` |
+| `policy.sweep_started`, `policy.sweep_completed` | 7.7.5 | trigger, counts of jobs checked, narrowed, stopped, cells voided |
+| `service.flag_recorded`, `service.terms_copy_saved` | 7.10.2 steps 3 and 4 | `flag_key`, `answer` (no free text); copy hash |
+| `job.screening_held`, `job.screening_reviewed` | 7.12.4 | decision, categories added |
+| `member.optin_changed` (S0) | any opt-in change | axis, value, state |
+
+### 7.15.3 Additions to S0 vocabulary (collected for the integrator)
+
+Enums: `policy_version_status`, `change_class` (`tighten`, `loosen`, `neutral`), `service_kind` (`chat_service`, `open_weight`), `copy_kind`, `screen_status`, `optin_axis`; decision result `hold`; reason `reject.service_not_eligible`. Fields: `Job.screened_policy_version_id`, `.policy_checked_version_id`, `.policy_checked_snapshot_hash`, `.screen_status`, `.eligible_service_ids`, `.policy_decision`, `.no_training`, `.downstream_use_uncontrolled`; `Cell.topic_keys`, `.accept_decision`; `ServiceRegistryEntry.service_kind`, `.review_round`, `.approved_round`, `.grace_ends_at`, `.model_notes`; `FlagAnswer.value_text`, `.value_json`, `.quote_locator`, `.counsel_memo_ref`, `.review_round`, `.supersedes_id`; `TermsCopy.copy_kind`, `.source_reference`, `.captured_at`; `TopicCategory`. Flag keys: `info.automation_limits` (new), the other `info.*` keys as named in 7.11. Invariant ids `INV-P01`..`INV-P09`. Template fields `task_scope`, `policy_envelope`, `job_type` (owned by S8.*).
+
+### 7.15.4 Operations proposed for S15.* (ids lowerCamelCase; every mutation takes an `Idempotency-Key`)
+
+| `operationId` | Method and path | Auth | Notes |
+| --- | --- | --- | --- |
+| `previewPolicy` | `POST /v1/policy-previews` | member | stage-`submit`/`screen`-style dry run, no state change; rate-limited; returns the first failing rule |
+| `getCurrentPolicy` | `GET /v1/policy` | public | current version summary, allowlist, change-log pointer; no private data |
+| `listServices` | `GET /v1/services` | member | approved services only: `name`, `service_kind`, adapter capabilities, notices |
+| `getOptIns`, `setOptIns` | `GET`, `PUT /v1/me/opt-ins` | member | grants need the acknowledgement; ETag / `row_version` |
+| `listTopicCategories` | `GET /v1/topic-categories` | member | active only |
+| `createPolicyVersionDraft`, `proposePolicyVersion`, `approvePolicyVersion`, `withdrawPolicyVersion` | `POST /v1/admin/policy-versions`, `.../{id}/proposal`, `.../{id}/approval`, `.../{id}/withdrawal` | admin (reviewer / operator) | 7.8 |
+| `createService`, `startServiceReview`, `uploadTermsCopy`, `recordFlagAnswer`, `approveService`, `rejectService`, `revokeService` | `POST /v1/admin/services`, `.../{id}/review`, `.../{id}/terms-copies`, `.../{id}/flag-answers`, `.../{id}/approval`, `.../{id}/rejection`, `.../{id}/revocation` | admin | 7.10 |
+| `listScreeningQueue`, `decideScreening` | `GET /v1/admin/screening`, `POST /v1/admin/screening/{job_id}/decision` | admin reviewer | 7.12.4 |
+| `getSupplyGauge` | `GET /v1/admin/supply-gauge` | admin | exact counts; the public and requester views use bands |
+
+### 7.15.5 Metrics and alarms
+
+`hamyar_policy_decisions_total{stage,result,rule}`, `hamyar_policy_hold_seconds`, `hamyar_policy_invariant_violations_total{invariant}`, `hamyar_policy_category_supply_donors{axis,value}`, `hamyar_policy_inflight_voided_total{cause}`, `hamyar_policy_service_state{state}`. Alarms: any invariant violation (highest severity); screening queue older than `screen.review_sla_s`; a service in `review_due`; a sweep older than `policy.reconcile_interval_s` that has not completed. Labels never contain member or job identifiers. [D]
+
+## Issues raised
+
+| ID | Severity | Needs owner | Where | Finding | Resolution applied in this part |
+| --- | --- | --- | --- | --- | --- |
+| `ISS-71` | major | yes | S0.8.3 and FD§5.3 | FD approves a service on two answers (third-party tasks, prohibited content), but the product is a human copying text on a credit system; `human_copy_paste_use` and `access_pooling_or_crediting` are gate flags that no rule consumes | 7.10.3 guard 2: approval also requires both to be `yes` with a saved copy; no override exists; the owner may relax it only by changing S0 with a counsel memo |
+| `ISS-72` | major | yes (counsel) | S0.8.3 `regional_availability` | marked a gate but no rule can consume it: the platform neither knows nor stores a member's region (privacy, S10.*) | recorded for every region in `service.required_regions`, shown as a declared-terms notice, never blocks approval, never accompanied by any workaround; whether a `no` for a region should block approval is for the owner and counsel [V] |
+| `ISS-73` | major | yes | FD§5.3 pairing table | no license is paired with `P3`; `P2` is paired only with `L3` | pairing `P0->L0`, `P1->L1,L2`, `P2->L3`, `P3->L0,L1,L2` [A]; the `P2` and `P3` rows are `locked` in Phases 1-2, so nothing depends on the choice until an unlock |
+| `ISS-74` | minor | no | S0.9.2 vs FD§5.4 R9 | S0 stamps the policy version at `job.policy_passed`; FD stamps at admission; the quote can be up to its TTL old | two stamps: `screened_policy_version_id` at `policy_passed`, binding `policy_version_id` at `escrow_confirmed` after a fresh evaluation (7.7.1, 7.7.2) |
+| `ISS-75` | minor | no | S0.9.2 Job states | `screening` has no cancel transition although a reviewer hold can last hours; no field records the hold | add `screening --job.cancel_requested--> cancelled`; add `Job.screen_status` and events `job.screening_held` / `job.screening_reviewed`; no new state |
+| `ISS-76` | major | yes | FD§5.4 R9 and S0.8.5 | a cell done in good faith but not accepted because the policy or a service changed earns nothing (no ledger entry type pays it) and a normal requeue would count an attempt | no credit, no penalty; `reject.policy_changed` does not increment `Cell.attempt`; new reason `reject.service_not_eligible` for a service attested outside the eligible set; a goodwill mechanism would be an owner decision and needs a new ledger entry type, which is not specified |
+| `ISS-77` | minor | no | S0.8.3 flag keys, FD§5.3 and §8.3 | FD lists "automation limits" as a registry flag and G0 (c), (h), (j), (k) ask for non-yes/no content; M2 needs a registry entry kind; `FlagAnswer` needs evidence and value fields | `info.automation_limits` added; `info.*` keys named in 7.11; `service_kind`; `FlagAnswer.value_text`, `value_json`, `quote_locator`, `counsel_memo_ref`, `review_round` (7.10.1, 7.11) |
+| `ISS-78` | minor | no | FD§5.4 R10 vs S0.10.3 | FD requires only a change-log entry and a reason; S0 adds a 7-day notice; mixed changes, mistaken tightenings, approver counts and the classification of unprovable edits are undefined | 7.8: one class per version, conservative classifier, revert window, distinct-admin counts; thirteen new parameters in 7.15.1(b) |
+| `ISS-79` | minor | no | structure | S0 assigns this part to `spec/07-policy-registry.md`; the file written is `spec/07-policy.md`; `R4` and `R3` need template fields `policy_envelope`, `task_scope`, `job_type` that S8.* must define; every addition is listed in 7.15.3 for the integrator | none beyond 7.15; the template fields are a stated requirement on S8.* |
