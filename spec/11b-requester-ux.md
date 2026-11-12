@@ -999,3 +999,71 @@ Every notice is a copy key with `fa` and `en` text and the marker `needs_human_a
 | Clipboard | Copy buttons (ids, hashes) use the clipboard API on a user gesture and fall back to selecting the text; no flow depends on reading the clipboard |
 | Session | Session expiry never loses wizard data; restore returns to the same screen (`auth_required`, 11.33.2) |
 | Resources | The requester area loads nothing from another origin; a strict content-security policy is a build requirement (S10.*) |
+
+## 11.47 Cross-cutting acceptance criteria
+
+- **AC-req-67** Given any requester-profile response (job, progress, cells, receipt, deliverable, manifest), When it is scanned, Then no key named `volunteer_handle` and no value shaped like `vol_` plus 32 hex characters appears at any depth.
+- **AC-req-68** Given locale `fa` with Persian numerals, When amounts and dates render, Then digits are Persian, layout is right-to-left and the Jalali date is primary; switching digits to Latin changes only display and no request body.
+- **AC-req-69** Given the client source, When the static check for `RD-01` runs, Then no floating-point operation is applied to any `*_ucr` or `*_ppm` value (arbitrary-precision integers only), which is a build-failing lint rule (`T-unit`).
+- **AC-req-70** Given a member holding 300 credits, a reviewed template, a 240-cell upload that passes screening, declarations `P1`/`L2`/`S0`/`M0`, and an `available` window, When the person completes the wizard and confirms escrow with both acknowledgements, Then the Job is `admitted`, the balance reads 24 credits, no step re-asks an answer already given, and exactly one `escrow_hold` exists (end-to-end, `T-e2e`; FD§3.3 inputs, illustrative).
+- **AC-req-71** Given a complete wizard run and a download, When browser storage (local, session, indexed database, cache) is inspected, Then it holds no uploaded text, glossary, result or manifest (RD-04).
+- **AC-req-72** Given `kill.all_new_jobs` becomes true while the person is on step 5, When Check my request is pressed, Then `copy.req.err_kill_switch` is shown, the entered declarations remain and nothing is lost.
+- **AC-req-73** Given any requester route loads, When network requests are listed, Then every request goes to the application's own origin (RD-14, 11.46).
+- **AC-req-74** Given the right-to-left locale and a keyboard-only user, When the person completes the wizard from step 1 to step 7, Then every control is reachable in visual order, focus is always visible, and no step needs a pointer (`T-rtl`).
+
+## 11.48 Reuse from the existing panel [V]
+
+Facts about the existing build-control panel come from `docs/source/panel-review.md` and were not checked against the panel's code. Only ideas are reused; no code, schema or behaviour is assumed. Hamyar status values, dependencies and timing are those of S0.9. [V]
+
+| Panel idea (as described in the review) | Reused in 11b as | Not reused |
+| --- | --- | --- |
+| A fixed vocabulary of cell statuses with colour and label | The ten-status vocabulary of 11.39.1, with shape added so colour is never the only carrier; the panel's "waiting on a dependency" and "needs split" map roughly to no state (cells are independent) and to `failed` (`cell.max_attempts` reached) | The panel's status names and colours |
+| A left-to-right dependency graph of cells | Nothing at job level, because Hamyar primary cells have no dependencies on each other; a map grid is used instead. A short chain (attempt, second check, third check) is a possible later addition inside `SCR-req-13` | The graph layout and its library |
+| A banner naming the bottleneck (the unfinished cell that blocks most others) | The bottleneck banner of 11.39.2, redefined as the dominant blocking cause plus at-risk cells | The "most dependents" computation |
+| An inspector for one cell | `SCR-req-13`, with output and identity deliberately absent | Operator actions such as release or hand over |
+| Periodic polling with a state cache on the server | Polling with `ETag` and a configured interval (`ui.requester.progress_poll_s`); the interval is a parameter, not the panel's value | The panel's interval and cache lifetimes |
+| Lease expiry evaluated lazily when the state is read | Nothing: Hamyar reaps leases in a background job (S0.9.3), so the map may lag by at most one reaper interval and says when it was last updated | Lazy evaluation |
+| Third-party web font loaded from a font host | Rejected: requester screens load no third-party resource (11.46) | The font host |
+| Browser storage for view settings | Rejected for content (RD-04); in-memory only for the list/grid choice | Any persisted key |
+
+## 11.49 Convention additions made by this part
+
+These are listed so C-001 can fold them back into S0 (`ISS-114`). Until it does, this file uses them as written. Names this file uses from S0 that S0 may spell differently (S0 wins, and the references here change with it): `ff.job.reservations`, `kill.all_new_jobs`, `i18n.digits_default_fa`, `i18n.dual_calendar_detail`, `appeal.reviewer_sla_days`, `credit.expiry_sweep_interval_s`.
+
+| Kind | Addition | Notes |
+| --- | --- | --- |
+| Entity | `JobRating`, prefix `rtg_`, table `job_ratings`, retention `job_bound`; fields `job_id`, `member_id` (pseudonymous, never shown to volunteers), `outcome_rating`, `tags`, `comment`, `flagged_cell_ids`, `created_at` | One per job; no state machine; event `rating.submitted` |
+| Enum | `upload_screen_status`: `pending`, `passed`, `flagged_for_review`, `rejected` | Display state of an `Upload` (S9.* sets it) |
+| Enum | `requester_cell_status`: `waiting`, `retrying`, `in_progress`, `checking`, `double_checking`, `done`, `paused`, `stopped`, `failed`, `redo` with codes `w r p c d a s x f o` | 11.39.1 |
+| Enum | `pause_reason`: `kill_switch`, `template_paused`, `service_paused`, `policy_tightened` | Shown while a Job is `suspended` |
+| Enum | `outcome_rating`: `good`, `mixed`, `poor`; `rating_tag`: `accuracy`, `format`, `completeness`, `speed_vs_quote`, `other` | 11.41 |
+| Enum | `screen_finding_kind`: `pii_pattern`, `url_present`, `instruction_pattern`, `hidden_characters`, `over_envelope`, `encoding_invalid`, `row_schema_invalid`, `other` | Display contract, 11.36 |
+| Enum | `manifest_profile`: `requester`, `internal` | 11.42 |
+| Error detail | `details.reason`: `quote_changed`, `policy_version_changed`, `no_approved_service`, `job_not_in_state`; `details.cap`: `concurrent_jobs`, `job_cells`, `waitlist_entries`, `reservations`, `reservation_cells` | 11.43.2 |
+| Events | `upload.accepted`, `upload.screen_passed`, `upload.screen_flagged`, `upload.screen_rejected`, `upload.screen_failed`, `rating.submitted`; `job.waitlist_expired` is used as the waitlist-lapse event (use S0.9.2's name if it differs) | 11.35.1 |
+| API | Operation ids marked `+` in 11.34; `createJob` accepts `copy_from_job_id` and `reservation_id`; `ETag` / `If-None-Match` on authenticated read responses that carry `Cache-Control: no-store` | Conditional requests are for bandwidth only |
+| Secret | Optional platform manifest-signing key for `manifest.signature` | S10.* names it; the owner decides (S3.*) |
+| ID schemes | Decision ids `RD-nn` (this file); `copy.req.*`; `SCR-req-01`..`SCR-req-18`; `AC-req-01`..`AC-req-74` | Within S0.5 |
+
+| Parameter | Type and unit | Initial default | Validation | Replaced by |
+| --- | --- | --- | --- | --- |
+| `ui.credit_display_decimals` | int | 2 | 0..6 | `OPS` |
+| `ui.ratio_display_decimals` | int | 3 | 0..6 | `OPS` |
+| `ui.requester.progress_poll_s` | int, seconds | 30 | 5..600 | `OPS` |
+| `ui.requester.preview_chars` | int, characters | 2000 | 200..20000 | `OPS` |
+| `ui.requester.rating_window_days` | int, days | 14 | 1..90 | `P1M` |
+| `ui.requester.rating_comment_max_chars` | int, characters | 1000 | 0..5000 | `OPS` |
+| `ui.requester.rating_flag_cells_max` | int | 20 | 0..100 | `P1M` |
+| `ui.requester.appeal_note_max_chars` | int, characters | 1000 | 0..5000 | `OPS` |
+| `job.draft_ttl_days` | int, days | 7 | 1..90 | `OPS` |
+| `job.manifest_time_granularity_s` | int, seconds | 3600 | 60..86400 | `P1M` |
+| `admission.waitlist_claim_ttl_s` | int, seconds | 86400 | `price.quote_ttl_s`..604800 | `P1M` |
+| `screen.requester_review_requests_per_day` | int | 3 | 1..20 | `OPS` |
+
+## Issues raised
+
+| id | severity | fd_ref | issue | resolution | status |
+| --- | --- | --- | --- | --- | --- |
+| `ISS-114` | minor | prompt | S11 is split over several files but S0 fixes no rule for heading numbers or top headings of sibling files, and several names the requester screens need are absent from S0 (entity, enums, events, parameters, operation ids) | This file uses its own top heading, numbers sub-sections from `11.31`, and lists every addition in 11.49; C-001 renumbers and folds the additions into S0 at assembly | proposed |
+| `ISS-115` | major | FD§4.8 | The FD says only that unstarted cells are refundable on cancellation; it does not say what happens to cells in flight, the verification pool, the levy, already accepted results, or what a requester receives when a job ends `failed` or is cancelled | Applied in 11.40 and 11.41: cells in flight finish and accepted ones are paid; refund = unstarted primary pay + unspent verification pool + levy not earned (levy is charged only on accepted primary cells); paid + levy + refund = held exactly; a partial `Deliverable` (`completeness` `partial`) is built for `failed` and `cancelled` jobs that have accepted cells | needs_owner |
+| `ISS-116` | major | FD§5.6 | FD§5.6 says requesters never see the salted-hash volunteer id yet also that exports carry the manifest; a manifest with exact per-cell times, service and model could also single out a volunteer in a small pilot | Two manifest profiles: `requester` (no volunteer handle, per-cell times rounded to `job.manifest_time_granularity_s`, gold cells unlisted) and `internal` (admin only); schema and verification in 11.42 | proposed |
