@@ -423,3 +423,116 @@ Triggers inside `growth.referral.clawback_window_days` after `paid_at`: (1) the 
 | payout, clawback | system and admin only | No member-callable payout route exists |
 
 Copy: `copy.growth.referral_terms` (S12.14): bonuses are declared, may be delayed or withheld, can be reversed, and have no cash value.
+
+## 12.11 Experiment framework for V1-V6
+
+Owned here: how growth flags are evaluated and how members are randomized. Owned by `S13.*`: the event schema, metric definitions, analysis, and the `PreRegistration` store and lock. The expiry arm (`ff.experiment.expiry_arm`) uses the same assignment mechanism and is specified in `S13.*`.
+
+### 12.11.1 Experiment record [D][A]
+
+`Experiment` (`exp_`, `permanent`) as in S0.7, with these fields for growth mechanics. Its document id `EXP-nn` is assigned by `S13.*`; this part refers to an experiment by its mechanic (`V1`..`V6`). At most one experiment is `running` per flag.
+
+| Field | Rule |
+| --- | --- |
+| `flag_key` | one of `ff.growth.v1_fast_path` .. `ff.growth.v6_milestones` |
+| `status` | `draft`, `locked`, `running`, `stopped` (T). Events `experiment.locked`, `experiment.started`, `experiment.stopped` (reason `completed` or `killed`) (`ISS-128`) |
+| `arms` | ordered list `{arm_key, weight_ppm}`; weights sum to exactly 1,000,000; exactly one arm has `arm_key` = `control` |
+| `population` | `new_members` (created after start) or `all_members` (active at start or later) |
+| `eligibility` | `min_trust_tier`, `locales`, `status` (default `active` only) |
+| `unit` | always the member; never a device, IP hash or invite |
+| `assignment_mode` | `hash_bucket` or `hash_blocked` (12.11.3) |
+| `strata` | at most two of the allowed stratifiers (12.11.4) |
+| `block_size` | required for `hash_blocked`: for every arm `weight_ppm * block_size` must be divisible by 1,000,000 (two arms at 500,000 ppm admit 2, 4, 6, ...) |
+| `salt` | 128 bits from the OS CSPRNG, generated at creation, secret while `running`, published when `stopped` so anyone can recompute the arms |
+| `seed_version` | copied at creation from `experiment.assignment_seed_version`; never changed for that experiment |
+| `pre_registration_id` | `prr_`; `running` requires a locked `PreRegistration` (12.11.7) |
+| `starts_at`, `ends_at` | an experiment always has an end |
+
+After `locked`, `arms`, `weight_ppm`, `population`, `eligibility`, `assignment_mode`, `strata`, `block_size`, `salt` and `seed_version` are immutable (`VALIDATION_FAILED`). A different design is a new `Experiment`.
+
+### 12.11.2 Flag evaluation and change classes [D]
+
+```
+function effective_variant(flag_key, member):
+    if launch.members_may_join is false or a kill switch covers the surface:  return OFF
+    if flag is disabled:                                                      return OFF
+    exp = the experiment with status = running for flag_key
+    if exp is none:                                                           return ON_FOR_ALL   # no assignment, no causal claim
+    if not eligible(exp, member):                                             return ON_FOR_ALL_OR_OFF per exp.ineligible_behavior
+    a = get_or_create_assignment(exp, member)       # 12.11.3; emits experiment.assigned once
+    return a.arm_key
+```
+
+`ineligible_behavior` is `off` for a new feature and `on` for a feature already shipped; it is fixed at lock. `GET /v1/flags` returns the member's effective variants and is the only place assignment is created (lazily, on first evaluation after the experiment is `running`).
+
+| Operator action | Class (S0.8.6) | Rule |
+| --- | --- | --- |
+| Disable any growth flag | `tighten` | Immediate, one operator; change-log entry within `change.tighten_publish_within_s` |
+| Enable `V1`, `V2`, `V3`, `V4`, `V6`, `ff.public.ledger_page` | `neutral` | Entry with notice `change.notice_days_default` |
+| Enable `ff.growth.v5_referral` (moves credit from the Reserve) | `loosen` | Entry with `reason`, notice `change.notice_days_default`, two operators; `S10.*` appends `flag.enable_credit_moving` to `security.two_person_actions` (`ISS-128`) |
+| Start an experiment | `neutral` | Entry of `subject_kind` `pre_registration` with the locked hash |
+
+### 12.11.3 Assignment mechanism [D]
+
+Assignment is a deterministic function of logged inputs, so any assignment can be recomputed and audited. Hashing follows S0.6.4 (SHA-256 family; OS CSPRNG for the salt).
+
+**Mode `hash_bucket`** (stateless; default for large populations):
+
+```
+h      = HMAC-SHA-256(key = salt,
+                      data = seed_version || ':' || exp_id || ':' || member_id || ':' || stratum_key)
+u      = first 8 bytes of h as an unsigned big-endian integer
+bucket = u mod 1,000,000                    # ppm; modulo bias is below 10^6 / 2^64, about 5e-14
+arm    = first arm whose cumulative weight_ppm > bucket       # arms in stored order
+```
+
+**Mode `hash_blocked`** (permuted blocks within a stratum; recommended while members are few, because plain hashing then leaves arms unbalanced):
+
+```
+seq = next value of an atomic counter per (exp_id, stratum_key)       # serialized per pair
+k   = floor((seq - 1) / block_size);   j = (seq - 1) mod block_size
+block = arms repeated (weight_ppm * block_size / 1,000,000) times each
+Fisher-Yates shuffle of block, drawing r = u_i mod (i + 1), where each u_i is 8 bytes of
+    HMAC-SHA-256(key = salt, data = 'blk:' || seed_version || ':' || exp_id || ':' || stratum_key || ':' || k || ':' || i)
+arm = shuffled_block[j]
+```
+
+In both modes the stored record makes the result reproducible: `ExperimentAssignment` (`asg_`, `permanent`, append-only, unique on `(experiment_id, member_id)`) holds `experiment_id`, `member_id` (opaque `mem_`), `arm_key`, `stratum_key`, `stratum_seq` (blocked mode), `bucket_ppm` (bucket mode), `seed_version`, `assigned_at`, and the `eligibility_snapshot` (the stratifier values used, nothing else). Assignment is exactly once under concurrency: the unique constraint makes concurrent evaluations return the same row and emit one `experiment.assigned`. Assignments are never changed, including when a flag is later disabled. When `experiment.assignment_log_enabled` is false (it is a constant true) assignment is refused.
+
+Blocked mode balances arms exactly within each complete block; the last incomplete block of a stratum can be off by at most one block.
+
+### 12.11.4 Stratification [D]
+
+Allowed stratifiers, all known at assignment time and none personal or location-derived: `locale` (`fa`, `en`), `trust_tier`, `cohort_week` (the ISO week of `Member.created_at`, UTC), `join_source` (`direct`, `invite`, `referral`, `card`, `milestone`, from the generic landing tag, S12.8.3). `stratum_key` joins the chosen values with `|`; with no strata it is the empty string. **Forbidden stratifiers:** anything derived from `Device`, an IP hash, a time zone, a device language or user agent, a place, the services a member uses, or any `OptIn` field. At most two stratifiers per experiment, because small strata at pilot size would be empty. Published results merge any stratum with fewer than `analytics.min_cohort_k` members into one `other` stratum.
+
+### 12.11.5 Exposure and analysis [D]
+
+- `experiment.assigned` records that a member was randomized. `experiment.exposed` records that the member reached the **decision point** where the variant applies; it fires **identically for every arm**, including `control` (where the treatment would have appeared), once per `(assignment, surface_key)`. Surface keys are listed per mechanic in S12.12.
+- The client reports exposure with `POST /v1/experiment-exposures` (`assignment_id`, `surface_key`, `Idempotency-Key`); a server-side effect (for example an invitation created with a bonus) emits it from the server.
+- The primary analysis is intent-to-treat by assigned arm among eligible members. Exposure-conditioned analyses are secondary and labeled as such. Both are defined in `S13.*`.
+- Events carry no personal data (S12.13). Raw events are kept `retention.event_raw_days`; assignments are kept permanently and reference only the opaque `mem_` id, which is what the `member_bound` closure rule leaves behind (`ISS-129`).
+- Members see which experiments they are part of and their own arm on a settings screen; `copy.growth.experiments_notice` states that features can differ between members. There is no per-experiment opt-out in Phase 1 because every arm stays inside the safe envelope of S12.1 rules 7 and 8 [A]. Whether randomizing who is offered a credit bonus is acceptable is [V] for counsel (S12.1 rule 4).
+
+### 12.11.6 Guardrails and kill rules [D]
+
+- An arm varies only its declared variable. No arm changes price, quote, admission, verification rates, expiry, minting or policy; those belong to `S6.*`, `S8.*` and the expiry arm of `S13.*`.
+- **Universal kill conditions** (the experiment becomes `stopped` with reason `killed`; no pre-registration is needed to apply them): a `ledger.invariant_violated` alarm; an engaged kill switch covering the surface; a safety incident that `S10.*` ties to the surface; a de-anonymization or exposure report about the surface. Thresholds for anything statistical (farming rate, rejection rate, report rate) are fields the founders fill in the pre-registration (12.11.7).
+- Parallel experiments use independent salts. Interactions are analyzed only if pre-registered.
+
+### 12.11.7 Pre-registration fields (stored and locked by S13.*) [D]
+
+This part defines the fields; the founders fill them (`FND`) and lock them before the experiment can become `running`. Their values are deliberately not given here: no statistic is invented.
+
+| Field | Content |
+| --- | --- |
+| `hypothesis` | The FD§6.2 sentence, restated |
+| `primary_metric_key`, `secondary_metric_keys`, `guardrail_metric_keys` | From S12.12, as named by `S13.*` |
+| `population`, `arms`, `weights_ppm`, `strata`, `assignment_mode`, `block_size` | Must equal the `Experiment` record |
+| `analysis_window_s`, `min_exposed_per_arm` | Window per member and the least exposure before any reading |
+| `success_rule` | Metric, comparator, effect threshold, minimum evidence: unset until locked |
+| `kill_rule` | List of `{metric_key, comparator, threshold}` plus the universal conditions: unset until locked |
+| `decision_if_success`, `decision_if_neither` | What the founders will do, written before launch |
+
+### 12.11.8 What this cannot show [D]
+
+With 30-50 members, Phase 1 cannot test any mechanic statistically (FD§6.2). Phase 2 estimates can still be confounded by contamination (members talk; the public counter is visible to all). Simulation output is never evidence about people (prompt K). Results, bad ones included, are published (FD Principle 11, `S13.*`).
