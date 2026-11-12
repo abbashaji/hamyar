@@ -280,3 +280,59 @@ Before any new field, event, log line, `ff.*` flag turning on, or change to a `r
 
 The outcome is an `AdminAction` (`safety_review`: `passed` or `rejected`). A change that loosens privacy (a larger `retention.*` value, a wider `public.*` setting) is a `loosen` change: public change-log entry, `change.notice_days_default` notice, second `operator` approval (S0.10.3). A tightening change takes effect at once (R10 applies by analogy).
 
+## 10.14 Secrets management
+
+### 10.14.1 Principles [D]
+
+1. A secret exists only in the host secret store behind `SecretsPort` (S10.15.2) and in the memory of the process that needs it. Never in the repository, the database, the `Parameter` table, a log, a URL, a client bundle or a chat transcript (S0.10.1 reserves `secret.<name>` for this).
+2. No human reads a secret value after creation. Access to a value is an `AdminAction` of kind `secret.emergency_access`, a two-person action with expiry `security.emergency_access_ttl_s`.
+3. Every secret has an owner role, a version, a rotation cadence and a compromise procedure. A secret without all four is not allowed to exist.
+4. Secrets are scoped to the smallest component that needs them (S10.14.3).
+5. Statements about the four existing secrets come from panel-review §4 (static reading, nothing executed) and stay [V].
+
+### 10.14.2 Inventory [D]
+
+**A. Existing secrets of the panel repo** (names are the panel's environment variable names; spec names are `secret.legacy_*`). None of them authenticates a Hamyar member or admin: members use key pairs and admins use WebAuthn (S0.6.4). They stay only while the panel remains in use as build tooling [V].
+
+| Spec name (env name) | What it protects, per panel-review | Known weaknesses seen in code (all [V]) | Cadence | On compromise |
+| --- | --- | --- | --- | --- |
+| `secret.legacy_panel_token` (`PANEL_TOKEN`) | Panel login password and the HMAC key of the stateless 12-hour cookie (§4.1) | Shared by all users; cookie not revocable except by changing the token; login limit read-then-write on KV (§4.5 items 1 to 3) | `security.secret_rotation_days`; rotating revokes every cookie at once | Rotate now |
+| `secret.legacy_admin_token` (`ADMIN_TOKEN`) | Owner key for release, takeover, publish-plan and steward actions (§4.2) | May persist in browser storage as `bp_owner_key`; legacy steward prompt asks it be pasted into a chat; no failure counter (§4.5 items 4 to 6) | As above; also rotated if it was ever pasted into a transcript, URL or browser storage | Rotate now; clear stored copies |
+| `secret.legacy_github_token` (`GITHUB_TOKEN`) | Every GitHub call of the Worker (§4.3) | Scope not determinable; one token, owner-wide `ALLOWED_REPOS` (§4.5 item 8); the Worker pushes to `main` (§2.1) | As above | Revoke at GitHub, issue a narrower replacement, review GitHub's audit log for use [V] |
+| `secret.legacy_mcp_auth_token` (`MCP_AUTH_TOKEN`) | Password of the connector consent page; every consenting client becomes one `owner` principal (§4.4, §4.5 item 7) | Dynamic client registration is on; limiter on `/authorize` not seen; issued grants outlive the token (§9) | As above | Rotate and invalidate all issued grants (S10.14.5) |
+| `secret.legacy_ext_token` (`EXT_TOKEN`) | Retired browser-extension endpoints; off when unset (§4, overview) | A fifth secret the README does not list | Unset it | Unset it |
+
+**B. Hamyar runtime secrets** (new)
+
+| Spec name | Purpose | Form and length | Held by | Cadence and overlap |
+| --- | --- | --- | --- | --- |
+| `secret.volunteer_handle_key[version]` | `vol_` handle HMAC (S0.6.4) | 256-bit random | App, ledger and provenance code | `security.secret_rotation_days`; no overlap needed (new handles use the new version); a retired version is destroyed `retention.job_payload_days` days after retirement, which unlinks old handles by design |
+| `secret.ip_hash_key[version]` | Rate-limit counters (S0.6.4) | 256-bit random | Edge or app rate limiter | One version per UTC day; a version is destroyed `retention.ip_hash_ttl_days` x 86,400 s after its day ends |
+| `secret.device_hash_key[version]` | `Device` keyed hash [A] | 256-bit random | Identity code | `security.secret_rotation_days`; old version kept until its devices age out (`short`) |
+| `secret.analytics_key[version]` | Member reference in `events` [A] | 256-bit random | Metrics pipeline | Rotated per phase (week-2 and week-4 return need stable references); destroyed `retention.event_raw_days` after its last event |
+| `secret.cursor_mac_key[version]` | Pagination cursor MAC (S0.11.6) | 256-bit random | App | `security.secret_rotation_days`; overlap `api.cursor_ttl_s` |
+| `secret.ledger_checkpoint_signing_key` | Signs the daily checkpoint hash (S6.*) | Ed25519 key pair [A] | Checkpoint job only | `security.secret_rotation_days`; the new public key is announced in a `ChangeLogEntry` signed by the old key; old public keys stay published |
+| `secret.backup_encryption_key` | Encrypts backups | 256-bit random data key, wrapped by a key split between two custodians | Backup job (data key); custodians (wrapping) | `security.secret_rotation_days` for new backups; an old key lives until the last backup it protects expires (`retention.backup_days`) |
+| `secret.email_encryption_key` | Optional e-mail ciphertext [A] | 256-bit random | Identity code | `security.secret_rotation_days` with re-encryption of rows |
+| `secret.db_credentials.<role>` | Roles `app`, `ledger_append`, `readonly`, `migrate`, `backup` | Random, per role | Only the component using the role | `security.secret_rotation_days` |
+| `secret.blob_credentials` | Blob store access | Provider-specific | Blob adapter | `security.secret_rotation_days` |
+| `secret.mail_credentials` | Optional mail sending | Provider-specific | Mail adapter (off if unused) | `security.secret_rotation_days` |
+| `secret.alert_destination_token` | Alarm delivery | Provider-specific | Alerting job | `security.secret_rotation_days` |
+| `secret.deploy_credentials` | CI deploy; never readable by runtime | Provider-specific | CI deploy job only | `security.secret_rotation_days` |
+| `secret.tls_private_key` | TLS at the terminator | Provider-specific | TLS terminator | At each certificate renewal [V: CA and host rules] |
+
+**C. Deliberately no key** [D]: session tokens, lease nonces and idempotency keys are CSPRNG values stored as SHA-256 hashes (S0.6.4), so there is no nonce key or pepper; the question is recorded here so it is not reopened without a threat-model change. WebAuthn gives the server public keys only.
+
+**D. Never held by the platform** [D]: member private keys, member recovery keys, any provider credential or session (ground rule 3).
+
+### 10.14.3 Storage and access [D]
+
+| Rule | Detail |
+| --- | --- |
+| Store | `SecretsPort` backed by the chosen host's secret facility, or by an operator-run store that meets the port contract; secrets injected at process start or fetched on demand with a short cache |
+| Component scope | A component receives only the secrets in the "Held by" column of S10.14.2. The checkpoint job cannot read database credentials of other roles; CI cannot read runtime secrets; the member origin never holds admin-only material |
+| Database roles | `app` (no UPDATE or DELETE on ledger tables), `ledger_append` (INSERT only on ledger tables), `readonly` (analytics, aggregates), `migrate` (schema, used only by deploys), `backup` (read, no write) |
+| Humans | No role reads values. The only path is `secret.emergency_access`, expiring after `security.emergency_access_ttl_s`, with an `AdminAction` entry and an `Alarm` |
+| Backup key custodians | Two named people each hold half of the wrapping key; neither alone can decrypt a backup |
+| Admin tool | Shows secret names, versions, created and rotated times, never values |
+
