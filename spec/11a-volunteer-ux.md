@@ -1044,3 +1044,278 @@ The volunteer also has "flagged" in the sense of their own report on a card (`SC
 - `AC-vol-52` Given the member has 0 verified cells, When they open the screen, Then no card is shown and `copy.share.not_yet` is displayed.
 - `AC-vol-53` Given the share card is saved, When network requests are inspected, Then no image or card data was sent to the server and no third-party host was contacted.
 - `AC-vol-54` Given the invite-link toggle is off by default, When the card is shared, Then no invite token appears in the shared text or image.
+
+## 11.17 SCR-vol-12 Invite flow
+
+**Purpose.** Let an eligible member vouch for a newcomer through a single-use invitation, forming an edge in the invite tree (`Invite`, FD§6.2 V5 and the anti-farming rules of S10.*). Referral bonus UI appears only when `ff.growth.v5_referral` is on. [D]
+
+**Entry conditions.** Signed-in `active` member with at least `invite.min_accepted_cells_to_issue` accepted cells; fewer than `invite.max_active_per_member` active invites; the invite tree is below `invite.tree_max_members` and `invite.tree_max_depth`.
+
+**Wireframe**
+
+```
++--------------------------------------------------+
+| Invite someone you trust                         |
++--------------------------------------------------+
+| Invites left: 2 of 3 active                       |
+| [ Create an invitation ]                         |
+|  -> one-time code + link, valid {ttl} days        |
+|  [ Copy link ]  [ Copy code ]                     |
+| Before you invite: Hamyar is for people who can    |
+| decide for themselves to take part. You vouch for  |
+| the person; you do not see what they do.           |
++--------------------------------------------------+
+| Your invitations:                                |
+|  code ...a7f2  Created {date}  Pending  [Revoke]  |
+|  code ...91cc  Used {date}     Joined             |
++--------------------------------------------------+
+| (flag v5) Referral: you and the newcomer each get |
+| a small declared bonus after their first verified |
+| cell. Rules: {copy.referral.rules}                |
++--------------------------------------------------+
+```
+
+**Rules [D]**
+
+- An invitation is a single-use token delivered as a URL fragment (`#invite=<token>`), so it is not sent to the server in a request line or to analytics. It shows only the last four characters of its code in the list. It carries no member id, handle or other identity of the issuer to the invitee. The invitee never learns who invited them unless the issuer tells them outside the app. [D][A]
+- The issuer sees only the state of each invitation (`pending`, `used`, `expired`, `revoked`) and the date. They are never told who joined or what the invitee does. [D]
+- Limits come from the parameters: active invites per member, time to live (`invite.ttl_days`), tree size and depth. Reaching a limit shows its plain reason once (`copy.invite.limit_reached`) and not the numeric thresholds of fraud rules (abuse-safe).
+- Referral (flag on): the declared bonus amounts are `growth.referral.bonus_referrer_credits` and `growth.referral.bonus_newcomer_credits`, paid after the newcomer has `growth.referral.min_newcomer_verified_cells` verified cells and the hold `growth.referral.hold_s`, limited to `growth.referral.max_per_referrer_per_30d`; they come from the Reserve and pause when the Reserve is empty (`ISS-06`). The copy states these as declared rules and says the bonus may be paused. It never uses "guaranteed" or "free money". [D]
+- Pressure is forbidden: no counters of friends, no "invite to unlock", no bonus shown before the first accepted cell, no prompt in the first-contribution flow. [D]
+- Member safety notice (`copy.invite.safety_notice`): inviting someone tells them you use Hamyar; invite only people who can decide for themselves and whom you trust; do not invite anyone for whom taking part could be unsafe. `needs_human_and_legal_review`.
+
+**States.** Empty: no invitations yet. Loading: list placeholders. Error: `ALREADY_EXISTS`, `CAP_EXCEEDED` (limit), `copy.error.try_again`. Offline: list last known; creating disabled. Blocked: gate closed (`LAUNCH_GATE_CLOSED`), member below the accepted-cell requirement (`copy.invite.not_yet`), member restricted or suspended, flag `ff.growth.v5_referral` off (referral block hidden).
+
+**Actions.** Create, Copy link, Copy code, Revoke, toggle "add to share card" (11.16).
+
+**API calls.** `createInvite`, `listInvites`, `revokeInvite`, `getReferralStatus`.
+
+**Copy intent.** Quiet, safety-first; a trust relationship, not a promotion.
+
+**Accessibility.** Code and link are selectable, labeled, `dir="ltr"`; Revoke confirms with a sheet that names the code suffix.
+
+**Acceptance criteria**
+
+- `AC-vol-55` Given a member with fewer than `invite.min_accepted_cells_to_issue` accepted cells, When they open the screen, Then Create is disabled with `copy.invite.not_yet`.
+- `AC-vol-56` Given an invite token in a URL, When the landing loads, Then the token is read from the fragment, sent only in the `createMember` body, and absent from every request URL and analytics event.
+- `AC-vol-57` Given the issuer views the list, When any entry is inspected, Then no invitee id, handle or activity is shown, only state and dates.
+- `AC-vol-58` Given `ff.growth.v5_referral` is off, When the screen renders, Then no bonus text, amount or counter appears.
+
+## 11.18 SCR-vol-13 Recovery key handling
+
+**Purpose.** Let a member save, confirm and, if needed, use a recovery key to restore a pseudonymous identity without e-mail (FD§3.2 step 1, FD§10 item 2). The cryptography, key format, recovery abuse limits and rotation rules are owned by S10.*; this screen specifies only what the volunteer sees and does. [D]
+
+**Design position [D][A].** The identity key pair is created on the device at F2 (11.7). The recovery key is a separate secret of `identity.recovery_key_bits` bits (default 128) generated on the device. It is first shown after the first accepted cell (V-09), not before, because before that moment the identity holds no credit and nothing to lose, and the 60-second path stays unblocked [H]. This is a UX position, and it differs from the reading of FD§3.2 step 1 that the key is created at join; the generation is at join (so a lost device before the first cell loses nothing) and the display is deferred. Challenged in `ISS-113`.
+
+**Wireframe: save**
+
+```
++--------------------------------------------------+
+| Save your recovery key                           |
++--------------------------------------------------+
+| If you lose this device you cannot get your credit |
+| back without this key. Hamyar cannot recover it    |
+| for you and does not know who you are.             |
+|                                                  |
+|  K7Q2-M9XD-4TPB-...-W8ZA  (dir=ltr, groups of 4)  |
+|  [ Copy ]  [ Show as words? ] [ Download .txt ]    |
+|                                                  |
+|  Keep it somewhere only you can read: not in this  |
+|  chat, not in a shared note.                      |
++--------------------------------------------------+
+| Confirm: type groups 3 and 7 of the key  [____][__]|
+| [ I saved it ]                    ( Later )       |
++--------------------------------------------------+
+```
+
+**Wireframe: restore**
+
+```
++--------------------------------------------------+
+| Restore your identity                            |
++--------------------------------------------------+
+| Enter your recovery key:  [____-____-____-...]    |
+| [ Restore ]                                      |
+| After a restore, spending and starting requests   |
+| wait {recovery_cooldown} (declared safety rule).  |
++--------------------------------------------------+
+```
+
+**Rules [D]**
+
+- The key is shown only after `getMember` reports the first accepted cell, only on the device, with Copy and Download as plain text. It is never sent to the server in clear; the server stores only a verifier (S10.*). Display is not logged. The screen is excluded from screenshots where the platform lets a page ask for that [V].
+- Confirmation asks the member to re-enter `ui.recovery_confirm_groups` groups chosen at random from the key (default 2), proving the member saved it; success calls `confirmRecoveryKey` and removes the header marker. The member may choose Later; the marker stays, and the key can be shown again only by `rotateRecoveryKey`, which creates a new key and invalidates the old one after a confirmation that states the consequence. [D]
+- The key is excluded from digit conversion (11.4.2) and rendered `dir="ltr"`; alternate "words" display is an option only if S10.* defines a word list for it [A].
+- Restore: signed with a new device key; success emits `member.recovered`; the member then faces `identity.recovery_cooldown_s` (default 86,400 s) during which they cannot start jobs or spend (S10.*), shown as a declared safety rule with the end time. Attempts are limited by `ratelimit.recovery_attempts_per_day` and `identity.recovery_max_per_90d`; the screen never says which limit triggered or whether the key was close. A wrong key and an unknown key give the same answer (no account enumeration). [D]
+- Honest limit statement (FD Principle 11): the screen says plainly that a recovery key is the only way back, that anyone who has it can restore the identity, and that Hamyar cannot protect a key the member shares. [D]
+
+**States.** Empty: no key yet generated (not reachable after F2). Loading: restore in progress. Error: `RATE_LIMITED`; wrong key (`copy.recovery.not_recognized`); `copy.error.try_again`. Offline: save and confirm work offline except `confirmRecoveryKey`, which is queued; restore requires network. Blocked: member `closed` (`copy.recovery.closed`); too many attempts (`RATE_LIMITED` with time).
+
+**API calls.** `confirmRecoveryKey`, `rotateRecoveryKey`, `startRecovery`, `completeRecovery`, `createSession`.
+
+| Copy key | `fa` (draft) | `en` |
+| --- | --- | --- |
+| `copy.recovery.warning` | اگر این دستگاه را از دست بدهید، بدون این کلید نمی‌توانید اعتبارتان را پس بگیرید. همیار نمی‌تواند آن را برایتان بازیابی کند و نمی‌داند شما کی هستید. | If you lose this device you cannot get your credit back without this key. Hamyar cannot recover it for you and does not know who you are. |
+| `copy.recovery.cooldown` | پس از بازیابی، خرج کردن و شروع درخواست تا {time} متوقف می‌ماند؛ این یک قاعدهٔ ایمنی اعلام‌شده است. | After a restore, spending and starting requests wait until {time}; this is a declared safety rule. |
+
+**Accessibility.** The key is real text in groups separated by non-selectable hyphens; Copy announces success; confirmation inputs have labels with the group numbers in the member's digit style; no CAPTCHA and no time pressure.
+
+**Acceptance criteria**
+
+- `AC-vol-59` Given a member with no accepted cell, When they use the app, Then no recovery key is displayed and the header marker is absent; and Given the first accepted cell, Then the key is offered once and the marker appears until confirmed.
+- `AC-vol-60` Given the key screen, When network requests are inspected, Then the key never appears in any request, URL, log event or analytics event.
+- `AC-vol-61` Given the member enters the wrong groups at confirmation, When they tap "I saved it", Then the key remains unconfirmed, the marker stays and the member can retry or choose Later.
+- `AC-vol-62` Given a wrong recovery key and an unknown one, When Restore is tapped, Then the visible result and timing class are the same, and the attempts counters are incremented.
+- `AC-vol-63` Given a successful restore, When the member opens the balance screen, Then the cooldown end time is shown and spend or job start actions are blocked until it passes.
+
+## 11.19 SCR-vol-14 Appeal
+
+**Purpose.** Let a volunteer challenge a cell rejection, a suspension or a ban (`appeal_kind` `cell_rejection`, `member_suspension`, `member_ban`, S0.9.7). Reviewer-side handling is specified in the reviewer screens. [D]
+
+**Entry conditions.** The decision exists, is inside `appeal.window_days`, and `appeal.max_per_decision` is not reached. Suspended or banned members can reach this screen and no other action.
+
+**Wireframe**
+
+```
++--------------------------------------------------+
+| Appeal a decision                                |
++--------------------------------------------------+
+| Decision: Not accepted ({reason copy}) {date}    |
+| Appeals can be filed until {date J / G}           |
+| Why do you think it was wrong?                   |
+| [ text field, max appeal.reason_max_chars ]       |
+|  Do not include personal data or secrets.         |
+| [ Send appeal ]                                  |
+| What happens next: a reviewer who did not make    |
+| the decision looks at it; target {appeal.reviewer_ |
+| sla_days} days (a target, not a promise).         |
++--------------------------------------------------+
+| Status: filed > assigned > in review > decision   |
+| [ Withdraw appeal ]                              |
++--------------------------------------------------+
+```
+
+**Rules [D]**
+
+- The status line follows the appeal machine (`filed`, `assigned`, `in_review`, `awaiting_second_review`, `upheld`, `overturned`, `withdrawn`), shown with plain words. The reviewer is never named; the original decider is never the reviewer (S0.9.7), stated as a declared rule.
+- The SLA is displayed as a target (`appeal.reviewer_sla_days`), never as a promise. Outcome copy for `overturned` states what is restored (credit via ledger reversal, `Cell.overturned` reversed, tier) in plain words and links to Balance; for `upheld` it gives the reason class and nothing that teaches evasion.
+- A late filing shows `copy.appeal.window_closed`; the API error is not shown. One appeal per decision unless the parameter allows more.
+- The reason text is plain text, length-limited, and visible only to reviewers; the screen warns not to include personal data.
+
+**States.** Empty: nothing to appeal (`copy.appeal.none`). Loading. Error: `STATE_CONFLICT` (already appealed), `VALIDATION_FAILED`, `CAP_EXCEEDED`. Offline: the text is kept locally; Send disabled until online. Blocked: window closed; member `closed`.
+
+**API calls.** `createAppeal`, `getAppeal`, `listAppeals`, `withdrawAppeal`.
+
+**Copy intent.** Fair and calm; no suggestion that appeals are unlikely to succeed and no suggestion that they are certain to.
+
+**Accessibility.** Status steps are an ordered list with the current step marked in text; the field has a live character count.
+
+**Acceptance criteria**
+
+- `AC-vol-64` Given a rejected cell inside the window, When the member sends an appeal, Then `appeal.filed` is emitted, the status shows `filed`, and a second appeal on the same decision is refused with `STATE_CONFLICT` when `appeal.max_per_decision` = 1.
+- `AC-vol-65` Given an appeal is `overturned`, When the member opens it, Then the screen states what was restored and the balance reflects the ledger reversal from `getBalance`.
+- `AC-vol-66` Given a banned member, When they sign in, Then only the account notice, Appeal, Help and Settings (close account) are reachable, and no offers are shown.
+
+## 11.20 SCR-vol-15 Help
+
+**Purpose.** Static, bundled help that answers the volunteer's likely questions in both locales, works offline and is the destination of every error state. [D]
+
+**Wireframe**
+
+```
++--------------------------------------------------+
+| Help                                    [search] |
++--------------------------------------------------+
+| Start here: what do I do?                        |
+| Topics:                                          |
+|  > How a task works (copy, Send, paste back)      |
+|  > What is credit and when does it expire?        |
+|  > Why was my answer not accepted?                |
+|  > My lease ran out                               |
+|  > Clean chat and memory off (service hints)      |
+|  > What Hamyar never does                         |
+|  > Safety and privacy: what we can and cannot say |
+|  > Lost my device / recovery key                  |
+|  > Report a task / appeal a decision              |
+|  > Terms and rules may limit this: read this      |
++--------------------------------------------------+
+```
+
+**Rules [D]**
+
+- All text is bundled (V-14), searchable on the device, linked by anchor from error states (`copy.error.*` has a `help_topic`). Service-specific hints come from registry-linked copy keys, never hardcoded in help text.
+- Help contains no instruction on bypassing any restriction, no legal conclusion, and the topic "Safety and privacy" states what Hamyar cannot promise (pseudonymity is minimization, not anonymity; a network observer or the host may see that the app is used; a recovery key is not recoverable; sharing a card or an invite can expose the member) [V: G1 threat model, S10.*].
+- A contact route is the report sheet (11.21); no support e-mail is displayed unless the operator configures one [A].
+- Help states the rule "Hamyar never asks you to do more than copy, press Send and return text" and tells the volunteer to report any task that does.
+
+**States.** Empty search: `copy.help.no_results` with the topic list. Loading: none (static). Error: none. Offline: fully available. Blocked: never blocked, available to every principal including suspended members.
+
+**API calls.** None.
+
+**Copy intent.** Plain language, short answers, no jargon (cell, lease and nonce words are replaced by "task", "time" and "code").
+
+**Accessibility.** Headings in order; search is a labeled field; each topic is a link with a visible focus ring; the page is usable at 200 percent text.
+
+**Acceptance criteria**
+
+- `AC-vol-67` Given the device is offline, When Help opens, Then all topics render and search works.
+- `AC-vol-68` Given any error state of 11.4.7, When the member taps "Help", Then the matching topic opens at its anchor.
+- `AC-vol-69` Given Help topics are scanned, When their text is inspected, Then none contains an instruction to bypass a regional or technical restriction, a legal conclusion, or the word "guaranteed" in a promise.
+
+## 11.21 SCR-vol-16 Report sheet and SCR-vol-17 Identity and display settings
+
+### 11.21.1 SCR-vol-16 Report sheet
+
+**Purpose.** Report a task, an output or an account problem in two taps. Opened from the card, from feedback and from History. [D]
+
+```
++--------------------------------------------------+
+| Report this task                                 |
++--------------------------------------------------+
+| What is wrong?   ( ) asks me to open a link / install / log in
+|                  ( ) looks like personal or private data
+|                  ( ) harmful, illegal or abusive content
+|                  ( ) asks for something beyond copy, Send, paste
+|                  ( ) other: [________]            |
+| [ Send report ]     ( Also decline this task )     |
++--------------------------------------------------+
+```
+
+- Creates a `Report` (state `open`, S0.9.8) tied to the cell and the lease, with a reason code from a fixed list [A] and optional text (length-limited, plain text). Limited by `report.max_per_member_per_day`. No penalty for reporting, and a volunteer is never told who the requester is. Triage target is `report.triage_sla_days`, shown as a target. An autopause of the template can follow when several reports arrive (`template.autopause_report_count` in `template.autopause_window_s`); the screen does not say whether a report triggered a pause (abuse-safe).
+- States: Empty (not reachable); Loading (sending); Error: `RATE_LIMITED`, `copy.error.try_again`; Offline: the report is kept locally and sent when online; Blocked: suspended members can still report (it is a safety channel).
+- API: `createReport`. Copy intent: calm, thanks without praise. Accessibility: radio group with legend; the optional text has a live count.
+- `AC-vol-70` Given the volunteer reports a card, When they tap Send report, Then a `Report` in state `open` is created, no decline occurs unless chosen, and no trust-tier or credit change results.
+- `AC-vol-71` Given more reports than `report.max_per_member_per_day`, When the next is sent, Then `RATE_LIMITED` is shown with the time and the draft is kept.
+
+### 11.21.2 SCR-vol-17 Identity and display settings
+
+**Purpose.** Language, digits, calendar, time zone, device linking, key rotation, and closing the account. [D]
+
+```
++--------------------------------------------------+
+| Settings                                         |
++--------------------------------------------------+
+| Language        (o) Persian  ( ) English          |
+| Digits          (o) Persian  ( ) Latin            |
+| Calendar        (o) Jalali   ( ) Gregorian        |
+| Time zone       Device  [choose a zone v]         |
++--------------------------------------------------+
+| Devices         [ Link another device ] (code)    |
+| Key             [ Rotate my device key ]          |
+| E-mail (optional): none  [ Add ]  (used only for  |
+|                  recovery help? S10.* decides)     |
++--------------------------------------------------+
+| Close my account  (confirmation, states what is   |
+|                    deleted and what is kept)      |
++--------------------------------------------------+
+```
+
+- Display options are device-local (11.4.2); time zone is the device zone by default and an IANA zone if chosen, never inferred from an IP address (S0.6.2).
+- **Link another device:** `createDeviceLinkCode` shows a one-time code valid `identity.device_link_code_ttl_s` (default 300 s); the new device enters it with `redeemDeviceLinkCode`; success emits `member.device_linked`; the old device is told. The screen explains that a linked device holds full access to the identity. [D]
+- **Rotate key:** `rotateMemberKey` replaces the device key with a grace period `identity.key_rotation_grace_s`; emits `member.key_rotated`; a confirmation states the consequence.
+- **E-mail:** optional (`identity.email_optional`); if S10.* allows it, the screen says in plain words what the address is used for and that adding it can link the identity to a person; it is never requested elsewhere. [A]
+- **Close account:** `closeMember` after a confirmation that states what is deleted or reduced to an opaque id (`member_bound` retention, S0.7) and that ledger records without personal data remain (`permanent` retention); irreversible; shows the credit that will be forfeited. Emits `member.closed`.
+- States: Loading; Error with retry; Offline: display options still change (device-local), server actions disabled; Blocked: suspended or banned members can change display options and close the account, nothing else.
+- `AC-vol-72` Given the member changes language, digits and calendar, When any screen renders, Then the choices apply immediately, are stored only on the device and no server call carries them.
+- `AC-vol-73` Given a link code older than `identity.device_link_code_ttl_s`, When it is redeemed, Then it is refused with `NOT_FOUND` and the same message as an unknown code.
+- `AC-vol-74` Given the member confirms Close account, When `closeMember` completes, Then the identity status is `closed`, the device key and session are removed and the confirmation shows what was kept.
