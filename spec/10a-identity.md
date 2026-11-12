@@ -660,3 +660,117 @@ The member-facing wording uses `declared` and never `guaranteed` (IC8). Stated p
 10. Fake accounts and credit farming are prevented. They are bounded and monitored (10.9, 10.10); a patient adversary with many cheap identities is accepted residual risk.
 11. Backups, deleted e-mail and closed accounts vanish at once. Backups expire on their schedule (10.5, 10.14.3).
 12. Counsel, regulators or providers will accept the design. Every such question stays [V].
+
+## 10.17 Acceptance criteria
+
+Given / When / Then; each criterion becomes a test in the layer shown (S0.5; `S18.*` owns the harness). [D]
+
+| Id | Given | When | Then | Layer |
+| --- | --- | --- | --- | --- |
+| AC-identity-01 | `launch.members_may_join` is true and a valid invite | A client registers with both signatures | One `Member` (`new`, `active`), two `MemberKey`, one `Device`, invite `redeemed`, a session returned, `member.created` emitted | e2e |
+| AC-identity-02 | `launch.members_may_join` is false | A client registers | `403 LAUNCH_GATE_CLOSED` and no row is written | policy |
+| AC-identity-03 | A registration whose recovery signature was made by a different key | It is submitted | `401 AUTH_INVALID`, no member created | adv |
+| AC-identity-04 | The recovery key screen is open | Network activity is recorded | No request is made while it is shown, and the key appears in no request, log or event afterwards | e2e |
+| AC-identity-05 | A member with a confirmed recovery key | A new device recovers with the correct key | All old keys and sessions are revoked, new device and recovery keys exist, `recovery_cooldown_until` is set, `member.recovered` emitted, status and tier unchanged | e2e |
+| AC-identity-06 | A member inside the recovery cooldown | They create a job, change e-mail or issue an invite | `403 FORBIDDEN` (X4); leasing and submitting still work | policy |
+| AC-identity-07 | A member with `identity.recovery_max_per_90d` completed recoveries in 90 days | They recover again | `422 CAP_EXCEEDED`, nothing changes | adv |
+| AC-identity-08 | An unknown recovery key and a known key with a bad signature | Both are submitted | The two responses are identical in status and body and equal in work | adv |
+| AC-identity-09 | A device key rotation whose response was lost | The client retries inside `identity.key_rotation_grace_s` | It succeeds; after `not_after` an unconfirmed old key is `revoked` | fsm |
+| AC-identity-10 | An open device-link offer | Two devices claim it, then the first is approved; later a sixth device is offered | Only the first claim wins; the key chain records `authorized_by_key_id`; the sixth is refused at `identity.max_devices_per_member` | adv |
+| AC-identity-11 | A recovery key typed with one wrong character | The client normalizes it | The checksum fails on the device, no request is sent, no recovery attempt is counted | unit |
+| AC-identity-12 | An address already held by another member | A member sets it | The response is identical to a fresh address and nothing is sent to the holder; removal deletes ciphertext and index at once | adv |
+| AC-invite-01 | One active invite | Two clients redeem it at once | One succeeds, the other gets `409 STATE_CONFLICT` | adv |
+| AC-invite-02 | A member with `invite.max_active_per_member` active invites | They issue another | `422 CAP_EXCEEDED` | policy |
+| AC-invite-03 | A direct inviter with one strike | A second member they invited is banned for `sybil` | Issuing is suspended and active invites revoked; status, tier and credit are unchanged | fsm |
+| AC-invite-04 | A tree with `invite.tree_freeze_ban_threshold` bans in the window | Anyone registers with an invite of that tree | Refused; its pending starter grants are held | policy |
+| AC-invite-05 | An invite edge older than `invite.accountability_days` with no ban | The sweep runs | `invited_by_member_id` is null and `invite_tree_id` remains | unit |
+| AC-access-01 | The permission matrix and the API operation table | A test enumerates every (principal, permission) pair | Every pair not marked `Y` or `2P` is denied | policy |
+| AC-access-02 | Members A and B | A requests B's job by id | `404 NOT_FOUND` | adv |
+| AC-access-03 | A `suspended` member | They lease a cell, then file an appeal | The lease is `403 FORBIDDEN`; the appeal is accepted | policy |
+| AC-access-04 | A reviewer-only admin | They edit an operator-owned parameter | `403 FORBIDDEN` | policy |
+| AC-admin-01 | A valid member token | It is sent to `/v1/admin/*` | `401 AUTH_INVALID`, counted by the limiter | adv |
+| AC-admin-02 | A proposed two-person action | The proposer approves it; or the payload changes after approval | Refused; an approval covers only its `params_hash` | adv |
+| AC-admin-03 | A passkey whose `sign_count` goes backwards | It signs in | No session, the credential is `locked`, `admin.credential_cloned` raised | adv |
+| AC-admin-04 | One active operator | A request locks or disables that operator | Refused (last operator rule) | policy |
+| AC-session-01 | A session past its idle or absolute TTL | It is used | `401 AUTH_EXPIRED` | unit |
+| AC-session-02 | A device key with live sessions | The key is revoked | The sessions are refused on the next request | fsm |
+| AC-session-03 | A database dump after sign-in | It is searched for the token | Only its SHA-256 appears | adv |
+| AC-session-04 | An active session of a key | The client signs in again with that key | The previous session of that key is revoked | fsm |
+| AC-privacy-01 | A request from a sentinel IP address | Dumps, logs, metrics, traces and backup fixtures are searched | The sentinel appears nowhere (`retention.raw_ip_stored` = false) | inj |
+| AC-privacy-02 | The same IP on two UTC days | `IpHasher.hash` runs | The two hashes differ | unit |
+| AC-privacy-03 | `kill.optional_pii` is engaged | The action completes | E-mail ciphertexts and request logs are deleted, new addresses are refused, IP-hash TTL is 0 | e2e |
+| AC-privacy-04 | Any request with a body and an `Authorization` header | The request log line is read | It holds none of the body, header, IP or token | inj |
+
+## 10.18 Events, interfaces, parameters, hooks
+
+### 10.18.1 Operations required by this part
+
+Names and paths are proposals for `S15.*`, which is authoritative; methods and prefixes follow S0.11. `Idem` marks a required `Idempotency-Key`. [A]
+
+| `op` | Request | Auth | Permission | Idem |
+| --- | --- | --- | --- | --- |
+| `createAuthChallenge` | `POST /v1/auth-challenges` | none | `perm.identity.create_challenge` | no |
+| `createMember` | `POST /v1/members` | none | `perm.identity.create_member` | yes |
+| `createSession` | `POST /v1/sessions` | none | `perm.identity.start_session` | no |
+| `deleteSession` | `DELETE /v1/sessions/{ses_id}` | member | `perm.session.revoke_own` | no |
+| `createSessionRevocation` | `POST /v1/members/me/session-revocations` | member (X5) | `perm.session.revoke_own` | yes |
+| `getMe`, `exportMe` | `GET /v1/members/me`, `GET /v1/members/me/export` | member | `perm.identity.view_own`, `perm.identity.export_own_data` | no |
+| `listMemberKeys`, `createMemberKey` | `GET`, `POST /v1/members/me/keys` | member (X5 for POST) | `perm.identity.manage_keys` | POST yes |
+| `createKeyRevocation` | `POST /v1/members/me/keys/{mky_id}/revocation` | member (X5) | `perm.identity.manage_keys` | yes |
+| `createRecoveryKey`, `createRecoveryConfirmation` | `POST /v1/members/me/recovery-keys`, `POST /v1/members/me/recovery-confirmations` | member (X5) | `perm.identity.manage_keys` | yes |
+| `createRecovery` | `POST /v1/recoveries` | none | `perm.identity.start_recovery` | yes |
+| `createDeviceLinkOffer`, `createDeviceLinkApproval` | `POST /v1/device-link-offers`, `POST /v1/device-link-offers/{dlo_id}/approval` | member (X5) | `perm.identity.link_device` | yes |
+| `createDeviceLinkClaim` | `POST /v1/device-link-offers/{dlo_id}/claims` | none | `perm.identity.link_device` (by secret) | no |
+| `putMemberEmail`, `deleteMemberEmail` | `PUT`, `DELETE /v1/members/me/email` | member (X5) | `perm.identity.set_email` | yes |
+| `closeMember` | `POST /v1/members/me/closure` | member (X5) | `perm.identity.close_account` | yes |
+| `createInvite`, `deleteInvite` | `POST /v1/invites`, `DELETE /v1/invites/{inv_id}` | member | `perm.invite.issue`, `perm.invite.revoke_own` | yes |
+| `createAdminAuthChallenge`, `createAdminSession` | `POST /v1/admin/auth-challenges`, `POST /v1/admin/sessions` | none | none (WebAuthn) | no |
+| `createAdminAction`, `createAdminActionApproval` | `POST /v1/admin/actions`, `POST /v1/admin/actions/{act_id}/approvals` | admin | by action (10.11) | yes |
+
+### 10.18.2 Events and metrics [A]
+
+Events (S0.5 format, stored in the outbox): `member.created`, `member.key_rotated`, `member.key_revoked`, `member.device_linked`, `member.recovered`, `member.recovery_confirmed`, `member.email_set`, `member.email_removed`, `member.closed`, `invite.issued`, `invite.redeemed`, `invite.expired`, `invite.revoked`, `invite.strike_recorded`, `invite.tree_frozen`, `invite.tree_unfrozen`, `session.issued`, `session.revoked`, `device_link.offered`, `device_link.claimed`, `device_link.approved`, `device_link.cancelled`, `device_link.expired`, `admin.signed_in`, `admin.credential_added`, `admin.credential_locked`, `admin_action.proposed`, `admin_action.approved`, `admin_action.executed`, `admin_action.expired`. Events carry `actor` as principal type plus opaque id and never an IP, key or token.
+
+Metrics (no id or IP in any label): `hamyar_identity_registrations_total`, `hamyar_identity_recoveries_total`, `hamyar_identity_recovery_failures_total`, `hamyar_identity_key_chain_invalid_total`, `hamyar_ratelimit_denied_total` (label: scope), `hamyar_session_revocations_total`, `hamyar_admin_pending_approvals_total`. Alarms (`Alarm`): `identity.key_chain_invalid`, `admin.credential_cloned`, a spike in `hamyar_identity_recovery_failures_total`.
+
+### 10.18.3 Parameters this part adds [A]
+
+All are initial configurable defaults, owned by the `operator` role (S0.10.5), public except none (they are not `security.*` secrets), and reported as convention gaps for `S16.*` to complete.
+
+| Name | Type | Initial configurable default | Validation | Replaced by |
+| --- | --- | --- | --- | --- |
+| `identity.registration_mode` | enum | `invite_only` | `invite_only`, `open` | `FND` |
+| `identity.challenge_ttl_s` | duration_s | 60 | 10..600 | `SEC` |
+| `identity.max_devices_per_member` | int | 5 | 1..20 | `OPS` |
+| `identity.code_max_attempts` | int | 5 | 1..20 | `SEC` |
+| `identity.email_code_ttl_s` | duration_s | 900 | 60..3600 | `SEC` |
+| `ratelimit.device_link_offers_per_day` | int | 5 | 1..100 | `OPS` |
+| `ratelimit.auth_failures_per_hour` | int | 20 per IP hash | 1..1000 | `OPS` |
+| `invite.accountability_days` | days | 90 | 1..365 | `SEC` |
+| `invite.strike_window_days` | days | 90 | 1..365 | `OPS` |
+| `invite.strikes_to_revoke_issuing` | int | 2 | 1..20 | `OPS` |
+| `invite.tree_freeze_ban_threshold` | int | 3 | 1..100 | `OPS` |
+| `session.step_up_max_age_s` | duration_s | 300 | 30..3600 | `SEC` |
+| `session.touch_min_interval_s` | duration_s | 300 | 10..86400 | `OPS` |
+| `security.two_person_ttl_s` | duration_s | 86,400 | 600..604800 | `SEC` |
+| `security.admin_min_credentials` | int | 2 | 1..5 | `SEC` |
+| `retention.sweep_interval_s` | duration_s | 3600 | 60..86400 | `OPS` |
+
+New cross-parameter constraint `C9` [A]: `session.member_abs_ttl_s <= retention.session_days x 86,400`. Changed default (`ISS-102`): `security.two_person_actions` starts as the four of S0.10.6 plus `member.ban`, `invite.seed_issue`, `admin.role_grant`, `admin.credential_add`, `admin.credential_unlock`, `disclosure.release`. Because members cannot be hurt by a tightening, every parameter above follows R10 (tighten at once, loosen with notice).
+
+### 10.18.4 Hooks this part needs from other S10 files [A]
+
+1. Secrets inventory: add `secret.email_enc_key`, `secret.email_index_key` (new) next to `secret.volunteer_handle_key` and `secret.ip_hash_key`; all rotate per `security.secret_rotation_days` and before any public exposure (`security.rotate_before_public_exposure`); a rotation of `secret.email_enc_key` re-encrypts addresses without member action.
+2. Threat model: rows for account takeover, de-anonymization, compelled disclosure, fake accounts and invite-tree abuse, insider and operator risk, reviewer capture and DoS must cite 10.8 to 10.15 as their mitigations and keep the residual risks of 10.16.
+3. Ban process: define the `reason class` values `credit_farming`, `forgery`, `sybil` used in 10.10, the two-person ban, the appeal path and the effect of `member.banned` on sessions (10.13).
+4. Hosting: the requirements of 10.14.2 item 5 (no client IP in host logs; trusted client-address header) and the reachability checks marked [V].
+
+## Issues raised
+
+| id | severity | fd_ref | issue | resolution | status |
+| --- | --- | --- | --- | --- | --- |
+| `ISS-101` | minor | prompt | `S10` is split over several files, so `S10.<m>` numbers can collide, and this file lists identity-relevant columns while `S5.*` owns full schemas | This file owns `S10.1`..`S10.19`, other S10 files start at `S10.20`; `S5.*` wins on column names, this file on meaning; any mismatch is reported at assembly | proposed |
+| `ISS-102` | major | FD§3.2, FD§8.3 | The FD makes e-mail optional without saying what it is for, names no account recovery besides the key, and names no admin approval mechanism; a one-person Phase 1 team cannot meet two-person approval | E-mail is for opt-in notices only and never a recovery or login factor; recovery is by key only and no operator can restore access; `security.two_person_actions` is extended (10.12); at least two distinct admins are required before any two-person action, including launch sign-off, can run | needs_owner |
+| `ISS-103` | minor | FD§4.6 | `S0.7` gives `Device` the retention class `short` and calls it a keyed-hash record, but `grant.max_per_device` is a lifetime limit and the token is a 128-bit random value that needs only SHA-256 | `Device` is `member_bound` with a residue of `{token_hash, grants_issued}` kept `retention.member_inactive_days` after closure (10.9.1); the hash is plain SHA-256 | proposed |
+
+Convention additions made by this part (not issues, listed so `S0.*` can fold them back): entities `AuthChallenge` (`chl_`), `DeviceLinkOffer` (`dlo_`), `RecoveryRequest` (`rcv_`), `SecurityNotice` (`snt_`); `Invite` states and the events in 10.18.2; `MemberKey` states and the `kind` values; the kill switch `kill.optional_pii`; secrets `secret.email_enc_key` and `secret.email_index_key`; the parameters of 10.18.3 and constraint `C9`; the permission names of 10.11 and the conditions `X1`..`X11`; the copy keys of 10.15.4 and `copy.invite.invalid`, `copy.ratelimit.try_later`, `copy.identity.recovery_limit`, `copy.identity.recovery_typo`, `copy.identity.recovered_elsewhere`.
