@@ -301,3 +301,110 @@ English is a full locale, not a fallback. [D]
 - Dates are unambiguous (`11 Nov 2026`), never `11/11/26`. The clock is 24-hour (S11.44).
 - English is written first for counsel to read and Persian is written natively, not machine-translated; which language prevails if they ever differ is a legal question that this spec does not decide and no precedence clause is written [V: counsel; recorded in the counsel memo]. [A]
 - A member can read both languages of any notice side by side on the public notices page (S11.52).
+
+## 11.48 Accessibility
+
+**Target** [A]: WCAG 2.2 level AA on every member, requester, reviewer, operator and public screen, in both locales. This is a declared target, not a claim that it has been reached; reaching it is shown by the audit in the last row of the table below. The owner decision that could overturn it (a different level, or a lower level for operator tools) is listed in S3.*. One deviation is known and stated openly (row 2.2.1).
+
+| Success criterion (WCAG 2.2) | Decision |
+| --- | --- |
+| 1.1.1 Non-text content | Every icon that carries meaning has a text alternative from a copy key; decorative icons are hidden from assistive technology. No text is baked into images (S11.42). |
+| 1.3.1, 1.3.2 Structure and order | Landmarks, one `h1` per screen, ordered headings, labeled controls, table headers. The cell card is one `article` with the declarations (purpose, license, sensitivity, service, template, expected time) in a description list. DOM order equals reading order in both directions. |
+| 1.3.4 Orientation | No orientation lock. |
+| 1.4.1 Use of color | Status (accepted, rejected, flagged, expired) is never color alone; each has a word and a shape. |
+| 1.4.3, 1.4.11 Contrast | Text at least 4.5:1 (3:1 for large text); borders, icons and focus indicators at least 3:1, in light and dark themes. |
+| 1.4.4, 1.4.10 Resize and reflow | Usable at 200% text zoom and at a 320 CSS pixel width without two-dimensional scrolling, except for code blocks and data tables, which scroll inside their own container. |
+| 1.4.12 Text spacing | Nothing is lost when a user stylesheet increases line, paragraph and word spacing. Letter spacing is never applied to Arabic-script text (S11.42). |
+| 1.4.13 Content on hover or focus | Dismissible, hoverable, persistent. |
+| 2.1.1, 2.1.2 Keyboard | Everything is operable by keyboard; nothing traps focus. The language switch, the prompt expansion, copy, paste-back and Submit are reachable in a short tab sequence. |
+| 2.2.1 Timing adjustable (known deviation) | A lease has a server-enforced time limit (`lease.timeout_s`) that exists so that cells are not hoarded. WCAG asks that a user can extend a limit many times; the product allows `lease.max_extensions` (initial configurable default 1) extensions of `lease.extend_s`. The deviation is mitigated by: a warning at `ui.lease.warn_remaining_s`; a default limit of ten times the expected time per cell (`lease.timeout_s` is 10 x 120 s, S0.10); a free decline at any moment; an immediate re-lease of the next cell; and local draft preservation (S11.49). The deviation is listed in the accessibility statement. [A][V: whether the essential-limit exception applies is for the accessibility auditor] |
+| 2.2.2, 2.3.1, 2.3.3 Motion | Nothing blinks or flashes. Animation honors `prefers-reduced-motion`; the counter and progress indicators work without motion. |
+| 2.4.1, 2.4.2, 2.4.6 Navigation | Skip-to-content link; localized page titles (dynamic parts isolated, S11.45); descriptive headings and labels. |
+| 2.4.3, 2.4.7, 2.4.11 Focus | Logical focus order; a visible focus indicator on every control; focused elements are never hidden under sticky bars. |
+| 2.5.1, 2.5.2 Pointer gestures | No gesture is required (no path-based gestures); swipes and carousels have buttons. Actions fire on release and can be cancelled. |
+| 2.5.3 Label in name | A control's accessible name starts with its visible Persian or English label. |
+| 2.5.8 Target size | Targets are at least `ui.a11y.min_target_css_px` (initial configurable default 44; the WCAG 2.2 minimum is 24). |
+| 3.1.1, 3.1.2 Language | `lang` on the root and `lang` on every inline passage in the other language, so that speech output switches voice (S11.45). Persian speech availability differs by device [V: target phones]; no function depends on audio. |
+| 3.2.2 On input | Changing the language, digits or calendar setting changes only the display and never submits or navigates. |
+| 3.3.1 to 3.3.4 Errors | An error summary at the top receives focus, links to each field, and names the problem and the fix from `details.copy_key` and `details.fields[].path` (S0.11). Screens that move credit (escrow confirmation, reservation, cancellation) show a review step and can be reversed or cancelled where the ledger allows (S6.*). |
+| 3.3.7 Redundant entry | Nothing already entered is asked again; the paste-back draft survives reload and re-lease (S11.49). |
+| 3.3.8 Accessible authentication | No cognitive test, no transcription. The recovery key field accepts paste and password managers; its grouping, hyphens and case are tolerated (S11.46). |
+| 4.1.2, 4.1.3 Name, role, value; status messages | Standard controls; custom ones carry ARIA roles. Result feedback (accepted, rejected, balance changed, draft saved, offline) is announced politely by a status region. The lease countdown is not announced every second: only at `ui.lease.warn_remaining_s` and at expiry. |
+| Mandatory prompt expansion (FD§5.5) | While a first-use or non-default prompt is unexpanded, Copy and Open stay focusable with `aria-disabled=true` and an adjacent explanation linked by `aria-describedby`; they are not removed from the tab order and not conveyed by color alone. Expanding moves focus to the start of the expanded text and announces it. |
+| Plain language | Notices follow the copy rules of S11.50: short sentences, one idea each, the actor named. |
+| Verification | An automated rules engine runs in CI on every screen in both locales (a failure fails the build); a manual pass with keyboard only, 200% zoom, and a screen reader on a real Android and a real iOS phone, in `fa` and in `en`, is a `LaunchGateItem` under G2 with evidence attached (S14.*). An accessibility statement page with a way to report problems exists before launch [A]. Automated checks find only part of the problems; the manual pass is not optional. |
+
+## 11.49 Low-bandwidth behavior and offline-tolerant paste-back
+
+The design assumes slow, lossy and sometimes blocked connections without assuming any statistic about them. Reachability from Iran is [V] (FD§8.3 G2) and is measured, not assumed. [D]
+
+**Rules** [D]
+
+- **No third-party requests** from any member or public page: no CDN, font, script, style, tracker, map, embed, avatar or analytics service. The content security policy (S10.*) allows the page origin and the API origin only. A CI test loads every screen with all other origins blocked and fails on any attempt (AC-i18n-28). Opening a service in another tab is a member action and is not part of a page load.
+- **No heavy assets:** no video, no raster hero images; icons are one inline SVG sprite; share cards (S12.*) are generated only on explicit request and are outside the flows of this part.
+- **Notices and public pages work without JavaScript and without an identity:** the notices (S11.51) are static pages readable before an identity exists, in both languages; the first-contribution flow needs JavaScript because keys are generated and used on the device (S10.*).
+- **UTF-8 JSON is sent raw**, not ASCII-escaped: an escaped Persian letter costs six bytes against two. Text responses are compressed (brotli or gzip).
+- **Caching:** static assets have hashed names and immutable caching [A]; authenticated responses are `no-store` and public ones follow S0.11.7.
+- **Polling, not sockets:** public counters refresh every `public.counter_refresh_s`; polling pauses while the tab is hidden and backs off on failure. Where the browser signals a data-saver preference, optional refreshes and animations stop [V: browser support].
+- **Only the active locale's strings** are loaded; the other locale loads on switch. The consent manifest (S11.50) is small and carries hashes, not texts.
+- **Retries** use the same `Idempotency-Key` and exponential backoff with jitter: `delay_n = min(ui.retry.max_delay_s, ui.retry.base_delay_s x 2^(n-1)) x u`, with `u` uniform in [0.5, 1.0], and `Retry-After` wins when larger. After `ui.retry.max_attempts` the client stops retrying by itself and offers a manual retry.
+
+**Budgets** (every one is an `initial configurable default` or a formula; each is enforced in CI against the build and replaced by measurement on real phones and networks, `TEC`)
+
+| Parameter | Value | Derivation |
+| --- | --- | --- |
+| `ui.budget.js_bytes` | 100,000 | initial configurable default, compressed, whole first-contribution flow including the calendar and number formatters |
+| `ui.budget.css_bytes` | 20,000 | initial configurable default, compressed |
+| `ui.budget.fonts_bytes` | 80,000 | initial configurable default, compressed |
+| `ui.budget.first_load_bytes` | 204,096 | js + css + fonts + 4,096 for markup and the icon sprite = 100,000 + 20,000 + 80,000 + 4,096 |
+| `ui.budget.cell_card_bytes` | 16,096 | `cell.envelope.max_input_chars` x 3 (worst-case UTF-8 bytes per character, as in S0.10) + 4,096 metadata = 4,000 x 3 + 4,096 |
+| `ui.budget.repeat_view_bytes` | 65,248 | cell card + `cell.envelope.max_submission_bytes` + 16,384 for balance and status calls = 16,096 + 32,768 + 16,384 |
+| `ui.budget.test_profile` | downlink 400 kbit/s, round trip 400 ms | initial configurable default for the test harness only; it is a test input, not a claim about any real network |
+| `ui.budget.first_interactive_s` | 7 | `ceil(first_load_bytes x 8 / (downlink_kbps x 1000) + 6 x rtt_s)` = `ceil(204,096 x 8 / 400,000 + 6 x 0.4)` = `ceil(4.08 + 2.4)`; six round trips for name lookup, connection, handshake, markup, style and script [A] |
+
+**Server time and countdowns** [D]. The client never trusts its own wall clock (S0.6). Lease responses carry `expires_at` and `server_time` (requirement on S15.*); the client keeps a monotonic clock and an offset:
+
+```
+sent_at = mono_now() ; response arrives at recv_at = mono_now()
+offset  = server_time - (sent_at + recv_at) / 2          # server minus client monotonic time
+remaining(now_mono) = expires_at - (now_mono + offset)
+```
+
+The displayed countdown is advisory; the server decides (`reject.lease_expired`, S9.*).
+
+**Offline-tolerant paste-back drafts** [D]
+
+The member copies a prompt, presses Send in the service, and pastes the answer back. Pasting must not be lost to a dropped connection, and the platform never submits for the member and never touches the service page (ground rule 3; FD Principle 3).
+
+| Client-local state | Meaning | Leaves the state when |
+| --- | --- | --- |
+| `empty` | Nothing pasted for this lease | text is typed or pasted: `drafting` |
+| `drafting` | Text exists; saved to device storage keyed by lease id; never sent | Submit pressed: `queued`; time-to-live, lease end or *clear local data*: purged |
+| `queued` | Submit was pressed; a key was generated; waiting for a connection or a retry timer | connection or timer: `sending`; lease end plus `lease.submit_grace_s` passes: `expired_local` |
+| `sending` | One request in flight with the stored `Idempotency-Key` | 2xx: `acked`; network error, timeout, 5xx: `queued` (backoff); 429: `queued` after `Retry-After`; 410 `LEASE_EXPIRED` or 409 `LEASE_CONFLICT`: `expired_local`; 400, 413 or 422: `drafting` with the error shown and the text kept |
+| `acked` (terminal) | The server stored the outcome (S9.*) | the draft is purged at once |
+| `expired_local` (terminal) | The cell can no longer be accepted from this lease | the text is kept until the draft time-to-live so the member can copy it out; then purged |
+
+These are client UI states, not domain states of S0.9; they emit no event and are not logged on the server. [D]
+
+```
+fn on_submit_press(lease_id):                    # only a person's press starts this; no auto-submit on paste
+    d = store.get(lease_id)
+    if utf8_bytes(d.text) > cfg.cell_envelope_max_submission_bytes: show copy_key for size; return   # server is authoritative (413)
+    d.key = new_idempotency_key()                # S0.11.5; a new key per press, reused by every retry of this press
+    d.state = 'queued'; store.put(d)             # persisted before any network call
+    schedule(try_send, now)
+fn try_send(d):
+    if server_now() > d.expires_at + cfg.lease_submit_grace_s: d.state = 'expired_local'; return
+    resp = POST /v1/leases/{d.lease_id}/submission   with the raw text, the lease nonce, Idempotency-Key d.key   # body per S15.*, S9.*
+    match resp: 2xx -> purge(d); show accepted_or_checking | 410, 409 -> d.state = 'expired_local'
+                | 400, 413, 422 -> d.state = 'drafting' ; show errors | 429, 5xx, network -> backoff(d)
+```
+
+Storage and privacy [D]:
+
+- A draft record holds the pasted text, the lease id, the lease nonce, the key and timestamps, in device storage (IndexedDB preferred). It is purged on acknowledgement, at the lease end plus the time-to-live `ui.draft.ttl_s`, on *clear local data*, and when the identity is closed. *Clear local data* never deletes the member's key silently; deleting the key is a separate, confirmed action defined in S10.*.
+- The draft contains output of a service for a cell of data classed S0 or S1 (S0.8.1); it is still readable by anyone who can inspect the device, and the notices say so (`copy.offline.draft_local_only`, `copy.safety.iran_notice.body`).
+- If storage is unavailable (private browsing) or full, drafts live in memory only, the field keeps its text, and a status message says that reloading will lose it. Nothing is silently dropped.
+- Two tabs: the draft is keyed by lease, the last write wins, and a `storage` event refreshes the other tab.
+- A service worker MAY cache the application shell and the notices for offline reading. It never caches API responses beyond the cell card of an active lease, which follows the same time-to-live. [A]
