@@ -133,3 +133,111 @@ A challenge is 256 random bits, stored only as SHA-256, bound to its purpose, si
 ```
 
 Replays are counted as requests at step 5 but do not pay the write weight (`ratelimit.write_weight`). Steps 8 to 11 outcomes that are deterministic `4xx` are stored with the key; `5xx` outcomes are not (0.11.5).
+
+## 15.5 Identity endpoints
+
+Decisions behind the shapes [D]: the member keypair and the recovery secret are generated on the device and the server never sees a private key or the recovery secret (FD§3.2 step 1; no signup, no e-mail); the server stores public keys (`MemberKey`); there are no passwords. The recovery key is a 128-bit secret (`identity.recovery_key_bits`) from which the client derives a second Ed25519 keypair; the API only ever carries its public half and signatures [A][V: `SEC`].
+
+| op | Method and path | Auth | Idem | RL | OK | Events |
+| --- | --- | --- | --- | --- | --- | --- |
+| `createIdentityChallenge` | `POST /v1/identity-challenges` | none | X | `RL-BOOT` | 201 | - |
+| `createMember` | `POST /v1/members` | none | R | `RL-BOOT` | 201 | `member.created`, `+invite.redeemed` |
+| `checkInvite` | `POST /v1/invite-checks` | none | O | `RL-BOOT` | 200 | - |
+| `createSession` | `POST /v1/sessions` | none | X | `RL-BOOT` | 201 | - |
+| `getSession` | `GET /v1/sessions/{session_id}` (`current` is an alias) | member | - | `RL-READ` | 200 | - |
+| `listSessions` | `GET /v1/sessions` | member | - | `RL-READ` | 200 | - |
+| `revokeSession` | `DELETE /v1/sessions/{session_id}` (`current` = log out) | member | O | `RL-WRITE` | 204 | - |
+| `getMe` | `GET /v1/members/me` | member | - | `RL-READ` | 200 | - |
+| `updateMe` | `PATCH /v1/members/me` | member | O | `RL-WRITE` | 200 | - |
+| `setEmail` | `PUT /v1/members/me/email` | member | O | `RL-WRITE` | 202 | - |
+| `confirmEmail` | `POST /v1/members/me/email/confirmations` | member | O | `RL-WRITE` | 200 | - |
+| `removeEmail` | `DELETE /v1/members/me/email` | member | O | `RL-WRITE` | 204 | - |
+| `listMemberKeys` | `GET /v1/member-keys` | member | - | `RL-READ` | 200 | - |
+| `rotateKey` | `POST /v1/member-keys/rotations` | member | R | `RL-WRITE` | 201 | `member.key_rotated` |
+| `revokeMemberKey` | `DELETE /v1/member-keys/{key_id}` | member | R | `RL-WRITE` | 204 | `+member.key_revoked` |
+| `recoverMember` | `POST /v1/recoveries` | none | R | `RL-RECOVER` | 201 | `member.recovered` |
+| `createDeviceLink` | `POST /v1/device-links` | member | R | `RL-WRITE` | 201 | - |
+| `redeemDeviceLink` | `POST /v1/device-links/redemptions` | none | R | `RL-BOOT` | 202 | - |
+| `approveDeviceLink` | `POST /v1/device-links/{device_id}/approval` | member | R | `RL-WRITE` | 200 | `member.device_linked` |
+| `denyDeviceLink` | `DELETE /v1/device-links/{device_id}` | member | O | `RL-WRITE` | 204 | - |
+| `listDevices` | `GET /v1/devices` | member | - | `RL-READ` | 200 | - |
+| `revokeDevice` | `DELETE /v1/devices/{device_id}` | member | R | `RL-WRITE` | 204 | `+member.device_revoked` |
+| `createInvite` | `POST /v1/invites` | member | R | `RL-WRITE` | 201 | `+invite.created` |
+| `listInvites` | `GET /v1/invites` | member | - | `RL-READ` | 200 | - |
+| `revokeInvite` | `DELETE /v1/invites/{invite_id}` | member | R | `RL-WRITE` | 204 | `+invite.revoked` |
+
+**Objects**
+
+```
+Member   { id: id<mem>, status: enum<member_status>, trust_tier: enum<trust_tier>, locale: enum<locale>,
+           digits: enum<digits>, calendar: enum<calendar>, time_zone: text<64>/null,
+           email: { state: "none"/"unconfirmed"/"confirmed", masked: text<64>/null },
+           email_notifications: { credit_expiry: bool },
+           recovery: { cooldown_until: ts/null, recoveries_90d: int },
+           security_notices: [ { kind: "key_rotated"/"device_linked"/"recovered"/"recovery_key_rotated", at: ts } ],
+           created_at: ts }                                              ETag = row_version
+Key      { id: id<mky>, kind: "device"/"recovery", state: "pending"/"active"/"retiring"/"revoked",
+           public_key: b64u<32>, created_at: ts, retires_at: ts/null }
+Session  { id: id<ses>, created_at: ts, idle_expires_at: ts, expires_at: ts, device_id: id<dev>/null, is_current: bool }
+Device   { id: id<dev>, link_state: "pending"/"awaiting_approval"/"linked"/"denied"/"expired"/"revoked",
+           created_at: ts, linked_at: ts/null, last_seen_on: date/null }
+Invite   { id: id<inv>, state: "active"/"redeemed"/"expired"/"revoked", created_at: ts, expires_at: ts, redeemed_at: ts/null }
+```
+
+`trust_tier` is the 0.9.4 state set; the reliability estimate behind it is not exposed by this part [A]. `last_seen_on` is a coarse date, never a timestamp (metadata minimization, FD Principle 8). The key and invite state names are convention additions.
+
+**Schemas** (errors beyond the common set of `S15.9` are listed per operation)
+
+```
+createIdentityChallenge  req { purpose: "create"/"session"/"rotate"/"recover"/"device_link", key_id?: id<mky> }
+                         201 { challenge: b64u<32>, expires_at: ts }      always returned, even for an unknown key_id
+createMember             req { public_key: b64u<32>, recovery_public_key: b64u<32>,
+                               proof: b64u<64>, recovery_proof: b64u<64>,   both sign the "create" message over both public keys
+                               device_token: b64u<16>, invite_code: text<32>?, locale: enum<locale>? }
+                         201 { member: Member, key: Key, recovery_key: Key,
+                               session_challenge: { challenge: b64u<32>, expires_at: ts } }
+                         err 403 LAUNCH_GATE_CLOSED (switch launch.members_may_join); 409 ALREADY_EXISTS (public_key_exists);
+                             422 UNPROCESSABLE (invite_required, invite_unusable); 422 CAP_EXCEEDED (invite_tree_full, invite_tree_depth);
+                             429 RATE_LIMITED (details.scope: device, ip_hash, invite_tree)
+checkInvite              req { code: text<32> }   200 { usable: bool, reason: null/"unknown"/"expired"/"redeemed"/"revoked" }
+createSession            req { challenge: b64u<32>, key_id: id<mky>, signature: b64u<64>, device_token: b64u<16>? }
+                         201 { session: Session, token: string, member: Member }       the only place a session token appears
+                         err 401 AUTH_INVALID (credentials_invalid, key_pending); 401 AUTH_EXPIRED (challenge_expired)
+updateMe                 req (JSON Merge Patch) { locale?, digits?, calendar?, time_zone?: text<64>/null, email_notifications?: { credit_expiry?: bool } }
+                         200 Member      time_zone validated against the tz database [V]; never inferred from an IP address
+setEmail                 req { email: text<254> }   202 { email: { state: "unconfirmed", masked: text<64> } }
+confirmEmail             req { code: text<12> }     200 { email: { state: "confirmed", masked: text<64> } }
+rotateKey                req { kind: "device"/"recovery", key_id: id<mky>, challenge: b64u<32>, signature: b64u<64>,
+                               new_public_key: b64u<32>, new_key_proof: b64u<64> }
+                         201 { key: Key, retired_key: Key/null }        key_id and signature: a fresh signature by an active device key
+revokeMemberKey          err 409 STATE_CONFLICT (last_active_key, key_state_invalid)
+recoverMember            req { recovery_public_key: b64u<32>, challenge: b64u<32>, recovery_signature: b64u<64>,
+                               new_public_key: b64u<32>, new_key_proof: b64u<64>, device_token: b64u<16> }
+                         201 { member: Member, key: Key, revoked_key_ids: [id<mky>], session_challenge: { challenge, expires_at } }
+                         err 401 AUTH_INVALID (credentials_invalid); 403 FORBIDDEN (recovery_quota); 429 RATE_LIMITED
+createDeviceLink         201 { device_id: id<dev>, code: text<32>, expires_at: ts }     the code appears once
+redeemDeviceLink         req { code: text<32>, new_public_key: b64u<32>, proof: b64u<64>, device_token: b64u<16> }
+                         202 { device_id: id<dev>, link_state: "awaiting_approval", sas: text<8> }
+approveDeviceLink        req { sas: text<8> }   200 { device: Device, key: Key }     the member compares sas on both screens
+createInvite             201 { invite: Invite, code: text<32> }                          the code appears once
+                         err 422 UNPROCESSABLE (invite_requirement_unmet); 422 CAP_EXCEEDED (invite_limit)
+```
+
+`getMe`, `listMemberKeys`, `listSessions`, `listDevices` and `listInvites` return the objects above (lists as `Page<T>`, `S15.11`). `listInvites` shows state and `redeemed_at` only: the inviter never learns who redeemed an invite, and the invitee never learns the inviter.
+
+**Behavior and guards**
+
+- **Create (no signup).** `createMember` needs no prior challenge: both proofs are signatures over the domain-separated creation message, which proves possession of both private keys (a mistyped recovery key cannot lock the member out). It returns no token; it returns a ready `session_challenge` so the client signs it and calls `createSession` at once (two round trips after creation, low bandwidth; time to first verified cell is measured, `V1`). A retry with the same `Idempotency-Key` replays the stored body; a new key with a known `public_key` is `409 ALREADY_EXISTS`. [D]
+- **Open or invite-only.** `invite.required_to_join` (convention gap, initial configurable default `true` for the closed Phase 1 pilot) decides whether `invite_code` is required. `launch.members_may_join` = `false` refuses every `createMember` with `LAUNCH_GATE_CLOSED`, regardless of invites. Redemption is atomic with creation: the invite, the member, the tree edge and the tree limits (`invite.tree_max_members`, `invite.tree_max_depth`) are checked and written in one transaction, so no unredeemed member row exists when invites are required. `invite_unusable` covers unknown, expired, redeemed and revoked codes alike (no enumeration); `checkInvite` is the only place the four states are distinguished, and only to a holder of the code. [D]
+- **Invite issuing.** Allowed when the member is `active`, has at least `invite.min_accepted_cells_to_issue` accepted cells, and has fewer than `invite.max_active_per_member` active invites; `expires_at = created_at + invite.ttl_days x 86,400 s`. A revoked or expired invite can never be redeemed. [D]
+- **Sessions.** `createSession` is single-use per challenge; a lost response means a new challenge. The key must be `active` or `retiring`; a `pending` device key (not yet approved) returns `key_pending` only after its signature verified, so the reason cannot be probed. [D]
+- **Rotation.** `kind` `device`: the new key becomes `active`, the signing key becomes `retiring` and is `revoked` at `now + identity.key_rotation_grace_s`; sessions of a revoked key end then. `kind` `recovery`: the new recovery key is `pending` and becomes `active` after the grace; during the grace both recovery keys work, so an attacker holding a stolen device session cannot silently replace the recovery key; a `recovery_key_rotated` notice is added to `security_notices`. [D]
+- **Revocation.** `revokeMemberKey` revokes a device key at once (a lost phone) and ends its sessions; it cannot revoke the last active device key and cannot revoke a recovery key (rotate it instead). [D]
+- **Recovery** (account takeover is the main abuse risk, `S10.*` threat model). Given a valid recovery signature, `recoverMember` in one transaction: revokes every device key and every session; denies every pending device link; registers the new key; sets `recovery.cooldown_until = now + identity.recovery_cooldown_s`; appends a `recovered` notice; emits `member.recovered`. A member may recover at most `identity.recovery_max_per_90d` times in 90 days (checked after the proof, so the quota cannot be used to learn that a member exists). During the cooldown the member may contribute and read but `confirmJob`, `createReservation` and `createJob` with `submit` return `403 FORBIDDEN`, reason `recovery_cooldown`, `details.until`. Residual risk: whoever holds the recovery key can take the account; the platform cannot promise otherwise [V: `SEC`]. [D][A]
+- **Device link** (scope A). Old device: `createDeviceLink` creates a `Device` in `link_state` `pending` and a one-time code valid `identity.device_link_code_ttl_s`. New device: `redeemDeviceLink` presents the code and its new public key and gets a short authentication string `sas` (derived from the code and the new key; format owned by `S10.*`); the code is consumed on the first redemption attempt that finds it. Old device: `approveDeviceLink` with the `sas` the member read from the new screen registers the `device` key as `active` and emits `member.device_linked`. A code that is expired, consumed or unknown returns `404 NOT_FOUND` (same body for all three). `denyDeviceLink` ends a pending link; `revokeDevice` revokes every key and session bound to a device. [D]
+- **E-mail is optional and never authenticates or recovers.** It receives only the opt-in notices of `email_notifications` (for example the `credit.expiry_notice_days` warning). It is stored only encrypted under an application key plus a keyed hash (0.7: never in clear text), confirmed by a one-time code, and deletable. Whether to ship it at all, and its delivery interface, is decided in `S10.*` and `S4.*` because an e-mail address is a de-anonymization vector for members in a high-risk context [V]. [D][A]
+
+Given / When / Then
+
+- `AC-api-01` Given `launch.members_may_join` is `false`, When any client calls `createMember` with a valid body and invite, Then `403 LAUNCH_GATE_CLOSED` with `details.switch` = `launch.members_may_join` and no row is written.
+- `AC-api-03` Given an active member recovered 30 seconds ago, When they call `confirmJob`, Then `403 FORBIDDEN` reason `recovery_cooldown` with `details.until` equal to `cooldown_until`.
