@@ -263,3 +263,84 @@ function resume_screen(job):            # derived from server state only, so rel
 | (5) Each cell fits one Send | server: `chars_available_per_cell` against the envelope | `SCR-req-03` | As (1) |
 
 The fit check is advice with reasons, never a score. [D]
+
+## 11.36 Entry and wizard screens
+
+### SCR-req-01 Requests home
+
+| Row | Content |
+| --- | --- |
+| Purpose | One place to see credit, drafts, active and finished requests, and to start a new request or reservation |
+| Entry conditions | Authenticated member (`auth_scheme` `member`); `launch.member_jobs_enabled` true, otherwise global state `gate_closed` |
+| Blocks | (1) Balance card: `balance_ucr` (rounded down), the soonest expiry among `listCreditLots` with its local date, and the cap `cap_ucr`. (2) Primary button New request. (3) Collapsible "What can I request?" holding the five job-fit conditions of 11.35.3. (4) Needs attention: quotes ready or about to expire, a waitlist place released, a rejection whose appeal window is open, results not yet downloaded or rated. (5) In progress, then Finished (cursor-paged, 11.33). (6) Drafts with their expiry date (`job.draft_ttl_days`). (7) Reservations (only when `ff.job.reservations` is on) |
+| States | `first_visit` (no jobs: shows the explainer instead of lists), `no_credit` (balance below one cell price: New request stays enabled to browse, but the page says how credit is earned and links to the volunteer area), `at_job_cap` (`admission.max_concurrent_jobs_per_member` reached: New request disabled with the reason) |
+| Actions | `listJobs`, `getBalance`, `listCreditLots`, `listReservations`; New request opens `SCR-req-02` |
+| Copy intent | Calm and factual; never urges to spend; says credit expires and shows when; wording "request" and "contribute", never "deposit" or "withdraw" (FD§0.1 item 13). Keys: `copy.req.home_title`, `copy.req.home_first_visit`, `copy.req.home_no_credit`, `copy.req.home_job_cap` |
+| Accessibility | One `h1`; lists are real lists; every job row is one link whose accessible name is title + state label + date; the Needs attention region is `aria-live="polite"`, never assertive; state is never colour alone |
+
+- **AC-req-01** Given a member with a draft, a `running` job and a `completed` unrated job, When the page loads, Then the draft appears under Drafts with its expiry, the running job under In progress, and the completed job under Needs attention with a Rate action.
+- **AC-req-02** Given `admission.max_concurrent_jobs_per_member` = 2 and two non-terminal jobs, When the page loads, Then New request is disabled and the reason names the limit by its configured value, not a literal.
+- **AC-req-03** Given `launch.member_jobs_enabled` is false, When any requester route is opened, Then `copy.req.err_gate_closed` is shown, no form is rendered and no write request is sent.
+
+### SCR-req-02 Template choice (wizard step 1)
+
+| Row | Content |
+| --- | --- |
+| Purpose | Choose a reviewed template. There is no free-form prompt box: prompts come only from reviewed templates (`R4`) |
+| Entry conditions | New request pressed; no `kill.all_new_jobs`; the list comes from `listTemplates` and only contains approved versions |
+| Blocks | One-line reason for templates (`copy.req.why_templates`). One card per template: name, job type, one-sentence description, "What you provide" (from `input_slots`), "How results are checked" (FD§2 condition 3), envelope facts (`cell.envelope.max_input_chars`, `cell.envelope.expected_time_s`), "Reviewed on {date}" and the effectiveness note [H] `copy.req.template_effect_note`. A job-type filter when more than one type is listed |
+| States | `no_templates` (`copy.req.templates_empty`; nothing else is offered, no text box), `template_paused` (card disabled, `kill.template.<tpl_id>`) |
+| Actions | Choose -> `createJob` (new `Idempotency-Key`); Back to home |
+| Copy intent | Explain what the template does in the requester's terms; say plainly that no template is shown to work for every text and that results are verified, not guaranteed |
+| Accessibility | Cards are a single-select list with visible focus; each card's name is the accessible name; the description is `aria-describedby` |
+
+- **AC-req-04** Given two approved templates, When the person chooses one, Then exactly one `createJob` is sent with that `template_id` and one `Idempotency-Key`, the Job is `draft` and step 2 opens.
+- **AC-req-05** Given `listTemplates` returns an empty `data` list, When the screen renders, Then `copy.req.templates_empty` is shown and no input accepting free text is rendered.
+- **AC-req-06** Given `kill.template.<tpl_id>` is engaged, When the list renders, Then that card is disabled and states the pause, and the other cards stay usable.
+
+### SCR-req-03 Data upload (wizard step 2)
+
+| Row | Content |
+| --- | --- |
+| Purpose | Supply the data and the template's other inputs, and show how the server will split it |
+| Entry conditions | Job in `draft` with a template |
+| Blocks | (1) One input block per `template.input_slots[]`; supported slot kinds [A, S8.* owns]: `file_rows` (file or pasted text, UTF-8), `glossary` (term pairs; becomes a `Glossary`), `option` (one of a list), `text_short`, `file_archive`. (2) Limits in words: `job.max_upload_bytes`, `admission.max_job_cells`, `cell.envelope.max_input_chars`. (3) Split summary after processing: `cell_count`, `chars_available_per_cell` (envelope minus template overhead minus glossary share), the list `cells_over_envelope` by index. (4) "Preview what a volunteer will see" (collapsed): up to three sample cards from `previewCells` showing the fixed card (purpose, license, sensitivity, service, template, expected time) and the full wrapped prompt as inert text. (5) Notices `copy.req.notice_stranger_reads` and `copy.req.notice_retention`. (6) Continue |
+| States | `choosing`, `uploading` (text progress), `processing` (`screen_status` `pending`), `too_large`, `too_many_cells` (more cells than `admission.max_job_cells`), `over_envelope`, `ready` |
+| Actions | `createUpload` (JSON body, `utf8` or `base64`), `deleteUpload` (Replace), `createGlossary`, `previewCells`. A file larger than `job.max_upload_bytes` is stopped on the device before sending; the server's `413 PAYLOAD_TOO_LARGE` is still handled |
+| Copy intent | Be specific about limits and why; say that a stranger reads each piece inside their own AI account; say how long text is kept and that hashes and the manifest remain (S0.7 `job_bound`) |
+| Accessibility | File input and paste area both labelled; drag-and-drop is never the only route; progress is text plus `role="progressbar"`; pasted and previewed text uses `dir="auto"` with bidi isolation (11.46); the over-envelope list is a table with row index and size |
+
+- **AC-req-07** Given a file of `job.max_upload_bytes` + 1 bytes, When it is chosen, Then no request is sent, `copy.req.err_too_large` is shown with the limit, and the previous upload (if any) is untouched.
+- **AC-req-08** Given the splitter returns `cell_count` above `admission.max_job_cells`, When processing ends, Then Continue is disabled and the message states the maximum and the current count; the person can shorten the file or split the request.
+- **AC-req-09** Given the connection drops during `createUpload`, When the person presses Retry, Then the same `Idempotency-Key` and body are sent and exactly one `Upload` exists afterwards.
+- **AC-req-10** Given three cells exceed the envelope, When processing ends, Then the three indices and their sizes are listed and Continue stays disabled until `cells_over_envelope` is empty.
+
+### SCR-req-04 Data check result: the screening result display (wizard step 3)
+
+| Row | Content |
+| --- | --- |
+| Purpose | Show the outcome of upload screening in plain language, with where each finding is, without echoing the sensitive text; let the person fix, re-upload, or ask a reviewer to look |
+| Entry conditions | An `Upload` exists; the screen polls `getUpload` while `screen_status` is `pending` (`ui.requester.progress_poll_s`) |
+| Blocks | Status banner (one of four, below); a findings list (kind, severity, location as row and character range, what to do); counts per kind; the line `copy.req.notice_screening_limits` (screening reduces risk, it does not remove it); actions |
+| States | `pending`: busy text, no promise of speed. `passed`: Continue enabled. `flagged_for_review`: Continue enabled; the page says a reviewer will look before the request is accepted. `rejected`: Continue disabled; findings of severity `reject` are listed first |
+| Actions | Replace file (`deleteUpload` then `createUpload`); Edit and upload again; Ask a reviewer to look (`requestUploadReview`, limited to `screen.requester_review_requests_per_day`; moves `rejected` to `flagged_for_review` only if a reviewer so decides); Continue |
+| Copy intent | Say what was found and where, never the detected text itself (the sensitive text would be reprinted on the screen and in screenshots); say what the person can change; never reveal detection thresholds or which exact check fired for prohibited content (it would teach evasion) |
+| Accessibility | Banner has `role="status"`; findings are a table with row/column headers; locations are readable text ("row 12, characters 40 to 71"), not only highlighted spans; no colour-only severity |
+
+Finding kinds the screen can display (detection is owned by S9.*; the set is a display contract [A]; an unknown kind uses `other`):
+
+| `kind` | Default action | Copy key | EN | FA |
+| --- | --- | --- | --- | --- |
+| `pii_pattern` | `screen.pii_action` (default `reject`) | `copy.req.finding_pii` | Text that looks like personal data of a person (for example an identity number, a phone number or an e-mail address) was found at the places listed. Hamyar cannot accept personal data. Remove or replace it and upload again. | در جاهای فهرست‌شده متنی یافت شد که شبیه اطلاعات شخصی افراد است (مثلاً شمارهٔ شناسایی، شمارهٔ تلفن یا نشانی ایمیل). همیار اطلاعات شخصی را نمی‌پذیرد. آن را حذف یا جایگزین کنید و دوباره بارگذاری کنید. |
+| `url_present` | `screen.url_action` (default `flag_for_review`), counted against `screen.max_urls_per_input` | `copy.req.finding_url` | A link was found. Links are not allowed in requests, because volunteers only copy, press Send and return text. A reviewer may look at this input. | پیوند (لینک) یافت شد. پیوند در درخواست‌ها مجاز نیست؛ چون داوطلب فقط متن را کپی می‌کند، ارسال را می‌زند و پاسخ را برمی‌گرداند. ممکن است یک بازبین این ورودی را ببیند. |
+| `instruction_pattern` | `flag_for_review` | `copy.req.finding_instruction` | Text that reads like an instruction to a person or to a chat assistant was found. If it is part of your material, a reviewer will check it. | متنی یافت شد که شبیه دستور به یک فرد یا دستیار گفت‌وگو است. اگر بخشی از متن شماست، یک بازبین آن را بررسی می‌کند. |
+| `hidden_characters` | `info` (normalised by the splitter) | `copy.req.finding_hidden` | Invisible direction or formatting characters were found and will be normalised so the text displays the same for everyone. | نویسه‌های نامرئی جهت‌نما یا قالب‌بندی یافت شد و برای نمایش یکسان متن، یکدست‌سازی می‌شود. |
+| `over_envelope` | block | `copy.req.finding_over_envelope` | Some pieces are longer than one volunteer message can hold. Split or shorten them. | بعضی بخش‌ها از ظرفیت یک پیام داوطلب بلندترند. آن‌ها را تقسیم یا کوتاه کنید. |
+| `encoding_invalid` | `reject` | `copy.req.finding_encoding` | The file is not valid UTF-8 text. | فایل متن معتبر UTF-8 نیست. |
+| `row_schema_invalid` | `reject` | `copy.req.finding_rows` | Some rows do not match what this template expects. | بعضی ردیف‌ها با آنچه این قالب انتظار دارد نمی‌خوانند. |
+| `other` | as returned | `copy.req.finding_other` | Something in this input needs attention. | چیزی در این ورودی نیاز به توجه دارد. |
+
+- **AC-req-11** Given `screen.pii_action` = `reject` and an upload with a `pii_pattern` finding at row 12, When the result displays, Then Continue is disabled, the finding shows "row 12" and a character range, and no snippet of the detected text appears anywhere in the page or its accessible tree.
+- **AC-req-12** Given `screen_status` = `flagged_for_review` because of `url_present`, When Continue is pressed, Then the wizard proceeds to declarations and the page states that a reviewer will look before acceptance.
+- **AC-req-13** Given `screen_status` = `pending`, When the tab is hidden, Then polling stops, and it refreshes once when the tab becomes visible again.
+- **AC-req-14** Given `requestUploadReview` was already used `screen.requester_review_requests_per_day` times today, When the person presses Ask a reviewer, Then the action is disabled with the reset time in local time.
