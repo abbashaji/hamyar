@@ -401,3 +401,102 @@ claimStarterGrant  req {}   201 { grant: StarterGrant, lot: Lot }
 - `balance_ucr` is the sum of unexpired lot remainders; `held_ucr` is credit in the member's own open escrows (informational); `member_cap_ucr = credit.member_cap_credits x trust.cap_multiplier.<tier>` in ucr; `headroom_ucr = max(0, member_cap_ucr - balance_ucr)`; `expiring_soon` covers `credit.expiry_notice_days`; `daily_cap_ucr` is `mint.per_member_daily_cap_credits` in ucr. All are computed from the ledger, never cached beyond `as_of`. [D]
 - `listLots` is ordered by `expires_at` ascending (the oldest-first spending order, 0.8.5) and filters on `state`; `listLedgerEntries` is newest first and returns only entries on the member's own account, with the related cell, job or reservation of the member but never a counterparty. The public ledger is a public-surface resource (sibling file). [D]
 - **Starter grant** (FD§4.6, `ISS-06`). The grant is claimed, not pushed, so the `grant.starter_lifetime_days` clock starts when the member decides. `claimable` requires `grant.required_verified_cells` verified cells. At claim time the server checks `grant.max_per_device`, `grant.max_per_invite_tree_per_day`, `grant.max_per_day` and that the Reserve stays above `grant.reserve_floor_credits` (otherwise `paused`: grants pause, they are never printed). It posts a `grant` entry from the Reserve for `grant.starter_credits` and is non-transferable (`grant.non_transferable`). [D]
+
+## 15.7 Requester endpoints
+
+The wizard of FD§3.2 steps 5 to 8: template choice, data upload and screening, declarations, policy result, price and window quote, escrow confirmation, progress, cancellation, results with manifest, rating, reservations. A member holds the requester capability without a separate account (0.8.2). [D]
+
+| op | Method and path | Auth | Idem | RL | OK | Events |
+| --- | --- | --- | --- | --- | --- | --- |
+| `listTemplates`, `getTemplate` | `GET /v1/templates`, `GET /v1/templates/{template_id}` | member | - | `RL-READ` | 200 | - |
+| `createUpload` | `POST /v1/uploads` | member | R | `RL-UPLOAD` | 201 | - |
+| `getUpload` | `GET /v1/uploads/{upload_id}` | member | - | `RL-READ` | 200 | - |
+| `deleteUpload` | `DELETE /v1/uploads/{upload_id}` | member | O | `RL-WRITE` | 204 | - |
+| `createGlossary` | `POST /v1/glossaries` | member | R | `RL-UPLOAD` | 201 | - |
+| `getGlossary` | `GET /v1/glossaries/{glossary_id}` | member | - | `RL-READ` | 200 | - |
+| `createJob` (active only) | `POST /v1/jobs` | member | R | `RL-WRITE` | 201 | `job.created` (+ `job.submitted`, `job.policy_passed` / `job.policy_rejected`, `job.waitlisted` when `submit` is `true`) |
+| `listJobs`, `getJob` | `GET /v1/jobs`, `GET /v1/jobs/{job_id}` | member | - | `RL-READ` | 200 | - |
+| `updateJob` | `PATCH /v1/jobs/{job_id}` | member | O | `RL-WRITE` | 200 | - |
+| `declareJobMetadata` | `PUT /v1/jobs/{job_id}/declarations` | member | O | `RL-WRITE` | 200 | - |
+| `checkJobPolicy` | `POST /v1/jobs/{job_id}/policy-checks` | member | O | `RL-WRITE` | 200 | - |
+| `submitJobForScreening` (active only) | `POST /v1/jobs/{job_id}/screenings` | member | R | `RL-WRITE` | 200 / 202 | `job.submitted`, `job.policy_passed` / `job.policy_rejected`, `job.waitlisted` |
+| `getJobQuote` | `GET /v1/jobs/{job_id}/quote` | member | - | `RL-READ` | 200 | - |
+| `confirmJob` (active only) | `POST /v1/jobs/{job_id}/confirmations` | member | R | `RL-WRITE` | 201 | `job.escrow_confirmed`, `ledger.entry_committed`, `cell.created`, `+reservation.activated` |
+| `getJobProgress` | `GET /v1/jobs/{job_id}/progress` | member | - | `RL-READ` | 200 | - |
+| `listJobCells` | `GET /v1/jobs/{job_id}/cells` | member | - | `RL-READ` | 200 | - |
+| `cancelJob` | `POST /v1/jobs/{job_id}/cancellation` | member | R | `RL-WRITE` | 200 / 202 | `job.cancel_requested`, `job.cancel_settled` |
+| `listJobResults` | `GET /v1/jobs/{job_id}/results` | member | - | `RL-READ` | 200 | - |
+| `getJobDeliverable`, `getJobDeliverableContent` | `GET /v1/jobs/{job_id}/deliverable`, `GET /v1/jobs/{job_id}/deliverable/content` | member | - | `RL-READ` | 200 | - |
+| `getJobManifest` | `GET /v1/jobs/{job_id}/manifest` | member | - | `RL-READ` | 200 | - |
+| `rateJob` | `PUT /v1/jobs/{job_id}/rating` | member | O | `RL-WRITE` | 200 | `+job.rated` |
+| `createReservation` (active only) | `POST /v1/reservations` | member | R | `RL-WRITE` | 201 | `reservation.held`, `ledger.entry_committed` |
+| `listReservations`, `getReservation` | `GET /v1/reservations`, `GET /v1/reservations/{reservation_id}` | member | - | `RL-READ` | 200 | - |
+| `cancelReservation` | `POST /v1/reservations/{reservation_id}/cancellation` | member | R | `RL-WRITE` | 200 | `reservation.cancelled` |
+
+### 15.7.1 Templates, uploads, glossaries
+
+```
+TemplateView { id: id<tpl>, version_id: id<tpv>, name: text<80>, job_type: enum<job_type>, approved_on: date,
+               input_slots: [ { key: text<40>, type: "upload_ref"/"glossary_ref"/"enum"/"text"/"int", required: bool,
+                                label_key: copy_key, values: [string]?, max_entries: int? } ],
+               output_format: "txt"/"csv"/"jsonl"/"json"/"md", expected_time_s: dur_s,
+               envelope: { max_input_chars: int, max_output_chars: int },
+               allowed: { purposes: [enum<purpose>], licenses: [enum<license>], sensitivities: [enum<sensitivity>],
+                          service_requirements: [enum<service_requirement>] } }
+Upload       { id: id<upl>, state: "received"/"attached"/"purged", format: "txt"/"csv"/"jsonl"/"json", size_bytes: int,
+               content_hash: hash, unit_estimate: int/null, job_id: id<job>/null, created_at: ts, expires_at: ts,
+               screening: { result: "passed"/"flagged", findings: [ { code: string, count: int, lines: [int] } ] } }
+Glossary     { id: id<gls>, name: text<80>, source_lang: text<35>, target_lang: text<35>, entry_count: int, created_at: ts }
+createUpload   req { format, filename: text<120>?, content: string, content_hash: hash? }       content is UTF-8 text inside JSON
+createGlossary req { name: text<80>, source_lang: text<35>, target_lang: text<35>, entries: [ { source: text<200>, target: text<200> } ] }
+```
+
+- `listTemplates` returns only `TemplateVersion`s in `review_status` `approved` (0.9.5) whose template is not paused or killed (`kill.template.<tpl_id>`); `allowed` is read from the active `PolicyVersion` allowlist so the wizard never offers a combination the engine will reject. Prompt bodies are not part of this view. Effectiveness of any template is [H] (`S8.*`). [D]
+- **Upload size.** The limit applies to the decoded `content` bytes: `job.max_upload_bytes`, else `413 PAYLOAD_TOO_LARGE`, reason `upload_too_large`. The HTTP layer accepts a body of at most `6 x job.max_upload_bytes + api.max_body_bytes` on this route only (JSON escapes one control character as up to 6 bytes). `content_hash`, when sent, must equal the SHA-256 of the decoded bytes. Binary files are not accepted (cells are text). [D]
+- **Automatic screening at upload** (non-binding early feedback; the binding screen runs at `submitJobForScreening`). Finding codes, extendable by `S9.*`: `screen.pii_pattern`, `screen.credential_pattern`, `screen.url_present`, `screen.instruction_pattern`. Each finding is handled by its action parameter: `screen.pii_action` (`reject`), `screen.url_action` (`flag_for_review`; any URL counts because `screen.max_urls_per_input` is 0), `screen.output_url_action` is for results (`S15.6.4`). `reject` returns `422 POLICY_REJECTED`, `details.reasons` such as `policy.R2.sensitivity_not_accepted` or `policy.R3.prohibited_content`, `details.findings`, and the content is **not stored** (data minimization); `flag_for_review` stores the upload with `screening.result` = `flagged`. Findings give counts and line numbers, never the matched text. [D]
+- **Human screening.** A `flagged` upload, and a share `screen.review_rate_new_requester` (1.0) or `screen.review_rate_established_requester` (0.20) of all inputs, wait for a reviewer after `submitJobForScreening` (job state `screening`, response `202`). [D]
+- `deleteUpload` is allowed while the upload is not attached to a job past `draft`; otherwise `409 STATE_CONFLICT`, reason `upload_attached`. Unattached uploads expire after `retention.job_payload_days`. Glossary text goes through the same screening; `glossary_invalid` (`422 UNPROCESSABLE`) covers more entries than the slot's `max_entries`, empty entries, or a language mismatch with the job inputs.
+
+### 15.7.2 Job wizard: create, declare, check, screen, quote, confirm
+
+```
+Declarations { purpose: enum<purpose>, license: enum<license>, sensitivity: enum<sensitivity>,
+               service_requirement: enum<service_requirement>, pinned_service_ids: [id<svc>]?,          required exactly when M1
+               topic_category_ids: [id<top>]?, acknowledgements: [enum<ack>],
+               window_preference_s: dur_s? }                                    admission.min_window_s .. admission.max_window_days x 86,400
+Job          { id: id<job>, state: enum<job states of 0.9.2>, template: { id: id<tpl>, version_id: id<tpv>, name: text<80> },
+               title: text<80>/null, inputs: object, upload_ids: [id<upl>], glossary_id: id<gls>/null,
+               declarations: Declarations/null, deadline_class: "standard", cell_count: int/null,
+               policy_version_id: id<plv>/null, rejection: { reasons: [string] }/null, quote: Quote/null,
+               escrow: { id: id<esc>, held_ucr: ucr }/null, window: { window_s: dur_s, completes_by: ts/null }/null,
+               waitlist: { position: int, expires_at: ts }/null, suspension_reason_key: copy_key/null,
+               closure_reason: "policy_stopped"/"service_revoked"/"template_retired"/"operator_killed"/"overrun_timeout"/"requester_cancelled"/null,
+               created_at: ts, updated_at: ts }                                  ETag = row_version
+Quote        { policy_version_id: id<plv>, parameter_versions: { "<parameter name>": int },
+               primary_cells: int, v_ppm: ppm, lambda_ppm: ppm, p_ucr: ucr, eta_ppm: ppm,
+               primary_pay_ucr: ucr, verification_pool_ucr: ucr, levy_ucr: ucr, escrow_ucr: ucr, verification_pool_cells: int,
+               admission: { decision: "admit"/"waitlist", capacity_cells: int, committed_cells: int, phi_ppm: ppm },
+               window_s: dur_s, expires_at: ts, quote_hash: hash }
+```
+
+`ack` (convention addition): `stranger_reads_input` (required for `S1`), `downstream_use_uncontrolled` (required for `P1`; FD§5.7 failure mode 3). The wizard is the only place a requester states purpose, license and sensitivity, and these are *declared*, never verified (FD§5.7 failure mode 1). `inputs` holds one value per `input_slots.key`, validated against the template version (`400 VALIDATION_FAILED` with `details.fields`).
+
+`Quote` arithmetic is exactly 0.6.1 with N = `primary_cells`: `p_ucr = 1,000,000 + v_ppm + lambda_ppm`; `escrow_ucr = N x p_ucr`; `primary_pay_ucr = N x 1,000,000`; `verification_pool_ucr = N x v_ppm`; `levy_ucr = N x lambda_ppm`; `verification_pool_cells = floor(verification_pool_ucr / 1,000,000)`; `eta_ppm = floor(10^12 / p_ucr)`. `v_ppm` and `lambda_ppm` are the values in force for the job type (`price.v_prior` until `price.v_min_sample_cells`, then the measured value, `S6.*`); `parameter_versions` records the version of every parameter used so the quote is reproducible. `S6.*` owns the admission algorithm; this part only fixes what it returns. [D]
+
+```
+createJob   req { template_id: id<tpl>, title: text<80>?, inputs: object?, upload_ids: [id<upl>]?, glossary_id: id<gls>?,
+                  declarations: Declarations?, copy_from_job_id: id<job>?, submit: bool? }       submit default false
+            201 Job (state draft)        with submit = true: 200-equivalent outcome of submitJobForScreening below, status 201
+checkJobPolicy         req {}     200 { result: "allowed"/"rejected", reasons: [string], policy_version_id: id<plv> }   dry run: no state change, no stamp
+submitJobForScreening  req {}     200 Job (state quoted or waitlisted)  /  202 Job (state screening: human screening pending)
+                                  err 422 POLICY_REJECTED (details.job_id, details.reasons)  -> job state rejected (terminal)
+                                      422 CAP_EXCEEDED (waitlist_limit)    -> the job stays draft, nothing stamped
+confirmJob  req { quote_hash: hash, reservation_id: id<rsn>? }
+            201 { job: Job (state admitted), escrow: { id: id<esc>, held_ucr: ucr }, balance_after_ucr: ucr }
+```
+
+- `copy_from_job_id` copies template, inputs, uploads (if not purged), glossary and declarations of one of the member's own jobs into a new draft (for example after `quote_expired`). `updateJob` and `declareJobMetadata` change a job only in state `draft`; otherwise `409 STATE_CONFLICT`, reason `job_state_invalid`.
+- **Policy result.** `checkJobPolicy` evaluates `R1`..`R10` in order against the current active `PolicyVersion` and reports every failing rule, not only the first (the engine rejects at the first failure; the dry run lists all so the requester fixes them together). `submitJobForScreening` evaluates for real: `R1` (declarations complete and consistent), `R2`, `R3`, `R4` (the template is a reviewed template), `R5`..`R7` (service flags), stamps `policy_version_id` (`R9`), plans `cell_count` with the template's splitter, then prices and runs admission. Reasons are `policy.<policy_rule_id>.<slug>` (0.8.4) and each carries `details.copy_key` for the `fa` and `en` text (`S11.*`). A rejection is deterministic and is stored with the idempotency key. [D]
+- **Admission outcomes.** `admit`: job `quoted`, quote valid until `expires_at = created + price.quote_ttl_s`. `waitlist`: no window up to `admission.max_window_days` fits the capacity rule (committed cells over the window at most `admission.phi` x forecast active capacity), the job becomes `waitlisted` with `waitlist.expires_at` after `admission.waitlist_ttl_days`; at most `admission.waitlist_max_per_member` waitlisted jobs per member (`CAP_EXCEEDED`, `waitlist_limit`, job stays `draft`). The window in the quote is never shorter than `window_preference_s` and never an instant-completion promise (FD Principle 10). [D]
+- **Confirm** runs in one transaction. Guards in order: job `quoted` (else `409 job_state_invalid`); `now < quote.expires_at` (else `409 quote_expired`, and the job moves to `quote_expired`); `quote_hash` equals the hash of the current quote (else `409 quote_changed`: a parameter or policy version moved); recovery cooldown (`403`); `admission.max_concurrent_jobs_per_member` (`CAP_EXCEEDED`, `concurrent_jobs`); `cell_count <= admission.max_job_cells` (`CAP_EXCEEDED`, `job_too_large`); capacity re-checked (`422 NO_CAPACITY`, reason `capacity_changed`, the job stays `quoted` and `getJobQuote` returns the re-computed quote); balance at least `escrow_ucr` (`422 INSUFFICIENT_CREDIT`, `details.required_ucr`, `available_ucr`, `short_by_ucr`); `launch.member_jobs_enabled` and `kill.all_new_jobs` are checked at pipeline step 7. Effects: `escrow_hold` oldest-first over the member's lots (0.8.5), `Escrow` opened, one `cel_` per primary cell created `queued`, job `admitted`, parameter and policy versions pinned. With `reservation_id` the escrow comes from the reservation (`escrow_release`) and any price difference is topped up or refunded at confirm. Nothing is posted if any guard fails. [D]
+- A job whose quote is not confirmed in time is moved by a timer to `quote_expired` (terminal); the requester creates a copy. A `waitlisted` job is re-quoted by the system (`job.waitlist_released`) and returns to `quoted` with a new `expires_at`; if its waitlist time ends it is `cancelled` (`job.waitlist_expired`).
