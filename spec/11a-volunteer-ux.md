@@ -490,3 +490,286 @@ Rules:
 - `AC-vol-14` Given a card is rendered, When its fields are inspected, Then purpose, license, sensitivity, service, template with version, expected time, category and credit all appear before the full prompt, and the provenance sentence appears exactly once with the approval date.
 - `AC-vol-15` Given the template is paused by `kill.template.<tpl_id>` while the member holds a lease, When the member returns to the card, Then the lease is shown revoked with `copy.card.revoked`, Copy is disabled, and no submission can be created for it.
 - `AC-vol-16` Given a prompt containing Persian text, Latin words and digits, When Copy is tapped, Then the clipboard holds the exact prompt string whose hash equals the lease's `prompt_hash`, with no added marks and no digit conversion.
+
+## 11.9 SCR-vol-04 Hand-off: copy and open in service (service-adapter layer)
+
+### 11.9.1 Purpose and entry [D]
+
+Get the exact prompt text into the volunteer's chosen chat service with the fewest taps, where the volunteer then presses Send themselves. Shown inside the card (11.8) once the expansion gate (11.8.4) allows it. No provider is hardcoded: every capability comes from the `ServiceRegistryEntry` through the service-adapter layer (S4.*, S7.*).
+
+### 11.9.2 Adapter contract used by the client [D]
+
+For each service offered to this member, `listApprovedServices` returns only services in state `approved` (S0.9.6) with these fields (names from S0.8.3; every value is entered by a reviewer [V]):
+
+| Field | Type | Meaning for the screen |
+| --- | --- | --- |
+| `service_id` | `svc_` id | Identity of the service, recorded on the submission when the volunteer picks it |
+| `display_name` | string | Name shown to the volunteer (registry data, not code) |
+| `adapter.supports_prefill` | bool | A prefilled link may exist |
+| `adapter.prefill_url_template` | string with `{prompt}` | The link pattern; the client fills `{prompt}` with the URL-encoded prompt |
+| `adapter.max_url_chars` | int | Longest allowed link |
+| `adapter.copy_only` | bool | True when prefill is unsupported or `prefilled_link_use` is not `yes` |
+| `adapter.clean_chat_hint_key` | copy key | Service-specific advice for a clean chat (memory off, new conversation) |
+| `prefill_allowed` | derived bool (server-computed) | See the rule below |
+
+`prefill_allowed` = `adapter.supports_prefill` AND NOT `adapter.copy_only` AND `prefilled_link_use` = `yes` for the service (a flag answer, S0.8.3) AND `length(url) <= adapter.max_url_chars`, where `url` is the template filled with the prompt. A `FlagAnswer` of `unknown` counts as `no`. [D] The server computes the flag part; the client computes the length part against the actual encoded prompt, because encoding length depends on the text. The client never invents a link pattern, never guesses a service's URL, and never opens a link not produced from a registry template. [D]
+
+```
+function handoffModes(card, service):
+    url = null
+    if service.prefill_allowed_flags:                      # server: supports_prefill, not copy_only, flag yes
+        url = fill(service.adapter.prefill_url_template, encodeURIComponent(card.prompt))
+        if length(url) > service.adapter.max_url_chars: url = null   # too long: copy-only for this card
+    return { copy: true, open: (url != null), url: url }   # copy is always available
+```
+
+### 11.9.3 Wireframe
+
+```
++--------------------------------------------------+
+| Step 3 of 5: Send it in your chat service        |
++--------------------------------------------------+
+| Your service:  ( ) ServiceA  (o) ServiceB  ( ) ... |
+|   (only approved services allowed by this task;   |
+|    your choice is recorded with your result)      |
++--------------------------------------------------+
+| Prefill mode:                                    |
+|  [ Open in ServiceB ]   <- shown only if allowed |
+|  [ Copy prompt ]        <- always shown           |
+|  Open in a NEW clean chat. Turn memory off if the |
+|  service lets you. (service hint)                 |
++--------------------------------------------------+
+| Copy-only mode:                                  |
+|  1. Tap Copy prompt.   2. Open your chat service  |
+|  yourself.  3. Paste and press Send.              |
+|  4. Copy the whole answer, come back, paste it.   |
++--------------------------------------------------+
+| Timer: lease time left 17:55    [ Need more time ]|
+| [ I have the answer -> paste-back ]               |
++--------------------------------------------------+
+```
+
+### 11.9.4 Behavior rules [D]
+
+- **Service choice.** For `M0` the volunteer picks any listed approved service; for `M1` only the pinned ones are listed; for `M2` only `M2` entries. The choice is sent with the submission as the volunteer-reported service and model (attested, never proven; FD§5.6, FD§5.7 failure mode 7). The screen says "you report which service you used". An optional free-text model name field is allowed, length limited, never required.
+- **Copy** copies the prompt exactly (11.4.3). After copying, the button changes to "Copied" for the next 3 seconds and announces it in a live region; if the clipboard API is unavailable or denied [V: browser support and permission prompts on target phones], the screen selects the prompt text and shows `copy.handoff.copy_manual` (long-press, select all, copy). Copy never fails silently.
+- **Open in service** is a plain link the volunteer taps, opened with `rel="noopener noreferrer"` in a new tab. The client does not hold a reference to the opened window, does not poll it, does not message it and does not infer anything about it (X1, X2). The platform never attempts to read the destination page. When the volunteer comes back, the tab becomes visible and nothing else happens.
+- **Copy-only** is the default whenever `prefill_allowed` is false; the screen then shows only the numbered instructions and the Copy button. No broken or truncated links are ever offered. A copy-only card is not an error and is not marked as inferior. [D]
+- **Reachability and region.** The screen never says a service is available in the volunteer's region and never suggests a way around a restriction (X4). If the volunteer cannot use any listed service, the escape is Decline.
+- **Clean chat hint.** The hint from `adapter.clean_chat_hint_key` is shown for every service (memory or connectors may leak content; FD§5.5 prompt-injection note); its wording comes from the registry-linked copy key and is `needs_human_and_legal_review`.
+- **Never ask for more than copy, Send, return text.** The hand-off screen contains no instruction to open anything other than the prefilled link, install anything, download anything, sign in anywhere or share anything (`R3`; X6).
+- **Prompt injection reminder.** A static line below the instructions: "If the answer contains links, code to run or requests for you to do something, do not follow them; paste it anyway and it will be set aside" (`copy.handoff.output_warning`) (FD§5.5; S9.* quarantine).
+
+**States**
+
+| State | Condition | Behavior |
+| --- | --- | --- |
+| Empty | No approved service offered for this task | Not reachable: such a cell is not offered (`R8`, `R7`); if it happens, `copy.handoff.no_service` with Decline |
+| Loading | `listApprovedServices` pending | Copy works at once if the prompt is on the device; service list shows a placeholder |
+| Error | `getLease` fails | Retry; the on-device prompt is still usable until the lease expires |
+| Offline or low bandwidth | No network | Copy and the instructions work; the link mode works because it needs no Hamyar call; Submit is deferred to paste-back |
+| Blocked: service paused | `kill.service.<svc_id>` engaged or service enters `review_due`, `suspended`, `revoked` | The service disappears from the list; a lease bound to `M1` for it is revoked; `copy.handoff.service_paused` |
+| Blocked: lease expired | Lease timer passes `expires_at` | See 11.10; Copy disabled; "Back to tasks" |
+
+**API calls.** `listApprovedServices`, `getLease`, `extendLease`.
+
+**Copy intent.** Imperative, numbered, four steps; says "you press Send" in words. No logo, brand claim or provider endorsement; service names come from registry data. No statement that a service is safe, free or allowed (those are [V] and live in the registry).
+
+**Accessibility.** The service choice is a radio group with a legend; the Open link has a name that includes the service and states that it opens in a new tab; the four copy-only steps are an ordered list; the timer follows 11.4.5.
+
+**Acceptance criteria**
+
+- `AC-vol-17` Given a registry entry with `adapter.supports_prefill` true, `adapter.copy_only` false and `prefilled_link_use` = `yes`, When the encoded URL length is at most `adapter.max_url_chars`, Then both Copy and Open in service are shown; and When the length exceeds the maximum, Then only Copy and the numbered instructions are shown for that card.
+- `AC-vol-18` Given a registry entry whose `prefilled_link_use` is `unknown`, When the hand-off renders, Then Open in service is not shown and the screen is copy-only.
+- `AC-vol-19` Given the clipboard API is denied, When Copy is tapped, Then the prompt text is selected and `copy.handoff.copy_manual` is announced in a live region.
+- `AC-vol-20` Given the volunteer taps Open in service, When network and script activity is inspected, Then no code in the page reads, messages or polls the opened window and no request carries any content of the provider's page.
+- `AC-vol-21` Given any service entry, When the hand-off renders, Then no credential field, chat-link field or token field is present and no instruction mentions bypassing a restriction.
+
+## 11.10 SCR-vol-05 Paste-back
+
+### 11.10.1 Purpose and entry [D]
+
+Return the provider's answer to Hamyar by a human paste, bound to the lease and its nonce, with local checks that catch obvious mistakes before the server does. Entry: an `active` lease (`Lease.active`) on this device.
+
+### 11.10.2 Wireframe
+
+```
++--------------------------------------------------+
+| Step 4 of 5: Paste the answer here               |
+| lease time left 09:12   [ Need more time ] (1 use)|
++--------------------------------------------------+
+| Which service did you use?  [ ServiceB v ]       |
+| (optional) model name: [______________]          |
++--------------------------------------------------+
+| +----------------------------------------------+ |
+| | (large text field, dir=auto, empty)          | |
+| |                                              | |
+| +----------------------------------------------+ |
+| [ Paste from clipboard ]     characters: 0/6,000 |
+| Checks on this device (advisory only):           |
+|  - not empty                                     |
+|  - within the size limit                         |
++--------------------------------------------------+
+| [ Submit ]  (disabled until a check-able answer) |
+| ( Release this task )                            |
++--------------------------------------------------+
+```
+
+### 11.10.3 Fields, local checks and limits [D]
+
+| Item | Rule |
+| --- | --- |
+| Answer field | Plain text only; multi-line; the pasted text is never interpreted as HTML or Markdown and is rendered back only as text (V-15) |
+| Paste from clipboard | A button that reads the clipboard inside its own tap handler and fills the field; if unsupported or denied, the volunteer pastes manually [V]; the clipboard is never read otherwise (X5) |
+| Size checks | Count characters against `cell.envelope.max_output_chars` and UTF-8 bytes against `cell.envelope.max_submission_bytes`; over the limit shows `copy.paste.too_large` and keeps Submit disabled; the server repeats the check and answers `PAYLOAD_TOO_LARGE` (reject reason `reject.size_exceeded`) |
+| Empty check | Submit disabled for an empty or whitespace-only field |
+| Advisory checks | Only checks that need no server secret: non-empty, size, and (when the template declares it) a language hint. The UI never runs the template's real automatic checks and never reveals gold or audit status, so the checks on the device cannot be used to probe the verifier (S9.*) |
+| Own-output reminder | If the pasted text equals the prompt text exactly, the screen shows `copy.paste.looks_like_prompt` (probably the wrong thing was copied) and still lets the volunteer submit |
+| Service and model | Service from the hand-off choice, changeable here; model name free text up to 80 characters [A], never required |
+| Draft | Held in memory and session storage, never uploaded before Submit; survives going back and a page reload within the lease |
+| No attachments | No file or image upload; text only (X6, `R3`) |
+
+### 11.10.4 Submit protocol (client side) [D]
+
+```
+function submit(lease, answer, service_id, model_name):
+    key = lease.idempotency_key                      # generated once per lease, kept on device
+    body = { nonce: lease.nonce, text: answer, service_id, model_name }
+    loop with backoff up to ui.status_poll_max_s:
+        r = submitResult(lease_id, body, Idempotency-Key: key)
+        if r is 2xx: show outcome per 11.11; stop
+        if r is 409 IDEMPOTENCY_IN_PROGRESS: wait Retry-After; continue
+        if r is 410 LEASE_EXPIRED: show lease-lost state; keep the draft visible, never discard it
+        if r is 413 or 400: show field error; stop
+        if network error or 5xx: show 'saved on this device, trying again'; continue
+```
+
+The client sends the nonce it received with the lease; it never generates, guesses or alters it. One submission is accepted per lease and nonce; a replay returns the stored outcome (S0.9.3). A submission within `lease.submit_grace_s` after expiry is accepted only if the cell has not been re-leased (server decision); the screen says nothing about the grace period beforehand, so it is not a target. [D]
+
+### 11.10.5 Lease timer and extension [D]
+
+- The timer is the server `expires_at` minus server time at last response (11.4.2). Warning states by remaining share of `lease.timeout_s`: normal above 25 percent, `copy.lease.warning` below 25 percent, with the extension offer. [A: the 25 percent threshold is an `initial configurable default` and is added as `ui.lease_warning_ratio` = 0.25 (range 0..1), replaced by measurement `CAL`.]
+- "Need more time" calls `extendLease` and adds `lease.extend_s`; the number of extensions is limited by `lease.max_extensions`; after the last one the button is replaced by `copy.lease.no_more_extensions`. Extending is never penalized.
+- At expiry the lease becomes `expired`; the cell requeues (`cell.lease_expired`, `cell.requeued`) and the screen shows `copy.error.lease_expired` with the draft preserved on screen so the volunteer can copy it; submitting it is refused unless the grace rule applies.
+- **Release this task** is the same as Decline (11.8.5).
+
+**States**
+
+| State | Condition | Behavior |
+| --- | --- | --- |
+| Empty | Field empty | Submit disabled; helper text under the field |
+| Loading | `submitResult` in flight | Submit shows "Sending..."; the field is read-only; a visible text status, no spinner-only state |
+| Error: field | `VALIDATION_FAILED`, `PAYLOAD_TOO_LARGE` | Error next to the field with its copy key; draft kept |
+| Error: lease lost | `LEASE_EXPIRED` (410), `LEASE_CONFLICT` (409) | `copy.error.lease_expired` or `copy.error.cell_taken`; draft kept on screen; one action: Back to tasks |
+| Offline or low bandwidth | No network on Submit | `copy.paste.saved_locally`; automatic retry with the same `Idempotency-Key`; on return of the network the screen continues; the lease timer shows last known time |
+| Blocked: paused or revoked | Lease revoked (`lease.revoked`) | `copy.card.revoked`; Submit disabled; draft kept; the volunteer is told the result will not be credited |
+| Blocked: rate limited | `ratelimit.member_submissions_per_hour` (`RATE_LIMITED`) | `copy.error.rate_limited` with time; draft kept |
+
+**API calls.** `getLease`, `extendLease`, `releaseLease`, `submitResult`.
+
+**Copy intent.** Short, procedural, forgiving. Never accuse of forgery or copying; never reveal which checks exist. The size message gives the number from the parameter. Text for "looks like prompt" is a question, not a warning.
+
+**Accessibility.** The field has a visible label and a described-by with the limit and the live character count (updated politely, not per keystroke); errors are linked with `aria-describedby` and announced; Submit disabled state is `aria-disabled` with a reason; the extension button is reachable before the timer text in the focus order.
+
+**Acceptance criteria**
+
+- `AC-vol-22` Given an active lease and a non-empty answer within limits, When Submit is tapped, Then `submitResult` is called once with the lease nonce, the volunteer-reported service and the `Idempotency-Key` fixed for that lease, and the screen moves to result feedback.
+- `AC-vol-23` Given the network drops during Submit, When it returns within the lease, Then the retry uses the same `Idempotency-Key` and exactly one `Submission` exists.
+- `AC-vol-24` Given an answer over `cell.envelope.max_output_chars` or `cell.envelope.max_submission_bytes`, When the field changes, Then Submit is disabled with `copy.paste.too_large`, and if the request is forced the server returns `PAYLOAD_TOO_LARGE` and the draft is kept.
+- `AC-vol-25` Given the lease expires while the volunteer is pasting, When Submit is tapped after `lease.submit_grace_s` or after the cell was re-leased, Then the server returns `LEASE_EXPIRED`, the screen shows `copy.error.lease_expired`, and the pasted text remains visible and copyable.
+- `AC-vol-26` Given `lease.max_extensions` = 1, When the volunteer taps "Need more time" twice, Then the first extends `expires_at` by `lease.extend_s` and the second is unavailable with `copy.lease.no_more_extensions`.
+- `AC-vol-27` Given the screen is open, When the clipboard is inspected by instrumentation, Then it is read only inside the tap handler of "Paste from clipboard" and never on focus, load, visibility change or timer.
+- `AC-vol-28` Given a pasted answer containing HTML tags, script text and a URL, When it is displayed back or in History, Then it is shown as inert text with no markup interpreted and no link made clickable.
+
+## 11.11 SCR-vol-06 Result feedback
+
+### 11.11.1 Purpose and entry [D]
+
+Tell the volunteer, honestly and without revealing the verifier, what happened to the submitted result and what it means for credit. Entry: after `submitResult`, and from History (11.13). The outcome is read with `getSubmission` (S0.9.3 states).
+
+### 11.11.2 Outcome model shown to the volunteer [D]
+
+The server states map to four volunteer-facing outcomes. The UI never exposes the words gold, audit sampling, or reliability estimate for an individual result (V-10; FD§4.4 keeps checks hidden to be useful).
+
+| Volunteer-facing outcome | Server state | Icon and word | Credit line | Next action |
+| --- | --- | --- | --- | --- |
+| `received` (checking) | `Submission.received`, `checks_passed` pending, `Cell.submitted`, `Cell.flagged_for_audit` | Hourglass: "Received, being checked" | "Credit is added when it is accepted" | Take another task; Check again |
+| `accepted` | `Submission.accepted`, `Cell.accepted` | Check mark: "Accepted" | "+1 credit" with its expiry date (`credit.lifetime_days`) | Another task; Save recovery key if unsaved (first accepted) |
+| `rejected` | `Submission.schema_failed`, `checks_failed`, `rejected`, `Cell.rejected` | Cross: "Not accepted" plus the reason | "No credit for this one" | See reason; Try again if the cell requeued to you; Appeal (`SCR-vol-14`) |
+| `set_aside` | `Submission.quarantined` | Flag: "Set aside for review" | "Credit is decided after review" | Nothing required; History shows the final outcome |
+
+The volunteer also has "flagged" in the sense of their own report on a card (`SCR-vol-16`); that is a separate outcome of reporting, not a verdict on the submission.
+
+**Rejection reason display.** The reason comes from the seed list of S0.8.4 and is shown as the code's plain-language copy key `copy.reject.<code>` plus one line of what to do. Reasons are shown only as far as they do not teach evasion: `reject.gold_mismatch`, `reject.audit_mismatch` and `reject.timing_anomaly` are shown with the generic text `copy.reject.generic_check` ("did not pass our checks") and never as "gold", "audit" or "too fast"; the exact code stays in the member's own History detail only if S9.* allows it [A: issue ISS-111]. A `reject.duplicate_of_other_output` is shown neutrally, never as an accusation. [D]
+
+| Reason code | Copy intent (plain, no blame) | Suggested volunteer action |
+| --- | --- | --- |
+| `reject.schema_invalid` | The answer was not in the expected form | Paste only the answer text; try the next task |
+| `reject.refusal_pattern` | The service declined or did not do the task | Try again with another service if allowed, or decline |
+| `reject.length_out_of_bounds` | The answer was much shorter or longer than expected | Check you copied the whole answer |
+| `reject.language_mismatch` | The answer was not in the expected language | Check the answer, try again |
+| `reject.test_failed` | The answer did not pass the task's own tests | Try again or decline |
+| `reject.forbidden_content` | The answer contained content we cannot accept | Nothing to do; see Help; you may appeal |
+| `reject.nonce_invalid`, `reject.lease_expired`, `reject.size_exceeded` | The submission could not be linked to your task, or arrived too late or too large | Take the task again if offered |
+| `reject.policy_changed` | The rules changed while you were working on it (`R9`) | No fault of yours; take another task |
+| `reject.gold_mismatch`, `reject.audit_mismatch`, `reject.duplicate_of_other_output`, `reject.timing_anomaly` | Generic: did not pass our checks | You may appeal |
+
+### 11.11.3 Wireframe
+
+```
++--------------------------------------------------+
+| Step 5 of 5: Result                              |
++--------------------------------------------------+
+| [hourglass] Received, being checked              |
+|   Credit is added when it is accepted. You can    |
+|   leave this page; we keep the status in History. |
+|   [ Check again ]                                |
++--------------------------------------------------+
+|  -- after acceptance --                          |
+| [check] Accepted      +1 credit  expires {date}  |
+|   Balance: 4 credits                             |
+|   [ Take another task ]                          |
+|   (first time) Save your recovery key  [ Save ]   |
+|   (if flag on) [ Share a card ]  [ Invite ]       |
++--------------------------------------------------+
+|  -- after rejection --                           |
+| [x] Not accepted: {reason copy}                  |
+|   No credit for this one.                         |
+|   [ Take another task ]  ( Appeal )  ( Report )   |
++--------------------------------------------------+
+```
+
+### 11.11.4 Rules [D]
+
+- Feedback is asynchronous when checks are not immediate: the screen shows `received`, and the final outcome appears on the next `getSubmission` read. Polling runs only while the screen is open, with backoff up to `ui.status_poll_max_s`, and stops on any final outcome; there is no push notification (V-12).
+- The credit amount shown is from the ledger (`getBalance`), never computed on the device. "+1 credit" appears only after `Submission.accepted`; no optimistic credit is ever displayed. [D]
+- Accepted credit shows its expiry date, converted per 11.4.2, and a second line with the other calendar in the detail view.
+- The first accepted cell triggers one prompt to save the recovery key (V-09); it can be dismissed; the marker remains (11.18). If the member's `trust_tier` or the grant state changes (starter grant needs `grant.required_verified_cells` verified cells), a plain one-line note says what happened (`copy.feedback.starter_grant`); starter grant wording says "declared" rules, not guarantees. [D]
+- An outcome of `accepted` can later become `Cell.overturned` (appeal or fraud finding; ledger reversal). History shows it with its reason and `copy.feedback.overturned`; nothing is hidden. [D]
+- A rejected result is not punished by the UI; any penalty or restriction is a trust-tier matter handled in S8.* and S10.*, and the UI never says "strike" or "warning".
+
+**States**
+
+| State | Condition | Behavior |
+| --- | --- | --- |
+| Empty | No submission id (deep link to nothing) | `copy.error.not_found` and a link to History |
+| Loading | `getSubmission` in flight | Last known status shown with "checking" label |
+| Error | `getSubmission` fails | `copy.error.try_again`; the submission is safe; History is the fallback |
+| Offline or low bandwidth | No network | Last known outcome shown with "last checked" time; Check again enabled when online; no polling |
+| Blocked: suspended | Member suspended after submit | Outcome still readable; new tasks blocked; Appeal offered |
+| Blocked: paused | Job or template paused or voided (`cell.voided`) | `copy.feedback.voided`: the task was withdrawn; no fault of yours; credit rules shown (S6.*) |
+
+**API calls.** `getSubmission`, `getBalance`, `getMember`.
+
+**Copy intent.** Say what is known, say what is not yet known, never congratulate beyond the fact. Never promise credit before acceptance. Never describe verification internals. Use "declared" for any statement about rules or expiry: "credit expires on the declared date".
+
+**Accessibility.** The outcome is announced once in a polite live region with the word and icon meaning; color is never the only signal; the Check again button keeps focus after use; the reason text is plain and short.
+
+**Acceptance criteria**
+
+- `AC-vol-29` Given a submission in `Submission.received`, When the feedback screen renders, Then it shows `received` with "credit is added when it is accepted" and no credit amount.
+- `AC-vol-30` Given `Submission.accepted`, When the screen refreshes, Then it shows +1 credit with an expiry date equal to `earned_at` plus `credit.lifetime_days` days (per the parameter version in force at `earned_at`) in the member's calendar, and the balance comes from `getBalance`.
+- `AC-vol-31` Given `reject.gold_mismatch`, When the rejection is shown, Then the screen uses `copy.reject.generic_check` and does not contain the words gold, audit, sampling or timing.
+- `AC-vol-32` Given `Submission.quarantined`, When the screen renders, Then it shows `set_aside`, no credit and no link to the submitted text as clickable content.
+- `AC-vol-33` Given the first accepted cell and an unsaved recovery key, When the outcome is `accepted`, Then the screen offers `SCR-vol-13` once and keeps the key marker visible until `confirmRecoveryKey`.
+- `AC-vol-34` Given the network is lost while the screen is open, When status polling fails, Then polling backs off up to `ui.status_poll_max_s`, the last known outcome stays visible, and no error blocks the page.
