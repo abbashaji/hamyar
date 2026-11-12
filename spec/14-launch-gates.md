@@ -112,3 +112,152 @@ Per-purpose conditions (`R5`..`R7`) stay in the policy engine (S7.*). `SG` answe
 | `review_due` | Refused at once | Allowed for `service.review_grace_days` | Continue for the grace period | Accepted within the grace period |
 | `suspended` | Refused | Refused | `cell.paused`; pinned jobs `job.paused` | Lease revoked, so `reject.lease_expired` |
 | `revoked` | Refused | Refused | `cell.voided`; pinned jobs `job.stop_requested` with closure_reason `service_revoked` | Rejected, `reject.policy_changed`; already accepted cells stay accepted and paid (R9: a change never legitimizes in-flight work retroactively and never claws back accepted work) |
+
+## 14.4 Data model
+
+Table and column naming follows 0.7. Entities marked [A] are convention additions (`ISS-147`). `GI-nn` ids name gate invariants local to this part. [A]
+
+### 14.4.1 `LaunchGateItem` (`launch_gate_items`, prefix `lgi_`, retention `permanent`)
+
+One row is one checklist line for one scope. The catalog of lines is data seeded by migration (S14.5); rows are created by `gate.item_created`.
+
+| Column | Type | Constraint and meaning |
+| --- | --- | --- |
+| `id` | text | `lgi_` ULID (0.6.3) |
+| `catalog_key` | text | Stable key from the catalog in S14.5, for example `g0.svc.a`, `g1.threat_model` |
+| `catalog_version` | int | Version of the catalog row that created this item; a catalog change that alters meaning increments it and reopens the item (`catalog_changed`) |
+| `gate_id` | text | `CHECK` in `G0`..`G5` |
+| `scope_type` | text | `global`, `service`, `template` |
+| `scope_id` | text null | `svc_` or `tpl_` id; null if and only if `global` |
+| `kind` | text | `attestation`, `evidence`, `measurement`, `decision`, `machine_check` |
+| `is_blocking` | bool | Counts in the predicates of S14.7. Advisory items (false) are shown and never block |
+| `required_role` | text | `reviewer` or `operator`: at least one signer of the generation holds it (SO-3, S14.6) |
+| `state` | text | `open`, `evidence_attached`, `signed_off`, `reopened` (0.9.8) |
+| `generation` | int | Starts at 1; increases by 1 on every `gate.reopened` |
+| `outcome` | text null | `satisfied`, `satisfied_with_conditions`, `not_satisfied`, `adopted`, `declined`; set only while `state = signed_off` |
+| `conditions_text` | text null | At most 4,000 characters; required when `outcome = satisfied_with_conditions` |
+| `signed_off_at`, `valid_until` | timestamptz null | Set with the outcome; `valid_until` by the formulas in S14.6.3 |
+| `watch` | json | List of watch descriptors copied from the catalog (S14.6.4) |
+| `watch_digest` | text null | `sha256:` over canonical JSON of the watched values at sign-off |
+| `reopen_reason` | text null | `expired`, `watched_change`, `manual`, `evidence_superseded`, `catalog_changed`, `service_state` |
+| `created_at`, `updated_at`, `row_version` | | Standard (0.7) |
+
+Unique on `(catalog_key, scope_type, scope_id)` with null `scope_id` coalesced to the empty string. Indexes: `(gate_id, state)`, `(scope_type, scope_id)`, and `(valid_until)` partial where `state = 'signed_off'` for the expiry sweep. [D]
+
+`outcome` meaning: `satisfied` means the recorded evidence supports the item; `satisfied_with_conditions` means it does, subject to `conditions_text`, which the signers also enter as the items or parameters it constrains; `not_satisfied` is a recorded finding that the answer is no (it is a sign-off, so it is immutable, and it never counts as valid); `adopted` and `declined` are used only by items of kind `decision` (fallbacks). A `not_satisfied` outcome is the honest way to record that counsel or a measurement said no. [D]
+
+### 14.4.2 `GateEvidence` (`gate_evidences`, prefix `gev_`, retention `permanent`, append-only) [A]
+
+| Column | Type | Rule |
+| --- | --- | --- |
+| `id` | text | `gev_` ULID |
+| `item_id`, `item_generation` | text, int | The item and the generation the evidence belongs to |
+| `kind` | text | `document`, `terms_copy_ref`, `flag_answer_ref`, `calibration_ref`, `measurement_report`, `counsel_memo`, `ci_artifact`, `rotation_record`, `secret_audit_note`, `history_scan_report`, `decision_record`, `interview_summary`, `attestation` |
+| `content_hash` | text | `sha256:` over the raw bytes, computed by the server and never taken from the client (0.6.4) |
+| `byte_length` | int | At most `launch.evidence_max_bytes` |
+| `media_type` | text | `text/plain`, `text/markdown`, `application/pdf`, `application/json`, `image/png`; sniffed, not trusted from the header |
+| `storage_ref` | text | Opaque key behind the storage interface (S4.*) |
+| `visibility` | text | `internal` or `restricted`; `counsel_memo` is always `restricted` |
+| `source_ref` | text null | For system-attached evidence: the `fla_`, `tcp_` or `cal_` ids, or a CI run reference |
+| `occurred_at` | timestamptz null | When the described thing happened (rotation date, measurement date, memo date); used by the validity formulas |
+| `note` | text | At most 2,000 characters, plain text, escaped on display |
+| `attached_by` | text | `adm_` id or `system` |
+| `supersedes_evidence_id` | text null | A correction is a new row pointing at the old one; nothing is edited or deleted |
+| `created_at` | timestamptz | |
+
+Upload rules [D]:
+
+- `EV-1` The server hashes the bytes and stores them; a client-supplied hash is only compared, never trusted.
+- `EV-2` Media type is sniffed from content; a mismatch with the declared type is `VALIDATION_FAILED`.
+- `EV-3` Secret-pattern guard: content that matches credential patterns (provider token prefixes, private-key headers, long high-entropy strings) is refused with `UNPROCESSABLE` and `details.fields[].code = secret_pattern` and is not stored. The guard is a heuristic: it reduces accidental disclosure and does not prove absence (S14.14). Evidence about secrets records handling, dates and fingerprints of identifiers, never values (ground rule 2; FD§10).
+- `EV-4` Evidence is never rendered inline. It is served with `Content-Disposition: attachment` and `X-Content-Type-Options: nosniff`; the screen shows hash, size, type and note only.
+- `EV-5` `restricted` evidence is readable only with `perm.launch.read_restricted`; every read writes an `AdminAction`.
+- `EV-6` Evidence contains no personal data of members, no raw IP addresses and no provider credentials. Tester results for reachability or device tests are stored as summaries without identities (FD Principle 8).
+
+### 14.4.3 `GateSignoff` (`gate_signoffs`, prefix `gso_`, retention `permanent`, append-only) [A]
+
+| Column | Type | Rule |
+| --- | --- | --- |
+| `id` | text | `gso_` ULID |
+| `item_id`, `item_generation` | text, int | |
+| `admin_user_id`, `credential_id` | text, text | The `AdminUser` and the passkey (`acr_`) used |
+| `acted_as_role` | text | `reviewer` or `operator`, the role the signer acted under |
+| `outcome` | text | One of the item outcomes allowed for its `kind` |
+| `note` | text | At most 2,000 characters |
+| `conditions_text_hash` | text null | SHA-256 of the conditions text |
+| `evidence_set_hash` | text | SHA-256 over canonical JSON of the sorted list of `{evidence_id, content_hash, kind}` of the generation, superseded rows excluded |
+| `watch_digest` | text | The watched values at signing |
+| `attestation_copy_key` | text | Which attestation sentence the signer accepted (`copy.launch.attest_*`) |
+| `digest` | text | The sign-off digest below |
+| `assertion` | json | WebAuthn assertion fields (`client_data_json`, `authenticator_data`, `signature`, base64url) so the signature can be re-verified offline |
+| `session_id`, `request_id` | text | `ses_`, `req_` |
+| `created_at` | timestamptz | |
+
+Unique on `(item_id, item_generation, admin_user_id, digest)`. [D]
+
+**Sign-off digest** [D][A]: `digest = sha256` over RFC 8785 canonical JSON (0.6.4) of `{item_id, catalog_key, scope_id, generation, catalog_version, outcome, conditions_text_hash, evidence_set_hash, watch_digest, attestation_copy_key}`. The WebAuthn challenge for a sign-off is those 32 bytes, so a stolen admin session token alone cannot produce a sign-off and a recorded assertion cannot be replayed onto different evidence.
+
+### 14.4.4 `LaunchAuthorization` (`launch_authorizations`, prefix `lau_`, retention `permanent`) [A]
+
+One row records one decision to open one launch switch.
+
+| Column | Type | Rule |
+| --- | --- | --- |
+| `id`, `switch_name` | text | `lau_`; one of `launch.members_may_join`, `launch.member_jobs_enabled`, `launch.minting_enabled` |
+| `proposal_action_id` | text | `act_` of the proposal `AdminAction` |
+| `proposed_by`, `approved_by` | text | Distinct `adm_` ids (`CHECK proposed_by <> approved_by`) |
+| `evaluation_digest` | text | SHA-256 of the canonical evaluation result (S14.7) |
+| `relied_on` | json | List of `{item_id, generation, signoff_ids[]}` the evaluation used |
+| `authorized_until` | timestamptz | Minimum `valid_until` over every relied-on item; the authorization expires by itself at this instant |
+| `created_at` | timestamptz | |
+| `revoked_at`, `revoked_reason`, `revoked_by` | timestamptz, text, text | Null until revoked, then set once (trigger allows null-to-value only). Reasons: `gate_regressed`, `closed_by_admin`, `expired`, `superseded`, `stop_adopted` |
+
+Active means `revoked_at is null and now < authorized_until`. A launch switch is open only if its parameter is `true` and an active authorization exists for it (`GI-01`, S14.9). Time expiry therefore needs no background job to take effect. [D]
+
+### 14.4.5 `KillSwitch` rows (`kill_switches`, prefix `ksw_`, retention `permanent`, append-only)
+
+Each engage or release is a new row; the current state of a key is its row with the highest `seq`. [D]
+
+| Column | Type | Rule |
+| --- | --- | --- |
+| `id`, `switch_key` | text | `ksw_`; one of `kill.all_minting`, `kill.all_new_jobs`, `kill.template.<tpl_id>`, `kill.service.<svc_id>`, `kill.member.<mem_id>` |
+| `scope_type`, `scope_id` | text, text null | `global`, `template`, `service`, `member`; null id for `global` |
+| `seq` | int | Per key, starting at 1; unique with `switch_key` |
+| `state` | text | `released` or `engaged` |
+| `reason_code` | text | `terms_change`, `safety_incident`, `abuse`, `ledger_concern`, `legal_hold`, `provider_warning`, `operator_decision` [A] |
+| `reason_text` | text | Required, 10 to 2,000 characters, plain text |
+| `acted_by`, `approved_by` | text, text null | `adm_` ids; `approved_by` is required and distinct from `acted_by` when `state = released` |
+| `request_id`, `created_at` | | |
+
+Migrations insert `seq = 1`, `state = released` for `kill.all_minting` and `kill.all_new_jobs`. Scoped keys have no row until first engaged. Missing-row semantics differ on purpose and are fixed in S14.9. [D]
+
+### 14.4.6 State machine of `LaunchGateItem`
+
+State and event names are those of 0.9.8; one event is added (`gate.item_created`, `ISS-147`). Events carry `item_id`, `catalog_key`, `gate_id` and `generation` beside the standard fields of 0.9.1. [D]
+
+```
+(none)             --gate.item_created-->       open
+open               --gate.evidence_attached-->  evidence_attached    first evidence of the generation (human or system)
+reopened           --gate.evidence_attached-->  evidence_attached    first evidence of the new generation
+evidence_attached  --gate.signed_off-->         signed_off           guard SO-1..SO-8 (S14.6)
+signed_off         --gate.reopened-->           reopened             generation + 1; reason: expired, watched_change, manual,
+                                                                     evidence_superseded, catalog_changed, service_state
+evidence_attached  --gate.reopened-->           reopened             reason manual only; partial sign-offs stay stored and stop counting
+```
+
+Further evidence on an item already in `evidence_attached` is not a state change; it writes an `AdminAction` and changes the evidence set hash, so earlier partial sign-offs no longer match the current digest and stop counting. Evidence attached to a `signed_off` item first reopens it (`evidence_superseded`) and then attaches, in one transaction, emitting `gate.reopened` then `gate.evidence_attached`. `open` cannot be reopened. [D]
+
+| Event | Guard | Side effects |
+| --- | --- | --- |
+| `gate.item_created` | Catalog row exists; for scope `service` or `template` the entity exists | `AdminAction` with actor `system` |
+| `gate.evidence_attached` | Actor holds `perm.launch.attach_evidence` for the item scope, or is `system`; rules EV-1..EV-6 | `AdminAction`; evidence set hash recomputed |
+| `gate.signed_off` | `SO-1`..`SO-8` (S14.6.2) | Sets `outcome`, `signed_off_at`, `valid_until`, `watch_digest`; runs `reevaluate_dependents` (S14.7); for a service item, may unlock `service.approved` |
+| `gate.reopened` | Actor holds `perm.launch.reopen`, or the actor is `system` for the automatic reasons | `generation + 1`; clears `outcome`, `valid_until`, `watch_digest`; in the same transaction revokes every `LaunchAuthorization` that relied on the item and closes the switches that depended on it (S14.7); for a service item moves the service to `review_due` (S14.6.5) |
+
+### 14.4.7 Database protections [D]
+
+- The running service uses a role that has `SELECT` and `INSERT` on `gate_evidences`, `gate_signoffs` and `kill_switches`; `SELECT`, `INSERT` and `UPDATE (revoked_at, revoked_reason, revoked_by)` on `launch_authorizations`; `SELECT`, `INSERT` and a column-restricted `UPDATE` on `launch_gate_items`. It has no `DELETE` on any table of this part. Migrations run under a different role that the service never holds.
+- Trigger `signed_off_needs_signoffs` on `launch_gate_items` refuses `state = 'signed_off'` unless the qualifying sign-off rows exist (the trigger recomputes `SO-1`, `SO-2`, `SO-4`).
+- Trigger `launch_param_needs_authorization` on `parameter_versions`: a row that sets `launch.members_may_join`, `launch.member_jobs_enabled` or `launch.minting_enabled` to `true` requires an active `LaunchAuthorization` for that switch written in the same transaction; a row that sets one to `false` is always allowed (fail-closed direction).
+- Guard triggers on `members`, `jobs` and `ledger_entries` are listed in S14.9.
+- All of these are exercised by `AC-launch-40` and `AC-launch-18`.
