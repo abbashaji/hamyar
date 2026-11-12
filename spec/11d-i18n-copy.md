@@ -221,3 +221,83 @@ Weekdays in `fa`, Saturday first: `شنبه`, `یکشنبه`, `دوشنبه`, `�
 - Countdowns (lease time left) are rendered from the server's `expires_at`; see S11.49 for clock-skew handling.
 
 **Date input and pickers** [D]: every date field names its calendar in its label; the text field parses only the selected calendar, and the year must fall in a plausible window for it (otherwise the error is `VALIDATION_FAILED` with a field code, shown from a copy key); the picker is keyboard operable, its month grid follows the reading direction, and its week starts on `i18n.week_start_fa` for `jalali` and on the member's regional default otherwise [V].
+
+## 11.45 Mixed-direction text
+
+Prompts, requester data, pasted answers, glossary terms and reviewer notes mix Persian, English, digits, code and URLs in any order. Policy: **never alter what a person wrote or what a template says; only isolate it for display.** [D]
+
+**Where mixed text appears** [D]: the cell card and the expanded full prompt (template body plus data slots, FD§5.5); the paste-back box; submitted results in reviewer and requester views; glossary terms (translation jobs, S8.*); the deliverable preview; dynamic placeholders inside notice copy; admin and log views.
+
+| Rule | Decision | Test |
+| --- | --- | --- |
+| Content is never altered | Stored text is exactly what was pasted or authored: no Unicode normalization, no trimming, no digit mapping, no ZWNJ removal, no inserted direction marks. Hashes are over raw bytes (S0.6). Only comparison keys are folded (`fold_fa`, below). | AC-i18n-15 |
+| Isolation units | Block-level foreign text is split into paragraphs at line breaks, each a separate element with `dir=auto`. Inline dynamic text is wrapped in `<bdi>` in markup. In plain-text contexts (page title, `aria-label`, `alt`, toast text) the renderer wraps dynamic text in U+2068 and U+2069 (first-strong isolate) and LTR tokens in U+2066 and U+2069. Preformatted text keeps its line breaks and is rendered per line with `dir=auto`. | AC-i18n-14 |
+| Declared language wins | If a template slot or output field declares its language (a BCP 47 tag from a closed list), the renderer sets `lang` and `dir` from it and uses `dir=auto` only for undeclared or mixed text. `dir=auto` follows the first strong character, so a Persian paragraph that starts with a Latin word would otherwise render left to right. Requirement on S8.*: slots and output fields carry `lang`. | AC-i18n-14 |
+| LTR tokens | Code, URLs, hashes, IDs, e-mail addresses and keys render in an `dir=ltr` isolate in the monospace stack (S11.46) and are never mirrored. Code blocks scroll horizontally. | AC-i18n-14 |
+| Fixing punctuation | A sentence-final mark next to an opposite-direction word is fixed by isolating that word, never by inserting direction marks into the content. | AC-i18n-14 |
+| Invisible controls are made visible | In the expanded prompt and in reviewer and requester result views, U+202A to U+202E, U+2066 to U+2069, U+200B, U+2060 and U+FEFF are always shown as labeled markers. U+200C, U+200D, U+200E and U+200F (legitimate in Persian text) are shown as markers only when the member turns on *show invisible characters*. Markers come from CSS-generated content or `user-select: none` elements, so they are never in a copied range. | AC-i18n-16 |
+| Screening | Embedding and override controls (U+202A to U+202E) and isolate controls (U+2066 to U+2069) in requester input or in a submission are flagged, because they can make text read differently from what it is (the same class of trick as source-code spoofing). The action is `screen.bidi_control_action`, initially `flag_for_review`; for a submission, a flag means `submission.quarantined` (S9.*). U+200C, U+200D, U+200E and U+200F are not flagged. | AC-i18n-17 |
+| Copy buttons | *Copy prompt* writes exactly the stored prompt text to the clipboard: no marks added or removed, no digit mapping, no trailing characters. Copying a UI-originated number or string writes the raw form without isolates. | AC-i18n-15 |
+| Paste-back | The field's content is sent exactly as it is in the field, without trimming. The server judges length and schema on the raw text (S9.*). | AC-i18n-15 |
+| Placeholders in notices | The renderer escapes dynamic text first, then isolates it (below). Numbers come from the formatter (S11.43). | AC-i18n-14 |
+| Prefilled links | Where a registry entry says prefill is supported, the prompt is percent-encoded from its UTF-8 bytes unchanged. Encoded length is computed by actually encoding, and if it exceeds `adapter.max_url_chars` (a per-service value, [V]) or `adapter.copy_only` is true, the adapter falls back to copy-only. For planning: every non-ASCII byte becomes three characters (`%XX`), a Persian letter is two bytes, so a Persian prompt expands up to six URL characters per letter; a prompt of `cell.envelope.max_input_chars` (4,000, initial configurable default) Persian letters can reach about 24,000 URL characters, so copy-only is the expected path for Persian prompts. | AC-i18n-15 |
+
+```
+fn render(key, params, ctx, mode):                 # mode: 'markup' | 'plain'
+    tpl = copy[key][ctx.locale] or fallback(key, ctx)        # S11.41
+    for p in placeholders(tpl):
+        v = params[p.name]
+        if p.type in {number, credits, ratio, duration, date, datetime}:
+            s = format(v, ctx)                               # S11.43, S11.44; already one LTR unit
+        elif p.type in {text, service, topic}:
+            s = escape(v)                                    # untrusted text: escape, then isolate
+            s = isolate(s, dir='auto', mode=mode, lang=known_lang(v))
+        tpl = substitute(tpl, p, s)
+    return tpl
+fn isolate(s, dir, mode, lang=None):
+    if mode == 'markup': return '<bdi' + (' dir=ltr' if dir == 'ltr' else '') + lang_attr(lang) + '>' + s + '</bdi>'
+    return ('\u2066' if dir == 'ltr' else '\u2068') + s + '\u2069'
+```
+
+**Comparison folding** (used by automatic checks, glossary matching and duplicate detection in S8.* and S9.*; the original text is never overwritten) [D]
+
+```
+fn fold_fa(text, opts):
+    t = NFC(text)
+    t = map U+0660..U+0669 and U+06F0..U+06F9 to '0'..'9'
+    t = replace U+064A and U+0649 with U+06CC ; replace U+0643 with U+06A9   # Arabic yeh, kaf to Persian forms
+    t = remove U+0640                                                        # tatweel
+    if opts.strip_marks: t = remove U+064B..U+0652 and U+0670               # vowel marks
+    if opts.zwnj == 'space': t = replace U+200C with U+0020
+    elif opts.zwnj == 'none': t = remove U+200C
+    if opts.collapse_ws: t = collapse runs of whitespace to one space
+    return t                                                                 # a key, never shown, never stored over the original
+```
+
+Each comparator declares its `opts`; whether `zwnj` is folded is a per-template decision because *می‌کنم* and *می کنم* are both seen in real text [A].
+
+## 11.46 Fonts
+
+| Topic | Decision |
+| --- | --- |
+| Hosting | Fonts are WOFF2 files served from the application's own origin or its storage interface (S4.*). No third-party font service, stylesheet, script, CDN or analytics request is made by any member or public page (FD§10 cautions on blocked resources; prompt I). `ui.font.third_party_allowed` is the constant `false`; the content security policy (S10.*) blocks other origins; a CI test fails on any request to another origin (AC-i18n-18). [D] |
+| Family | The stylesheet names one alias, `Hamyar Sans`, mapped to the bundled files, so the family can change without touching components. The final family is chosen by the designer from candidates whose license permits redistribution and subsetting; candidates, unverified: Vazirmatn, Noto Sans Arabic, Noto Naskh Arabic [V: license text and glyph coverage, checked by a reviewer; the license file and the check date are stored beside the font files in the repository]. [D] |
+| Coverage | Must cover: Persian letters including پ چ ژ گ ک ی; hamza and the combining hamza above (U+0654) used for the ezafe; the digits U+06F0 to U+06F9; ، ؛ ؟ « » ٫ ٬; U+200C to U+200F; Basic Latin; common general punctuation. [D] |
+| Subsetting | A build step subsets by `unicode-range` so that `en` pages do not download Arabic-script ranges and `fa` pages download Latin only if the face contains it. The subset MUST keep the OpenType layout tables that Arabic-script shaping needs (at least `ccmp`, `locl`, `isol`, `init`, `medi`, `fina`, `rlig`, `liga`, `calt`, `mark`, `mkmk`, `kern`); stripping them breaks letter joining. A render test on joined words and on a ZWNJ pair is part of CI (AC-i18n-19). [D] |
+| Weights and styles | Two weights (`ui.font.max_weights`, initial configurable default 2: regular and bold). No italic; `font-synthesis` is off, so a missing style is not faked. [D] |
+| Loading | Preload only the regular face of the active locale on first screens; hashed file names with long immutable caching [A]; `font-display: swap` so text is never invisible; metric overrides to limit layout shift where the browser supports them [V]. [D] |
+| Fallback stack | The default Persian stack ends in system faces and a generic family (`ui.font.fa_stack`, S11.55). Which system faces render Persian on the target phones is [V] (G2, FD§8.3). A prompt that contains letters outside the subset (Kurdish, Urdu, Arabic) must still render in a fallback face and never as empty boxes (AC-i18n-20). [D] |
+| Monospace | A system monospace stack for codes, keys and code blocks; always `dir=ltr`. The recovery key is shown in groups of four characters, as an LTR isolate, with no digit mapping; on input, hyphens, spaces and case are ignored; paste is never blocked. Its alphabet and length belong to S10.*, which SHOULD avoid visually ambiguous characters. [D] |
+| Budget | Total font bytes are capped by `ui.budget.fonts_bytes` (initial configurable default 80,000, replaced by the measured subset sizes, `TEC`). [D] |
+
+## 11.47 English
+
+English is a full locale, not a fallback. [D]
+
+- Same keys, same screens, same flows as `fa`; the layout is checked in both directions (S11.42).
+- Digits `latin` and calendar `gregorian` by default, with the Jalali date shown as a second line in detail views (S11.44). Jalali month names in English are the transliterations in S11.44.
+- Plain, short sentences; the same terms in the same meaning every time (S11.53 glossary); no idioms, humor or abbreviations in notices.
+- Counted nouns have `one` and `other` plural forms in `en`; Persian uses the singular noun after a number, so a Persian key has a single form [A].
+- Dates are unambiguous (`11 Nov 2026`), never `11/11/26`. The clock is 24-hour (S11.44).
+- English is written first for counsel to read and Persian is written natively, not machine-translated; which language prevails if they ever differ is a legal question that this spec does not decide and no precedence clause is written [V: counsel; recorded in the counsel memo]. [A]
+- A member can read both languages of any notice side by side on the public notices page (S11.52).
