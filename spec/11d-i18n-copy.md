@@ -621,3 +621,117 @@ The keys above are not API error texts. API errors use their own `copy.*` keys t
 | Hamyar does not publish tips for getting around limits | Editorial rule; the copy checks of S11.50 | consistent with this part |
 | Drafts stay on the device for the stated time | S11.49; `ui.draft.ttl_s` | consistent with this part |
 | Opt-in changes apply to cells not yet opened | Rule `R8`; the lease-time opt-in check (S8.*) | [V] S8.* |
+
+## 11.53 Persian quality, terminology and the review procedure
+
+The Persian must be correct, natural written Persian, not a word-for-word rendering of the English. [D]
+
+**Orthography and typography** [D]
+
+- Standard written Persian in Iranian orthography, polite register (`شما`), no slang and no machine translation as a final text.
+- ZWNJ (U+200C) in verb prefixes (`می‌کند`, `نمی‌کند`), before plural and comparative suffixes (`سلول‌ها`), in compounds (`اعلام‌شده`, `مشارکت‌کننده`, `جمع‌آوری`). The ezafe after a final he is written with the combining hamza above (U+0654), as in the FD Persian summary (`بازهٔ زمانی`); after a final vowel it is a yeh (`گفتگوی شما`).
+- Persian yeh and kaf (`ی`, `ک`), never the Arabic forms; Persian punctuation `، ؛ ؟ « »`; no space before punctuation; no Latin letters inside Persian sentences except an allowlisted token (`IP`) in the middle of a sentence.
+- Hamyar's name is `همیار`; it is not transliterated in Persian text.
+
+**Terminology** (one term per concept in both languages; the table is the glossary source for S20.*) [D][A]
+
+| English | Persian | Note |
+| --- | --- | --- |
+| cell | سلول کار | as in the FD Persian summary |
+| job | کار | a large job: `کار بزرگ` |
+| credit | اعتبار | never `توکن` (tokens are not the unit, FD§4.1) |
+| capacity commons | مشترک ظرفیت | public descriptor (FD§0.3) |
+| Commons Reserve | ذخیرهٔ مشترک | |
+| volunteer, donor | مشارکت‌کننده | |
+| requester | درخواست‌دهنده | |
+| reviewer | بازبین | |
+| operator | گردانندهٔ سامانه | [V] reviewer preference |
+| service (an AI chat service) | سرویس | |
+| account | حساب | |
+| template | قالب | |
+| prompt | متن (پرامپت) | first mention as shown, then `متن` or `متن کامل` |
+| Send (the service's button) | ارسال | |
+| decline | انصراف | not `رد`, which means reject |
+| report | گزارش | |
+| appeal | درخواست بازبینی | chosen over `اعتراض` because it sounds neutral [A] |
+| rejected, accepted | رد‌شده، پذیرفته‌شده | |
+| recovery key | کلید بازیابی | |
+| pseudonymous, anonymous | با نام مستعار، ناشناس | the two are never mixed up |
+| declared | اعلام‌شده | the required word of S11.50 |
+| guarantee | تضمین | only in negated sentences |
+| opt-in | انتخاب | |
+| change log | سابقهٔ تغییرات | |
+| provenance | شجره (provenance) | as in the FD Persian summary |
+| ledger | دفتر کل | |
+| lease | مهلت | |
+| escrow | سپرده | [V] reviewer preference |
+| quoted window | بازهٔ زمانی اعلام‌شده | |
+| open license | مجوز باز | |
+| downstream use | استفادهٔ بعدی | |
+
+**Review procedure** [D]
+
+1. The author writes the English first, as the source of meaning for counsel, and writes the Persian natively from the meaning, not from the English words.
+2. A native-speaking reviewer for Persian and one for English each go through the checklist below and are recorded in `reviewed.fa_by` and `reviewed.en_by`; status becomes `human_reviewed`.
+3. The notices are rendered on real phones in both locales and checked against S11.42 to S11.46 (this is also the G2 item on RTL rendering, FD§8.3).
+4. A person qualified to advise on safety reads the safety and privacy-limits keys (FD§8.3 G1); counsel in the operator's jurisdiction reads all keys, the contributor waiver, and the declared-claim register [V]. Their memo reference goes into `reviewed.legal_ref`; status becomes `legal_reviewed`.
+5. Two distinct admins sign off; status becomes `approved`. The launch rule that depends on this is in S11.57.
+6. For the consent keys and the safety keys, a second native speaker who has not seen the English reads the Persian and says in their own words what it asks the member to accept; a mismatch returns the key to step 1 [A].
+7. Any text change, in either language, resets both to `needs_human_and_legal_review` (S11.50). A change of a parameter that fills a placeholder goes through the parameter change log and the loosen-with-notice rule (`R10`, S0.8.4); it does not reset the copy, but the claim register row is re-read by the reviewer.
+
+**Checklist** [D]
+
+| Check | Question |
+| --- | --- |
+| Meaning | Does the Persian say what the English says, no more and no less? |
+| Promise | Does every promise-like sentence say `اعلام‌شده`, and does no sentence promise what the claim register cannot support? |
+| Register | Polite, plain, no jargon the target reader would not know (a first-use gloss where needed) |
+| Terms | Every term as in the table above |
+| Orthography | ZWNJ, ezafe, yeh and kaf, punctuation as above |
+| Fear and blame | The safety and privacy texts neither scare nor reassure beyond the facts; no blame |
+| Rendering | On a real phone: joined letters, ZWNJ pairs, digits, isolates, no boxes (S11.46) |
+| Length | Fits its container at 200% zoom in both languages (S11.48) |
+
+## 11.54 Acceptance criteria
+
+Test cases are named here by acceptance id; S18.* assigns `T-*` ids and layers (`rtl`, `unit`, `e2e`, `load`, `inj`). Every item stays in CI once added (S0.12 ordering rule 5). [D]
+
+| id | Given | When | Then |
+| --- | --- | --- | --- |
+| `AC-i18n-01` | a page in `fa` | it first paints, and then the member switches to `en` | `lang=fa dir=rtl` are set before first paint; after the switch `lang=en dir=ltr`, with no reload |
+| `AC-i18n-02` | text typed in the paste-back box, an expanded prompt and a scrolled page | the language is switched | the text, the expansion, the scroll position and the focus are unchanged |
+| `AC-i18n-03` | no stored locale and a browser list that starts with `en-GB` | the landing page loads | `en` is chosen and nothing about the list is sent to the server; with an empty list `fa` is chosen |
+| `AC-i18n-04` | the style sources | the CI check runs | any physical-direction property or value outside the allowlist, or `row-reverse`, fails the build |
+| `AC-i18n-05` | the icon sprite and a time chart in `fa` | rendered | every icon marked `mirror: true` is flipped and others are not; time runs from the inline start; the numeric axis is not mirrored |
+| `AC-i18n-06` | `digits=persian` and a balance of 1234.5 credits | rendered | the display is one LTR isolate with Persian digits and Persian separators; with `digits=latin` it uses ASCII digits and `,` and `.` |
+| `AC-i18n-07` | `digits=persian` and any screen that sends or exports data | a request or an export is produced | all numbers, amounts and dates in it are ASCII or ISO; no Persian digit and no Jalali string appears |
+| `AC-i18n-08` | a numeric field | `۱۲۳` or `1٫5` is entered, and `1,5` is entered | the first two parse to ASCII values; `1,5` fails with the field code `number_format`; the parsed value is echoed before a credit-moving confirmation |
+| `AC-i18n-09` | `digits=persian` and a prompt containing `2026`, `abc123` and `۱۲` | the card and the expanded prompt render | those characters are shown exactly as stored |
+| `AC-i18n-10` | the golden table of boundary dates | the calendar library runs in CI | every row converts exactly, in both directions, for the required range |
+| `AC-i18n-11` | `i18n.dual_calendar_detail` true | a detail view of an instant is opened in `fa` and in `en` | the primary calendar line, the other calendar line and the ISO line are shown, in that order |
+| `AC-i18n-12` | the monthly mint cap period | it is shown in `fa` | it is labeled as a UTC month, not with a Jalali month name, with its start and end in the member's calendar and zone beside the UTC value |
+| `AC-i18n-13` | a device zone and a settings override | times are shown | the override wins, and no request carries or derives a zone from an IP address |
+| `AC-i18n-14` | a Persian paragraph starting with a Latin word, a code token and a dynamic service name | rendered in `fa` | the declared `lang` and `dir` apply where known, otherwise each paragraph resolves its own direction; code is an LTR isolate; the dynamic name is isolated and sentence punctuation sits correctly |
+| `AC-i18n-15` | a prompt with ZWNJ, LRM, both digit sets and Persian text | it is copied, pasted back and submitted | clipboard text, submitted body and stored text are byte-equal to the stored prompt; no ZWNJ is lost; the prefill link falls back to copy-only when the encoded length exceeds `adapter.max_url_chars` |
+| `AC-i18n-16` | a prompt containing U+202E | the expanded prompt and a result view render | the control is shown as a visible marker that is not in a copied range |
+| `AC-i18n-17` | requester input and a submission containing U+202E, and others containing only ZWNJ and LRM | they are screened | the first two are flagged per `screen.bidi_control_action` (a submission is quarantined); the others are not flagged |
+| `AC-i18n-18` | a production build | every screen is loaded with all other origins blocked | no request goes to another origin and no font comes from a third party; no screen has text inside a bitmap |
+| `AC-i18n-19` | the subset font and a test page of joined words, a ZWNJ pair and Arabic-script text with a style rule | rendered | letters join correctly, the ZWNJ pair is not joined, and no `letter-spacing` or italic is applied |
+| `AC-i18n-20` | a prompt with Kurdish and Urdu letters outside the subset, and the tallest Persian line | rendered | no empty boxes appear, and nothing is clipped |
+| `AC-i18n-21` | every key of the copy tables and every screen | rendered in `en` | the same keys and screens exist; plurals take `one` and `other` forms |
+| `AC-i18n-22` | a form with an invalid field | it is submitted | an error summary takes focus, links to the field, and shows the text of `details.copy_key`; meaning is never by color or emoji alone |
+| `AC-i18n-23` | a keyboard only session in `fa` | the member tabs through a screen with a tab widget and a slider | every control is reachable and operable; ArrowLeft and ArrowRight follow the visual direction |
+| `AC-i18n-24` | any screen | zoomed to 200% and at a 320 CSS pixel width, in both themes | no loss of content or function; contrast is at least 4.5:1 for text and 3:1 for controls |
+| `AC-i18n-25` | a lease with `ui.lease.warn_remaining_s` configured | the countdown runs | assistive technology is told only at the warning time and at expiry, not every second |
+| `AC-i18n-26` | a first-use prompt that is not expanded | the member tabs to Copy | it is focusable with `aria-disabled=true`, linked to its explanation, and expanding moves focus to the expanded text |
+| `AC-i18n-27` | the build | the budget check runs | the compressed js, css and fonts, the first-load total and the card payload are at or below `ui.budget.*`; the first-interactive time on the test profile is at or below `ui.budget.first_interactive_s` |
+| `AC-i18n-28` | the first-contribution flow in the harness | it runs on the test profile with other origins blocked | it completes, with no third-party request |
+| `AC-i18n-29` | a draft and the network switched off | Submit is pressed, and the network returns | exactly one submission is accepted by the server; a retry of the same press replays the stored response; no submission happens before the press |
+| `AC-i18n-30` | drafts in every state | the time-to-live passes, *clear local data* is pressed, or the identity is closed | the records are purged; the member key is not deleted by *clear local data* |
+| `AC-i18n-31` | the copy files | the build runs | a missing key or placeholder mismatch in either language, a failed check of S11.50, or a placeholder with no registry row fails the build |
+| `AC-i18n-32` | every key with `promise: true` | the declared check runs | `اعلام‌شده` is present in `fa` and `declared` in `en`; guarantee words occur only in allowlisted negated sentences |
+| `AC-i18n-33` | an approved key | its Persian or English text is edited | its version increases, both languages return to `needs_human_and_legal_review`, and the hash in the manifest changes |
+| `AC-i18n-34` | a request to set `launch.members_may_join` to true | any required key of S11.51 is not `approved` | the request is refused with `LAUNCH_GATE_CLOSED` |
+| `AC-i18n-35` | a member accepts the consent boxes | the consent is recorded | the stored record holds `copy_key`, `copy_hash` and `accepted_at` for each box and no text; a hash that is in neither the current nor the previous manifest is refused |
+| `AC-i18n-36` | the join page | it loads | all notices are shown in full in the order of S11.52, every box is unticked, and the continue button stays focusable and says what is missing |
+| `AC-i18n-37` | a new member from any network | the join page is shown | the safety note appears for everyone, and no code path reads or derives a location |
