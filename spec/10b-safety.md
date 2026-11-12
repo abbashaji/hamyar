@@ -476,3 +476,74 @@ The drill runs in `BM9` on a second host with synthetic data before launch (`AC-
 
 Production, staging and development are separate hosts and secret scopes. No production data, member record or secret enters a non-production environment; tests use synthetic data (S18.*). The admin origin is separate in every environment (S0.11.4). Monitoring and alerting follow S10.13.1 item 9.
 
+## 10.16 Abuse reporting, takedown, ban and appeals
+
+Process spec. Entities `Report` and `Appeal`, their states and events are in S0.9.7 and S0.9.8 and are used unchanged. Everything legal is [V] for counsel.
+
+### 10.16.1 Roles and permissions [D]
+
+Permission names follow `perm.<area>.<action>` (S0.8.2); the matrix itself is in the identity file of S10.*, and the names below are proposed [A].
+
+| Role in the process | Held by | May | May not |
+| --- | --- | --- | --- |
+| Reporter | Any member or requester (`perm.report.file`) | File a report; see its outcome; appeal a dismissal once | See who the subject is beyond the reported object; see other reports |
+| Triager | `AdminUser` with `reviewer` (`perm.report.triage`) | Triage, request more evidence, dismiss, escalate | Ban; release a kill switch |
+| Decider | `AdminUser` with `reviewer` (`perm.report.decide`) | Warn, restrict, suspend, reject a job, pause a template, void cells | Decide a report about themselves, or an appeal of their own decision |
+| Second approver | A different `AdminUser` (`perm.member.ban_approve`) | Approve a ban, a legal-hold clear, a disclosure | Be the decider of the same action |
+| Operator | `AdminUser` with `operator` | Engage kill switches with a logged reason; execute approved actions technically | Decide content questions alone |
+| Appeals reviewer | `AdminUser` with `reviewer` who was not the decider and has no declared conflict (`perm.appeal.review`) | Uphold or overturn | Handle an appeal about a decision they took |
+| Counsel (external) | Outside the system | Advise on legal notices and disclosure [V] | Hold any system credential |
+| Subject | The reported member or requester | See the decision, its reason code and the object; appeal | See the reporter's identity |
+
+### 10.16.2 Intake [D]
+
+- **In product:** a report button on every cell card (FD§5.5), on public team and milestone surfaces, and on a requester's result view. A filing creates `Report` in state `open` and the event `report.filed`.
+- **Categories** (`report_category`, new enum, S10.18): `unsafe_prompt`, `injection_attempt`, `suspected_sensitive_data`, `prohibited_content`, `harassment`, `forged_or_junk_result`, `fraud_or_farming`, `impersonation`, `safety_of_person`, `legal_notice`, `other`.
+- **Automatic evidence** attached at filing, by identifier only: object id (`cel_`, `tpv_`, `job_`), `policy_version`, rule results (`policy.<rule>.<slug>`), submission hash, verification outcomes. Never a volunteer's chat page (never read) and never plaintext of a payload that is about to be purged for `suspected_sensitive_data` (S10.16.7).
+- **Free text** is limited to `report.max_text_chars` and is stored with the report; it is written for reviewers, never shown to the subject.
+- **Automatic flags** (screening, gold failures, anomaly detectors) create reports with `principal_type` = `system`. A flag never bans anyone by itself [D].
+- **Outside the product:** people who are not members (a copyright holder, a person named in content, a legal authority) use the contact `report.external_contact` (string, set by the operator, published on the public pages; empty means launch gate `g1.abuse_contact_published` is open). Legal notices go to counsel without any member data being checked or produced first [V].
+- **Rate limit:** `report.max_per_member_per_day` per member.
+
+### 10.16.3 Triage and service levels [D]
+
+```
+report.filed  -> state open
+triager picks within SLA -> report.triaged (category confirmed or changed, severity set)
+decider chooses an action (10.16.4)  -> report.actioned   or   report.dismissed (reason code recorded)
+SLA clock: filed_at -> triaged_at
+  normal categories : report.triage_sla_days        (initial configurable default 3)
+  urgent categories : report.urgent_triage_sla_s     (initial configurable default 14400)
+  urgent = safety_of_person, injection_attempt, suspected_sensitive_data, legal_notice
+on breach: Alarm, metric hamyar_report_triage_overdue_total increments; the oldest overdue report is shown first on the queue
+```
+
+SLAs are published defaults, configurable parameters, and targets, not promises ("declared"). A report in an urgent category lets any reviewer escalate to an operator at once, who may engage `kill.template.<tpl_id>` or pause cells (`cell.paused`) before a decision, with a logged reason. Template autopause: when `template.autopause_report_count` reports from at least `template.autopause_min_distinct_reporters` distinct reporters, each at or above `template.autopause_min_reporter_tier`, arrive within `template.autopause_window_s` for the categories `unsafe_prompt`, `injection_attempt`, `suspected_sensitive_data`, `prohibited_content`, the template is paused (`template.paused`); the pause is not a verdict, and release needs the usual `killswitch.release` two-person action (`ISS-106`).
+
+### 10.16.4 Action ladder [D]
+
+`moderation_action` (new enum, S10.18) with the existing event that records each effect:
+
+| Action | Effect and event | Decider and approval | Notes |
+| --- | --- | --- | --- |
+| `no_action` | `report.dismissed` | Triager | Reason code recorded |
+| `warn` | Note on the member; `report.actioned` | Decider | No other effect |
+| `restrict` | `member.restricted`; caps fall, sampling rises (`trust.*`) for `trust.restriction_days` | Decider | Lifts by `member.restriction_lifted` |
+| `suspend` | `member.suspended`; leases revoked (`lease.revoked`) | Decider | Reversible by `member.reinstated` |
+| `ban` | `member.banned`; leases revoked | Decider plus second approver (`member.ban` is in `security.two_person_actions`) | Appealable; see below |
+| `reject_job` | `job.stop_requested` with `closure_reason` `operator_killed`; refunds follow S6.* | Decider | Unstarted cells refunded as usual |
+| `pause_template` | `template.paused` through `kill.template.<tpl_id>` | Operator on a decider's request | Release is two-person |
+| `suspend_service` | `service.suspended` through `kill.service.<svc_id>` | Operator | Release is two-person |
+| `void_cells` | `cell.voided` for in-flight cells | Decider | |
+| `takedown_output` | Hosted copy withdrawn (S10.16.5) | Decider; legal notices via counsel [V] | |
+| `refer_to_counsel` | Note on the report; no member data produced | Operator | [V] |
+
+**Rules** [D]
+
+1. Proportionality: the lowest action that stops the harm; escalation needs a recorded reason code.
+2. A ban is never automatic, never produced by a classifier alone, and never propagates to an invite tree; tree members are reviewed individually (`THR-06`).
+3. A ban or suspension never edits the ledger and never confiscates credit: the member's lots expire normally into the Reserve (FD§4.5), escrow refunds proceed under S6.*, accepted cells stand unless a fraud finding leads to `cell.overturned` and a two-approver `reversal`. Involuntary forfeiture is not specified (`ISS-104` records why: no entry type exists for it and it would reward false reports).
+4. A suspended or banned member can still authenticate to a restricted scope: read history, export own data, file an appeal, close the account (constraint on S10.*).
+5. A ban does not trigger tracking of the person elsewhere: evasion is limited by `grant.max_per_device` and the sybil limits only; no extra fingerprinting is added to detect it (S10.13.1 item 4). Residual evasion is accepted.
+6. The platform does not report members to any authority on its own initiative unless counsel determines the law compels it [V].
+
