@@ -657,3 +657,45 @@ All are convention additions (S0.1) and are reported under `## Issues raised`. D
 
 **Permissions**: `perm.report.file`, `perm.report.triage`, `perm.report.decide`, `perm.member.ban_approve`, `perm.appeal.review`. **Secrets**: the `secret.*` names of S10.14.2 (never parameters). **Admin action kinds**: `disclosure.received`, `disclosure.release`, `secret.rotated`, `secret.emergency_access`, `safety_review`.
 
+## 10.19 Register of unverified items and assumptions
+
+**[V] items**: what is verified, by whom, where the answer is stored. [D]
+
+| Item | Verified by | Stored in |
+| --- | --- | --- |
+| Every legal point: disclosure duties, gag orders, warrant canary, notice to members, takedown and counter-notice, special-handling material, whether reachability measures are lawful, reporting duties | Counsel in the operator's jurisdiction | Counsel memo; evidence on `g1.disclosure_runbook_reviewed` |
+| Host choice, jurisdiction, provider-level logging, encryption at rest, TLS termination point | Founders with counsel | G1 decision record (code `SEC`) |
+| Reachability from Iran | Founders and opt-in testers, remote measurement [V] | `g2.reachability_recorded` evidence |
+| Non-extractable key support on target phones | Founders on real devices | G2 evidence (`TEC`) |
+| Encrypted client hello and HSTS at the edge | Operator | G1 evidence |
+| External mirror for checkpoints | Operator | `g1.secrets_inventory_complete` and the public parameter page |
+| Every statement about the panel (secrets, scope of `GITHUB_TOKEN`, OAuth KV layout, `main` protection, CI behavior) | Owner, during the G4 repo review | `g4.secret_handling_audited` |
+| Font licenses for self-hosted fonts | Reviewer | Asset record |
+| Member notice wording and Persian copy | Someone qualified to advise, plus a native reviewer | `g1.member_notice_reviewed` |
+| Canonical domain set | Operator | Public parameter page |
+
+**[A] items**: the owner decision that could overturn each. [D]
+
+| Assumption | Overturned by |
+| --- | --- |
+| Device-group and invite-tree exclusion in audit assignment (`THR-04`) | Owner decision on whether device grouping is acceptable under S10.13.1 item 4 |
+| `secret.device_hash_key`, `secret.analytics_key`, `secret.email_encryption_key` and the Ed25519 checkpoint key | Identity file or S13.* choosing different mechanisms |
+| Ports of S10.15.2 and their names | S4.* |
+| Two custodians for the backup key | Team size (one-person team: owner decision) |
+| `service.min_approvers` raised to 2 | Owner decision |
+| Proposed gate item keys and gate assignment | S14.* |
+| Added parameters and the changed `security.two_person_actions` default | S16.* completion |
+
+## Issues raised
+
+Block `ISS-104`..`ISS-106` is the second sub-block of part 10 (S0.4), assuming the identity file sorts first. Each resolution is already applied in this file. [D]
+
+| id | severity | fd_ref | issue | resolution | status |
+| --- | --- | --- | --- | --- | --- |
+| `ISS-104` | major | FD§4.2, FD Principle 8, `RISK-05` | The ledger is `permanent` and every entry has an exact `created_at`, so each pseudonym leaves a permanent minute-level activity timeline; combined with any network log it supports timing correlation. S0.7 calls the class free of personal data, which understates this | Member-account legs and lots store times truncated to `ledger.member_timestamp_granularity_s` (one UTC day); order stays by `seq` (S0.6.2); exact times stay only in `ops` data that expires; the public ledger shows aggregates only; S6.* applies it | proposed |
+| `ISS-105` | major | FD§5.3 S1, `THR-30` | Nothing limits how many cells of one job a single volunteer may lease, so one volunteer can rebuild a requester's whole S1 input | Add `lease.max_job_share_ratio` (ratio, owner `operator`, initial configurable default 0.34 of a job's cells per member, replaced by `P1M`), enforced at lease time by S9.*; reported for S16.* | needs_owner |
+| `ISS-106` | major | FD§5.5, `THR-29` | `template.autopause_report_count` (5 reports in 3600 s) lets a few accounts pause any template, a denial of service through the report button | Count distinct reporters at or above a minimum tier (`template.autopause_min_distinct_reporters`, `template.autopause_min_reporter_tier`); autopause is a pause, release is two-person (S10.16.3) | proposed |
+
+**Convention additions made by this part** (not issues, listed so assembly can fold them back): parameters, enums, permissions, secret names, admin action kinds and the changed `security.two_person_actions` default of S10.18; the ports of S10.15.2; the proposed gate item keys of S10.14.5; the legacy secret names `secret.legacy_*` (S10.14.2); and heading numbers `10.11`..`10.19` for this second file of part 10, because S0.3 has no heading rule for a part split over files (the identity file is assumed to use `10.1`..`10.9`).
+
+**Owner decisions this part needs** (also for S3.*): operator jurisdiction and host; whether the team has two independent admins (needed for two-person actions and `launch.min_signoffs`); who the two backup-key custodians are; whether `service.min_approvers` is 2; whether the cap in `ISS-105` is accepted; who is the qualified adviser for the member notice.
