@@ -241,3 +241,117 @@ Given / When / Then
 
 - `AC-api-01` Given `launch.members_may_join` is `false`, When any client calls `createMember` with a valid body and invite, Then `403 LAUNCH_GATE_CLOSED` with `details.switch` = `launch.members_may_join` and no row is written.
 - `AC-api-03` Given an active member recovered 30 seconds ago, When they call `confirmJob`, Then `403 FORBIDDEN` reason `recovery_cooldown` with `details.until` equal to `cooldown_until`.
+
+## 15.6 Volunteer endpoints
+
+The volunteer flow of FD§3.2 steps 2 to 4 and FD§5.5, with the human pressing Send. Operations marked **active only** return `403 FORBIDDEN` for `suspended` and `banned` members (`S15.4`). [D]
+
+| op | Method and path | Auth | Idem | RL | OK | Events |
+| --- | --- | --- | --- | --- | --- | --- |
+| `listServices` | `GET /v1/services` | member | - | `RL-READ` | 200 | - |
+| `listTopicCategories` | `GET /v1/topic-categories` | member | - | `RL-READ` | 200 | - |
+| `getOptIns` | `GET /v1/members/me/opt-ins` | member | - | `RL-READ` | 200 | - |
+| `replaceOptIns` | `PUT /v1/members/me/opt-ins` | member | O | `RL-WRITE` | 200 | `member.optin_changed` |
+| `listOfferedCells` | `GET /v1/cells/offers` | member | - | `RL-READ` | 200 | - |
+| `declineOffer` | `POST /v1/cells/{cell_id}/declines` | member | O | `RL-WRITE` | 204 | `+offer.declined` |
+| `createLease` (active only) | `POST /v1/cells/{cell_id}/leases` | member | R | `RL-LEASE` | 201 | `cell.leased`, `lease.issued` |
+| `getLease` | `GET /v1/leases/{lease_id}` | member | - | `RL-READ` | 200 | - |
+| `listLeases` | `GET /v1/leases` | member | - | `RL-READ` | 200 | - |
+| `expandLeasePrompt` | `POST /v1/leases/{lease_id}/expansions` | member | O | `RL-WRITE` | 200 | - |
+| `issueLeaseNonce` | `POST /v1/leases/{lease_id}/nonces` | member | R | `RL-WRITE` | 201 | - |
+| `extendLease` | `POST /v1/leases/{lease_id}/extensions` | member | R | `RL-WRITE` | 200 | - |
+| `releaseLease` | `POST /v1/leases/{lease_id}/release` | member | R | `RL-WRITE` | 200 | `lease.released`, `cell.declined` |
+| `createReport` (active only) | `POST /v1/reports` | member | R | `RL-REPORT` | 201 | `report.filed` |
+| `listReports`, `getReport` | `GET /v1/reports`, `GET /v1/reports/{report_id}` | member | - | `RL-READ` | 200 | - |
+| `submitResult` (active only) | `POST /v1/leases/{lease_id}/submission` | member | R | `RL-SUBMIT` | 201 | `submission.received` and the outcome events of 0.9.3 |
+| `getSubmission`, `listSubmissions` | `GET /v1/submissions/{submission_id}`, `GET /v1/submissions` | member | - | `RL-READ` | 200 | - |
+| `getBalance` | `GET /v1/balance` | member | - | `RL-READ` | 200 | - |
+| `listLots` | `GET /v1/balance/lots` | member | - | `RL-READ` | 200 | - |
+| `listLedgerEntries` | `GET /v1/balance/entries` | member | - | `RL-READ` | 200 | - |
+| `getStarterGrant` | `GET /v1/members/me/starter-grant` | member | - | `RL-READ` | 200 | - |
+| `claimStarterGrant` (active only) | `POST /v1/starter-grants` | member | R | `RL-WRITE` | 201 | `ledger.entry_committed` |
+
+### 15.6.1 Services, topics and opt-ins
+
+```
+ServiceView  { id: id<svc>, display_name: text<80>, supports_prefill: bool, copy_only: bool, max_url_chars: int/null,
+               clean_chat_hint_key: copy_key, advice_copy_keys: [copy_key] }
+Topic        { id: id<top>, name_key: copy_key, sensitive: bool, opted_in: bool }
+OptIns       { purposes: [enum<purpose>], sensitivities: [enum<sensitivity>], licenses: [enum<license>],
+               service_requirements: [enum<service_requirement>], service_ids: [id<svc>], topic_category_ids: [id<top>],
+               updated_at: ts }                                                       ETag = row_version
+```
+
+- `listServices` returns only registry entries in state `approved` (0.9.6) with `adapter.*` capabilities (0.8.3); `advice_copy_keys` derive from the `info.*` flags (for example `info.provider_trains_on_chats` = `yes` adds a clean-chat advice key). Every value is entered by a reviewer; nothing here names or assumes a provider [V: `G0`, `G2`]. [D]
+- `replaceOptIns` replaces the whole object. Defaults for a new member come from `optin.default_purposes`, `optin.default_sensitivities`, `optin.default_licenses`, `optin.default_service_requirements`; every sensitive `Topic` is opted out (`optin.sensitive_topics_default` = `false`). `P2` and `P3` need an explicit value; `S2` and `S3` are never accepted values (`400 VALIDATION_FAILED`, reason `option_not_selectable`); a `service_ids` entry must be an `approved` service. A change takes effect for the next `listOfferedCells` and never retroactively cancels a lease already held (`R9` is about policy, not opt-ins). [D]
+
+### 15.6.2 Offers, leasing, declining
+
+```
+CellCard   { task: "run"/"review", purpose: enum<purpose>, license: enum<license>, sensitivity: enum<sensitivity>,
+             service_requirement: enum<service_requirement>, pinned_service_ids: [id<svc>],
+             template: { id: id<tpl>, version_id: id<tpv>, name: text<80>, job_type: enum<job_type> },
+             topic_category_ids: [id<top>], expected_time_s: dur_s, origin: "commons"/"member",
+             provenance: { reviewed_on: date, reviewer_count: int, policy_version_id: id<plv> },
+             downstream_use_uncontrolled: bool, requires_expansion: bool,
+             expansion_reason: null/"first_use_of_template"/"non_default_category" }
+Offer      { cell_id: id<cel>, card: CellCard }
+Lease      { id: id<lse>, cell_id: id<cel>, state: "active"/"submitted"/"expired"/"released"/"revoked",
+             issued_at: ts, expires_at: ts, extensions_used: int, extensions_max: int, submit_grace_until: ts/null }
+WorkOrder  { prompt: { text: string, hash: hash, char_count: int }/null, prompt_state: "available"/"expansion_required",
+             output: { format: "text"/"json", max_chars: int, max_bytes: int, schema_hint_key: copy_key/null },
+             service: { service_id: id<svc>, display_name: text<80>, supports_prefill: bool, open_url: string/null,
+                        copy_only: bool, max_url_chars: int/null }/null,
+             clean_chat_hint_key: copy_key }
+```
+
+`provenance` feeds the card sentence "A stranger asked for this; the text below was reviewed by a reviewer on [date]" (FD§5.5; copy key `copy.cell.provenance_line`, `S11.*`). `origin` tells the volunteer whether it is a Commons job or a member job and nothing about who asked. `downstream_use_uncontrolled` is `true` for `P1` output (FD§5.7 failure mode 3).
+
+**What a volunteer can never learn from the API** [D][A]: `cell_kind` and whether a cell is `primary`, `gold`, `audit`, `third` or `rework`; a `review` cell appears only as `task` = `review` (its gold cells stay hidden); the job, the requester, the other executor of an audit, or any comparison result. Gold and audit cells are therefore indistinguishable from primary cells before submission (`ISS-152`).
+
+```
+listOfferedCells(member, filters, cursor):                       order: server priority (S8.*, S9.*), never price or requester
+  candidates = cells with state = queued
+  keep only cells visible to member under R8:
+      cell.purpose in optin.purposes AND cell.sensitivity in optin.sensitivities AND cell.license in optin.licenses
+      AND cell.service_requirement in optin.service_requirements
+      AND (topics of the cell not sensitive OR in optin.topic_category_ids)
+      AND exists s in optin.service_ids that satisfies the requirement (M0: any approved; M1: in pinned set; M2: open-weight entry)
+  drop: Commons cells while launch.minting_enabled = false or kill.all_minting is engaged; cells of a paused template or a suspended service;
+        cells of the member's own jobs; cells the member already executed or declined; audit cells whose first executor is the member
+  drop: everything if member headroom or daily earn cap leaves no room (see createLease quotas)
+  window = first `limit` after the cursor ; filters (service_id, template_id, job_type) can only narrow, never widen
+```
+
+The list carries card metadata only, never the prompt (limits bulk harvesting of requester text to members who actually take the work; FD§5.5 "can see" holds because decline after viewing the prompt is free). A cell on a page may be leased by someone else before the member acts; that is the normal race, not an error of the list. [D]
+
+```
+createLease(member, cell_id, service_id):        req { service_id: id<svc> }
+  201 { lease: Lease, cell: { id: id<cel>, card: CellCard }, work: WorkOrder, nonce: b64u<16> }   nonce appears here and in issueLeaseNonce only
+  pipeline gates:   member active; launch.minting_enabled for Commons cells; kill switches (template, service)
+  visibility:       cell not visible under R8, own-job cell, already-executed cell            -> 404 NOT_FOUND
+  service:          service_id not in optin.service_ids or not eligible for the requirement   -> 422 UNPROCESSABLE (service_not_eligible)
+  quota:            active leases >= lease.max_active_per_member                              -> 422 CAP_EXCEEDED (active_lease_limit)
+                    balance + 1,000,000 ucr x (active leases + 1) > member cap               -> 422 CAP_EXCEEDED (member_credit_cap)
+                    earned today + 1,000,000 ucr x (active leases + 1) > mint.per_member_daily_cap_credits -> 422 CAP_EXCEEDED (daily_earn_cap)
+  race:             in one transaction: UPDATE cells SET state = 'leased' WHERE id = :id AND state = 'queued'   (exactly one winner)
+                    loser                                                                     -> 409 LEASE_CONFLICT (cell_not_queued)
+  effect:           Lease(active, expires_at = issued_at + lease.timeout_s); nonce stored as SHA-256 only; events cell.leased, lease.issued
+```
+
+The two cap checks at lease time use "potential earnings" so a member cannot hold credit they could not be paid; the member cap is `credit.member_cap_credits` x `trust.cap_multiplier.<tier>`; where `S6.*` places enforcement differently, `S6.*` wins [A]. `getLease` returns the lease and the work order while `state` is `active` (the prompt only when `prompt_state` is `available`) and metadata only afterward; it never returns the nonce.
+
+- **Mandatory expansion** (FD§5.5). When `requires_expansion` is `true`, `createLease` and `getLease` return `prompt: null`, `prompt_state: expansion_required`; `expandLeasePrompt` returns the prompt and records the expansion on the lease, and `submitResult` without it is `409 STATE_CONFLICT`, reason `expansion_required`. The server can prove the prompt was requested, not that it was read ("can see" is guaranteed, "has read" is not). `requires_expansion` is `true` for the member's first lease on a `template_id` and for any non-default category (`optin.sensitive_topics_default`, `P2`, `P3`); `ui.card.expand_required_first_use` is a constant `true`. [D][H: whether this reduces blind pasting is measured by `ui.comprehension_check_rate` experiments, `S13.*`]
+- **Adapter.** `work.service` is built server-side from the registry entry. `open_url` is the entry's `adapter.prefill_url_template` with `{prompt}` URL-encoded, present only if `adapter.supports_prefill` is `true`, `prefilled_link_use` is `yes` and the result is at most `adapter.max_url_chars` long; otherwise `open_url` is `null` and `copy_only` is `true`. The URL never contains the lease, nonce, cell id or any member identifier. The member presses Send in the service; the platform never reads that page [D][V: per service, `G0(c)`, `G2`].
+- **Lost nonce.** `issueLeaseNonce` mints a new nonce for an `active` lease and invalidates the previous one (a page reload must not strand a lease). `extendLease` adds `lease.extend_s` once per allowed extension (`lease.max_extensions`); beyond it `409 STATE_CONFLICT`, reason `max_extensions_reached`. An expired lease is `410 LEASE_EXPIRED`.
+- **Decline is free** (FD§5.5, `lease.decline_cooldown_s` = 0). `releaseLease` takes `{ reason?: enum<decline_reason> }`, ends the lease (`released`), returns the cell to `queued` without raising `attempt`, and excludes that cell from this member's offers. `declineOffer` does the same for a card the member never leased (it records the decline for the demand-quality signal by category, never as a penalty). `decline_reason`: `not_interested`, `too_long`, `service_problem`, `content_concern`, `other` (convention addition). [D]
+
+### 15.6.3 Reports
+
+```
+createReport  req { subject_kind: "cell"/"lease"/"template"/"job"/"result", subject_id: id<cel>/id<lse>/id<tpl>/id<job>/id<sub>,
+                    category: enum<report_category>, note: text<500>? }
+              201 Report { id: id<rpt>, state: "open"/"triaged"/"actioned"/"dismissed", category, created_at: ts }
+```
+
+`report_category` (convention addition): `prohibited_content`, `sensitive_data`, `injection_attempt`, `link_or_action_request`, `wrong_declaration`, `abusive_or_unsafe`, `other`. A volunteer may report any card they hold a lease for; a requester may report a `result` of their own job. The reported party never sees the reporter; reports count toward `template.autopause_report_count` within `template.autopause_window_s` (event `template.paused`, `S8.*`); a report never changes the reporter's tier. Limit: `report.max_per_member_per_day` per UTC day (`RL-REPORT`). [D]
