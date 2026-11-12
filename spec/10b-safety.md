@@ -128,3 +128,59 @@ One row per threat. Columns follow prompt scope I: actor, goal, attack, impact, 
 - The table is re-read, and new rows are added, at every secret rotation cycle (`security.secret_rotation_days`), before any new public surface or `ff.*` flag is enabled, after any incident, and when a new data field is proposed (S10.13.8).
 - A mitigation that names a parameter holds only while the parameter stays inside the range its row implies; a loosening change to such a parameter triggers a threat-model re-read (S10.13.8).
 
+## 10.13 Member safety design
+
+Context: some members may be in Iran, where participation may carry personal risk (`RISK-05`). The design promises minimization, never anonymity (FD Principle 8). [P]
+
+### 10.13.1 Safety rules [D]
+
+Numbered for reference as "S10.13.1 item n".
+
+1. **Pseudonymity by default.** Identity is a key pair made on the device. No name, phone number, social login or government identity is requested anywhere. E-mail is optional (`identity.email_optional` = true) and never a condition of any feature (FD§3.2).
+2. **Minimal collection.** Only the data in S10.13.2 exists. A new field, event or log line first passes S10.13.8.
+3. **No location.** The server never derives or stores a place from an IP address, time zone, locale or any API (S0.6.2); the client never requests geolocation permission; `public.location_display` = `never` by default (FD§6.1 rank 5). With `opt_in`, only a free-text label the member typed is shown, unverified, with a warning, and never for a group below `team.min_public_members`.
+4. **No fingerprinting.** A `Device` is a random client-generated token stored as a keyed hash (`secret.device_hash_key`, [A]). No canvas, audio, font-enumeration or hardware identifiers are read. The request log keeps no `User-Agent`. Constraint on S10.*.
+5. **No third-party requests** from any page, script, font or image (S10.15.5).
+6. **No raw IP stored** (`retention.raw_ip_stored` = false). Rate-limit counters use the daily-rolling `secret.ip_hash_key` (S10.14.4) and hold no member id.
+7. **Retention is enforced by jobs, not by intent.** Every retention class in S0.7 has a sweep; a sweep that falls behind raises an alarm (`hamyar_retention_overdue_rows_total` > 0).
+8. **Closure deletes.** On `member.closed` the sweep (interval `retention.sweep_interval_s`) deletes or opaques all `member_bound` rows; the ledger keeps only the opaque `mem_` id and day-granular times (`ISS-104`). Backups lose the data within `retention.backup_days`.
+9. **No content in logs.** Logs and metrics never contain submitted text, cell input or output, or any free text. Allowed fields: UTC minute, method, route template, status, duration, `request_id`, `principal_type`.
+10. **Admins see less than the database holds.** No admin screen shows IPs, e-mail, device hashes or public keys. The e-mail ciphertext is reachable only through the two-person disclosure path (S10.13.5).
+11. **Public surfaces are aggregates** with small-cohort suppression (`analytics.min_cohort_k`); per-member rows are never public.
+12. **Plain words.** Copy never says anonymous, untraceable, safe or guaranteed (Persian equivalents included, marked `needs_human_and_legal_review`).
+
+### 10.13.2 Data inventory (everything that is collected) [D]
+
+| Data item | Stored in | Why | Retention | Identifies a person by itself? | Who can read it |
+| --- | --- | --- | --- | --- | --- |
+| Member public key(s) | `member_keys` | Verify signatures | `member_bound` | No | System only |
+| `mem_` id, `status`, `trust_tier`, creation day | `members` | Account | `member_bound` | No | Admins see id, status, tier only |
+| Optional e-mail, only if the member supplies it | Ciphertext under `secret.email_encryption_key` [A] | Recovery notices if the identity file uses them | Deleted at `member.closed` | Yes, strongly, if supplied | System; decrypted only via S10.13.5 |
+| `Device` keyed hash | `devices` | Limits, `grant.max_per_device`, linking | `short` | No | System only |
+| Session token hash | `sessions` | Authentication | `retention.session_days` | No | System only |
+| IP-hash counters (key hash, window, count) | Rate-limit store | Abuse limits | `retention.ip_hash_ttl_days`, key destroyed after | No once the key is destroyed; within the window a key holder can test a candidate IP | System only |
+| Cell input and output text, uploads | `cells`, `submissions`, `uploads` | The work | Payload purged `retention.job_payload_days` after the job is terminal | Not by policy (S0 and S1), but a requester may have typed personal text | Leasing volunteer; reviewers when flagged or reviewed; the requester (own job) |
+| Hashes and manifests (with `vol_` handle) | `manifests`, `submissions` | Provenance (FD§5.6) | `job_bound`, hashes stay | No; handle maps to a member only with its key version | Requester sees the manifest without handle; admins see the handle |
+| Ledger entries and lots | `ledger_entries`, `credit_lots` | Credit | `permanent` | A pseudonymous activity trace per `mem_` account | Admins; public page shows aggregates only (S10.13.6) |
+| Reports and appeals | `reports`, `appeals` | Moderation | `retention.moderation_days` after resolution, then counts | Pseudonymous ids only | Reviewers |
+| Admin action log | `admin_actions` | Accountability | `permanent` | Contains `mem_` and `adm_` ids, no free personal text (reason codes only) | Operators and reviewers |
+| Request and ops logs | Log sink | Debugging | `retention.request_log_days`, `retention.ops_log_days` | No (fields in item 9) | Operators |
+| Analytics events | `events` | FD§9 measures | `retention.event_raw_days` | Member reference is `HMAC-SHA-256(secret.analytics_key[version], member_id)` [A] | Operators; aggregates only for publication |
+| Backups | Blob store | Recovery | `retention.backup_days` | Contains all of the above | Key custodians (S10.14.3) |
+| `TermsCopy` bytes, `GoldCell` answers | Blob store, `gold_cells` | Evidence, verification | `permanent` | No | Reviewers |
+
+**Never held by the platform** [D]: raw IPs, names, phone numbers, locations, hardware or browser fingerprints, plaintext e-mail, any provider credential or session, any chat page or its text (ground rule 3), message bodies in logs, private keys, recovery keys (the server keeps only a verifier, identity file).
+
+### 10.13.3 What each observer can see [D]
+
+| Observer | Can see | Cannot see | What the platform controls | What it cannot change |
+| --- | --- | --- | --- | --- |
+| `network_observer` (passive) | Member's IP and the host's IP; DNS lookups unless encrypted; the host name in the TLS handshake unless encrypted client hello is used [V]; timing and volume, from which screens may be inferred | Paths, headers, tokens, bodies, cell text (TLS), unless a device or certificate authority is compromised | HTTPS only, HSTS [V], no third-party hosts, neutral content, no tracking | That a device contacts the host at all |
+| `network_observer` (active) | The above, plus blocking, throttling, resetting, injection against users who click through certificate warnings | Same | Copy tells members never to bypass a certificate warning | Blocking. No circumvention is offered (S10.15.1) |
+| `host_provider` | Whatever the layout gives it: at least disks, snapshots, memory, the secrets handed to the process, and provider-level network logs; at a TLS-terminating edge, plaintext requests and IPs [V per host] | Member private keys and recovery keys (never sent); backups' contents without `secret.backup_encryption_key` | Collects nothing beyond S10.13.2; chooses a host and logging settings by G1 decision | Provider-level logs and legal duties of the provider |
+| Operators (`operator_insider`) | Admin-tool views, `AdminAction`, database through role-separated access | IPs and e-mail through the tool; secret values (S10.14.3) | Two-person actions; public change log | What a deployer can do by changing code (`THR-13`) |
+| `other_member` | Own data; public aggregates; a team's total if the team is public | Any other member's id, handle, activity or place | `vol_` handle never shown to requesters or members | Writing style and what members say about themselves |
+| `requester_malicious` and honest requesters | Own jobs, results, manifest without handle | Which member did a cell | Handle withheld; key rotated | Stylometry of outputs |
+| Public visitor | Counter, public ledger aggregates, parameters, change log, milestones | Per-member rows; trees; places | Suppression below `analytics.min_cohort_k`; `public.ledger_lag_s` | Inference from small or timed aggregates beyond the suppression |
+| `provider_service` | The prompt and the volunteer's reply, tied to the volunteer's own account | Nothing is sent to it by us; no automation exists | Template and registry review | Everything the volunteer's own account exposes (`THR-31`) |
+
