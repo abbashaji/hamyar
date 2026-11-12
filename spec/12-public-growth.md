@@ -257,3 +257,99 @@ reached|published --milestone.withdrawn--> withdrawn   legal or safety finding; 
 - **Framing:** knowledge access, not politics (FD§6.1 rank 2).
 - **Where the output lives** (host, mirror, reachability from Iran) is [V]: verified by the operator, stored in `output_url` and the G2 `LaunchGateItem`.
 - Phase 1 and 2 behavior and the randomized in-app announcement: S12.12 `V6`.
+
+## 12.7 Badges
+
+### 12.7.1 Definition [D]
+
+A `Badge` (`bdg_`, `permanent`) is a recognition mark whose criterion is expressed in verified cells only (S0.7). FD§6.1 rank 4: reputation comes from verified quality, not volume, and there are no streak penalties. Therefore badges are recognition only; the `trust_tier` (S0.9, `S8.*`, `S10.*`) is the only reputation mechanism with effects.
+
+- A badge **never** changes a cap (K), a sampling rate, a price, admission, `trust_tier`, or any ledger balance. No `LedgerEntry` is created for a badge.
+- There is **no individual ranking or leaderboard** of members, public or private (FD Principle 8). Competition exists only between teams (S12.9).
+- Criteria count accepted cells of every `cell_kind` identically (S12.1 rule 6).
+
+| Field | Rule |
+| --- | --- |
+| `badge_key` | Natural key, e.g. `cells_10`, `days_30`, `review_cells_10`, `milestone_<milestone_key>` |
+| `family` | `cells`: accepted cells total at least N. `days`: distinct UTC days with at least one accepted cell, at least N (cumulative, never consecutive, so no streak can break). `review_cells`: accepted `review` cells at least N (human-review channel, `ff.channel.human_review`). `milestone`: at least one of the member's cells is inside a `published` milestone output |
+| `threshold` | N, from parameter `growth.badge.thresholds` (S12.13); null for `milestone` |
+| `title_key`, `description_key`, `version`, `is_active` | Definitions are immutable rows; a changed criterion is a new row and the old one is deactivated for new awards |
+
+`BadgeAward` (`baw_`, `member_bound`): `member_id`, `badge_id`, `awarded_at`, `evidence_value`, `state` (`awarded`, `revoked`), `revoked_at`. Events `badge.awarded`, `badge.revoked`.
+
+### 12.7.2 Evaluation [D]
+
+```
+on cell accepted (outbox event) for member m:   re-evaluate families cells, days, review_cells
+on milestone.published:                          award family milestone to members with a cell in the manifest
+on cell.overturned for member m:                for each held badge of families cells, days, review_cells:
+                                                     if current criterion value < threshold: state = revoked  (badge.revoked)
+on any later re-evaluation that meets the criterion again: state = awarded (new BadgeAward row)
+Awards are idempotent: UNIQUE(member_id, badge_id) among state = awarded.
+on member.banned: awards are hidden from every surface; rows are kept.
+```
+
+Reason for revocation on overturn only: one honest overturn should not strip recognition permanently, but a badge must not stand on cells that no longer count. Badges are private to the member by default; they appear on a share card only if the member selects them (S12.8).
+
+## 12.8 Share cards (V3)
+
+### 12.8.1 Design decisions [D]
+
+- **Client-side only.** The card is rendered on the member's device from a payload the server returns on request; the server stores no card, hosts no per-member card page and mints no per-member share token. Reason: any per-member public URL or token would link a pseudonym to a public post (FD Principle 8).
+- **Explicit action only.** The card is generated only when the member taps a share control; a preview shows exactly the fields and the rendered image; nothing is posted by the platform, no social account is connected, no third-party SDK is loaded (`analytics.third_party_trackers` = false). Sharing uses the device's own share or copy capability [V: support on the target phones, `LaunchGateItem` G2].
+- **Eligibility:** `ff.growth.v3_share_card` on, member `status` `active`, tier not `restricted`, at least one accepted cell.
+- **No authority:** a card is not a verifiable artifact and the footer says so (`copy.growth.share_card_footer`).
+- **Rendering:** bundled fonts only, RTL for `fa`, Persian numerals per `digits`, text alternative provided; no external image or font.
+
+### 12.8.2 Card content spec [D]
+
+`getShareCardPayload` returns an object validated with `additionalProperties: false`:
+
+| Field | Source | Shown on card |
+| --- | --- | --- |
+| `cells_verified_total` | the member's own accepted cells, all kinds (S12.1 rule 6) | yes, exact |
+| `badges` | up to the member-selected `badge_key`s the member holds | yes, only selected |
+| `locale`, `digits` | member settings | text language and numerals |
+| `landing_url` | the generic landing address with source tag `s=c` | yes; contains no member data |
+| `card_version` | int | no |
+| static strings | `copy.growth.share_card_footer`, mission line | yes |
+
+**Forbidden on any card or payload:** any id (`mem_`, `vol_`, `lac_`, `dev_`, `ses_`); a handle, alias or name; team name or label; join date or any time other than none; per-day activity; service, provider or model names and logos; job content or titles; trust tier; credit balance or amounts; rank; location, time zone, device or browser data; a QR code or link that encodes anything member-specific.
+
+### 12.8.3 Attribution and measurement limits [D]
+
+The landing page records a first-touch `source` from the generic tag (`c` card, `r` referral invite, `m` milestone page, none = direct) on the new member's `member.created` event, never from an IP address or cookie. Consequence (`ISS-124`): V3 can measure (a) share taps per exposed member, randomized by the offer, and (b) arrivals with source `c` over time, which is descriptive and confounded. It cannot give a randomized estimate of new members gained per card, because that would need a member-specific token on the card. Adding one is an owner decision for the G1 threat model [V].
+
+## 12.9 Teams (V4)
+
+### 12.9.1 Entities and states [D][A]
+
+`Team` (`tem_`, `member_bound`) as in S0.7. `TeamMembership` is a new entity (`tmm_`, `member_bound`, `ISS-128`): `team_id`, `member_id`, `joined_at`, `left_at` (null while active). A member has at most one active membership.
+
+| `Team` field | Rule |
+| --- | --- |
+| `name` | Free text up to `team.label_max_chars`; no URLs, e-mail-like or phone-like patterns; reportable (`Report`) |
+| `join_mode` | `code` (default, private) or `listed` (appears in the public list) |
+| `group_label` | Exists only when `public.location_display` = `opt_in` (below); otherwise the field is rejected with `VALIDATION_FAILED` and never stored |
+| `state` | `active`, `locked` (reviewer action after a report), `disbanded` (T) |
+| size | at most `team.max_members` active members |
+
+Events: `team.created`, `team.joined`, `team.left`, `team.locked`, `team.unlocked`, `team.disbanded`. Creating needs `trust_tier` at least `team.create_min_tier`; joining needs `status` `active` and tier not `restricted`.
+
+### 12.9.2 Rules [D]
+
+- **Opt-in only.** Creating or joining is an explicit act. No auto-assignment, no suggestion from inferred attributes, no import of contacts. Leaving is one action and removes the member from future scores.
+- **Scoring on verified cells.** `score(team, period)` = accepted cells of every `cell_kind` whose acceptance time lies in the period and inside the member's membership interval `[joined_at, left_at)`. A cell counts for the team the member was in at acceptance; history is not imported on joining. Periods: the current UTC calendar week (Monday 00:00 UTC) and all time. A later overturn lowers the score.
+- **Teams see only totals.** A team page shows member count, weekly and all-time score. It shows no member list, no per-member contribution, no alias in Phase 1 (basic teams). Reason: pseudonymity inside a group is not guaranteed by the platform, so the platform shows nothing to correlate.
+- **Public listing:** only teams with `join_mode` = `listed`, `state` = `active` and at least `team.min_public_members` active members; a team falls out of the list the moment it drops below that size.
+- **Location by default: never.** With `public.location_display` = `never` no team carries any place or affiliation label. With `opt_in`: the creator may type a `group_label` (city, school); the platform never infers or verifies it; `copy.growth.team_group_label_warning` is shown before anyone joins; the label is public only for listed teams of at least `team.min_public_members`; no per-member place is ever shown. Iran-based members are not shown by place by default (FD§6.1 rank 5) because the default is `never` and nothing is inferred.
+- **Phase 2 “full” teams** (FD§6.1): optional in-team aliases, default off per member, only after the G1 threat model covers them [V].
+- **Randomization:** only the in-app offer is randomized (S12.12 `V4`); joining by a code stays possible for everyone while the flag is on.
+
+| Operation (proposal) | Route | Idempotency-Key |
+| --- | --- | --- |
+| `createTeam` | `POST /v1/teams` | required |
+| `getTeam`, `listTeams` | `GET /v1/teams/{team_id}`, `GET /v1/teams` | n/a |
+| `joinTeam` | `POST /v1/teams/{team_id}/memberships` | required |
+| `leaveTeam` | `DELETE /v1/team-memberships/{membership_id}` (sets `left_at`; the row stays) | required |
+| `reportTeam` | `POST /v1/teams/{team_id}/reports` | required |
