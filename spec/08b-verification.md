@@ -1,0 +1,687 @@
+# 8. Templates and verification pipeline: verification (part 8b)
+
+*Spec part 8b · file `spec/08b-verification.md` · provenance: cell C-009 · binding on every part that creates, checks, pays or measures cells. Written against Founding Document draft v0.1 (FD) and `spec/00-conventions.md` (S0). Nothing here is legal advice; nothing is verified against any provider's terms. Every number is derived by a shown formula or is an `initial configurable default` that exists in the parameter table (S0.10.6) or in 8.37.*
+
+## 8.20 Scope, boundaries and what this part reads
+
+This file is the second half of S8. The template half owns the template format, the first template set and template review. **This half owns what happens to a cell's result after it is pasted back:** the order of checks, gold cells, audits, redundancy, human review, the reliability estimator, adaptive sampling, the error-rate estimators, counting into v, payment, rejection reasons, appeals handoff, the human-review channel and the ban on model-based judging. Sub-headings start at `8.20` so they cannot collide with the template half (`ISS-84`). [D]
+
+| Prompt scope E bullet | Where it is specified |
+| --- | --- |
+| Automatic checks | 8.22, 8.23 |
+| Hidden gold cells: rate g, insertion, reliability | 8.24, 8.28 |
+| Sampled audits: rate s, comparator, third execution | 8.25 |
+| Adaptive sampling with a floor | 8.29 |
+| Blanket redundancy for new donors and high-risk templates | 8.26 |
+| Human review cells with their own gold cells | 8.27 |
+| Appeals | 8.34 |
+| Estimation of donor reliability, false-accept and false-reject rates, with limits | 8.28, 8.30, 8.40 |
+| v and rework counting, payment, rejection reasons, channel 2, no model judging | 8.31, 8.32, 8.33, 8.35, 8.36 |
+
+**Boundaries.** [D]
+
+- Lease, nonce, size limit, schema validation, escaping, replay handling, and the detectors for timing anomalies and copy-paste of another donor's output are S9.*. This part consumes their signals (8.23) and decides what an anomaly causes.
+- Ledger postings (`mint`, `transfer`, `reversal`), escrow and settlement are S6.*. This part states which cell earns what and when it is accepted; S6.* posts it.
+- Policy rules `R1`..`R10` are S7.*. This part only places the `R9` re-check in the order (8.22).
+- Appeal states and the review UI are S10.* and S11.*. This part defines the evidence and the effects (8.34).
+- Ground rule 3 applies: nothing here reads a volunteer's chat page, stores a credential or session, or submits for a volunteer. The service and model of a result are **attested by the volunteer, never proven**; verification treats them as audit metadata only. [P] FD§5.6
+
+**Fields this part reads from `TemplateVersion`** (the template half owns the format; the object below is embedded under the key `verification`; a different shape is reconciled at assembly, `ISS-84`). [A]
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `verification.risk_class` | enum `standard`, `high` | `high` forces blanket redundancy (8.26). Set by a reviewer at approval; none is `high` by default in Phase 1 (`ISS-85`) |
+| `verification.comparator` | id + version | Deterministic comparator for audits and gold (8.25) |
+| `verification.subjective` | bool | True when no comparator can decide equivalence; audits become human review (8.27) |
+| `verification.auto_checks` | list of ids | Automatic checks in order, each with a reason code (8.23) |
+| `verification.gold_pool_min` | int | Minimum number of active gold items before the template may be leased (8.24) |
+
+## 8.21 Vocabulary and definitions [D]
+
+| Term | Definition |
+| --- | --- |
+| Acceptable output | An output that passes the template's automatic checks and is equivalent to the reference or to the majority under the template's comparator. "Bad" is relative to the template's declared checks, never to absolute truth (limit 8.40-L11) |
+| Observation | One pass or fail about one executor, produced by a gold result, a resolved audit or redundancy group, or an accepted review verdict. Inconclusive outcomes are not observations |
+| Scope | `exec` (executing cells) or `review` (human-review cells). Reliability, adaptive state and restriction are kept per scope |
+| Selection | How a verification event was triggered: `random` (a CSPRNG draw), `forced` (an anomaly or a rule), `blanket` (a redundancy plan). Only `random` events enter the false-accept estimators |
+| Inclusion probability `pi` | The probability, in ppm, that this cell was selected for the random audit draw, recorded at draw time |
+| Floor band | The part of the draw range `[0, floor)`; events in it are always executed |
+| Verification cell | A cell with `cell_kind` in `gold`, `audit`, `third`, `review`, `rework` (S0.8.6) |
+| Sponsor job | The job whose pool pays for a gold instance placed into one of its lease slots (8.24) |
+| False-accept | An accepted primary cell whose output is bad under the definition above. Rate = bad accepted cells / accepted primary cells |
+| False-reject | A good submission that the pipeline rejected. Rate = good submissions rejected / good submissions |
+
+Constants used from S0: `credit.scale_ucr_per_credit` = 1,000,000; ratios are integer ppm; donor earn is exactly 1,000,000 `ucr` per accepted cell of any kind (S0.6.1). Verification stores `*_ppm` integers; floating point appears only inside the Beta quantile (8.28) and is rounded as stated there. [D]
+
+## 8.22 Pipeline order, pseudocode and state transitions
+
+### 8.22.1 Order [D]
+
+| Stage | Name | Owner | Failure result |
+| --- | --- | --- | --- |
+| P0 | Intake: lease, nonce, size, schema, escaping, replay | S9.* | `submission.schema_failed`; reasons `reject.nonce_invalid`, `reject.lease_expired`, `reject.size_exceeded`, `reject.schema_invalid` |
+| P1 | Automatic checks (template list) | 8.23 | `submission.checks_failed`; reason from the failing check |
+| P1b | Quarantine screen (links, code to run, requests for action) | S9.* | `submission.quarantined`: no acceptance, no payment, no observation until released |
+| P2 | Anomaly intake (timing, duplicate of another donor's output) | S9.* detect, 8.23 decide | `forced` audit, or rejection if S9.* rules say so |
+| P3 | Kind dispatch | 8.22.2 | per kind |
+| P4 | Verification plan for primary and rework cells: blanket, forced audit, random audit or human review, or none | 8.25, 8.26, 8.27 | `cell.flagged_for_audit` |
+| P5 | Policy re-check `R9` (`policy.recheck_on_accept` = true) | S7.* | `cell.voided` with reason `reject.policy_changed`; no payment is posted by this part |
+| P6 | Acceptance and payout request to S6.* | S6.* | `cell.checks_passed` or `cell.audit_passed` |
+
+Stages never run out of order and a later stage never overrides an earlier failure: a model verdict, a review verdict or an audit match cannot accept a cell that failed P0, P1 or P1b. [D]
+
+### 8.22.2 Pseudocode
+
+```
+function verify_submission(sub):                 # called once per Submission in state checks_passed (P0 done)
+  cel = cell_of(sub); tv = template_version_of(cel)
+  res = run_auto_checks(sub, tv.verification.auto_checks)           # P1, deterministic, no execution of content
+  if res.failed:
+      record(sub, method=auto_check, outcome=fail, reason=res.reason, selection=none)
+      if cel.kind == gold: record_observation(executor(sub), scope(cel), FAIL, source=gold)   # 8.24
+      return reject(cel, res.reason)
+  record(sub, method=auto_check, outcome=pass)
+  if quarantine_screen(sub): return hold_quarantined(sub)                                    # P1b
+  anomalies = s9_anomaly_signals(sub)                                                        # P2
+  if anomalies.reject: return reject(cel, anomalies.reason)
+  switch cel.kind:                                                                           # P3
+    case gold:               return resolve_gold(sub)                                        # 8.24
+    case audit, third:       return add_execution_to_group(sub)                              # 8.25, 8.26
+    case review:             return accept_review_cell(sub)                                  # 8.27
+    case primary, rework:    plan = choose_plan(sub, anomalies)                              # P4
+  if plan.kind == NONE:      return accept(cel)                                              # P5, P6
+  open_group(cel, plan)                                                                      # Audit row, verification cells created
+  emit cell.flagged_for_audit(cel, reason = plan.reason)
+
+function choose_plan(sub, anomalies):
+  m = executor(sub); tv = template_version_of(cell_of(sub))
+  if blanket_required(m, tv, cell_of(sub)):  return Plan(BLANKET, n = verify.blanket_redundancy_n, reason = blanket_redundancy_pending)
+  if anomalies.force_audit:                  return Plan(AUDIT, selection = forced, reason = anomaly)
+  (pi, in_floor_band_only) = inclusion_probability(m, cell_of(sub))                          # 8.29
+  u = csprng_uniform_ppm()                  # integer in [0, 1_000_000), fresh per submission
+  if u < pi:
+      return Plan(tv.verification.subjective ? HUMAN_REVIEW : AUDIT, selection = random, pi_ppm = pi, reason = sampled)
+  return Plan(NONE)
+
+function blanket_required(m, tv, cel):
+  return member_state(m, exec).blanket_remaining > 0          # new donor's first verify.new_donor_blanket_cells cells
+      or tv.verification.risk_class == high
+      or (cel.kind == rework and cel.overturn_reason == integrity)
+```
+
+The draw `u` is made only after P1 to P2 passed, uses the server CSPRNG, and its value and `pi_ppm` are stored on the `Audit` or `VerificationRecord` (`selection`, `inclusion_prob_ppm`). A cell that is not selected stores `selection = random`, `outcome = pass` for the `auto_check` record only, and its `pi` is kept in `cell_sampling_log` (a column pair on the cell, `sampling_pi_ppm`, `sampling_draw_ppm`) so the false-accept estimator can weight it (8.30). [D][A]
+
+### 8.22.3 Cell transitions used (S0.9.3 names, no new states)
+
+| From | Event | To | Condition |
+| --- | --- | --- | --- |
+| `submitted` | `cell.checks_failed` | `rejected` | P1 or P2 rejection, or a gold fail |
+| `submitted` | `cell.checks_passed` | `accepted` | plan NONE; or a gold pass; or an accepted verification cell that needs no group |
+| `submitted` | `cell.flagged_for_audit` | `flagged_for_audit` | plan AUDIT, HUMAN_REVIEW or BLANKET; reason one of `sampled`, `anomaly`, `blanket_redundancy_pending` |
+| `flagged_for_audit` | `cell.audit_passed` | `accepted` | primary is in the majority, or the audit matched, or the audit slot was exhausted for reason `sampled` (outcome `inconclusive`, recorded as `audit_coverage_gap`) |
+| `flagged_for_audit` | `cell.audit_failed` | `rejected` | primary in the minority, or no majority (8.25) |
+| `rejected` | `cell.requeued` | `queued` | primary or rework cell, `attempt` below `cell.max_attempts`, or a verification cell rejected by P1 (the slot stays open) |
+| `rejected` | `cell.attempts_exhausted` | `exhausted` | attempts spent; **also** every verification cell rejected on content (`reject.gold_mismatch`, `reject.audit_mismatch`, `reject.review_unacceptable`): its single attempt is used up [A] |
+
+A `gold` instance has an attempt limit of 1, an exception to `cell.max_attempts` stated here (`ISS-84`). A gold cell whose lease expires returns to the pool as a new instance for another member. A cell stuck in `flagged_for_audit` for a reason other than `sampled` is never released without a verdict: after `job.max_overrun_ratio` pressure it goes to an operator queue (S14.*), not to `accepted`. [D]
+
+## 8.23 Automatic checks and anomaly intake [D]
+
+Automatic checks are the cheapest stage (FD§4.4 step 1). The template half defines each check; this part fixes the contract.
+
+- A check is a pure, deterministic function `check(output, input, ctx) -> pass | fail(reason_code)`. It never executes submitted content, never calls a model, never fetches a URL. A check that needs execution of submitted code is not allowed in Phase 1 (S9.*); such a template uses parse-level checks only. [D]
+- Checks run in the template's order and stop at the first failure. The failing check's `reason_code` maps to a donor-visible reason (8.33). Standard checks: schema validity, length bounds (`cell.envelope.max_output_chars`), language, refusal-pattern detection, format validator, forbidden content.
+- Automatic-check failures on organic cells are **not** reliability observations (they are a gate, not a quality sample) but are counted per member in `auto_fail_rate` for support and S9.* abuse tooling. On gold cells they are fails (8.24). [D]
+
+**Anomaly signals consumed from S9.*** (S9.* owns detection and thresholds `verify.timing_min_s`, `verify.duplicate_similarity_threshold`):
+
+| Signal | Meaning | Default action here | Reliability effect |
+| --- | --- | --- | --- |
+| `timing_below_min` | `submitted_at - leased_at < verify.timing_min_s` | `force_audit` | step-up of the adaptive factor (8.29) |
+| `duplicate_of_other_output` | similarity to another member's output ≥ `verify.duplicate_similarity_threshold` | `force_audit`; S9.* may instead reject with `reject.duplicate_of_other_output` | step-up; a rejection counts as one fail with `source = anomaly` |
+| `forgery_finding` | S9.* integrity finding | S9.* voids or restricts | `member.restricted` (S10.*, S9.*) |
+
+In every case an anomaly overrides the random draw (`selection = forced`) and **cannot lower** any sampling rate. A `forced` audit that passes is an exonerating observation for the member (counted); it is excluded from the false-accept estimators because selection by suspicion is not random (8.30). [D]
+
+## 8.24 Gold cells
+
+### 8.24.1 The library [D]
+
+`GoldCell` (`gld_`, permanent, S0.7) is a known-answer item. Its reference answer is access-restricted: readable only by the verification worker (`system`) and by reviewers holding `perm.verify.read_gold` (S10.* assigns it; name registered in `ISS-84`).
+
+| Field | Rule |
+| --- | --- |
+| `status` | `draft`, `active`, `quarantined`, `retired` (machine below) |
+| `job_type`, `template_id` | An item belongs to one template; a primary-execution item and a review item are separate (`gold_kind`: `exec`, `review`) |
+| `input_ref`, `reference_ref` | Input and reference stored as content-hashed blobs; the reference is never sent to any member |
+| `reference_source` | `reviewer_authored`, `deterministic` (a validator or checker defines correctness), `reviewer_approved_consensus` (a majority output a reviewer approved). Consensus without reviewer approval is never a reference: correlated model error would become "truth" (limit 8.40-L6) |
+| `polarity` | Review items only: `acceptable` or `unacceptable`, the known verdict |
+| `source_license_ref` | The license record of the source text. Input must be `S0` and its license must allow display under any card face it can be attached to [V: reviewer records the license per item] |
+| `exposure_count`, `activated_at`, `retired_at`, `leak_flag` | Maintained by 8.24.4 |
+
+```
+(none)       --gold_cell.drafted-->      draft
+draft        --gold_cell.activated-->    active        guard: approved by a reviewer who is not the author; pool rules pass
+active       --gold_cell.quarantined-->  quarantined    leak signal (8.24.5), a defect found on appeal, or a manual flag
+quarantined  --gold_cell.reactivated-->  active        guard: reviewer clears it, new `activated_at`
+active|quarantined --gold_cell.retired--> retired (T)  exposure cap reached or manual
+```
+
+A template may be leased to members only while its active gold pool holds at least `verification.gold_pool_min` items; below that the template is paused for new cells (`template.paused`, kill-switch path S14.*) and an alarm is raised. This keeps gold detectability and rates from degrading silently. [D]
+
+### 8.24.2 Insertion: substitution at lease time [D]
+
+Gold is inserted when a member leases a cell. The member picks a card; the server decides, per lease, whether the lease is a gold instance of the **same template**. The real cell the member picked stays `queued`.
+
+```
+function lease_cell(member, selected_cell):              # inside the lease transaction, idempotent per Idempotency-Key
+  g = gold_rate_ppm(member, scope_of(selected_cell))      # 8.29
+  u = csprng_uniform_ppm()                                # fresh draw, separate from any audit draw
+  if u >= g: return create_lease(selected_cell)
+  if u >= verify.gold_rate_floor_ppm and sponsor_budget_exhausted(selected_cell.job): return create_lease(selected_cell)  # extras only
+  item = pick_gold_item(selected_cell.template_version, member)
+  if item is None: alarm(gold_pool_empty, template); return create_lease(selected_cell)
+  inst = new_cell(kind = gold, gold_cell_id = item.id, job = selected_cell.job, template_version = selected_cell.template_version)
+  return create_lease(inst)                               # the same card face, envelope and lease timeout as a real cell
+
+function pick_gold_item(tv, member):
+  eligible = items where status = active and template matches and exposure_count < verify.gold_max_exposures
+                   and member has no lease ever for the item and the member's opt-ins (R8) cover the item's metadata
+  return uniform_random(eligible)
+```
+
+- `g` is a share of **leases**, so gold cells per primary cell are `g / (1 - g)` (used in 8.31). [D]
+- The decision is stored with the lease; a replay of the same request returns the same cell, so repeating a request cannot re-roll the draw. [D]
+- **Sponsor job.** A gold instance belongs to the job whose slot it takes; that job's verification pool pays for it (8.32). The card face (purpose, license, sensitivity, service, template, expected time, provenance sentence) is rendered from the sponsor job, and the gold input is `S0` with a compatible license (8.24.1), so no field on the card is false. The general volunteer notice says that some cells are hidden reference checks and that the volunteer cannot tell which (copy `copy.verify.hidden_checks_notice`, S11.*, `needs_human_and_legal_review`). [D]
+- Unique exposure is enforced by a partial unique index `ux_leases_member_gold` on `leases (member_id, gold_cell_id) WHERE gold_cell_id IS NOT NULL` (column added to `Lease`, `ISS-84`). An exposure counts when the lease is issued, whether or not the member submits. [D]
+
+### 8.24.3 How gold stays hidden [D]
+
+1. No member-facing response, event or log field contains `cell_kind`, `gold_cell_id`, `audit_id` or `selection` for a cell that is unresolved. After resolution a member sees only the outcome and the reason code. S15.* schemas for gold and organic cells are identical (`AC-verify-03`).
+2. Same template, envelope, lease timeout, card layout, copy and latency class. Server-side branches that differ by kind must not change response size by more than the natural variation of the template [H: measured in `TEC`].
+3. The gold reference, comparator output and sponsor linkage are visible only to the roles in 8.24.1 and to an appeal reviewer for that appeal (8.34).
+4. **Published rates, hidden instances.** `verify.gold_rate_g`, the floors and the formulas are public (FD Principle 5); which lease is gold is not.
+5. A donor whose gold cell fails sees `reject.gold_mismatch` and so learns that this one cell was a reference check. That cost is accepted because FD§4.4 requires donors to see why (`ISS-86`); the item is burned for that member, the reference is never shown, and failures feed leak detection (8.24.5).
+
+### 8.24.4 Rotation and retirement [D]
+
+- Each item is retired when `exposure_count` reaches `verify.gold_max_exposures` (initial configurable default 20, 8.37). Each member sees an item at most once, ever.
+- Retirement rate (items per day) = `g x cells_per_day / verify.gold_max_exposures`. Illustrative inputs from the FD§3.3 example (40 donors x 8 cells a day = 320 cells a day, g = 0.05): 16 gold exposures a day and 0.8 items retired a day, about 24 a month per 320 cells a day. The library must be fed at this rate or the template pauses (8.24.1). These are not measurements.
+- `gold_pool_low` alarm when the active pool of a template covers fewer than 7 days of the current retirement rate (derived: 7 x rate; 7 is the `admission.active_donor_window_days` default reused as a look-ahead).
+- Reference answers are authored or approved by reviewers (a cost counted in `OPS`); a donor's result is never promoted to a reference without reviewer approval.
+
+### 8.24.5 Leak detection [D][H]
+
+A gold item is "leaked" when its answer circulates or its identity is recognizable. Signals are computed per item over its last `verify.gold_max_exposures` exposures and per template over the window `price.v_window_days`; each is a one-sided test at significance `verify.gold_leak_alpha` (initial configurable default 0.01, 8.37).
+
+| Signal | Test | Reading |
+| --- | --- | --- |
+| L1 pass-rate drift | Fisher exact test, later half of the item's exposures against the earlier half | Rising pass rate on one item |
+| L2 gold versus organic | Two-proportion test: gold pass rate against the random-audit agreement rate of the same template (8.30) | Gold passes more than organic work: gold is easier, recognizable or leaked |
+| L3 timing | Median `elapsed_s` of the item's exposures against the template median (rank test) | Answers produced faster than the template allows |
+| L4 near-duplicate cluster | Two or more exposures from different invite trees whose outputs meet `verify.duplicate_similarity_threshold` where the comparator does not predict identical outputs | Answer text is being shared |
+| L5 decline asymmetry | Decline-or-expiry rate of gold leases against organic leases of the same template (two-proportion test) | Donors recognize gold and avoid it |
+| L6 report | A donor, reviewer or operator flags the item | Manual |
+
+On any signal the item goes `quarantined`; no new exposures. Observations that members produced on the item **after the earliest exposure inside the suspect window** are flagged `suspect = true` and removed from every estimator in both directions (no penalty, no credit); payments already made are not reversed. A quarantined item returns to `active` only by reviewer decision with a new `activated_at`. Signals are triage, not proof: tests are not corrected for multiple comparisons and will raise false alarms at roughly `verify.gold_leak_alpha` per test [H]. L2 doubles as the **gold-detectability diagnostic** reported in 8.30.
+
+### 8.24.6 Resolving a gold submission [D]
+
+```
+function resolve_gold(sub):
+  cel = cell_of(sub); item = gold_item_of(cel)
+  verdict = comparator(item.tv.verification.comparator)(sub.output, item.reference)         # deterministic
+  if verdict == match:  record(sub, gold, pass);  record_observation(m, scope, PASS, gold);  accept(cel)          # paid 1 credit
+  else:                 record(sub, gold, fail, reason=reject.gold_mismatch);  record_observation(m, scope, FAIL, gold)
+                        reject(cel, reject.gold_mismatch); consecutive_gold_fails(m) += 1
+                        maybe_enqueue_adjudication(sub)                                    # 8.30.3
+  if consecutive_gold_fails(m, scope) >= trust.restrict_after_gold_fails: emit member.restricted     # 8.28.4
+```
+
+`inconclusive` from a gold comparator is a defect of the item: it is not an observation, the donor is paid, and the item is quarantined. A passing gold cell resets `consecutive_gold_fails`. [D]
+
+## 8.25 Sampled audits, comparator and third execution
+
+### 8.25.1 Comparator contract [D]
+
+`comparator(a, b, ctx) -> match | mismatch | inconclusive`, declared by `TemplateVersion.verification.comparator` and versioned with it. Requirements, each a property test (layer `prop`): deterministic; symmetric (`comparator(a,b) = comparator(b,a)`); reflexive on valid outputs; side-effect free; no execution of content; **no model call and no network access** (8.36). The comparator version is stored on every `VerificationRecord` so a later comparator change never rewrites an old outcome. A comparator that returns `inconclusive` is treated as `mismatch` for the purpose of requesting a third execution. [D]
+
+### 8.25.2 Audit flow [D]
+
+`Audit` states and events are those of S0.9.8; this table gives the transitions.
+
+| From | Event | To | Guard and effect |
+| --- | --- | --- | --- |
+| (none) | `audit.created` | `pending` | Plan AUDIT chosen (8.22.2). A cell of kind `audit` with the **same input** is created for a different member. The auditor never sees the primary output |
+| `pending` | `audit.second_submitted` | `second_executed` | The audit cell passed P1 to P2 |
+| `second_executed` | `audit.matched` | `matched` (T) | comparator = `match`: primary `cell.audit_passed`; audit cell accepted; both executors get a PASS observation |
+| `second_executed` | `audit.mismatched` | `mismatched` | comparator = `mismatch` or `inconclusive` |
+| `mismatched` | `audit.third_requested` | `third_pending` | `verify.third_exec_on_mismatch` = true (constant): a cell of kind `third`, same input, a third member |
+| `third_pending` | `audit.third_submitted` | `third_pending` | Informational, no state change (S0.9.1 allows an event without a change) |
+| `third_pending` | `audit.resolved` | `resolved` (T) | Majority rule below |
+| any non-terminal | `audit.cancelled` | `cancelled` (T) | Job cancelled, cell voided, template paused, or a verification slot exhausted `cell.max_attempts` |
+
+**Majority rule (also used for blanket groups, 8.26).** Let the executions that passed P1 be the nodes of an agreement graph, with an edge where the comparator returns `match`. The majority is the **unique maximum clique** whose size is at least `floor(n / 2) + 1`; a tie between cliques, or no such clique, is `NO_MAJORITY`. [D]
+
+```
+function resolve_group(execs):                    # n = len(execs), n in 2..verify.blanket_redundancy_n (at most 5)
+  G = agreement_graph(execs); need = floor(n/2) + 1
+  C = maximum_cliques(G)                          # brute force is enough for n <= 5
+  if len(C) == 1 and len(C[0]) >= need: return MAJORITY(C[0], minority = execs - C[0])
+  return NO_MAJORITY
+```
+
+| Result | Primary cell | Executors in the majority | Executors in the minority | Observations |
+| --- | --- | --- | --- | --- |
+| Primary in majority | `cell.audit_passed`, accepted, its output is delivered | accepted, paid 1 credit each | rejected `reject.audit_mismatch`, unpaid, single attempt used up (`exhausted`) | majority PASS, minority FAIL |
+| Primary in minority | `cell.audit_failed`, rejected with `reject.audit_mismatch`, then requeued as a fresh attempt | accepted, paid; their outputs are **not** reused for the requeued attempt [A] | rejected as above | same |
+| `NO_MAJORITY` | `cell.audit_failed`, rejected with `reject.audit_mismatch` and `details.inconclusive = true`; requeued; appealable | every execution that passed P1 is accepted and paid (nobody was outvoted) | none | **none**: inconclusive is not an observation |
+| Slot exhausted | `cell.audit_passed` with outcome `inconclusive` and `audit_coverage_gap` if the reason was `sampled`; otherwise held for an operator (8.22.3) | executions that passed P1 are paid | none | none |
+
+Reusing a majority pair's output for the requeued primary would save one attempt but needs a Cell transition that S0.9.3 does not define; it is not specified [A]. Cost of the waste is visible in v (8.31). [D]
+
+### 8.25.3 Auditor assignment [D]
+
+An audit, third or blanket copy is assigned only to a member who: has `status` `active` and tier other than `restricted`; is not the executor of any earlier execution of this cell; is not in the same invite tree or device group as any earlier executor or, for a member job, as the requester; has opt-ins covering the cell (R8); and, when the pool allows, has tier `established` or `trusted`. If no such member exists the assignment falls back to any active non-restricted member meeting the other conditions and the metric `hamyar_verify_1_degraded_auditor_pool_total` counts it (name per S0.5 scheme). Where opt-ins allow, copies prefer different **attested** services; diversity lowers correlated error but raises benign mismatches [H]. [D][A]
+
+## 8.26 Blanket redundancy
+
+Blanket redundancy executes **every** copy up front, in parallel, instead of sampling (FD§4.4: triple redundancy only for new donors' first cells and high-risk templates). [D]
+
+| Trigger | Rule |
+| --- | --- |
+| New executor | The first `verify.new_donor_blanket_cells` (default 5) primary cells that a member submits in scope `exec` are executed as blanket groups. A counter `blanket_remaining` starts at that value in `member_state(m, exec)` and decreases when the group resolves or is cancelled by a content verdict; a lost lease does not consume it |
+| High-risk template | `TemplateVersion.verification.risk_class = high`: every primary cell of the template |
+| Integrity rework | A `rework` cell whose overturned cell had `overturn_reason = integrity` |
+| New reviewer | The first `verify.new_donor_blanket_cells` review cells of a member in scope `review` (8.27) |
+
+- Group size `n = verify.blanket_redundancy_n` (default 3). Copy 2 is a cell of kind `audit`, copies 3..n are kind `third`; every copy's `verification_method` is `blanket_redundancy`. The group is resolved by `resolve_group` (8.25.2) once at least `floor(n/2) + 1` executions passed P1; remaining outstanding copies are cancelled and are not paid. [D]
+- A blanket group **replaces** the random audit draw for that cell. The primary stays `flagged_for_audit` with reason `blanket_redundancy_pending` until it resolves. [D]
+- Assignment follows 8.25.3, and at least `n - 1` copies go to members of tier `established` or `trusted` when available, so new executors do not mainly verify each other. [D][A]
+- **Cost.** A blanket group adds `n - 1` paid verification cells per accepted primary. Expected cost share is in 8.31; blanket redundancy on a whole template makes `v >= n - 1 = 2.0` for that template, which `price.v_cap` (0.50) cannot price (`ISS-85`). No template is `high` by default in Phase 1 [A]. The new-executor rule costs `(n - 1) x verify.new_donor_blanket_cells` verification cells per new donor, charged to the jobs those cells belong to.
+
+## 8.27 Human review cells and their own gold cells
+
+Human review is the verification method for subjective templates (`verification.subjective = true`), where no comparator can decide equivalence, and the unit of work of channel 2 (8.35). [D]
+
+**Review cell (`cell_kind` = `review`).** The reviewer sees the template's input, one candidate output, and a fixed rubric; there is no executor identity, service or other verdict on screen. The verdict is `acceptable` or `unacceptable` plus one reason code from the rubric's closed list. **No free text** is accepted (it could carry instructions, personal data or links). Candidate outputs that were quarantined or flagged are never shown to reviewers. [D]
+
+**Flow for a subjective primary cell** (plan HUMAN_REVIEW, chosen by the random draw at the review sampling rate of 8.29, or forced): an `Audit` row with `verification_method = human_review` is created.
+
+| Step | Rule |
+| --- | --- |
+| R1 | One review cell. `acceptable` = `audit.matched` (the primary is accepted) |
+| R2 | `unacceptable` = `audit.mismatched`; a second review cell is created (`audit.third_requested`) |
+| R3 | If R1 and R2 disagree, a third review cell is created; majority of the three decides. Two `unacceptable` verdicts reject the primary with `reject.review_unacceptable` |
+| Pay | A review cell is accepted and paid when it passes its own checks (closed codes valid, not a gold mismatch) and is not outvoted; outvoted reviewers are rejected unpaid |
+| Observation | Reviewer verdict agreement is a reviewer observation in scope `review`. A verdict about a donor's output is a donor observation (source `review`) **only** when the review cell is accepted and the verdict is determinate |
+
+**Review gold.** A separate library (`gold_kind = review`) of candidate outputs with a known verdict. The substitution rule of 8.24.2 applies to review leases with the rate `verify.human_review_gold_rate` (default 0.10) clamped by the same floor and maximum as `g`. The library must keep both polarities: each polarity is at least `verify.review_gold_min_polarity_share` (initial configurable default 0.40, 8.37) of the active review gold, so a reviewer who always answers `acceptable` or always `unacceptable` fails about that share of gold and cannot coast. A review gold fail is `reject.gold_mismatch`; two consecutive review gold fails suspend review eligibility, not the member tier (8.35). [D]
+
+**Subjective templates and audits.** For a subjective template the sampled audit slot is a review panel (R1 to R3), never a comparator audit, so `verification.subjective = true` and a comparator are mutually exclusive in the template half's validation (`ISS-84`). [D]
+
+## 8.28 Donor reliability estimator and how trust tier uses it
+
+### 8.28.1 Observations [D]
+
+Reliability is kept per member and scope (`exec`, `review`). The unit is an observation: one PASS or FAIL about one executor. Subjective templates have no `exec` gold (no comparator exists, 8.27), so `verification.gold_pool_min` is 0 for them and their observations come from review verdicts.
+
+| Source | PASS when | FAIL when | Not an observation |
+| --- | --- | --- | --- |
+| `gold` | Gold comparator `match` | `mismatch`, or an automatic-check failure on the gold cell (8.23) | `inconclusive` (item defect), lease expiry, decline |
+| `audit` | Executor is in the majority of a resolved group (including a matched pair) | Executor is in the minority | `NO_MAJORITY`, cancelled or exhausted audits |
+| `blanket` | As `audit`, for blanket groups | As `audit` | As `audit` |
+| `review` | Accepted determinate verdict `acceptable` about the donor's output | Accepted determinate verdict `unacceptable` | Verdicts from non-accepted review cells |
+| `anomaly` | A forced audit that passes counts as `audit` | A rejection by S9.* for an anomaly counts as one FAIL | Anomaly flags that are not followed by a verdict |
+
+An observation carries `selection` (`random`, `forced`, `blanket`), `observed_at`, `source`, `suspect` (8.24.5) and `corrected_by` (an adjudication or appeal, 8.34). Corrections are new rows; the estimator uses the latest non-suspect value. Forced-selection observations count for the member (they are the cases the system most wants to catch, so the member-level estimate is deliberately conservative) and are excluded from the error-rate estimators (8.30). [D]
+
+### 8.28.2 Exact method: Beta posterior over a recent window [D]
+
+```
+function reliability(m, scope):
+  W = most recent verify.reliability_window_obs observations of (m, scope)      # order by observed_at, then id; drop suspect rows
+  P = count(PASS in W); F = count(FAIL in W)
+  a = verify.reliability_prior_a + P;   b = verify.reliability_prior_b + F       # posterior Beta(a, b)
+  mean_ppm = floor(1_000_000 * a / (a + b))                                      # exact integer arithmetic
+  lcb_ppm  = floor(1_000_000 * beta_quantile(verify.estimator_tail_prob, a, b))  # inverse regularized incomplete beta
+  return (mean_ppm, lcb_ppm, n_obs = P + F)
+```
+
+- Prior: Beta(`verify.reliability_prior_a`, `verify.reliability_prior_b`), default Beta(1, 1), the uniform prior. A member with no observations has mean 500,000 ppm and lower bound 100,000 ppm (at tail 0.10). [D]
+- `beta_quantile(q, a, b)` is the inverse of the regularized incomplete beta function; any library implementation is allowed if it agrees with the fixtures below within 1 ppm (`ISS-84` records the added parameter `verify.estimator_tail_prob`, initial configurable default 0.10). Lower bounds are rounded down and upper bounds (8.30) up, so rounding never flatters a donor or a rate. [A]
+- The window (default 50) makes the estimate follow behavior change; one old failure leaves the window after `verify.reliability_window_obs` further observations. Bayesian updating stays valid under the adaptive sampling of 8.29 because the sampling decision depends only on past observed data, not on the unobserved outcome of the cell being sampled [A]; frequentist coverage of the bounds is not claimed.
+- Fixtures (a = b = 1, tail 0.10; computed from the formula, `AC-verify-06`): P=10, F=0 gives mean 916,666 and lower bound 811,130; P=9, F=0 gives 909,090 and 794,328; P=50, F=0 gives 980,769 and 955,855; P=49, F=1 gives 961,538 and 925,859; P=8, F=1 gives 818,181 and 663,152. For F = 0 and b = 1 the lower bound is `tail^(1 / a)`, a closed form that tests can check independently.
+
+### 8.28.3 Use by trust tier [D]
+
+Promotion needs evidence (the lower bound); demotion needs evidence of harm (the mean). Parameters are S0.10.6 Table B; the statistic each compares against is fixed here.
+
+| Transition (event) | Condition (all) |
+| --- | --- |
+| `new` to `established` (`member.tier_promoted`) | accepted cells ≥ `trust.established_min_cells`; `lcb_ppm` ≥ `trust.established_min_reliability`; `blanket_remaining` = 0; status `active`; not `restricted` |
+| `established` to `trusted` | accepted cells ≥ `trust.trusted_min_cells`; `lcb_ppm` ≥ `trust.trusted_min_reliability` |
+| `established` to `new` (`member.tier_demoted`) | `mean_ppm` < `trust.demote_below_reliability` |
+| `trusted` to `established` | `lcb_ppm` < `trust.established_min_reliability` |
+
+Consequences derived from the defaults (a = b = 1, tail 0.10, window 50), stated so they are not discovered later [H]:
+
+- `established` needs at least **10 clean observations**, because 0.1^(1/10) = 0.794 < 0.80 and 0.1^(1/11) = 0.811 ≥ 0.80. Promotion is limited by observations, not by `trust.established_min_cells` = 10. A new member's 5 blanket cells give about 5 observations; the other 5 arrive at about `g + s` = 0.15 per leased cell (each gold lease and each random audit yields one observation), so about 33 further cells: roughly 38 cells in all. Whether this is acceptable is a `P1M` finding.
+- `trusted` needs **zero fails in a full window of 50**: P=50, F=0 gives 955,855 ≥ 950,000, while P=49, F=1 gives 925,859. One failure removes `trusted` eligibility until it leaves the window.
+- Tier changes the audit multiplier and the cap multiplier only (`trust.audit_multiplier.*`, `trust.cap_multiplier.*`), never the gold rate and never the floors (8.29).
+
+### 8.28.4 Restriction [D]
+
+`member.restricted` is emitted when (a) `trust.restrict_after_gold_fails` consecutive gold fails in scope `exec` stand after adjudication (8.30.3), or (b) S9.* or S10.* raise an integrity finding. A gold fail that is later overturned does not count and, if it caused a restriction, `member.restriction_lifted` is emitted. Restriction lasts `trust.restriction_days` and then lifts to `tier_before_restriction` unless a new failure occurred. While restricted: audit multiplier 3.0 and cap multiplier 0.25 (S0.10.6), no auditor assignments (8.25.3). Scope `review` has its own suspension (8.35). [D]
+
+### 8.28.5 State, determinism and idempotency [D]
+
+- Per-member verification state is one JSON column `members.verification_state`: for each scope `{ blanket_remaining, adapt_factor_ppm, clean_run, consecutive_gold_fails, review_suspended_until }` (`ISS-84`). It is updated in the same transaction as the `VerificationRecord` that causes it.
+- The state is a **pure function of the ordered stream of verification records** of the member. Processing a record is idempotent (unique `(verification_record_id)` marker). A nightly job rebuilds the state from the stream and raises an alarm on any difference. [D]
+
+## 8.29 Adaptive sampling function with floor
+
+### 8.29.1 Rates [D]
+
+All rates are integer ppm (S0.6.1). Let `f` = `adapt_factor_ppm` of the member in the scope of the cell, `tier_mult` = `trust.audit_multiplier.<tier>` in ppm.
+
+```
+f_lo = ceil(verify.audit_rate_floor_ppm * 1_000_000 / verify.audit_rate_s_ppm)        # = 200_000 at defaults
+f_hi = floor(verify.audit_rate_max_ppm  * 1_000_000 / verify.audit_rate_s_ppm)        # = 5_000_000 at defaults
+
+audit_rate(m)  = clamp( floor( s_ppm * tier_mult * f / 10^12 ),  audit_rate_floor_ppm, audit_rate_max_ppm )
+gold_rate(m)   = clamp( floor( g_ppm * f / 10^6 ),                gold_rate_floor_ppm,  gold_rate_max_ppm )
+review_rate(m) = clamp( floor( human_review_rate_ppm * tier_mult * f / 10^12 ), audit_rate_floor_ppm, audit_rate_max_ppm )
+```
+
+The floor is the last operation, so no multiplier, tier or factor can push a rate below it. The tier multiplier does not apply to the gold rate. For scope `review` the factor and tier multiplier of the member's review state are used; review gold uses `verify.human_review_gold_rate` in place of g with the same clamp. [D]
+
+### 8.29.2 Adaptive factor [D]
+
+```
+function on_observation(state, outcome, selection):       # called for every counted observation and every anomaly signal
+  if outcome in (FAIL, ANOMALY):
+      state.adapt_factor_ppm = min(f_hi, floor(state.adapt_factor_ppm * verify.adapt.step_up_ratio_ppm / 10^6)); state.clean_run = 0
+  else:                                                    # PASS
+      state.clean_run += 1
+      if state.clean_run >= verify.adapt.clean_streak:
+          state.adapt_factor_ppm = max(f_lo, floor(state.adapt_factor_ppm * verify.adapt.step_down_ratio_ppm / 10^6)); state.clean_run = 0
+```
+
+Initial `adapt_factor_ppm` = 1,000,000. Derived properties at the defaults (step-down 0.80, clean streak 20, step-up 2.00):
+
+- From factor 1.0 to the lower limit 0.2 takes `ceil(ln 0.2 / ln 0.8)` = 8 steps = **160 consecutive clean observations**. At about 0.15 observations per cell this is about 1,070 cells (derived, illustrative).
+- A single FAIL doubles the factor; from the lower limit it takes 3 failures to reach 1.0 (0.2, 0.4, 0.8, then 1.6).
+- Fixtures: factor 1,000,000 with 20 clean observations gives 800,000 and, for tier `established` (1.0), `audit_rate` 80,000 ppm; then one FAIL gives 1,600,000 and 160,000 ppm. For tier `trusted` (0.5) at the lower limit the product is 10,000 ppm, below the floor, so the rate is 20,000 (`AC-verify-10`). For tier `restricted` (3.0) and factor 2.0 the product is 600,000, so the rate is capped at 500,000 (`AC-verify-12`).
+
+### 8.29.3 Floor guarantee and what it buys [D]
+
+- **Floors hold for every member in every state**: `verify.audit_rate_floor` (0.02) and `verify.gold_rate_floor` (0.01) are validated parameters (C2) and are applied last. No tier, factor, budget or operator edit of a rate can go below them; only the floor parameter itself can be lowered, as a `loosen` change with notice (R10).
+- Detection exposure of a patient bad actor who stays at both floors (derived, not a measurement): per bad cell the chance that gold or audit sees it is at most `1 - (1 - 0.02)(1 - 0.01) = 0.0298` (using the gold floor per cell as an upper bound), so about `1 / 0.0298` = **34 bad cells accepted in expectation before the first detection**, and `ln 0.05 / ln(1 - 0.0298)` = 99.0, so about **100 bad cells** before the chance of at least one detection reaches 95%. Each accepted bad cell also earns 1 credit. The first detection doubles the factor, and two consecutive gold fails restrict the member (8.28.4). This residual is the price of the floor; 8.40-L8 repeats it.
+- **Budget band.** The random audit draw is `u` in `[0, 1_000_000)` (8.22.2). Before the draw the inclusion probability is fixed: `pi = audit_rate(m)` if the cell's job has verification budget (8.32), else `pi = audit_rate_floor_ppm`. The audit happens iff `u < pi`. Draws in the floor band are always funded; draws above it only while the job's pool lasts. The same rule applies to gold (8.24.2). The actual `pi` is stored (8.22.2), and the share of draws truncated by budget is published beside v as `truncated_extra_share` because truncation censors the measured v (`ISS-85`). [D]
+
+## 8.30 False-accept and false-reject estimators
+
+FD§9 asks for the false-reject rate "from gold cells" and a false-accept estimate "from audits". Neither is observable as stated: a gold fail is a rejection by construction, and audit agreement does not bound errors that the comparator or the auditors share. The estimators below add the missing adjudication and state what they cannot see (`ISS-86`). All are computed per `job_type` and per template over the window `price.v_window_days`, never pooled across templates. [D]
+
+### 8.30.1 Logged data they need [D]
+
+For every primary or rework submission that passed P0 to P2: `selection`, `sampling_pi_ppm`, `sampling_draw_ppm` (8.22.2). For every audit and group: comparator version and verdict, resolution, `selection`. For every gold submission: outcome, adjudication result. Only `selection = random` cells enter 8.30.2; `forced` and `blanket` cells are reported separately.
+
+### 8.30.2 False-accept estimator [D]
+
+Let, for one stratum and window: `n_acc` = accepted primary and rework cells that were eligible for the random draw; `R` = resolved random audits (primary in majority or minority, not `inconclusive` or cancelled), `r = |R|`; `k` = members of `R` where the primary was in the minority (bad); `inc` = random audits that ended inconclusive.
+
+```
+B_unsampled   = sum over i in R with bad_i of (1_000_000 - pi_i) / pi_i               # Horvitz-Thompson count of bad cells that were NOT audited
+FA_point_ppm  = ceil(1_000_000 * B_unsampled / n_acc)
+scale         = (n_acc - audited_and_accepted) / n_acc                                 # share of accepted cells that nobody audited
+rate_lo, rate_hi = beta_quantile(tail, a0 + k, b0 + r - k), beta_quantile(1 - tail, a0 + k + inc, b0 + r - k)   # inconclusive counted as bad in the upper bound
+FA_lo_ppm     = floor(1_000_000 * rate_lo * scale);   FA_hi_ppm = ceil(1_000_000 * rate_hi * scale)
+status        = insufficient_data if r < n_min_FA
+              | alarm  if FA_lo_ppm >= verify.false_accept_alarm_ppm
+              | clear  if FA_hi_ppm <  verify.false_accept_alarm_ppm
+              | watch  otherwise
+```
+
+`a0`, `b0` are `verify.reliability_prior_a/b` and `tail` is `verify.estimator_tail_prob` (8.28.2). Because audits catch bad cells **before** acceptance (a cell flagged for audit is accepted only if it passes), the false-accept mass sits in the cells nobody audited; that is what `B_unsampled` estimates. The interval treats `pi` as roughly constant across the stratum; when it varies by more than a factor of 2 (for example after budget truncation) the point estimate stays valid and the interval is approximate [H].
+
+- **Minimum sample.** `n_min_FA` is the smallest `r` for which zero bad cells could still clear the alarm: `ceil(ln(tail) / ln(1 - alarm)) - 1`. At the defaults (tail 0.10, alarm 0.05, uniform prior) `n_min_FA` = **44** resolved random audits, about `44 / 0.10` = 440 random-eligible primary cells per template per window at `s` = 0.10 (derived). Below it the status is `insufficient_data` and no number is published as a rate (the count is still published).
+- The estimate is a **lower bound on the true false-accept rate** whenever the comparator or the auditors can be wrong in the same direction as the executor (8.40-L5, L6).
+
+### 8.30.3 False-reject estimator [D]
+
+Gold fails are adjudicated by an admin-side reviewer (role `reviewer`, permission `perm.verify.read_gold`) who sees the reference, the donor output and the rubric, not a member-facing cell (so no gold item is exposed to members and no cell is paid). Each gold fail is enqueued with probability `verify.gold_adjudication_rate` (initial configurable default 1.0, 8.37). The reviewer returns `upheld` (the output really was bad), `overturned_acceptable` (an equally valid output, or the comparator was too strict) or `overturned_defect` (the reference or item is defective).
+
+```
+passes  = gold submissions that passed;  adjudicated = gold fails that were adjudicated;  over = adjudicated with overturned_*
+X       = over / verify.gold_adjudication_rate                  # estimated good gold outputs wrongly rejected
+FR_point_ppm = ceil(1_000_000 * X / (passes + X))
+FR_lo_ppm, FR_hi_ppm = floor/ceil of beta_quantile(tail / 1 - tail, a0 + X, b0 + passes)      # exact for rate 1.0, approximate below 1.0 [H]
+status = insufficient_data if passes < n_min_FR | alarm if FR_lo_ppm >= verify.false_reject_alarm_ppm | clear if FR_hi_ppm < ... | watch
+```
+
+`n_min_FR` = `ceil(ln(tail) / ln(1 - false_reject_alarm)) - 1` = 21 good gold submissions at the defaults (alarm 0.10). Effects of an overturn: the gold outcome becomes PASS (a correcting record, the original stays), the donor's observation is corrected, the donor is paid 1 credit through the appeal-award path (8.34), `consecutive_gold_fails` is recomputed, and an item with `overturned_defect`, or with two overturns, is quarantined (8.24.1). A **second, selection-biased floor** is published: organic rejections overturned on appeal divided by organic rejections in the window; it counts only donors who appeal. [D]
+
+### 8.30.4 Diagnostics published beside the rates [D][H]
+
+| Diagnostic | Computation | Reading |
+| --- | --- | --- |
+| Gold detectability gap | Bad rate on gold (after adjudication) against bad rate on random audits of the same template, tested at `verify.gold_leak_alpha` (signal L2, 8.24.5) | Gold lower than organic: gold easier or recognized |
+| Comparator calibration | A random share `verify.comparator_calibration_rate` (initial configurable default 0.05, 8.37) of resolved audit pairs, matched and mismatched, is adjudicated blind to the comparator verdict by an admin-side reviewer; Beta bounds of false-match and false-mismatch rates | Bounds how much 8.30.2 understates false-accept |
+| Truncation | `truncated_extra_share` (8.29.3) | Sampling was cut by budget |
+| Coverage | Share of random-eligible cells with `audit_coverage_gap` | Audits that could not run |
+| Auditor pool | Count of degraded auditor assignments (8.25.3) | Weak independence |
+
+Alarms: `status = alarm` raises `Alarm` with the stratum and, with `verify.false_accept_alarm` pre-registered (S13.*), is a kill-switch input for the template (S14.*: `kill.template.<tpl_id>`). Numbers published to the public parameter page are the status, the interval and the sample size, never a bare point estimate. [D]
+
+## 8.31 Counting verification and rework cells into v
+
+v is **measured**, never set (FD§4.3, S0.10.1). This part supplies the counts; S6.* owns publication and the quote. [D]
+
+```
+v_ppm(type, window) = ceil( 1_000_000 * V_num / V_den )
+V_den = accepted primary cells of the job type, accepted inside the window, not overturned
+V_num = accepted cells of the job type, accepted inside the window, with cell_kind in { gold, audit, third, review, rework }
+```
+
+| Item | Counted in v? | Reason |
+| --- | --- | --- |
+| Accepted `gold` cell (sponsor job's type) | yes, numerator | Paid 1 credit (8.32) |
+| Accepted `audit` and `third` cells, sampled or blanket | yes | Paid |
+| Accepted `review` cells (subjective audits, review gold) | yes | Paid |
+| Accepted `rework` cell | yes, 1 cell each | ISS-05; counted at 1 whether or not the reversal of the overturned payout was recovered (conservative, rounds v up) [A] |
+| Rejected, expired, declined, cancelled or voided verification cells | no | Not paid, so no credit cost; reported as `wasted_execution_share` (rejected and expired verification executions / V_den), not priced [A] |
+| Primary cell later `overturned` | removed from V_den | Its replacement is a `rework` cell in V_num; V_den is literal FD§4.3 and slightly overstates v when overturns are many |
+| Admin-side adjudication (8.30.3, comparator calibration) | no | No cell, no credit; reviewer time is an `OPS` cost |
+| Commons cells (minted) | **not** in member-job v | Published separately as `commons_verification_share` (ISS-03) |
+
+Strata: per `job_type` (S0.8.6); published monthly (`price.publish_period_days`) from the trailing `price.v_window_days`; below `price.v_min_sample_cells` accepted primary cells the quote falls back to `price.v_prior` (S6.*). The snapshot carries the numerator split by kind, the denominator and `truncated_extra_share`.
+
+**Expected v from the sampling parameters** (derived; tests compare it to the measurement and any gap is a finding). Per accepted primary cell, with `mu` the share of audits that mismatch, `beta` the share of primary cells under blanket redundancy, `rho` the rework share, `n` = `verify.blanket_redundancy_n`: [D]
+
+```
+v_exp = g/(1-g) + (1 - beta) * s * (1 + mu) + beta * (n - 1) + rho            # subjective templates replace the s term with the review rate
+```
+
+Illustrative inputs (not measurements): g = 0.05, s = 0.10, mu = 0.10, rho = 0.005. With beta = 0: `v_exp` = 0.0526 + 0.1100 + 0.005 = **0.1676**, so v = 167,632 ppm, p = 1.217632 and `eta = floor(10^12 / 1,217,632)` = 821,266 ppm. With beta = 0.05: `v_exp` = 0.2621, p = 1.312132, eta = 762,118 ppm, below the suggested 0.80. At both floors (g = 0.01, s = 0.02): 0.0321. Two consequences (`ISS-85`): the default `price.v_prior` = 0.10 is below what the default `g` and `s` imply, and adaptive sampling is the main lever on eta. **Floor funding check** (parameter-editor warning, proposed `C9`): `g_floor/(1-g_floor) + s_floor * (1 + mu)` must not exceed `price.v_prior + price.levy_lambda`; at the defaults 0.0321 ≤ 0.15. [A]
+
+## 8.32 Who is paid what, and from where
+
+Donor earn is exactly 1,000,000 `ucr` per **accepted** cell of any kind (FD§4.3, S0.6.1). Nothing else is paid and nothing is paid twice for one cell. [D]
+
+| Cell and outcome | Donor paid | Observation | Funding (S6.* posts it) |
+| --- | --- | --- | --- |
+| Primary or rework, accepted without a group (`cell.checks_passed`) | 1 credit at acceptance | none | Member job: `transfer` from escrow (primary pay `N x 1,000,000`, rework from the pool). Commons: `mint` |
+| Primary, `flagged_for_audit` | 0 until resolved | | |
+| Primary accepted after audit or blanket (`cell.audit_passed`) | 1 credit at acceptance | PASS | as above |
+| Primary rejected (any reason) | 0 | per 8.28.1 | |
+| Gold cell, passed | 1 credit | PASS | Sponsor job's verification pool (member job) or `mint` (Commons, ISS-03) |
+| Gold cell, failed | 0, no penalty beyond the observation | FAIL | |
+| Audit, third or blanket copy, accepted (in the majority, matched, or no vote held) | 1 credit | PASS or none | Verification pool of the **audited cell's** job |
+| Audit, third or blanket copy, outvoted | 0 | FAIL | |
+| Review cell, accepted | 1 credit | reviewer observation | Pool of the reviewed cell's job (8.35 for channel 2) |
+| Cell overturned later (appeal or fraud) | the original payout is reversed by S6.* (`reversal`, two approvers); a `rework` cell is created | corrected | `INV-L*` owned by S6.* |
+| Appeal overturns a rejection | 1 credit through the appeal-award path (8.34) | corrected | Verification pool; counted as one `rework` cell in v |
+
+The requester pays only `p = 1 + v + lambda` per primary cell (S0.6.1); verification events never add a charge. Payment waits for acceptance, so a cell under audit shows "awaiting verification" and earns nothing yet; because every cell's draw is independent, the delay reveals nothing a donor can exploit after submission. [D]
+
+**Verification budget.** A job's verification pool is `floor(N x v_ppm / 10^6)` cells (S0.6.1, ISS-04); `budget_remaining = pool - verification cells accepted or pending for that job`. Gold and audit draws above the floor band need `budget_remaining > 0` (8.29.3). Floor-band events and mandatory ones (forced audits, third executions, blanket groups) are never skipped for budget reasons; an overrun is absorbed first by the unspent pool remainder, then by the job's levy share, so a requester never pays more than quoted and donors are always paid. The floor funding check (8.31) keeps the levy sufficient at the defaults. What S6.* does if even the levy share is exhausted is open (`ISS-85`, `needs_owner`). [D][A]
+
+## 8.33 Rejection reasons shown to donors
+
+Every rejection stores a machine `reason_code` (S0.8.4 seed list plus `reject.review_unacceptable`, `ISS-84`) and a `details` object. The donor sees, in history (S11.*), the code's copy text (`copy.verify.<code>`, `fa` and `en`, `needs_human_and_legal_review`), the stage that produced it, whether it is appealable and the appeal deadline (`appeal.window_days`). Wording says what happened, never that the donor cheated. [D]
+
+| Code | Stage | Shown to donor | Never shown | Observation |
+| --- | --- | --- | --- | --- |
+| `reject.schema_invalid` | P0 | the field path that failed | | none (FAIL on gold) |
+| `reject.refusal_pattern`, `reject.length_out_of_bounds`, `reject.language_mismatch` | P1 | the rule and the limit | | none (FAIL on gold) |
+| `reject.test_failed` | P1 | names of the failing checks | hidden test content | none (FAIL on gold) |
+| `reject.forbidden_content` | P1, P1b | the category | the detection rule internals | none |
+| `reject.gold_mismatch` | gold | "did not match the reviewed reference for this cell" | the reference, the diff, any other member's result | FAIL |
+| `reject.audit_mismatch` | audit, blanket | "differed from independent results"; `inconclusive` flag when there was no majority | other outputs, how many executions, who | FAIL, or none if inconclusive |
+| `reject.review_unacceptable` | review panel | the rubric reason code | reviewer identities and verdicts | FAIL |
+| `reject.duplicate_of_other_output`, `reject.timing_anomaly` | P2 (S9.*) | that it matched or was too fast | whose output, the threshold values beyond the public parameters | FAIL (anomaly) |
+| `reject.nonce_invalid`, `reject.lease_expired`, `reject.size_exceeded` | P0 | the cause | | none |
+| `reject.policy_changed` | P5 | that a published rule changed (R9) | | none |
+
+The donor also sees own tier, `mean_ppm` and observation count (rules are public, FD Principle 5), but never whether a given unresolved cell is gold or audited. [D]
+
+## 8.34 Appeals: handoff to the Appeal machine
+
+The Appeal machine and screens are S10.* and S11.*; kind `cell_rejection` (S0.9.7). This part defines what verification supplies and what an outcome changes. [D]
+
+- **Eligibility.** A rejected cell with a reason in 8.33 is appealable within `appeal.window_days`, at most `appeal.max_per_decision` times, never against `reject.nonce_invalid` or `reject.lease_expired` (S9.* may allow a grace via `lease.submit_grace_s`). Filing creates `appeal.filed` with `subject_cell_id`, `reason_code` and an `evidence_hash`.
+- **Evidence package** built by verification, visible only to the assigned reviewer (never the original decider; for an automated rejection the decider is `system`): submission hash and output, automatic-check results with codes, comparator version and verdict, and for gold the reference, for audits the other executions **anonymized**. Access requires `perm.verify.read_gold` where a reference is included.
+- **Upheld.** No change.
+- **Overturned.** (1) A correcting `VerificationRecord` sets the outcome to `pass` (records are append-only); (2) the observation is corrected and the reliability state recomputed (8.28.5); (3) if the item was gold, the gold fail is adjudicated `overturned_*` (8.30.3) and the cascade of 8.24.1 applies; (4) payment: if the cell is still `queued` it is accepted on the original submission; otherwise the donor is paid exactly 1,000,000 `ucr` through an **appeal award** posted by S6.* (a `transfer` for member jobs, a `mint` under the monthly cap for Commons, keyed to the appeal id and counted as one `rework` cell in v); the later accepted submission remains the deliverable. The exact ledger path is S6.*'s decision (`ISS-85`).
+- Rejections caused by a defective gold item, a comparator later changed for a defect, or a policy change are queued for **automatic re-adjudication** of the affected donors without waiting for appeals; donors are told in history. [D]
+
+## 8.35 Channel 2: human review as an experimental arm
+
+FD§6.4: channel 2 needs no provider account, and its accuracy and fraud profile are untested [H]. Phase 1 runs it only as an arm. [D]
+
+| Rule | Decision |
+| --- | --- |
+| Gate | Feature flag `ff.channel.human_review` (default off) with an `Experiment` and logged random assignment (S13.*). While it is off no member is offered review cells, so subjective templates (8.27) are not leased and stay paused; objective templates are unaffected |
+| Work item | Review cells of 8.27: closed verdict, closed reason codes, no free text, blind to the executor |
+| Credit | Exactly 1 credit per accepted review cell, same expiry rules as other credit, no bonus. It is paid from the reviewed cell's job pool (member jobs) or minted for Commons verification cells (ISS-03). Review credit is never minted for a cell that has no reviewed job |
+| Cap | At most `verify.review_channel_daily_cap_cells` accepted review cells per member per UTC day (initial configurable default 20, 8.37) |
+| Separation | Reliability, adaptive factor and blanket counter are separate in scope `review` (8.28, 8.29). Review reliability never promotes the member's execution tier and vice versa |
+| New reviewers | First `verify.new_donor_blanket_cells` review cells are blanket groups of 3 reviewers (8.26) |
+| Gold | Review gold at `verify.human_review_gold_rate`, balanced polarity (8.27). Two consecutive review gold fails set `review_suspended_until = now + trust.restriction_days`; the member keeps the execution tier |
+| Conflicts | A reviewer cannot review a cell executed by their own invite tree or device group, a job they requested, or their own output; verdicts are independent (no member sees another verdict) |
+| Authority | A review verdict can accept a subjective primary only if it passed P0 to P2; it can never override a gold, audit or automatic-check failure, and never accepts a cell that is quarantined |
+| Measures (pre-registered in S13.*, thresholds set by founders) | Review gold pass reliability (lower bound, 8.28.2) per reviewer; inter-reviewer agreement on panels; false-accept status (8.30.2) of review-verified templates; reviewer share of capacity. Kill input: `alarm` status of false-accept on a template verified mainly by channel 2 |
+
+Channel 2 is **not** a way around the provider-terms gate: review work reads outputs of other members, so it carries the same sensitivity limits (`S0` and `S1` only) and the same privacy notice duties (S10.*). [D][V]
+
+## 8.36 No model-based judging to mint credit in Phase 1
+
+- `verify.model_judge_mints_credit` is a constant `false` (S0.10.6); a write is refused with `VALIDATION_FAILED`. [D]
+- No model output is an input to any accept or reject decision, observation, payout, reliability estimate or error-rate estimate. Automatic checks, comparators and gold comparators are deterministic code (8.23, 8.25.1); a template whose check or comparator declares a model call fails template review. The verification worker has no provider credentials and no egress to model endpoints. [D]
+- Models *as the donors' tools* are the whole point of the product; this rule is about the **judge**. A later test of model judging is a spec change with a pre-registered design and a [V] check of provider terms and privacy before any member content leaves the platform; no hook for it is specified here. [H]
+
+## 8.37 Parameters used here and parameters added
+
+Existing names (S0.10.6 Table B, used exactly): `verify.gold_rate_g`, `verify.gold_rate_floor`, `verify.gold_rate_max`, `verify.audit_rate_s`, `verify.audit_rate_floor`, `verify.audit_rate_max`, `verify.blanket_redundancy_n`, `verify.new_donor_blanket_cells`, `verify.adapt.clean_streak`, `verify.adapt.step_down_ratio`, `verify.adapt.step_up_ratio`, `verify.reliability_prior_a`, `verify.reliability_prior_b`, `verify.reliability_window_obs`, `verify.human_review_rate`, `verify.human_review_gold_rate`, `verify.timing_min_s`, `verify.duplicate_similarity_threshold`, `verify.false_accept_alarm`, `verify.false_reject_alarm`, `verify.third_exec_on_mismatch`, `verify.model_judge_mints_credit`, `trust.established_min_cells`, `trust.established_min_reliability`, `trust.trusted_min_cells`, `trust.trusted_min_reliability`, `trust.demote_below_reliability`, `trust.restrict_after_gold_fails`, `trust.restriction_days`, `trust.cap_multiplier.*`, `trust.audit_multiplier.*`, `appeal.window_days`, `appeal.max_per_decision`, `cell.max_attempts`, `price.v_window_days`, `price.v_min_sample_cells`, `price.publish_period_days`.
+
+**Added by this part** (convention gap, `ISS-84`; area `verify`, owner `operator`, public true; each default is an `initial configurable default`):
+
+| Name | Type | Initial configurable default | Validation | Replaced by |
+| --- | --- | --- | --- | --- |
+| `verify.estimator_tail_prob` | ratio | 0.10 (one-sided tail for every Beta bound in 8.28 and 8.30) | 0 < x < 0.5 | `FND`, pre-registered |
+| `verify.gold_max_exposures` | int | 20 | 1..1000 | `P1M` leak and library-cost data |
+| `verify.gold_leak_alpha` | ratio | 0.01 | 0 < x < 0.5 | `P1M` false-quarantine rate |
+| `verify.gold_adjudication_rate` | ratio | 1.0 (adjudicate every gold fail; rare at Phase 1 volume) | 0 < x <= 1 | `OPS` reviewer load |
+| `verify.comparator_calibration_rate` | ratio | 0.05 | 0 <= x <= 1 | `OPS` reviewer load |
+| `verify.review_gold_min_polarity_share` | ratio | 0.40 | 0 < x <= 0.5 | `P1M` |
+| `verify.review_channel_daily_cap_cells` | int | 20 (twice the FD§3.2 habit of about 10 cells a day) | 1..1000 | `P1M` |
+
+Other names added: template field object `TemplateVersion.verification` (8.20); `GoldCell.status` and events `gold_cell.drafted`, `gold_cell.activated`, `gold_cell.quarantined`, `gold_cell.reactivated`, `gold_cell.retired`; `Lease.gold_cell_id`; cell columns `sampling_pi_ppm`, `sampling_draw_ppm`; `members.verification_state`; reason code `reject.review_unacceptable`; permission `perm.verify.read_gold`; copy keys `copy.verify.*`; proposed warning constraint `C9` (8.31). Rates `g` and `s` are fractions of **leases** and of **eligible submissions** respectively (8.24.2, 8.22.2). [A]
+
+## 8.38 Acceptance criteria (Given / When / Then)
+
+Ids are `AC-verify-nn` (S0.0.5). Layers name where the test lives; `T-*` ids are assigned by S18.*. All fixtures are computed from the formulas in this file.
+
+| Id | Given | When | Then | Layer |
+| --- | --- | --- | --- | --- |
+| `AC-verify-01` | An organic cell whose output exceeds `cell.envelope.max_output_chars` | `verify_submission` runs | `cell.checks_failed`, reason `reject.length_out_of_bounds`; no random draw, no audit, no observation | `fsm` |
+| `AC-verify-02` | A member with `gold_rate` 50,000 ppm and a seeded CSPRNG stub | 100,000 leases are issued | Gold leases are within 5,000 +/- 276 (4 standard deviations, sqrt(100000 x 0.05 x 0.95) = 68.9) | `prop` |
+| `AC-verify-03` | One gold lease and one organic lease of the same template | The member API responses are serialized | Identical key sets; no field named `cell_kind`, `gold_cell_id`, `audit_id` or `selection`; identical card face fields | `adv` |
+| `AC-verify-04` | A gold item with `exposure_count` = `verify.gold_max_exposures`, and a member who already leased another item | A further lease draw selects gold | The capped item is never picked; the member never receives an item they leased before; forcing a second lease violates `ux_leases_member_gold` | `unit` |
+| `AC-verify-05` | An item whose first 10 exposures passed 2 times and last 10 passed 10 times | Signal L1 runs at `verify.gold_leak_alpha` 0.01 | One-sided Fisher p = 0.000357 < 0.01, so the item is `quarantined` and later observations are `suspect` and excluded from all estimators | `unit` |
+| `AC-verify-06` | Prior Beta(1,1), tail 0.10 | `reliability` is computed for (P,F) = (10,0), (9,0), (50,0), (49,1), (8,1) | (mean, lower bound) in ppm = (916,666; 811,130), (909,090; 794,328), (980,769; 955,855), (961,538; 925,859), (818,181; 663,152), each within 1 ppm | `unit` |
+| `AC-verify-07` | A `new` member with 10 accepted cells, `blanket_remaining` 0 | 10 PASS observations, then separately 9 PASS observations | 10: `member.tier_promoted` to `established` (811,130 >= 800,000); 9: no promotion (794,328) | `fsm` |
+| `AC-verify-08` | An `established` member with 100 accepted cells | A full window of 50 PASS, then separately 49 PASS and 1 FAIL | 50 PASS: promoted to `trusted` (955,855 >= 950,000); 49+1: not promoted (925,859) | `fsm` |
+| `AC-verify-09` | Factor 1,000,000, tier `established`, clean run 19 | One more PASS | Factor 800,000, clean run 0, `audit_rate` 80,000 ppm | `unit` |
+| `AC-verify-10` | Tier `trusted` (0.5), factor at `f_lo` 200,000 | `audit_rate` is computed | Product 10,000, result clamped to 20,000 (`verify.audit_rate_floor`); `gold_rate` is never below `verify.gold_rate_floor` for any state | `prop` |
+| `AC-verify-11` | Factor 800,000 | One FAIL | Factor 1,600,000, clean run 0, `audit_rate` 160,000 ppm (tier `established`) | `unit` |
+| `AC-verify-12` | Tier `restricted` (3.0), factor 2,000,000 | `audit_rate` is computed | Product 600,000, result capped at `verify.audit_rate_max` = 500,000; factor never exceeds 5,000,000 | `unit` |
+| `AC-verify-13` | A job whose pool is exhausted, member `audit_rate` 80,000 | Draws `u` = 15,000 and `u` = 50,000 | `pi` = 20,000: `u` = 15,000 creates an audit, `u` = 50,000 does not; `sampling_pi_ppm` = 20,000 is stored in both cases | `unit` |
+| `AC-verify-14` | Primary A and audit B with comparator `match` | The audit resolves | `audit.matched`; A `cell.audit_passed`; A and B each paid 1,000,000 `ucr`; both PASS | `fsm` |
+| `AC-verify-15` | A, B, C with agreement pairs (A,C) only | The third execution is submitted | `audit.resolved`; majority {A, C}; B rejected `reject.audit_mismatch`, unpaid, `exhausted`; observations A PASS, C PASS, B FAIL | `fsm` |
+| `AC-verify-16` | A, B, C with no matching pair | The third execution is submitted | `NO_MAJORITY`; A rejected with `details.inconclusive = true` and requeued; A, B, C paid; no observations | `fsm` |
+| `AC-verify-17` | A new member's first submission, `verify.blanket_redundancy_n` = 3 | `choose_plan` runs | Plan BLANKET; three executions assigned to three members, distinct invite trees and device groups, none in the requester's tree; `blanket_remaining` decreases on resolution only | `fsm` |
+| `AC-verify-18` | A template with `risk_class = high` | Any primary cell is submitted | Plan BLANKET regardless of tier and of `u` | `policy` |
+| `AC-verify-19` | Stratum: `n_acc` 597, 59 audited and accepted, `pi` 0.10, `r` 60, `k` 3, `inc` 2 | `FA` is computed | Point 45,227 ppm; interval 26,048 to 128,192 ppm; status `watch` against 50,000 | `unit` |
+| `AC-verify-20` | `r` = 43 and `r` = 44 with `k` = 0 | `FA` status is computed | 43: `insufficient_data`; 44: status `clear` (upper bound below 50,000) | `unit` |
+| `AC-verify-21` | 188 gold passes, 12 gold fails all adjudicated (rate 1.0), 3 overturned | `FR` is computed | Point 15,707 ppm; interval 9,117 to 34,464; status `clear` against 100,000 | `unit` |
+| `AC-verify-22` | Window with 1,000 accepted primaries, 96 audit, 11 third, 48 gold, 0 review, 5 rework accepted, and 14 rejected verification cells | `v` is computed | `v_ppm` = 160,000; the 14 rejected cells appear only in `wasted_execution_share` | `unit` |
+| `AC-verify-23` | A gold pass and a gold fail | Settlement of the cells | Pass: 1,000,000 `ucr` to the donor; fail: 0 | `e2e` |
+| `AC-verify-24` | A donor whose gold cell failed | History is fetched | Reason `reject.gold_mismatch` and appeal deadline present; no reference, diff or other output anywhere in the response | `adv` |
+| `AC-verify-25` | A gold fail overturned on appeal | `appeal.overturned` is processed | Correcting record `pass`, observation corrected, `consecutive_gold_fails` recomputed, donor paid exactly 1,000,000 `ucr` once, item quarantined if `overturned_defect` | `e2e` |
+| `AC-verify-26` | `ff.channel.human_review` off, then on | A member requests a review lease; later a 21st review cell in one UTC day | Off: none offered; on: offered; the 21st is refused with `CAP_EXCEEDED` (`verify.review_channel_daily_cap_cells` = 20) | `policy` |
+| `AC-verify-27` | An operator and a template author | `verify.model_judge_mints_credit` is set to true; a comparator declaring a model call is submitted for review | `VALIDATION_FAILED`; the template review rejects the comparator | `policy` |
+| `AC-verify-28` | `elapsed_s` below `verify.timing_min_s` | `verify_submission` runs | `flagged_for_audit` with reason `anomaly` for every `u`; the factor steps up; the observation is excluded from the false-accept estimator | `adv` |
+| `AC-verify-29` | Two consecutive gold fails, then the second is overturned | Events are processed | `member.restricted` after the second fail; `member.restriction_lifted` after the overturn | `fsm` |
+| `AC-verify-30` | A member's full record stream | The nightly rebuild runs | The rebuilt `verification_state` equals the stored state; any difference raises an alarm | `prop` |
+| `AC-verify-31` | Floors g = 0.01, s = 0.02, mu = 0.10, `price.v_prior` 0.10, `price.levy_lambda` 0.05 | The parameter editor saves | No warning (0.0321 <= 0.15); raising `verify.audit_rate_floor` to 0.10 raises the `C9` warning | `policy` |
+
+## 8.39 Worked example (all numbers illustrative; none measured)
+
+Parameters are the initial configurable defaults; inputs about donor behavior and counts are invented for the example and are not evidence.
+
+**A. A donor's reliability and rates.** D1 joins; the first 5 cells are blanket groups (5 PASS). Five more observations (gold and audit) are PASS: P=10, F=0, accepted cells 10, `blanket_remaining` 0, so mean 916,666 and lower bound 811,130 ≥ 800,000: `member.tier_promoted` to `established`. A gold cell then fails (P=10, F=1): mean 846,153, lower bound 712,502; the mean is above 700,000, so no demotion. The factor doubles to 2,000,000: `audit_rate` = 100,000 x 1,000,000 / 10^6 x 2,000,000 / 10^6 = 200,000 ppm (0.20) and `gold_rate` = 50,000 x 2 = 100,000 ppm (0.10). After 20 consecutive PASS the factor is 1,600,000: `audit_rate` 160,000.
+
+**B. One audit.** A (primary), B (audit), C (third). The comparator says A and B differ, A and C match, B and C differ. The unique maximum clique is {A, C}, size 2 ≥ `floor(3/2) + 1` = 2. A is accepted (`cell.audit_passed`) and paid 1,000,000 `ucr`; C is accepted and paid 1,000,000; B is rejected with `reject.audit_mismatch`, paid 0, and sees "differed from independent results". Observations: A PASS, C PASS, B FAIL. For v: one `third` cell is accepted (counts 1); B is rejected and counts 0.
+
+**C. Budget band.** A job of N = 240 primaries has `v_ppm` 100,000, so a pool of `floor(240 x 100,000 / 10^6)` = 24 verification cells. After 24 are used, a donor whose `audit_rate` is 80,000 gets `pi` = 20,000: a draw of 15,000 audits, a draw of 50,000 does not.
+
+**D. False-accept status.** A template, one window: 600 random-eligible submissions, `pi` = 0.10 for all, 62 audited, 60 resolved (2 inconclusive, accepted through `audit_coverage_gap`), 3 bad. Accepted `n_acc` = 600 - 3 = 597; audited and accepted 59. `B_unsampled` = 3 x 0.9 / 0.1 = 27, point = ceil(10^6 x 27 / 597) = **45,227 ppm** (4.5%). Interval: lower = floor(10^6 x 0.028905 x 538/597) = 26,048, upper (inconclusive counted as bad) = ceil(10^6 x 0.14225 x 538/597) = 128,192. Against 50,000: `watch`. `r` = 60 ≥ `n_min_FA` = 44, so the number may be published, as an interval, with its sample size. It is a lower bound if the comparator is blind to a shared error (8.40-L5).
+
+**E. False-reject status.** 200 gold submissions: 188 passed, 12 failed, all adjudicated (rate 1.0), 3 overturned. `X` = 3, point = ceil(10^6 x 3 / 191) = 15,707 ppm; interval 9,117 to 34,464; against 100,000: `clear`. The 3 donors are paid 1,000,000 `ucr` each by appeal award, counted as 3 `rework` cells.
+
+**F. v and eta.** 1,000 accepted primaries; accepted verification cells: audit 96, third 11, gold 48, review 0, rework 5 = 160. `v_ppm` = ceil(10^6 x 160 / 1,000) = **160,000**; with `price.levy_lambda` 50,000, p = 1,210,000 `ucr` and `eta` = floor(10^12 / 1,210,000) = 826,446 ppm (0.826). Compare 8.31: the parameter-implied expectation is 0.1676, so this window sits below it, for instance because adaptive sampling had already stepped down; the gap is a finding to explain, not an error.
+
+## 8.40 Limits: what these estimators and rules cannot do [D][H]
+
+Stated plainly so no one reads a number here as more than it is.
+
+| Id | Limit | Effect and what is done about it |
+| --- | --- | --- |
+| L1 | **Selection bias in gold.** Gold items are chosen and written by reviewers, from S0 text, for clear answers | Reliability measured on gold may overstate reliability on organic cells. Reported beside the audit-based rate (8.30.4); never used alone for the false-accept estimate |
+| L2 | **Gold detectability.** If donors can recognize gold (content, timing, decline pattern), they behave better on it | Reliability and false-reject are flattered. Hiding rules (8.24.3), signals L2 and L5 (8.24.5) reduce and measure it; they cannot prove gold is indistinguishable. Failed-gold donors learn that one cell was gold (`ISS-86`) |
+| L3 | **Small samples.** The Phase 1 pilot has about 30 to 50 members for 30 days | Per-template counts may never reach `n_min_FA` = 44 audited cells (about 440 eligible primaries per template, 8.30.2) or `n_min_FR` = 21; the status is then `insufficient_data` and no rate is published. Illustration: 40 donors x 8 cells x 30 days = 9,600 cells; at s = 0.10 that is about 960 audits over all templates, about 190 each over 5 templates (invented inputs) |
+| L4 | **Comparator error.** False matches hide bad outputs; false mismatches reject good ones and inflate v | Estimated by the calibration sample (8.30.4) with its own sampling error; not removed |
+| L5 | **Shared errors.** An audit that agrees only shows that two executions agree | The false-accept estimate is a lower bound under correlated errors |
+| L6 | **Correlated model error.** If most donors use the same underlying model, they can agree on the same wrong answer; attested service diversity (8.25.3) helps only if it exists | Not detectable by agreement; only gold with reviewer-authored references and human review see it. Consensus is never promoted to a reference without a reviewer (8.24.1) |
+| L7 | **Collusion and sybils.** Several identities controlled by one person can fill an audit or blanket group | Assignment excludes shared invite trees and device groups (8.25.3) but cannot see an unlinked sybil set; estimators are blind to it; S10.* abuse tooling owns detection. If colluders hold most of a template's capacity, audits are not independent |
+| L8 | **The floor is a residual risk.** A patient bad actor at both floors expects about 34 accepted bad cells before first detection and about 100 for 95% detection (8.29.3), each earning 1 credit | Accepted; the floor is the cost of not sampling everything. Raising the floors is a `tighten` change (R10) |
+| L9 | **Adaptive sampling and inference.** Sampling depends on past outcomes | The Beta posterior stays valid; frequentist coverage of intervals is not claimed; `pi` varying across a stratum makes the false-accept interval approximate (8.30.2) |
+| L10 | **Lag.** Audits resolve hours or days after submission | Estimates describe the window before today. Alarms can arrive after the harm |
+| L11 | **"Bad" is defined by the template.** A template that fails to capture what a requester needs yields cells that pass and are useless | Not measured by this part; requester outcome ratings are S13.* signals |
+| L12 | **Appeals are self-selected.** Only donors who appeal appear in the appeal floor | A lower bound on false rejects; never an estimate |
+| L13 | **Budget censoring.** When pools bind, measured v is capped (8.29.3) | `truncated_extra_share` is published; `v_exp` (8.31) gives the uncensored expectation |
+| L14 | **Attested metadata.** Service and model are reported by the volunteer | Used for audit assignment preference only; never proof |
+| L15 | **Parameters are defaults.** Every number is an `initial configurable default` or derived from one | Replaced by `P1M` and `OPS` measurement; none of this is evidence about human behavior, and simulation output (S18.*) must say so |
+
+## Issues raised
+
+This file is the second file of S8; if the template half is the first file, the issue block is `ISS-84`..`ISS-86` (S0.0.4 sub-blocks); C-001 corrects the numbers if the split differs. [A]
+
+| id | severity | fd_ref | issue | resolution | status |
+| --- | --- | --- | --- | --- | --- |
+| `ISS-84` | minor | prompt | Convention gaps. This part needs names that S0 does not list: parameters `verify.estimator_tail_prob`, `verify.gold_max_exposures`, `verify.gold_leak_alpha`, `verify.gold_adjudication_rate`, `verify.comparator_calibration_rate`, `verify.review_gold_min_polarity_share`, `verify.review_channel_daily_cap_cells` (8.37); `GoldCell.status` machine and `gold_cell.*` events; `Lease.gold_cell_id` and `ux_leases_member_gold`; cell columns `sampling_pi_ppm`, `sampling_draw_ppm`; `members.verification_state`; `TemplateVersion.verification` object (`risk_class`, `comparator`, `subjective`, `auto_checks`, `gold_pool_min`); reason code `reject.review_unacceptable`; permission `perm.verify.read_gold`; warning constraint `C9`; the exception that a gold instance has an attempt limit of 1 and that content-rejected verification cells end in `exhausted`; heading numbers `8.20`+ in this file; `subjective` and a comparator are mutually exclusive in template validation | All added in this file with defaults and validation; C-001 folds them into S0 and S16; the template half must carry the `verification` object | proposed |
+| `ISS-85` | major | FD§4.3, FD§4.4 | Verification cost accounting is inconsistent. (a) The default `g` and `s` imply v of about 0.15 to 0.17 (8.31) but `price.v_prior` is 0.10, so pools start underfunded. (b) Blanket redundancy on a high-risk template makes v at least `n - 1` = 2.0, above `price.v_cap` 0.50. (c) A job's pool is a trailing-average price but actual verification is random per job, and the ledger has no entry type for a shortfall. (d) An appeal that overturns a rejection has no defined payment path. (e) Budget truncation censors measured v | (a) S6.* quotes with `max(price.v_prior, v_exp)` until a measured v exists, and C-022 reviews `price.v_prior` against `verify.*` defaults. (b) No template is `high` in Phase 1; if one is, it is quoted at its measured v and `price.v_cap` does not apply to it. (c) Sampling above the floor is budget-limited; floor-band and mandatory events are funded by the pool remainder, then the levy share (8.32). (d) Appeal award per 8.34, a `transfer` or capped `mint`, counted as one `rework` cell. (e) `truncated_extra_share` is published. Who covers a shortfall beyond the levy share, and the exact ledger path of (d), are S6.*'s decision | needs_owner |
+| `ISS-86` | major | FD§4.4, FD§5.5, FD§9 | (a) Donors must see why a cell was rejected, but `reject.gold_mismatch` tells a donor that the cell was a hidden gold check. (b) FD§9 asks for false-reject "from gold cells" and false-accept "from audits", yet a gold fail is a rejection by construction, and audit agreement cannot reveal errors the comparator or auditors share | (a) The reason is shown without the reference or diff; the item is burned for that member and fails feed leak detection (8.24.3, 8.24.5). (b) False-reject is estimated from adjudicated gold fails (8.30.3); false-accept is a Horvitz-Thompson estimate over random audits with explicit lower-bound status and a comparator calibration sample (8.30.2, 8.30.4); limits in 8.40 | proposed |
