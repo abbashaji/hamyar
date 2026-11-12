@@ -168,3 +168,92 @@ Consequences [D]: founders' `reserve_donation` rows appear only once at least `a
 - `schema_version` increases only for breaking shape changes (which need `/v2`, S0.11.1); additive fields stay in `/v1`.
 - A failed invariant check is published, not hidden: after `ledger.invariant_violated` the page shows `last_invariant_check.result` = `failed` until a full recompute passes (`ledger.full_recompute_interval_s`). Disabling `ff.public.ledger_page` is an operator action recorded in `AdminAction` and the change log.
 - Copy: `copy.public.ledger_notice` (S12.14). The page says figures are as declared by the system's own checks at the time shown.
+
+## 12.4 Parameter page
+
+### 12.4.1 Content [D]
+
+FD Principle 5: formulas, parameters, expiry and the ledger are public. The page is generated from `Parameter` and `ParameterVersion` (S0.10.3) and lists every parameter whose `public` field is true.
+
+| Field shown | Source | Note |
+| --- | --- | --- |
+| `name`, `type`, `unit` | `Parameter` | `S0.10.1`, `S0.10.2` |
+| `value`, `version`, `effective_from` | current `ParameterVersion` | `ratio` is shown as integer ppm, `credits` as a `*_ucr` integer string; the client formats decimals (S0.6.1) |
+| `default`, `is_initial_default` | `Parameter.default`; true while `value` equals the default | Makes uncalibrated parameters visible (FD Principle 11: bad news is published too) |
+| `calibration_source` | measurement code of S0.10.4 plus pointer | Says what will replace the default |
+| `validation`, `owner`, `introduced_in` | `Parameter` | |
+| `next_version` | a `ParameterVersion` with a future `effective_from` | `{version, value, effective_from, change_log_entry_id}` or null |
+
+Parameters with `public` = false (area `security` by default) are **not listed by name**; the page shows only `withheld: { count, areas }` and `copy.public.parameter_withheld`. Changing any parameter's `public` flag is itself a change-log entry (S12.5), so withholding cannot happen silently (FD Principle 5).
+
+### 12.4.2 Versioning and queries [D]
+
+- `GET /v1/public/parameters` lists current values (`?area=` filters; cursor pagination, S0.11.6). `GET /v1/public/parameters/{name}` returns one. `GET /v1/public/parameters/{name}/versions` lists every `ParameterVersion`, newest first: `{version, value, effective_from, published_at, change_class, change_log_entry_id}`.
+- `?as_of=<RFC 3339>` on the single-parameter route returns the version in force at that instant. This lets anyone check a lot's expiry or a job's quote against the parameter version stamped at the time (S0.6.2: changes are prospective only).
+- A response never exposes a value before its `effective_from` as current; future versions appear only as `next_version`.
+- Responses carry `ETag` and `Cache-Control: max-age` no larger than `public.counter_refresh_s`.
+
+## 12.5 Change log
+
+### 12.5.1 What it records [D]
+
+The change log is the public projection of `ChangeLogEntry` (`chg_`, `permanent`, append-only). It exists so that no rule changes secretly (FD Principle 5) and so that rule R10 is checkable from outside: any rule may tighten at once; loosening needs a public entry and a stated reason (FD§5.4).
+
+`subject_kind` [A, convention addition, `ISS-128`]: `parameter`, `policy_version`, `template_version`, `service`, `feature_flag`, `pre_registration`, `kill_switch`, `milestone`, `correction`.
+
+| Public field | Rule |
+| --- | --- |
+| `id`, `published_at`, `effective_from` | `effective_from` is the instant the change binds |
+| `subject_kind`, `subject_ref` | `parameter`: the name; `policy_version`: `plv_` id and the changed `R1`..`R10` ids; `template_version`: `tpv_` id and transition; `service`: `svc_` id and transition (see label rule); `feature_flag`: `flag_key` and on or off; `pre_registration`: `exp_` id and the locked hash; `kill_switch`: scope; `milestone`: `milestone_key`; `correction`: the corrected checkpoint or entry |
+| `change_class` | `tighten`, `loosen` or `neutral` (S0.8.6) |
+| `old_value`, `new_value`, `old_version`, `new_version` | Only for public parameters |
+| `reason` and `reason_lang` | Required and non-empty for `loosen`; recommended otherwise |
+| `approvers` | A count and the roles (`operator`, `reviewer`); never `adm_` ids |
+| `corrects_id` | Set on a correction entry |
+
+- **Not published:** `kill.member.<mem_id>` engagements (a personal action); parameters with `public` = false (their entry says only “withheld parameter changed” and the area).
+- **Service labels:** a `service` entry shows the `svc_` id; the registry display label is added only when `public.change_log_service_labels` is true. Default false. [V] whether naming a provider publicly is acceptable; decided with counsel and the G1 threat model; stored in that parameter and the G0 counsel memo.
+
+### 12.5.2 Timing rules (R10 and S0.10.3) [D]
+
+| Class | Rule | Check |
+| --- | --- | --- |
+| `loosen` | `ChangeLogEntry` is published before the change binds; `effective_from >= published_at + notice_days` (`change.notice_days_default`, or `change.notice_days_price` for `price.*`, `admission.*`, `credit.*`) | Write refused with `VALIDATION_FAILED` otherwise |
+| `tighten` | Binds at once; the entry is published within `change.tighten_publish_within_s` | An `Alarm` is raised if the entry is late |
+| `neutral` | Published with `notice_days` like `loosen`, but `reason` optional | |
+
+Entries are never edited or deleted (S0.7: no soft delete on change-log tables). A mistake is fixed by a new entry of `subject_kind` `correction` with `corrects_id`. `GET /v1/public/change-log` filters by `subject_kind`, `change_class` and a date range and is newest first. A change-log entry is written in the same database transaction as the change it records (S0.10.3). The event is `changelog.entry_published`.
+
+## 12.6 Milestone pages (V6)
+
+### 12.6.1 Entity and states [D][A]
+
+FD§6.2 `V6`: public milestones tied to real outputs. `Milestone` is a new entity (`mst_`, `permanent`; convention addition, `ISS-128`).
+
+| Field | Type | Rule |
+| --- | --- | --- |
+| `id`, `milestone_key` | `mst_` id; slug | `milestone_key` is the natural key and the public path |
+| `metric_key` | enum | `verified_output_cells_total` or `commons_output_cells_total` (S12.2) |
+| `threshold` | int | Authored per milestone by the founders (`FND`); FD§6.2's 10,000 is an illustration, not a default |
+| `title_key`, `body_key` | copy keys | Need `needs_human_and_legal_review` before the state can reach `published` |
+| `state` | enum | `defined`, `reached`, `published` (T), `withdrawn` (T) |
+| `reached_at`, `reached_value` | timestamp, int | Set once |
+| `output_deliverable_ids`, `output_manifest_hash`, `output_license`, `output_cell_count`, `output_url` | refs, hash, `L1` or `L2`, int, string | Set at publication |
+
+```
+(none)    --milestone.defined-->    defined
+defined   --milestone.reached-->    reached      metric_key value >= threshold on a daily snapshot or live recount
+reached   --milestone.published-->  published    guards below
+reached|published --milestone.withdrawn--> withdrawn   legal or safety finding; page stays, marked withdrawn
+```
+
+`milestone.reached` is emitted once and is irreversible: if overturns later push the count below the threshold the milestone stays `reached` and the page shows `copy.public.milestone_corrections`. Reason: honesty without retracting history.
+
+### 12.6.2 Publication guards and page content [D]
+
+- **Guards for `milestone.published`:** (1) every included cell is `accepted` at that moment; (2) `output_manifest_hash` equals the stored `Manifest` hash; (3) the included jobs are Commons jobs with `purpose` `P1` and license `L1` or `L2`; policy stamps show R7 passed at admission and acceptance (R9), so the output is not licensed beyond the service flags; (4) the page copy is reviewed; (5) two distinct admins approve, one `reviewer` and one `operator`. `milestone.publish` is a two-person action; `S10.*` appends it to `security.two_person_actions` (`ISS-128`).
+- **A page may say only what is recorded:** before `published` it says the threshold was reached and when; it never says an output “became” anything. After `published` it shows the output description, declared license, cell count, manifest hash and link, the measured false-accept estimate from the latest `MetricSnapshot` (or “not yet measured”), and `copy.public.milestone_downstream` (FD glossary: downstream use uncontrolled).
+- **Never shown:** member names, handles, ids, places, services used. A contributor count appears only if it is at least `analytics.min_cohort_k`.
+- **Framing:** knowledge access, not politics (FD§6.1 rank 2).
+- **Where the output lives** (host, mirror, reachability from Iran) is [V]: verified by the operator, stored in `output_url` and the G2 `LaunchGateItem`.
+- Phase 1 and 2 behavior and the randomized in-app announcement: S12.12 `V6`.
