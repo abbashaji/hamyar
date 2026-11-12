@@ -509,3 +509,115 @@ The notice is shown to every new member and does not depend on any guess about l
 | `copy.declared.reported_service` | سرویس و مدل را مشارکت‌کننده گزارش کرده است و راستی‌آزمایی نشده است. | The service and model are reported by the volunteer and have not been verified. | needs human and legal review |
 | `copy.credit.not_money.title` | اعتبار، پول نیست | Credit is not money | needs human and legal review |
 | `copy.credit.not_money.body` | اعتبار در همیار واحد حسابِ کارهایی است که بررسی و پذیرفته شده‌اند. اعتبار پول نیست، دارایی نیست و حقِ وعده‌داده‌شده‌ای هم به شمار نمی‌رود. ¶ • اعلام‌شده: اعتبار فقط با انجام کار جابه‌جا می‌شود. نه خرید و فروش می‌شود، نه مستقیم برای عضو دیگری فرستاده می‌شود و نه با پول مبادله می‌شود. • اعلام‌شده: اعتبار تاریخ انقضا دارد و هر موجودی تاریخ‌های انقضای خود را نشان می‌دهد. اعتبارِ حاصل از کار {credit_lifetime_days} روز ماندگار است، مگر آنکه قوانین با اطلاع قبلی در سابقهٔ تغییرات عوض شوند. • اعلام‌شده: قیمت هر کار پیش از تأیید درخواست‌دهنده نشان داده می‌شود و کار فقط وقتی پذیرفته می‌شود که ظرفیت اعلام‌شده اجازه بدهد. • همیار دربارهٔ اینکه قانون با اعتبار چگونه رفتار می‌کند هیچ ادعایی ندارد. | Credit in Hamyar is a unit of account for work that has been checked and accepted. It is not money, not property and not a promised entitlement. ¶ • Declared: credit moves only through completed work. It is not bought or sold, it is not sent directly to another member, and it is not exchanged for money. • Declared: credit expires, and each balance shows its expiry dates. Credit earned by work lasts {credit_lifetime_days} days, unless the rules change with advance notice in the change log. • Declared: the price of a job is shown before the requester confirms, and a job is accepted only when the declared capacity allows it. • Hamyar makes no statement about how any law treats credit. | needs human and legal review |
+
+### 11.51.E Prompt-injection advice, decline, report and rejection
+
+| key | FA | EN | review status |
+| --- | --- | --- | --- |
+| `copy.injection.advice.title` | پیش از زدن دکمهٔ ارسال | Before you press Send | needs human and legal review |
+| `copy.injection.advice.body` | متنی که می‌خواهید کپی کنید حاوی داده‌هایی از یک شخص ناشناس است که درون یک قالب بازبینی‌شده قرار گرفته است. متنِ افراد ناشناس ممکن است دستورهایی داشته باشد که برای هدایت شما یا گفتگوی شما نوشته شده‌اند. ¶ • برای هر سلول کار یک گفتگوی تازه و تمیز شروع کنید. • هر جا که سرویس اجازه می‌دهد، حافظه و برنامه‌ها یا ابزارهای متصل را برای آن گفتگو خاموش کنید. • اگر چیزی غیرعادی به نظر می‌رسد، متن کامل درخواست را باز کنید و بخوانید. • تنها کار شما این است: متن را کپی کنید، ارسال را بزنید و متن پاسخ را برگردانید. اگر متن چیز دیگری از شما خواست، مثلاً باز کردن پیوند، دانلود فایل، اجرای کد، نصب چیزی یا دادن گذرواژه، انجامش ندهید و سلول کار را گزارش کنید. • اعلام‌شده: همیار ورودی‌ها را بازبینی می‌کند و نتیجه‌های مشکوک را علامت می‌زند. این کار خطر را کم می‌کند، اما از بین نمی‌برد. | The text you are about to copy contains data from a stranger, placed inside a reviewed template. Text from strangers can include instructions meant to steer you or your chat. ¶ • Use a new, clean chat for each cell. • Where the service lets you, turn off memory and connected apps or tools for that chat. • If anything looks unusual, expand and read the full prompt. • Your only job is to copy the prompt, press Send and paste back the text of the answer. If the text asks for anything else, such as opening a link, downloading a file, running code, installing something or sharing a password, do not do it, and report the cell. • Declared: Hamyar reviews inputs and flags suspicious results. This reduces the risk but does not remove it. | needs human and legal review |
+| `copy.injection.clean_chat_hint.default` | گفتگوی تازه‌ای شروع کنید. اگر این سرویس حافظه یا برنامهٔ متصل دارد، برای این گفتگو آن‌ها را خاموش کنید. | Start a new chat. If this service has memory or connected apps, turn them off for this chat. | needs human and legal review |
+| `copy.moderation.decline_explainer` | می‌توانید از هر سلول کار انصراف دهید. اعلام‌شده: انصراف جریمه ندارد، بر سطح اعتماد شما اثر نمی‌گذارد و زمان انتظاری هم ایجاد نمی‌کند. سلولِ منصرف‌شده به صف برمی‌گردد تا شخص دیگری آن را انجام دهد. اعلام‌شده: همیار تعداد انصراف‌ها را فقط برای فهمیدن اینکه کدام کارها باید بهتر شوند می‌شمارد. | You can decline any cell. Declared: declining has no penalty, does not affect your trust level and adds no waiting time. A declined cell returns to the queue for someone else. Declared: Hamyar counts declines only to learn which jobs need improving. | needs human and legal review |
+| `copy.moderation.report_explainer` | اگر سلولی ناامن به نظر می‌رسد، چیزی بیشتر از کپی، ارسال و بازگرداندن متن می‌خواهد، به نظر می‌رسد اطلاعات شخصی دارد یا به هر شکل دیگری ایراد دارد، آن را گزارش کنید. ¶ • اعلام‌شده: یک بازبین هر گزارش را می‌بیند. هدف اعلام‌شده برای نخستین بررسی {report_triage_sla_days} روز است. • اعلام‌شده: درخواست‌دهنده نمی‌فهمد چه کسی گزارش داده است. • اعلام‌شده: گزارش‌ها تا {moderation_days} روز پس از رسیدگی نگه داشته می‌شوند و بعد به شمارش‌های کلی تقلیل می‌یابند. | Report a cell if it looks unsafe, asks for more than copying, pressing Send and returning text, seems to contain personal data, or is wrong in some other way. ¶ • Declared: a reviewer looks at every report. The declared target for a first look is {report_triage_sla_days} days. • Declared: the requester does not learn who reported. • Declared: reports are kept for {moderation_days} days after they are resolved, then reduced to counts. | needs human and legal review |
+| `copy.moderation.rejection_explainer` | نتیجه‌ای که رد‌شده باشد اعتباری نمی‌آورد. اعلام‌شده: دلیل رد را می‌بینید و تا {appeal_window_days} روز می‌توانید درخواست بازبینی بدهید. بازبینی را کسی انجام می‌دهد که تصمیم اول را نگرفته است. | A rejected result earns no credit. Declared: you can see the reason, and you can ask for a review within {appeal_window_days} days. A reviewer who did not make the first decision looks at it. | needs human and legal review |
+
+### 11.51.F Recovery key, consent and opt-in
+
+| key | FA | EN | review status |
+| --- | --- | --- | --- |
+| `copy.identity.recovery_key_warning.title` | همین حالا کلید بازیابی خود را ذخیره کنید | Save your recovery key now | needs human and legal review |
+| `copy.identity.recovery_key_warning.body` | این کلید تنها راه بازگرداندن هویت شما در همیار است، اگر این دستگاه یا اطلاعات آن را از دست بدهید. ¶ • این کلید فقط یک‌بار و همین‌جا نشان داده می‌شود. اعلام‌شده: همیار نسخه‌ای از آن نگه نمی‌دارد که بتواند دوباره به شما نشان دهد. • هرکس این کلید را داشته باشد می‌تواند هویت شما را تصاحب کند و اعتبار شما را خرج کند. آن را به کسی ندهید و برای کسی نفرستید. اعلام‌شده: تیم همیار هرگز آن را نمی‌خواهد. • آن را در جای امنی نگه دارید که با شرایط خودتان سازگار باشد. هر کسی که به محل نگهداری دسترسی داشته باشد می‌تواند نسخهٔ ذخیره‌شده را پیدا کند. • اگر آن را گم کنید، همیار نمی‌تواند هویت شما را برایتان بازگرداند. • اعلام‌شده: پس از بازیابی، هویتِ بازیابی‌شده تا {recovery_cooldown} نمی‌تواند کار شروع کند یا اعتبار خرج کند. این یک محدودیت برای جلوگیری از سوءاستفاده است. | This key is the only way to get your Hamyar identity back if you lose this device or its data. ¶ • It is shown once, here. Declared: Hamyar does not keep a copy that it can show you again. • Anyone who has this key can take over your identity and spend your credit. Do not share it, and do not send it to anyone. Declared: the Hamyar team never asks for it. • Keep it somewhere safe that fits your own situation. A saved copy can be found by anyone who can reach the place where you saved it. • If you lose it, Hamyar cannot restore your identity for you. • Declared: after a recovery, the recovered identity cannot start jobs or spend credit for {recovery_cooldown}. This is an abuse limit. | needs human and legal review |
+| `copy.identity.recovery_key_warning.confirm` | کلید بازیابی‌ام را ذخیره کرده‌ام و می‌دانم همیار نمی‌تواند آن را برایم بازگرداند. | I have saved my recovery key. I understand that Hamyar cannot restore it for me. | needs human and legal review |
+| `copy.consent.join.title` | پیش از عضویت | Before you join | needs human and legal review |
+| `copy.consent.join.intro` | لطفاً یادداشت‌های بالا را بخوانید. هر کادر را فقط اگر برای شما درست است علامت بزنید. برای ادامه، همهٔ کادرها لازم است. | Please read the notes above. Tick each box only if it is true for you. You need all of them to continue. | needs human and legal review |
+| `copy.consent.join.risk_ack` | یادداشت دربارهٔ خطر برای حساب‌های خودم را خوانده‌ام. می‌دانم ممکن است سرویسی حساب من را محدود یا مسدود کند و خودم تصمیم می‌گیرم که مشارکت کنم یا نه. | I have read the note on risks to my own accounts. I understand that a service may limit or suspend my account, and I decide for myself whether to take part. | needs human and legal review |
+| `copy.consent.join.privacy_ack` | آنچه همیار جمع‌آوری می‌کند و آنچه نمی‌تواند وعده دهد را خوانده‌ام. می‌دانم همیار «با نام مستعار» است، نه «ناشناس». | I have read what Hamyar collects and what it cannot promise. I understand that Hamyar is pseudonymous, not anonymous. | needs human and legal review |
+| `copy.consent.join.safety_ack` | یادداشت دربارهٔ ایمنی شخصی را خوانده‌ام. خودم تصمیم می‌گیرم که مشارکت برای من ایمن است یا نه. | I have read the note on personal safety. I decide for myself whether it is safe for me to take part. | needs human and legal review |
+| `copy.consent.join.credit_ack` | می‌دانم اعتبار پول یا دارایی نیست، تاریخ انقضا دارد و زمان‌ها و عددهای اعلام‌شده تضمین نیستند. | I understand that credit is not money or property, that it expires, and that declared times and numbers are not guarantees. | needs human and legal review |
+| `copy.consent.join.waiver` | ادعای شخصی خودم را نسبت به نتیجه‌هایی که ارسال می‌کنم، همان‌طور که در شرایط مشارکت‌کنندگان آمده است، کنار می‌گذارم. می‌دانم نتیجه‌های دارای مجوز باز را هر کسی می‌تواند دوباره استفاده کند. | I give up any claim of my own over the results I submit, as described in the contributor terms. I understand that openly licensed results can be reused by anyone. | needs human and legal review |
+| `copy.consent.join.no_circumvention_ack` | می‌دانم همیار از من نمی‌خواهد محدودیتی را دور بزنم یا شرایط استفادهٔ سرویسی را نقض کنم، و نباید از سرویسی که برای من در دسترس یا مجاز نیست استفاده کنم. | I understand that Hamyar does not ask me to get around any restriction or to break a service's terms, and that I should not use a service that is not available or not allowed for me. | needs human and legal review |
+| `copy.consent.join.age_confirmation` | تأیید می‌کنم که دست‌کم {min_age_years} سال دارم. | I confirm that I am at least {min_age_years} years old. | needs human and legal review |
+| `copy.consent.join.continue` | موافقم و ادامه می‌دهم | Agree and continue | needs human and legal review |
+| `copy.consent.optin.defaults_note` | اعلام‌شده: به‌طور پیش‌فرض فقط سلول‌هایی به شما نشان داده می‌شود که برای استفادهٔ شخصی یا انتشار باز هستند و داده‌های عمومی یا غیرحساس دارند. هر زمان می‌توانید انتخاب‌هایتان را عوض کنید. تغییرها بر سلول‌هایی که هنوز باز نکرده‌اید اعمال می‌شود. | Declared: by default you are shown only cells for personal use or open publication that use public or non-sensitive data. You can change your choices at any time. Changes apply to cells you have not opened yet. | needs human and legal review |
+| `copy.consent.optin.sensitive_topic` | سلول‌هایی با این موضوع به من نشان داده شود: {topic}. ممکن است محتوای سخت یا ناراحت‌کننده داشته باشند. اعلام‌شده: این گزینه به‌طور پیش‌فرض خاموش است و هر زمان می‌توانید خاموشش کنید. | Show me cells on this topic: {topic}. They may contain difficult material. Declared: this is off by default, and you can turn it off at any time. | needs human and legal review |
+| `copy.consent.optin.locked_purpose` | این نوع استفاده هنوز باز نشده است. اعلام‌شده: برای هر سرویس فقط پس از بازبینی شرایط آن باز می‌شود و تغییر در سابقهٔ تغییرات اعلام می‌شود. | This use is not open yet. Declared: it opens for a service only after that service's terms have been reviewed, and the change is announced in the change log. | needs human and legal review |
+
+### 11.51.G No circumvention and offline drafts
+
+| key | FA | EN | review status |
+| --- | --- | --- | --- |
+| `copy.policy.no_circumvention.title` | بدون دور زدن محدودیت‌ها | No circumvention | needs human and legal review |
+| `copy.policy.no_circumvention.body` | اعلام‌شده: همیار هرگز از کسی نمی‌خواهد و به کسی توصیه نمی‌کند که محدودیت منطقه‌ای یا فنی را دور بزند یا شرایط استفادهٔ یک سرویس را نقض کند. ¶ • اعلام‌شده: هر سرویس فقط پس از آن در همیار به کار می‌رود که یک بازبین شرایط آن را ثبت کرده باشد. • اعلام‌شده: همیار راهکار دور زدن محدودیت‌ها را منتشر نمی‌کند و نمی‌تواند در مشکل‌هایی که از این کار پیش می‌آید کمک کند. • اگر سرویسی برای شما در دسترس نیست، یا برای شما یا برای کاری که می‌خواهید با آن بکنید مجاز نیست، از آن استفاده نکنید. پرسش دربارهٔ آنچه یک سرویس اجازه می‌دهد را باید از خود آن سرویس و از مشاورهٔ حقوقی صلاحیتدار پرسید. | Declared: Hamyar never asks or advises anyone to get around a regional or technical restriction, or to break the terms of a service. ¶ • Declared: a service is used in Hamyar only after a reviewer has recorded its terms. • Declared: Hamyar does not publish tips for getting around limits, and cannot help with problems that come from doing so. • If a service is not available to you, or not allowed for you or for what you would do with it, do not use it. Questions about what a service allows are for that service and for qualified legal advice. | needs human and legal review |
+| `copy.offline.draft_local_only` | اعلام‌شده: متنی که چسبانده‌اید فقط روی همین دستگاه ذخیره می‌شود، تا وقتی که ارسال را بزنید، یا زمانِ سلول کار تمام شود، یا {draft_ttl}، هر کدام زودتر باشد. هر کسی که بتواند از این دستگاه استفاده کند آن را می‌بیند. همین حالا می‌توانید آن را پاک کنید. | Declared: your pasted text is saved only on this device, until you press Submit, until the cell's time runs out, or for {draft_ttl}, whichever comes first. Anyone who can use this device can see it. You can clear it now. | needs human and legal review |
+| `copy.offline.submit_queued` | شما آفلاین هستید. ارسال شما روی همین دستگاه منتظر مانده است. اعلام‌شده: اگر زمان سلول کار تمام نشده باشد، با برگشتن اتصال فرستاده می‌شود. هنوز پذیرفته نشده است. | You are offline. Your submission is waiting on this device. Declared: if the cell's time has not run out, it will be sent when the connection returns. It has not been accepted yet. | needs human and legal review |
+
+## 11.52 Where each notice appears, placeholders and the declared-claim register
+
+**Usage map** [D]
+
+| Notice group (keys) | Where it appears | Rule |
+| --- | --- | --- |
+| `copy.safety.iran_notice.*`, `copy.risk.account_notice.*`, `copy.privacy.pseudonymity_notice.*`, `copy.credit.not_money.*`, `copy.declared.not_guaranteed.*`, `copy.license.downstream_uncontrolled.body`, `copy.policy.no_circumvention.*` | The join page, in this order (safety first), displayed in full, not collapsed; then the consent keys | Static, readable without JavaScript and before an identity exists (S11.49) |
+| `copy.consent.join.*` | Below the notices on the join page | Every box starts unticked; all are required; no box is hidden or collapsed; the continue button stays focusable and explains what is missing (S11.48) |
+| `copy.identity.recovery_key_warning.*` | Immediately after the identity is created, before any other screen, and again from settings | The confirm box gates leaving the screen |
+| `copy.injection.advice.*` | The cell card, one tap away, and mandatory expansion on first use (FD§5.5); the help page | `copy.injection.clean_chat_hint.default` is the target of `adapter.clean_chat_hint_key` (S0.8.3) when an entry sets no hint of its own |
+| `copy.moderation.decline_explainer`, `copy.moderation.report_explainer` | Next to the decline and report buttons of the cell card; the help page | |
+| `copy.moderation.rejection_explainer` | On every rejected-result screen and the appeal screen | |
+| `copy.license.downstream_uncontrolled.chip` and `.body` | The cell card of every open-publication cell; the requester job form where an open license is declared; the results download page | FD§5.7 failure mode 3: the card and the job form must say so |
+| `copy.declared.window_quote` | The quote screen of the requester wizard | |
+| `copy.declared.reported_service` | The provenance view and the manifest page | |
+| `copy.risk.service_review_line` | The cell card, next to the service | |
+| `copy.consent.optin.*` | Opt-in settings | |
+| `copy.offline.*` | Beside the paste-back box | |
+| All of the above except the cell-level keys | The public notices page, both languages side by side, each notice with a stable anchor, reachable from every footer | Readable without login, without JavaScript, and offline once loaded |
+
+The keys above are not API error texts. API errors use their own `copy.*` keys through `details.copy_key` (S0.11) and follow the same rules.
+
+**Placeholder registry** [D] (every placeholder in the table of S11.51; a placeholder with no row here is a build error)
+
+| Placeholder | Type | Source |
+| --- | --- | --- |
+| `{review_date}` | date | date of the latest `service.approved` event of the registry entry [A] |
+| `{ip_hash_ttl_days}` | number | `retention.ip_hash_ttl_days` |
+| `{job_payload_days}` | number | `retention.job_payload_days` |
+| `{moderation_days}` | number | `retention.moderation_days` |
+| `{report_triage_sla_days}` | number | `report.triage_sla_days` |
+| `{appeal_window_days}` | number | `appeal.window_days` |
+| `{credit_lifetime_days}` | number | the member's effective lifetime: `credit.lifetime_days`, or `credit.lifetime_days_accelerated` for a member assigned to the accelerated-expiry arm (S12.*, S13.*) |
+| `{recovery_cooldown}` | duration | `identity.recovery_cooldown_s` |
+| `{draft_ttl}` | duration | `ui.draft.ttl_s` |
+| `{window}` | duration | the quoted completion window of the job (S6.*) |
+| `{topic}` | topic | display name of a `TopicCategory` (stored as a `{fa, en}` pair) |
+| `{min_age_years}` | number | `identity.min_age_years` (requested of S10.*, `ISS-119`); the age line is rendered only when the value is greater than 0 |
+
+**Declared-claim register** [D]. A notice may say only what the system does. Each promise-like claim below names what makes it true; a row marked [V] is a dependency on another part that must be confirmed there before the notice is approved.
+
+| Claim in the notices | Made true by | Status |
+| --- | --- | --- |
+| Identity is a device-made public key, no name | `MemberKey`, no password (S0.6); S10.* | consistent with S0 |
+| Only keyed hashes of device and network identifiers, kept `retention.ip_hash_ttl_days`; never a raw network address | S0.6 hashing table; `retention.raw_ip_stored` constant false; build milestone `BM4` acceptance | consistent with S0 |
+| Job and result text deleted `retention.job_payload_days` after the job ends; hashes and manifests remain | S0.7 retention class `job_bound` | consistent with S0 |
+| An e-mail address is stored only if the member adds it | `identity.email_optional` constant true; the storage form is S10.* | [V] S10.* |
+| No service password or session stored; chat page never read | No feature of the spec does either (ground rule 3) | consistent with the spec |
+| The member presses Send every time | Ground rule 3; S9.* | consistent with the spec |
+| Location is not shown | `public.location_display` = `never` | consistent with S0 |
+| No third-party trackers or cookies | `analytics.third_party_trackers`, `analytics.cookies_enabled` constants false; bearer tokens, no cookies (S0.11) | consistent with S0 |
+| Requesters never see who completed a cell | `vol_` handles are never shown to requesters (S0.6) | consistent with S0 |
+| A service is offered only after a reviewer recorded its terms and saved a copy | Approval guard (S0.8.3, S0.9.6); S7.* | consistent with S0 |
+| Declining has no penalty and does not affect the trust level | `lease.decline_cooldown_s` constant 0; trust tiers move only on reliability evidence (S0.9.4); S8.* MUST NOT count declines in reliability | [V] S8.* |
+| A reviewer looks at every report; first look target; retention then counts only | `report.triage_sla_days`; S0.7 class `moderation`; S10.* | [V] S10.* |
+| A different reviewer decides an appeal; the window | S0.9.7 guard; `appeal.window_days` | consistent with S0 |
+| Credit moves only through completed work; is not bought, sold or sent directly | S0.8.5 entry types contain no member-to-member entry; `grant.non_transferable` | consistent with S0 |
+| Credit expires and balances show expiry dates | `credit.lifetime_days`; S6.*, S11 screens | consistent with S0 |
+| A price is shown before confirmation; a job is accepted only when declared capacity allows | Quote and admission flow (S6.*) | consistent with S0 |
+| Recovery cooldown | `identity.recovery_cooldown_s` | consistent with S0 |
+| The Hamyar team never asks for the recovery key | Operating procedure of the team | [V] operator, recorded in the launch checklist (S14.*) |
+| Hamyar keeps no copy of the recovery key that it could show again | Recovery key design (S10.*) | [V] S10.* |
+| Defaults of opt-ins; sensitive topics off by default | `optin.default_*`; `optin.sensitive_topics_default` constant false | consistent with S0 |
+| Locked purposes open only after a terms review and a change-log entry | Rules `R5`, `R6`, `R10` (S0.8.4) | consistent with S0 |
+| Inputs are reviewed and suspicious results are flagged | Screening and quarantine (S9.*) | [V] S9.* |
+| Published numbers carry the measurement date; changes with advance notice | `change.notice_days_default`; public change log (S12.*) | consistent with S0 |
+| The safety note is shown to every new member and Hamyar does not infer location | S11.51.C; S0.6 (no IP-derived location) | consistent with this part |
+| Hamyar does not publish tips for getting around limits | Editorial rule; the copy checks of S11.50 | consistent with this part |
+| Drafts stay on the device for the stated time | S11.49; `ui.draft.ttl_s` | consistent with this part |
+| Opt-in changes apply to cells not yet opened | Rule `R8`; the lease-time opt-in check (S8.*) | [V] S8.* |
