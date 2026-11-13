@@ -543,3 +543,28 @@ Transitions rule 6 exempts (never blocked by any switch or kill switch): refund 
 | `Parameter` for a `launch.*` or `kill.*`-adjacent value missing | Falls back to the compiled default (0.10.3's existing rule), which for every boolean in this part is the closed value |
 | Clock skew between the node evaluating and the node that wrote `valid_until` | Evaluation always uses the database's `now()`, never an application-server clock, so skew across app nodes cannot produce different answers (`AC-launch-27`) |
 | Two concurrent `gate.signed_off` calls on the same item and generation | Serialized by the unique constraint on `GateSignoff` and a row lock on the item during `SO-1`..`SO-8`; the loser sees a normal `CONFLICT` and may retry, which simply re-reads the now-updated state |
+
+## 14.10 Screens (data contract only; copy and layout are S11.*/S15.*)
+
+| Screen | Who | Must show | Must allow |
+| --- | --- | --- | --- |
+| Launch panel | `perm.launch.read` | Three switches with the fields of S14.8.5; per-switch `Fail` reasons grouped by gate | Nothing by itself; actions live on the items and the propose/approve controls of S14.8.1 |
+| Gate checklist | `perm.launch.read` | Every `LaunchGateItem` grouped by `gate_id` then `scope`, its `state`, `outcome`, `valid_until`, and whether it is advisory | Filter by gate, scope, state |
+| Item detail | `perm.launch.read`; evidence list hides `restricted` rows without `perm.launch.read_restricted` | Evidence list (kind, size, hash, note, attach date, attacher), sign-off history across generations, watch descriptors and their last-checked digest | `perm.launch.attach_evidence` holders attach; `perm.launch.signoff` holders sign; `perm.launch.reopen` holders reopen with a reason |
+| Service registry row | `perm.launch.read` | `service_gate` result live, with reasons; grace period countdown while `review_due` | Link to that service's 12 `g0.svc.*` items |
+| Kill-switch board | `perm.launch.read` | Every key, state, last 3 `KillSwitch` rows with reason | `perm.killswitch.engage` holders engage; release per S14.8.4 |
+
+## 14.11 Events
+
+All follow 0.9.1's envelope. New event names introduced by this part, beyond `gate.item_created`, `gate.evidence_attached`, `gate.signed_off`, `gate.reopened` already given with their guards in S14.4.6: [D]
+
+| Event | Emitted by | Key fields |
+| --- | --- | --- |
+| `launch.switch_proposed` | `launch.switch_propose` | `switch_name`, `evaluation_digest`, `relied_on` |
+| `launch.switch_approved` | `launch.switch_approve` | `switch_name`, `authorization_id`, `authorized_until` |
+| `launch.switch_closed` | `launch.switch_close` or automatic revocation | `switch_name`, `authorization_id`, `revoked_reason` |
+| `killswitch.engaged` | `killswitch.engage` | `switch_key`, `seq`, `reason_code` |
+| `killswitch.release_proposed`, `killswitch.released` | release flow | `switch_key`, `seq` |
+| `service.review_due`, `service.suspended` | `RL-7` transition, grace-period sweep | `svc_id`, `cause` (`item_reopened` or `review_expired`) |
+
+Every row this part defines that is written by `system` still emits the same event as a human-caused write of the same kind, with `actor = system`, so downstream consumers (audit, S10.*) need no special case for machine-attached evidence. [D]
