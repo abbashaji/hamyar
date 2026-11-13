@@ -779,7 +779,7 @@ Editing `arms` after `registered` is rejected (`409 STATE_CONFLICT`). A changed 
 2. **Stratum.** `pilot_week:<k>` with `k = wk(member.created_at)` (13.5.1), optionally with `locale:<l>`. [D]
 3. **Block draw.** Lock the open block row `(experiment_id, stratum)` with `SELECT ... FOR UPDATE`; if none is open, create block `block_index = max + 1` with a permutation derived as below. Take `permutation[next_position]`, increment `next_position`, insert the `ExperimentAssignment`, emit `experiment.member_assigned` (no member id in the event). Replays are safe: the unique key returns the existing row. [D]
 4. **Permutation.** `seed = HMAC-SHA-256(key = salt, msg = "v" || experiment.assignment_seed_version || 0x00 || stratum || 0x00 || block_index)`. Build the list of arm keys with multiplicities `weight_i / g` in ascending `arm_key` order. Fisher-Yates from the last position `j = B-1` down to 1: draw `r` uniform in `[0, j]` from the stream `HMAC-SHA-256(seed, counter)` taken as 64-bit unsigned integers with rejection sampling (reject `v >= floor(2^64 / (j+1)) * (j+1)`), swap positions `r` and `j`. The same salt, version, stratum and index always give the same permutation, so an auditor holding the published salt can regenerate every block and compare it with the stored one. [D]
-5. **No re-draw.** A member's arm never changes. Re-registering creates a new `mem_` id and a new draw, which the platform cannot prevent; the arm is therefore not described to members as better or worse (`ISS-139` rationale below). [D]
+5. **No re-draw.** A member's arm never changes. Re-registering creates a new `mem_` id and a new draw, which the platform cannot prevent; the arm is therefore not described to members as better or worse. [D]
 6. **Balance guarantee and check.** Within a stratum the count of any arm differs from `n * weight_i / 1,000,000` by less than `block_size`. Job `experiment.balance_check` runs daily and writes an `Alarm` of kind `experiment.balance_violated` if it does not (a defect, not a finding), and publishes the per-stratum count table (counts only). A table of baseline covariates by arm (`locale`, pilot week, invite depth) is reported descriptively; with the pilot's size no covariate test is run. [D]
 
 ### 13.8.5 Applying an arm
@@ -807,3 +807,84 @@ GROUP BY a.arm_key;   -- spent_within_h_share = spent_h * 1e6 / earned
 ```
 
 **What a pilot of this size can detect.** With `n` members per arm, a difference in a proportion of about `delta = sqrt(2 * (1.96 + 0.84)^2 * 0.25 / n)` is detectable with 80 percent power at the two-sided 5 percent level in the worst case `p = 0.5` (normal approximation, rough at these sizes): `n = 15` gives about 0.51, `n = 20` about 0.44, `n = 25` about 0.40 (`1.96` and `0.84` are the standard normal quantiles for 95 percent two-sided and 80 percent power; `2.80^2 = 7.84`). Differences smaller than 40 to 50 percentage points in week-2 return are not detectable in a 30 to 50 member pilot, so `EXP-01` is a feasibility and mechanism check; the report says so (13.11). [D]
+
+## 13.9 Phase 0 calibration tool
+
+FD§9 Phase 0 has founders and a few testers run cells on their own accounts and measure four things: cells per day per service, seconds per cell, copy-and-paste error rate and automatic-check pass rate; the exit is "cell envelope defined". The tool below records those runs, computes the statistics with intervals, and turns them into parameter proposals. It needs no member and no job, runs in the admin app from `BM2` (S0.12), and is the only thing in the product that must work before anything else is finished. [D]
+
+**Hard limits of the tool** (ground rules 2, 3 and 9 of the brief) [D]:
+
+- It never asks for, receives or stores a provider credential, cookie, session token or API key, and never calls a provider, scrapes a provider page or reads the clipboard of a page that is not its own. Founders copy and paste by hand.
+- It stores sizes, durations, booleans and enum codes. It does not store prompt text, output text or screenshots. Tool-generated canary strings (below) are stored because the tool made them.
+- It may be used on a `Service` row in any review state, including `unreviewed`: it creates no `Job`, shows nothing to members and approves nothing. Running tests on the founders' own accounts may still breach a provider's terms or put the account at risk; that is for the founders and counsel to decide and is outside what this part can check [V].
+- It never writes a parameter. It produces proposals (13.9.4); a person applies them in the parameter editor, which does the prospective-only and notice handling of S0.10.
+
+### 13.9.1 Data model
+
+Table `calibration_records` (`CalibrationRecord`, `cal_`, `permanent`; contains no personal data by construction). [D]
+
+| Column | Type | Rule |
+| --- | --- | --- |
+| `id`, `created_at` | S0.7 | `created_at` is server time of entry |
+| `kind` | enum `cell_run`, `clipboard_probe` | |
+| `recorded_by` | text | `adm_` id of the recording admin (an operator id, not a member) |
+| `service_id` | text, nullable | `svc_`; null for `clipboard_loop` probes (no service involved) |
+| `template_id` | text, nullable | `tpl_` when a registered template was run; null for ad-hoc size tests |
+| `account_label` | text | `^[a-z0-9_-]{1,32}$`, a label such as `founder-a-free-1`; not an e-mail, not a handle |
+| `ran_on` | date (UTC) | The day of the run as entered or taken from the page clock; used for cells per day |
+| `device_class`, `locale` | enums | `phone`, `tablet`, `desktop`; `fa`, `en` |
+| `attempt_index_in_day` | int | 1-based count of runs on that account that day, entered or counted by the tool |
+| `input_chars`, `output_chars` | int, nullable | Sizes after normalization (S0.6.6); `output_chars` null when no output |
+| `seconds_total` | int | From pressing Start in the tool until the paste is complete |
+| `seconds_paste` | int, nullable | From the lap button "answer received" until paste complete |
+| `result` | enum `ok`, `refused`, `failed`, `limit_hit`, `wrong_format` | `refused`: the service declined the task; `failed`: error or empty; `limit_hit`: the account's allowance was exhausted (this run and later ones that day); `wrong_format`: output could not be pasted into the result schema |
+| `auto_check_passed` | bool, nullable | The template's automatic checks (S9.*) run by the tool on the pasted text; null when none ran |
+| `copy_paste_error` | bool | Tool-detected mismatch (probes) or founder-flagged (real cells) |
+| `copy_paste_error_kind` | enum, nullable | `truncated_paste`, `extra_text`, `whitespace_changed`, `direction_marks_lost`, `digits_changed`, `encoding_garbled`, `other` |
+| `used_prefill` | bool | Whether the open-in-service prefill link was used (FD§3.2 variant) |
+| `probe_kind` | enum, nullable | `clipboard_loop` (page to clipboard to the same page, no service), `echo_roundtrip` (through a service: "repeat this text exactly") |
+| `canary_script` | enum, nullable | `latin`, `persian`, `mixed_rtl_ltr`, `digits_mixed` (the sets include the digit and direction cases of S0.6.6 and S11.*) |
+| `canary_chars`, `matched` | int, bool | For probes; `matched` is true when the pasted text equals the canary byte for byte after normalization |
+
+Durations are measured with the monotonic clock of the founder's device, a deliberate exception to the server-time rule: they are durations, not instants, and the tool is used by trusted operators (instants such as `created_at` remain server time). [A]
+
+Entry methods: the single-run page (a timer with Start, lap and Done, designed for a phone; screens in S11.*), and a validated bulk upload of the numeric columns only (CSV, at most 200 rows per request, no free-text column). Both write `calibration.recorded`. [D]
+
+### 13.9.2 Statistics (`CAL-01` to `CAL-06`)
+
+Computed on demand per `service_id` and pooled, from `calibration_records` only; each shows `n`, the Wilson interval where a proportion, and the flag `sufficient = (n >= calibration.min_samples_per_service)` (initial configurable default 30). [D]
+
+| Id | Statistic | Computation |
+| --- | --- | --- |
+| `CAL-01` | Cells per day per service | Over (service, `account_label`, `ran_on`) groups with at least one run: count of runs; report min, median, p90, max; and `cells_before_limit` = `attempt_index_in_day - 1` of the first `limit_hit` that day, where one occurred; days with no limit observed are `right-censored` and reported as such |
+| `CAL-02` | Seconds per cell | Over `result = 'ok'`: p01, p05, p50, p90, p95, p99 of `seconds_total` (lower percentiles, 13.5.3); the same for `seconds_paste` |
+| `CAL-03` | Refusal and failure | `refused / n`, `failed / n`, `limit_hit / n`, `wrong_format / n` over all `cell_run` rows, per service and per template |
+| `CAL-04` | Copy-paste error rate | `copy_paste_error` over `cell_run` rows; and `matched = false` over probes, separately for `clipboard_loop` and `echo_roundtrip`, by `canary_script` and `device_class`. A `clipboard_loop` failure is the channel; an `echo_roundtrip` failure mixes the channel with the model's fidelity in copying and is never reported as clipboard error |
+| `CAL-05` | Automatic-check pass rate | `auto_check_passed = true` over rows where it is not null, per template |
+| `CAL-06` | Input-size fit | Sort `result = 'ok'` and not-`ok` runs by `input_chars`; the *success prefix* is the largest `x` such that all runs with `input_chars <= x` have a success rate (ok and no limit hit) of at least `calibration.envelope_min_success` (new parameter, initial configurable default 0.95, `FND`), with at least `calibration.min_samples_per_service` runs in the prefix |
+
+Expected scale: collecting 30 runs per service for four or five services is 120 to 150 runs; a proportion measured on 30 runs has a Wilson half-width of about 0.17 at `p = 0.5` and a zero-event upper bound of about `3 / 30 = 0.10` (13.11). The tool displays these widths next to every rate so that no one reads a 0 of 30 as "no errors". [D]
+
+### 13.9.3 Freezing as evidence
+
+A report is *frozen* by `POST /v1/admin/calibration-reports` (creates a report resource): the tool computes all statistics at that instant, writes them as `MetricSnapshot` rows (`metric_no = CAL-nn`, `visibility = internal`, `dims` with `service_id`), records the id range of the `calibration_records` used, and attaches the report id and a SHA-256 of its canonical JSON as evidence to the launch-gate item that S14.* designates for calibration data. Frozen reports are immutable; a later report supersedes (`supersedes_id`), never edits. [D]
+
+### 13.9.4 Parameter proposals
+
+Each proposal shows: the parameter, the current value, the proposed value, the rule, the records behind it, and `ready` (true only when every contributing service is `sufficient`). Proposals are conservative across services: where a parameter is global, the tool takes the safest value over the services with `sufficient = true` and lists services below the minimum as `insufficient`. Applying one copies it into a draft change in the parameter editor. [D]
+
+| Parameter | Proposed value | Notes |
+| --- | --- | --- |
+| `cell.envelope.expected_time_s` | `ceil(p50 of seconds_total)` over `ok` runs, pooled over the sufficient services (maximum over services) | The default 120 s is the FD§3.2 target, not a measurement |
+| `lease.timeout_s` | `ceil(calibration.lease_timeout_multiplier * p95 of seconds_total)`, with `calibration.lease_timeout_multiplier` a new parameter, initial configurable default 10 (carried from the conventions default `lease.timeout_s` = 1,200 = 10 x 120 s) | Must satisfy C3 (not below `cell.envelope.expected_time_s`) |
+| `lease.submit_grace_s` | `ceil(p95 of seconds_paste)` | Paste phase only |
+| `verify.timing_min_s` | `floor(percentile calibration.timing_min_percentile of seconds_total)` (new parameter, initial configurable default 1, so p01) | A floor for the plausibility check on submission time. Founders are faster than donors [H]; treat as an upper bound on a sensible minimum |
+| `cell.envelope.max_input_chars` | The success prefix of `CAL-06` | Conservative across services: the minimum |
+| `cell.envelope.max_output_chars` | `ceil(p99 of output_chars)` over `ok` runs | A larger value is allowed; a smaller one would reject valid outputs |
+| `cell.envelope.max_submission_bytes` | `ceil(3 * max_output_chars / 1024) * 1024`, three bytes per character as in the S0.6.6 envelope default | Rounded up to a whole kibibyte |
+| `mint.monthly_cap_credits` | Not proposed automatically: the tool prints `planned_members.max * median cells per active day (CAL-01) * 30 * (1 - admission.phi)` as a reference upper bound, which S6.* then caps by forecast redeemable capacity | Founder accounts do not represent donors [H] |
+| `lease.extend_s`, `lease.max_extensions` | Not proposed; the tool shows `CAL-02` percentiles for the founders to choose from | No derivable rule without donor data |
+
+### 13.9.5 Exit check for Phase 0
+
+The tool shows an exit checklist (informational, never a gate; the gates are S14.*): at least 3 and at most 5 templates have `CAL-05` rows (FD§9: 3 to 5 templates), each service in the candidate set has `sufficient = true` for `CAL-02`, `CAL-03` and `CAL-04`, and every parameter of the table above has a proposal with `ready = true` or a written reason it does not. [D]
