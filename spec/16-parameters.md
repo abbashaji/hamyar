@@ -19,11 +19,11 @@ This part is the single complete list of configuration parameters. Every number 
 | Source | What was taken |
 | --- | --- |
 | FD§4.9, FD§3.3, FD§4.3-4.8, FD§5.4, FD§6.2, FD§8.3, FD§9 | The ten FD§4.9 parameters, illustrative inputs, thresholds named by the FD, Phase 1 measures and decision rules |
-| S0 0.10.6 (tables A, B, C), 0.10.3 constraints C1..C8 | 217 names with defaults, validation and measurement codes |
-| S4 4.19.1 | 21 new `ops.*` names and `admission.forecast_refresh_s` |
+| S0 0.10.6 (tables A, B, C), 0.10.3 constraints C1..C8 | Every name of tables A, B and C with defaults, validation and measurement codes |
+| S4 4.19.1 | 21 new `ops.*` names and `admission.forecast_refresh_s` (22 names) |
 | S6.* ledger file (6.11, 6.12) | Binding of parameters to entities, tighten directions required from this part, `phi` and mint-cap relation (`ISS-63`) |
-| S6.* admission file (6.23 B and C) | 14 new `admission.*` and `reservation.*` names, constraints `C9`..`C12` |
-| S7 (7.15.1) | 13 new `policy.*`, `screen.*`, `service.*` names |
+| S6.* admission file (6.23 B and C) | 15 new `admission.*` and `reservation.*` names, constraints `C9`..`C12` |
+| S7 (7.15.1) | 14 new `policy.*`, `screen.*`, `service.*` names |
 | S9 (9.18) | 17 new `cell.*`, `lease.*`, `screen.*`, `verify.*` names, constraints `S9-C1`..`S9-C3` |
 | Not yet on main when this was written | S8 (templates and verification), S10 (identity), S11..S15, S1..S3: parameters they add are folded in by C-001 at assembly (`ISS-169`) [V] |
 
