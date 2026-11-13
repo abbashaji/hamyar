@@ -64,7 +64,7 @@ The directions for rows whose defining part states one (S0 for `verify.audit_rat
 | Versioning | Every accepted change creates an immutable `ParameterVersion` (`version` + 1) with `effective_from`, `change_class`, reason, approvers. The `default` column of `Parameter` is never edited. The value in force at time `t` is the version with the greatest `effective_from <= t` |
 | Owner roles | By area, S0 0.10.5: `operator` for `credit`, `price`, `grant`, `reserve`, `mint`, `inflation`, `ledger`, `job`, `admission`, `reservation`, `verify`, `lease`, `cell`, `trust`, `identity`, `session`, `invite`, `ratelimit`, `retention`, `security`, `launch`, `change`, `api`, `ui`, `i18n`, `ops`; `reviewer` for `policy`, `screen`, `service`, `template`, `optin`, `appeal`, `report` (exceptions named in 16.12); `founders` for thresholds, `operator` otherwise in `analytics`, `experiment`, `growth`, `team`, `public`, `metrics`, `calibration` |
 | Approvers | The owner role edits. A `loosen` or `neutral` change also needs a second distinct `operator` (`security.two_person_actions` contains `parameter.loosen`); `launch.*` needs `launch.min_signoffs` distinct admins |
-| Public exposure | `public` is true for every row except `security.*` and `ops.*` rows marked `public: no`; see 16.17.5 |
+| Public exposure | `public` is true for every row except those listed in 16.17.5 |
 | Calibration gate | A `CAL` or `P1M` value may replace a default only with at least `calibration.min_samples_per_service` cells per service behind it (16.19) |
 | Stamping | Objects stamp the version they were created under where the group header says `Binding`; every event carries `config_epoch` (S4.9.2) |
 
@@ -485,3 +485,142 @@ Owner `operator` (`calibration.min_samples_per_service` is `founders`). Binding:
 | `ops.migration_batch_size` | int | 1..100000 | 1000 | `N` | `OPS` | S4.* |
 | `ops.alert_error_ratio` | ratio | 0..1 | 0.05 | `T↓` | `OPS` | S4.11 |
 | `ops.alert_window_s` | duration_s | 30..86400 | 300 | `N` | `OPS` | S4.11 |
+
+## 16.17 Configuration mechanics
+
+### 16.17.1 Records [D]
+
+| Record | Fields beyond S0 0.10.3 |
+| --- | --- |
+| `Parameter` | `name` (PK), `type`, `unit`, `owner_role`, `change_policy` (16.2.2), `tighten_direction` (`lower`, `higher`, `toward:<value>`, `none`), `validation` (json), `default_value`, `public` (bool), `calibration_code`, `constraint_ids`, `introduced_in` (spec part), `prospective_only` (always true except constants, which are immutable) |
+| `ParameterVersion` | `parameter_name`, `version` (from 1), `value`, `effective_from`, `change_class` (`tighten`, `loosen`, `neutral`, `seed`), `reason`, `author_admin_id`, `approver_admin_ids`, `created_at`, `withdrawn_at` (null unless withdrawn before it took effect) |
+
+### 16.17.2 Write pipeline [D]
+
+```
+function write_parameter(actor, name, new_value, effective_from, reason, batch):
+  p = store.get(name)  or reject VALIDATION_FAILED("unknown parameter")      # R16-4
+  if p.change_policy == C: reject FORBIDDEN                                  # constants
+  if actor.role not in owner_roles(p.area): reject FORBIDDEN
+  v = parse(p.type, new_value); check_range_and_enum(p, v)                   # 16.4-16.16 Validation column
+  cur = value_at(name, now)
+  if v == cur and no pending version differs: return ok(no-op)              # idempotent
+  cls = classify(p, cur, v)          # tighten | loosen | neutral, by p.tighten_direction
+  if cls == tighten:   effective_from = now                                  # immediate (R10)
+  else:                effective_from = max(effective_from or 0, now + notice_days(p) * 86400)
+  future = config_as_of(effective_from) with batch applied and (name -> v)   # all pending versions
+  for c in constraints(p): if c.kind == error and not c.holds(future): reject VALIDATION_FAILED(c.id)
+  need = 1
+  if cls != tighten and "parameter.loosen" in value_at("security.two_person_actions"): need = 2
+  if p.area == launch: need = max(need, value_at("launch.min_signoffs"))
+  if c13_warning(future): need = max(need, 2)                                # mint cap above redeemable
+  if cls != tighten and len(reason) < value_at("policy.loosen_reason_min_chars"): reject VALIDATION_FAILED
+  require distinct approvers >= need
+  transaction:
+    insert ParameterVersion(version+1, effective_from, cls, reason, approvers)
+    insert ChangeLogEntry(public per 16.17.5, old, new, effective_from, notice)   # S0 0.10.3
+    insert AdminAction; emit parameter.changed via the outbox; bump config_epoch when it takes effect
+```
+
+A batch is atomic and validated as one future configuration, so an edit that is valid only together with another (for example `credit.lifetime_days` and `credit.lifetime_days_accelerated`) is accepted as a batch and refused as two single edits when the first alone breaks a constraint. Warnings (`C8`, `C13`) are returned in the response and recorded in the log entry. [D]
+
+**Classification** [A]: numeric and duration values use the direction of 16.2.2; booleans and enums use the stated end; lists use set inclusion (a longer `service.required_regions` or `security.two_person_actions` is a tightening, a longer `optin.default_*` or `service.terms_copy_allowed_types` is a loosening); a parameter with several members changed at once is `loosen` if any member loosens.
+
+### 16.17.3 Activation, lookup, caching [D]
+
+`value_at(name, t)` returns the non-withdrawn version with the greatest `effective_from <= t` (higher `version` wins a tie). Time is the server's UTC clock only. A scheduled version takes effect through an idempotent activation job every `ops.ttl_sweep_interval_s`, which bumps `config_epoch`; every event and every stamped object carries the epoch or the version it used. Processes cache values for at most `ops.config_cache_ttl_s`; a `tighten` change also emits `parameter.changed`, so the longest a tightening stays unapplied in one process is that TTL (30 s by default). Kill switches and `launch.*` are read uncached. [D]
+
+### 16.17.4 Rollback [D]
+
+A rollback is a new version with the old value; it is classified by the same rule, so rolling back a tightening is a loosening and takes notice, and rolling back a loosening is a tightening and is immediate. A version that has not yet taken effect may be withdrawn by its author or by any admin of the owner role at any time (`withdrawn_at`), which is itself logged. There is no revert window for parameters; the revert window of S7 (`policy.revert_window_s`) applies to `PolicyVersion` only. [A]
+
+### 16.17.5 Public exposure [D][A]
+
+`GET /v1/public/parameters` (S0 0.11.2) lists, for every public parameter: name, unit, current value, owner role, change-policy code, calibration code, initial default, the next pending version with its `effective_from`, and a link to the change log. A member can therefore see what changes before it changes (FD Principle 5). These rows are `public: no` because publishing the exact value helps an attacker more than it helps a member: `security.*`; `ops.*` except `ops.rpo_s`, `ops.rto_s`, `ops.backup_retention_days`; `identity.recovery_*`; `ratelimit.recovery_attempts_per_day`, `ratelimit.*new_members_per_day`; `grant.max_per_device`; `growth.referral.max_per_referrer_per_30d`; `verify.timing_*`, `verify.duplicate_*`, `verify.audit_rate_*`, `verify.gold_rate_*`, `verify.adapt.*`, `trust.audit_multiplier.*`; the `screen.*` limits. A change to a hidden parameter still produces a public change-log entry that names the area and the change class and gives the notice period, but not the value; an owner may decide that is too little (`ISS-164`). Constants and the structure of the sampling method are public in S8.* and S9.*. [A]
+
+### 16.17.6 Seeding and constants [D]
+
+The first migration inserts every row of this table at `version` 1 with `change_class` `seed` and `effective_from` = migration time, except the alias row `admission.forecast_refresh_s` (`ISS-162`). The `default_value` of a `Parameter` is never updated. A constant is stored for reading and for the public list but refuses writes; changing one is a spec change with a migration note.
+
+## 16.18 Cross-check against FD§4.9
+
+The FD's parameter table is the list that must be configurable and justified. Each item maps to the rows below; the derived values are recomputed by `AC-param-13`. [D]
+
+| FD§4.9 parameter | Row(s) here | Initial configurable default | Basis |
+| --- | --- | --- | --- |
+| Cell envelope | `cell.envelope.max_input_chars`, `.max_output_chars`, `.max_submission_bytes`, `.expected_time_s` | 4000, 6000, 32,768, 120 | FD§3.2 estimate [H]; replaced by `CAL` |
+| E, credit expiry | `credit.lifetime_days`, `credit.lifetime_days_accelerated` | 60 and 14 | FD§4.5 proposal and example arm |
+| K, member cap | `credit.member_cap_credits` | 350 | 1.25 x 240 x 1.15, rounded to 50 |
+| v, verification overhead | `price.v_prior`, `price.v_cap`, `price.v_window_days`, `price.v_min_sample_cells` (v itself is measured) | 0.10, 0.50, 28 days, 100 cells | FD§3.3 illustrative input as prior only |
+| λ, levy | `price.levy_lambda` | 0.05 | FD§3.3 illustrative |
+| g, gold rate | `verify.gold_rate_g`, `_floor`, `_max` | 0.05, 0.01, 0.20 | `P1M` |
+| s, audit rate | `verify.audit_rate_s`, `_floor`, `_max` | 0.10, 0.02, 0.50 | `P1M`; the floor keeps sampling above zero (FD§4.4) |
+| φ, redeemable share | `admission.phi` (and `admission.forecast_haircut`, `admission.horizon_discount_per_day`) | 0.50, 0.00, 0.00 | FD§3.3 illustrative; `P1M` |
+| G, starter grant | `grant.starter_credits`, `grant.starter_lifetime_days` | 3, 14 | FD§4.6 |
+| Mint cap | `mint.monthly_cap_credits`, `mint.per_member_daily_cap_credits` | 4800, 30 | derived (16.5) |
+| Reserve ceiling | `reserve.ceiling_credits` | 1000 | `P1M` |
+| Lease timeout | `lease.timeout_s` | 1200 | 10 x 120 s, `CAL` |
+
+Checked against the rows named in the cell and in the other parts; the FD§4.9 table itself was not re-read line by line for this cross-check [V]: C-001 re-checks it at assembly (`ISS-169`).
+
+## 16.19 Calibration plan
+
+A default is replaced only by the named evidence, recorded as a `CalibrationRecord` or a `PreRegistration`, with at least `calibration.min_samples_per_service` cells per service behind a `CAL` value. The pilot has 30 to 50 members (FD§9), too few for statistical claims: a `P1M` value is a descriptive estimate, published with its sample size and the range it was measured over, and no row is tuned inside that range without noting that. [D]
+
+| Code | Evidence and gate | Who decides | Rows it replaces (groups) |
+| --- | --- | --- | --- |
+| `CAL` | Phase 0 on the founders' own accounts: cells per day per service, seconds per cell, failure and copy-paste error rates (FD§9 Phase 0) | operator, recorded | 16.4 envelope, 16.9 lease, `verify.timing_*`, `mint.monthly_cap_credits` |
+| `P1M` | Phase 1 pilot measures (FD§9) | founders | credit and price group, 16.7 admission, 16.8 verification, 16.10 trust, 16.14 UI and i18n |
+| `DEM` | Demand check: interviews about real job sizes, splittability, accepted window (FD§8.3 G5) | founders | `credit.member_cap_credits`, `admission.max_job_cells`, `admission.min_window_s`, `admission.max_window_days`, `policy.max_pinned_services` |
+| `FND` | A founders' decision locked in a `PreRegistration` before day 1 | founders | floors, maxima, thresholds, `launch.*`, `change.*`, review counts |
+| `CNS` | Counsel's answer in the operator's jurisdiction [V] | operator with counsel | `service.review_*`, `service.required_regions`, retention rows marked `CNS`, `ops.backup_retention_days` |
+| `SEC` | The G1 threat-model decision | operator | identity, session, retention, security, `analytics.min_cohort_k`, public-exposure choices |
+| `TEC` | Feasibility measurement on real phones and desktops (FD§8.3 G2) | operator | `cell.envelope.max_json_depth`, `api.max_body_bytes`, `api.request_timeout_s`, `job.max_upload_bytes` |
+| `OPS` | Operating experience: alerts, incidents, capacity dashboard | operator | intervals, TTLs, `ops.*`, anti-farming limits |
+| `CON` | None: constants, changed only by a spec change | spec | every `C` row |
+
+## 16.20 Acceptance criteria
+
+| Id | Given | When | Then |
+| --- | --- | --- | --- |
+| `AC-param-01` | a name not in this table | it is seeded, written or read in a policy or job path | the store refuses it with `VALIDATION_FAILED`; CI fails on a code reference to an unknown name |
+| `AC-param-02` | the seeded defaults | the seed check runs | every row satisfies its range and every constraint of 16.3, and the derived defaults recompute to the stored values |
+| `AC-param-03` | an operator lowers `admission.phi` | the write is accepted | `change_class` is `tighten`, `effective_from` is now, and the log entry is public within `change.tighten_publish_within_s` |
+| `AC-param-04` | an operator raises `admission.phi` | the write is made without a second approver or with `effective_from` earlier than now + 14 days | it is refused; with a second approver and 14 days of notice it is accepted as `loosen` |
+| `AC-param-05` | two pending versions that are each valid but together break `C7` | the second is written | it is refused naming `C7`; as one batch with a fix it is accepted |
+| `AC-param-06` | a constant such as `lease.nonce_bytes` | any write is attempted | refused with `FORBIDDEN`, and nothing is logged as a change |
+| `AC-param-07` | a lease issued under `lease.timeout_s` = 1200 | the value is changed to 600 and effective | the issued lease keeps its stamped expiry; the next lease uses 600 |
+| `AC-param-08` | a tightening that is then rolled back | the rollback is written | it is classified `loosen` and takes notice; withdrawing a pending version before `effective_from` is immediate and logged |
+| `AC-param-09` | `retention.job_payload_days` lowered from 30 to 14 | the next purge run executes | payloads older than 14 days are deleted; raising it later does not restore them |
+| `AC-param-10` | a hidden parameter such as `verify.audit_rate_s` is changed | the public parameters list and the change log are read | the list omits the row; the log entry names the area, class and notice but not the value |
+| `AC-param-11` | a write is repeated with the same `Idempotency-Key` and body | the second arrives | the first response is replayed and no second `ParameterVersion` exists |
+| `AC-param-12` | the `PreRegistration` form for Phase 1 | it is locked with an empty week-2 return bar or large-job trial rule | the lock is refused; after locking, editing the seeding parameter does not change the locked threshold |
+| `AC-param-13` | the derived defaults 350, 300, 4800, 1200, 32,768 | CI recomputes them from the FD§3.3 inputs | each equals its stored default or the build fails |
+| `AC-param-14` | the alias row `admission.forecast_refresh_s` | the seed runs | it is not created and a write to it is refused as unknown |
+| `AC-param-15` | code that compares a number with a literal threshold in a policy, ledger, admission, verification, lease or retention path | the config-literal lint runs | it fails unless the literal is a constant of S0 or is read through `value_at` |
+
+## 16.21 Hypotheses, verifications, assumptions
+
+**Hypotheses [H]** (each default above is one; the ones most likely to be wrong): `admission.forecast_haircut` and `admission.horizon_discount_per_day` at 0.00 are too optimistic; `admission.min_forecast_donors` = 10 is the right floor; `ui.comprehension_check_rate` 0.00 is acceptable; the FD§3.2 time estimates behind `cell.envelope.expected_time_s`; `verify.timing_regular_cv` = 0.05; `i18n.digits_default_fa` = `persian`.
+
+**Verifications [V]** (what, by whom, where stored): counsel's answer on regions and retention (`CNS`, counsel memo reference on the `ParameterVersion` reason); the G1 threat-model decision on public exposure of anti-abuse values (`SEC`); a line-by-line check of the FD§4.9 table at assembly (C-001); the measurement for every `CAL` and `P1M` row, stored as `CalibrationRecord` or in the pilot report.
+
+**Assumptions [A]** (with the decision that could overturn each): change directions not stated by a defining part are assigned by the rule in 16.2.2 (owner decision on any row); retention lowering is applied to existing rows (16.11); hidden-parameter list and value-less log entries (16.17.5); no revert window for parameters (16.17.4); the union enum for `screen.output_request_action`; thresholds in 16.15 without a default are `PreRegistration` keys.
+
+**What this part cannot promise** [D]: a default is a guess until its replacing measurement exists; nothing here shows that any default is safe for real members, legal in any jurisdiction or sufficient for the pilot's 30 to 50 members; two-person approval is only as strong as the number of distinct admins (`ISS-168`).
+
+## Issues raised
+
+Convention additions and problems found while completing the table. None blocks this part; `needs_owner` marks a decision only the owner can make. [D]
+
+| Id | Severity | Status | Finding | Proposed resolution |
+| --- | --- | --- | --- | --- |
+| `ISS-161` | major | proposed | Parts S4, S6 (admission), S7 and S9 added names that S0 0.10.6 does not list (22 `ops.*` and alias, 15 admission and reservation, 14 policy, screen and service, 17 cell, lease, screen and verify), and a new area `ops` (`ISS-45`). S0 says its list is the full set. | This table is the complete list; added names are accepted as written; S0 0.10.5 gains the `ops` area (owner `operator`, defining part S4) and the S0 list is regenerated from this table at assembly. |
+| `ISS-162` | minor | proposed | One concept has two names: `admission.forecast_refresh_s` (S4 4.19.1) and `admission.reforecast_interval_s` (S6 admission file). | Keep `admission.reforecast_interval_s`; the other is listed as an alias that is not seeded; S4 4.19.1 is amended at assembly. |
+| `ISS-163` | minor | proposed | Two value conflicts: `service.terms_copy_max_bytes` is 5,242,880 in S0 and 10,485,760 in S7 (S7 added it only "if absent from S0"); `screen.output_request_action` is defined in both S7 (`quarantine`, `reject`) and S9 (`reject`, `flag_for_review`, `quarantine`). | S0's 5,242,880 stands; one parameter with the union enum and the strictness order `flag_for_review` < `quarantine` < `reject`; S7 7.15.1 and S9 9.18 reference this table. |
+| `ISS-164` | major | proposed | S0 0.10.3 requires `tighten_direction` on every parameter but defines it only for a few (`verify.audit_rate_s`, `admission.phi`, and the S6 rows); no part says which parameters are public. | Directions are assigned by the rule in 16.2.2 and the `Chg` column; public flags by 16.17.5; both are [A] and an owner may change any cell. The decision to publish names but not values of anti-abuse parameters is the owner's. |
+| `ISS-165` | minor | proposed | Constraint ids: S0 has `C1`..`C8`, the admission part proposes `C9`..`C12`, S9 proposes `S9-C1`..`S9-C3`; several limits in S5 to S9 have no constraint id. | `C13`..`C20` are added in 16.3; `S9-C1`..`S9-C3` are kept as written; S0 0.10.3 is regenerated from 16.3 at assembly. |
+| `ISS-166` | minor | proposed | S0 derives `mint.monthly_cap_credits` with (1 - phi) and S6 (ledger) with phi; both equal 0.5, so 4,800 is right either way, but the two diverge if phi changes. | The derivation is phi x forecast capacity (S6 ledger 6.11.5); `C13` warns when the cap exceeds forecast redeemable capacity; S0's wording is corrected at assembly. |
+| `ISS-167` | minor | proposed | FD§9 decision rules (week-2 return bar, large-job trial rule, open-incident rule) have no parameter names and the FD gives no numbers for two of them. | They are `PreRegistration.thresholds` keys (`thr.week2_return_min`, `thr.large_job_trial_rule`, `thr.open_incident_rule`), not parameters, with no initial default; S13.* defines the form; S0 0.7 gains the keys. |
+| `ISS-168` | major | needs_owner | Two-person rules (`service.min_approvers` 1 vs `policy.loosen_min_approvers` 2, `launch.min_signoffs` 2, `security.two_person_actions`) assume at least two distinct admins; with one admin every loosening and every sign-off is blocked. | Owner decision: the number of admins at launch. Until decided the defaults stand and `C19` warns; the fallback of FD§8.3 (documented single-person approval with a stated reason) needs the owner's explicit choice. |
+| `ISS-169` | major | proposed | When this part was written S8, S10 to S15 and S1 to S3 were not on main, so parameters they add (for example UI budgets for S11, gate parameters for S14, template and verification details for S8) are missing, and the FD§4.9 cross-check was not re-read line by line. | C-001 assembly adds their names to the matching group table, re-checks FD§4.9 row by row and re-runs `AC-param-01` and `AC-param-15` over the assembled spec; any `area.name` found in a later part and absent here is a convention gap by R16-4. |
