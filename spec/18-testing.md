@@ -777,3 +777,114 @@ Every major feature of the prompt (scopes A to J) maps to criteria below, and ev
 | `AC-registry-03` | An approved entry | `service.review_max_age_days` passes | It becomes `review_due`, new jobs stop, in-flight cells run for `service.review_grace_days`, then it lapses | `T-fsm-06` |
 | `AC-registry-04` | A revoked service | Cells are in flight | They are handled as `S7.*` specifies and no credit moves for voided cells | `T-policy-13`, `T-e2e-05` |
 | `AC-registry-05` | A fresh build | Jobs are created | Every entry is `unreviewed` and every job is refused until the gate items are signed | `T-policy-11`, `T-e2e-06` |
+
+### 18.14.3 Injection defenses, templates, verification and return path
+
+| Id | Given | When | Then | Tests |
+| --- | --- | --- | --- | --- |
+| `AC-inj-01` | A requester's input text | The cell prompt is built | The input sits inside the template's delimiters with the data-not-instructions sentence, the rendered prompt equals the reviewed template plus input, and a delimiter inside the input cannot break out | `T-unit-17`, `T-inj-10`, `T-inj-12` |
+| `AC-inj-02` | Input with links, personal-data patterns or instruction patterns | It is screened | The action configured in `screen.url_action`, `screen.pii_action` and `screen.max_urls_per_input` is applied and the reviewer sees the matched span | `T-inj-09`, `T-inj-14` |
+| `AC-inj-03` | A submitted output with a link, code to run or a request for action | It is received | It is quarantined, withheld from results, unpaid until a reviewer releases it, and shown to reviewers as inert text | `T-inj-11`, `T-fsm-03` |
+| `AC-inj-04` | Any template | It is reviewed | It cannot ask the volunteer to do more than copy, Send and return text (`R3`); the checklist contains the rule | `T-policy-10`, `T-fsm-05` |
+| `AC-tpl-01` | A new template | It is reviewed | `template.min_reviewers_new` distinct non-author reviewers approve; an edit needs `template.min_reviewers_edit`; one reviewer counts once | `T-fsm-05`, `T-adv-20`, `T-e2e-10` |
+| `AC-tpl-02` | The first template set (translation with glossary, classification and extraction, summarization into a schema, code change with tests, format conversion with a validator) | Each is exercised | Each has a comparator, automatic checks, a gold-cell mechanism and a golden rendering | `T-unit-17`, `T-unit-19`, `T-unit-20` |
+| `AC-tpl-03` | An approved `TemplateVersion` | An edit is made | A new version is created; the approved one is immutable; reports reaching `template.autopause_report_count` within `template.autopause_window_s` pause it | `T-fsm-05`, `T-e2e-18` |
+| `AC-verify-01` | A submission | It arrives | The automatic checks of the template run first and a failure gives the matching `reject.*` code | `T-unit-20` |
+| `AC-verify-02` | A running job | Cells are scheduled | Gold cells are inserted at the member's current gold rate and are indistinguishable on the card | `T-unit-16`, `T-sim-12` |
+| `AC-verify-03` | A primary cell | An audit is due | A second executor is chosen who is not the author, not in the same invite tree or device group where forbidden; mismatch triggers a third execution; the outcome follows `S8.*` | `T-adv-18`, `T-sim-09` |
+| `AC-verify-04` | A member's recent results | They change | Audit and gold rates adapt by `verify.adapt.*`, never below the floors and never zero | `T-unit-16`, `T-sim-10` |
+| `AC-verify-05` | A new member | They do their first cells | Blanket redundancy applies until the trust threshold in `trust.*` is reached | `T-unit-23`, `T-fsm-04` |
+| `AC-verify-06` | A human-review cell | It is executed | Review cells have their own gold cells and earn as any Commons cell (`ISS-03`) | `T-e2e-21` |
+| `AC-verify-07` | A rejected or overturned cell | The member appeals within `appeal.window_days` | A different reviewer decides; an overturn writes a `reversal` where credit moved and a `rework` cell | `T-fsm-07`, `T-e2e-08` |
+| `AC-verify-08` | A member's history | The reliability estimate is computed | It follows the Beta formula of `T-unit-15` over `verify.reliability_window_obs` observations | `T-unit-15`, `T-prop-25` |
+| `AC-verify-09` | The false-accept estimate | It is reported | It is reported with its interval, its method and the caveat that it estimates from audits and gold cells only; it is never presented as a guarantee | `T-sim-17`, `T-rtl-11` |
+| `AC-return-01` | A lease | It is issued | It carries a server-issued id and a nonce of `lease.nonce_bytes` bytes stored only as a hash, bound to member and cell | `T-unit-18`, `T-adv-01` |
+| `AC-return-02` | A lease past `lease.timeout_s` | A submission arrives | It is refused (`reject.lease_expired`) outside `lease.submit_grace_s`; the cell requeues once with `attempt + 1` | `T-adv-02`, `T-adv-09` |
+| `AC-return-03` | A submission | It exceeds size or fails the schema | `PAYLOAD_TOO_LARGE`, `reject.size_exceeded` or `reject.schema_invalid` | `T-adv-07` |
+| `AC-return-04` | An output equal or near-equal to another donor's | It is submitted | `reject.duplicate_of_other_output` | `T-adv-05` |
+| `AC-return-05` | A submission faster than `verify.timing_min_s` | It arrives | `reject.timing_anomaly` and the member's sampling rises | `T-adv-06` |
+| `AC-return-06` | Any returned text | It is stored or displayed | It is stored as data and rendered only as text everywhere | `T-inj-01`, `T-inj-02` |
+
+### 18.14.4 Experiences, operations, language and public surfaces
+
+| Id | Given | When | Then | Tests |
+| --- | --- | --- | --- | --- |
+| `AC-volx-01` | A first-time visitor | They open the landing page | They see a verified-only live counter, one primary action and the declared-not-guaranteed honesty text, with no sign-up wall | `T-e2e-02`, `T-e2e-12` |
+| `AC-volx-02` | A visitor pressing contribute | The flow runs | A cell appears within the screen and tap budget of `S11.*`, with no install and no e-mail | `T-e2e-02`, `T-rtl-10` |
+| `AC-volx-03` | A cell card | It is shown | It shows task, expected time, the purpose and sensitivity labels, and the prompt in an expandable block that must be opened once if `ui.require_prompt_expand` is set | `T-e2e-02`, `T-rtl-07` |
+| `AC-volx-04` | A volunteer | They decline or report a cell | The cell requeues, the decline is counted for supply gauges, a report reaches triage, and no penalty applies to a decline | `T-e2e-18`, `T-policy-08` |
+| `AC-volx-05` | A service with a prefill adapter | The card is shown | An open-in-service button is built from the registry and falls back to copy-only | `T-e2e-22`, `T-rtl-12` |
+| `AC-volx-06` | A pasted result | It is submitted | A preview shows the text as inert text, the result of checks appears, and a lost connection keeps the pasted text | `T-rtl-10`, `T-inj-01` |
+| `AC-volx-07` | A member | They open the balance view | Every lot with its expiry date is listed, in both calendars, with the next expiry first | `T-e2e-17`, `T-rtl-03` |
+| `AC-volx-08` | A member | They open settings | They can change opt-ins, digits, language, calendar, export history and delete the identity as `S10.*` allows | `T-e2e-17` |
+| `AC-volx-09` | A member | They create a team, share a card, invite a friend or show a recovery key | Each is opt-in, carries no personal data or location, and the recovery key is shown once with its warning | `T-e2e-17`, `T-e2e-12` |
+| `AC-reqx-01` | A requester | They use the job wizard | Each step of `S11.*` works: template, upload and screening, declarations, policy result, quote, escrow, confirm | `T-e2e-16` |
+| `AC-reqx-02` | A running job | The requester opens progress | A progress map shows cells by state and the estimated completion against the quote | `T-e2e-16` |
+| `AC-reqx-03` | A running job | The requester cancels | `AC-admit-06` or `T-e2e-04` applies, and the screen says what was refunded | `T-e2e-04` |
+| `AC-reqx-04` | A finished job | The requester downloads results | Accepted outputs and the manifest download; manifest hashes match; quarantined outputs are excluded | `T-unit-26`, `T-e2e-16` |
+| `AC-reqx-05` | A finished job | The requester rates it | The rating is stored and feeds template quality, never the volunteers' identities | `T-e2e-16` |
+| `AC-ops-01` | Template reviewers | They open the queue | They see pending versions, diffs, checklist and the second-reviewer rule | `T-e2e-10` |
+| `AC-ops-02` | Service reviewers | They open the registry | They record flag answers with a `TermsCopy` and see due dates | `T-policy-04` |
+| `AC-ops-03` | Moderators | They open audit, appeal, abuse and report queues | Items arrive with the evidence of `S9.*`, every action is an `AdminAction`, and ban and takedown follow `S10.*` | `T-e2e-18` |
+| `AC-ops-04` | An operator | They open the ledger explorer | They can search any entry, verify the chain, and see no personal data | `T-prop-10`, `T-e2e-12` |
+| `AC-ops-05` | An operator | They edit a parameter | Validators, class, owner role, notice and change log apply (`AC-price-03`) | `T-unit-08`, `T-unit-09` |
+| `AC-ops-06` | An operator | They open the capacity dashboard | Active donors, throughput, committed cells, waitlist and gauges are shown from production data only | `T-e2e-14`, `T-sim-19` |
+| `AC-ops-07` | Operators | They open the launch-gate checklist | Items `G0`..`G4` show evidence, owners and sign-offs | `T-e2e-06` |
+| `AC-ops-08` | A kill switch | It is engaged and released | `kill.all_minting`, `kill.all_new_jobs`, `kill.template.<id>`, `kill.service.<id>`, `kill.member.<id>` each act at once and exactly, are logged with a reason, and release needs a second operator | `T-e2e-11`, `T-adv-13` |
+| `AC-i18n-01` | Persian locale | Any screen is shown | The page is `lang="fa"`, `dir="rtl"`, uses logical properties, and mirrors directional icons | `T-rtl-01`, `T-rtl-07` |
+| `AC-i18n-02` | Digit choice | The member switches digits | Persian or Latin digits show everywhere and input accepts both | `T-rtl-02` |
+| `AC-i18n-03` | Calendar | A date is shown | Jalali by default for `fa`, both in detail views; API and storage stay UTC and Gregorian | `T-rtl-03`, `T-rtl-14` |
+| `AC-i18n-04` | Mixed Persian and Latin text | It is rendered or copied | Runs are isolated, code stays left to right, ZWNJ and normalization are preserved | `T-rtl-04`, `T-rtl-05`, `T-rtl-12` |
+| `AC-i18n-05` | Any copy key | The catalogue is checked | `fa` and `en` text and the review marker exist for every key | `T-rtl-11` |
+| `AC-i18n-06` | Any user-facing string | It is searched | No claim of guarantee appears in either language; promises are "declared" | `T-rtl-11` |
+| `AC-i18n-07` | A keyboard or screen-reader user | They complete a contribution | Automated checks pass and the manual script is run before release | `T-rtl-08`, `T-rtl-09` |
+| `AC-i18n-08` | A throttled network with third parties blocked | The first flow loads | It works within `test.lowbw.first_flow_budget_kb`, with bundled fonts and no third-party request | `T-rtl-06`, `T-rtl-10` |
+| `AC-public-01` | The public counter | It is read | It counts verified cells only, trails the ledger by at most `public.ledger_lag_s`, and refreshes every `public.counter_refresh_s` | `T-e2e-12`, `T-load-06` |
+| `AC-public-02` | The public ledger and parameter pages | They are read | They show every entry and every parameter with its version and no personal data | `T-e2e-12`, `T-prop-10` |
+| `AC-public-03` | A parameter change | It is published | The public change log shows class, reason, effective time and notice | `T-unit-09` |
+| `AC-public-04` | A milestone | It is reached | It is shown from production data after human confirmation | `T-e2e-12` |
+| `AC-public-05` | A share card | It is generated | It carries no personal data and no location (`public.location_display` = `never`) | `T-e2e-12`, `T-e2e-17` |
+| `AC-public-06` | A team | It is shown publicly | Only teams that opted in, with aggregate counts and no member list | `T-e2e-17` |
+| `AC-public-07` | A referral | A newcomer completes `growth.referral.min_newcomer_verified_cells` verified cells | Both sides receive the bonus after `growth.referral.hold_s`, once, from the Reserve within its floor | `T-unit-27`, `T-adv-17` |
+| `AC-public-08` | Referral or grant farming | Limits are exceeded | The bonus is refused or held and the case enters the abuse queue | `T-adv-17`, `T-sim-07` |
+| `AC-growth-01` | A fresh environment | Flags `ff.growth.*` are read | Every growth mechanism V1..V6 is off by default | `T-e2e-13` |
+| `AC-growth-02` | A flag turned on for an experiment | Members are assigned | Assignment is random, reproducible from `experiment.assignment_seed_version`, and logged | `T-e2e-13` |
+| `AC-growth-03` | A growth mechanism | It runs | The events needed for its pre-registered measures are emitted without trackers | `T-e2e-14` |
+
+### 18.14.5 Measurement, security, architecture, gate and simulation
+
+| Id | Given | When | Then | Tests |
+| --- | --- | --- | --- | --- |
+| `AC-measure-01` | The Phase 1 measures of FD§9 (deposit-to-withdrawal ratio, time to complete a large job against quote, rejection, false-reject and false-accept rates, v and efficiency, week-2 and week-4 return, time to first verified cell, share under 60 seconds, capacity concentration, decline and opt-out rates, incidents) | Each is queried after the journeys | Each returns a defined value or a defined insufficient-data result below `analytics.min_cohort_k` | `T-e2e-14` |
+| `AC-measure-02` | A pre-registered hypothesis | Its experiment starts | Hypothesis, measure, decision rule and horizon are locked and the lock is public; later edits are new versions | `T-e2e-14`, `T-unit-09` |
+| `AC-measure-03` | The credit-lifetime experiment | It starts | Members are assigned to arms by the logged randomization (`T-e2e-13`) and both arms are reported | `T-sim-06`, `T-e2e-13` |
+| `AC-measure-04` | A parameter default | It is replaced | The change log cites a measurement code of `S0.10.4`, never a simulation run (`S18.12.8`) | `T-unit-09`, `T-sim-19` |
+| `AC-measure-05` | Analytics | They run | No third-party tracker, no raw IP, cohorts below `analytics.min_cohort_k` suppressed, retention per `S10.*` | `T-e2e-19`, `T-e2e-20`, `T-rtl-06` |
+| `AC-sec-01` | Each threat class of FD§6 (forged results, credit farming, fake accounts and invite-tree abuse, malicious requesters and inputs, prompt injection against volunteers, XSS and injection, ledger tampering, insider and operator risk, account takeover, de-anonymization, compelled disclosure, denial of service, reviewer capture) | The traceability table of `S18.16` is checked | Each has at least one automated test or an accepted residual risk with an owner in `S10.*` | `S18.16` |
+| `AC-sec-02` | Every secret named in `S10.*` | It is rotated | Old values stop working and events record it | `T-e2e-15` |
+| `AC-sec-03` | The system's data | It is inventoried | Every table and column has a class and retention; none holds a provider credential, session or chat text | `T-e2e-19` |
+| `AC-sec-04` | A takedown or report | It is processed | The `S10.*` procedure and timelines are followed and logged | `T-e2e-18` |
+| `AC-sec-05` | The storage and hosting interface | An alternative implementation is plugged in | The contract tests pass for both implementations | `T-e2e-15` [V: contract tests defined in `S4.*`] |
+| `AC-sec-06` | A disclosure request | A bundle is built | It contains only what retention keeps and shows no member content the system never stores | `T-e2e-19` |
+| `AC-api-01` | Any error | It is returned | The error envelope, code and status match `S0.11.3` | `T-unit-10` |
+| `AC-api-02` | Any mutating route | A key is replayed or misused | `S0.11.4` behavior holds | `T-unit-11`, `T-adv-04` |
+| `AC-api-03` | Any list | It is paged | Cursor rules hold and tampered cursors fail | `T-unit-12`, `T-prop-28` |
+| `AC-api-04` | Any limited route | It is called | Rate-limit headers are present and `RATE_LIMITED` carries `Retry-After` | `T-unit-13`, `T-adv-23` |
+| `AC-api-05` | The two auth schemes | They are mixed | Each route accepts only its scheme | `T-adv-15` |
+| `AC-jobs-01` | Lease reaping, escrow settlement, credit expiry, audit scheduling, metric rollup, invariant checks | They run on their intervals | Each is idempotent, lags by at most `test.load.lag_factor` x its interval and logs its run | `T-load-05`, `T-adv-09` |
+| `AC-jobs-02` | Migrations | They run | They apply forward on an empty and on the previous milestone's database, and never alter ledger rows | `S18.2.2` (`ci.pr`) |
+| `AC-jobs-03` | Logs, metrics, traces | They are scanned | No personal data or secret appears | `T-e2e-20`, `T-inj-13` |
+| `AC-jobs-04` | A backup | It is restored in a clean environment | The hash chain verifies, invariants hold, and the drill is recorded | `T-e2e-15`, `T-load-08` |
+| `AC-jobs-05` | Configuration | It is deployed | Parameters come only from versioned parameter tables; environment variables hold only secrets and wiring | `T-unit-09` |
+| `AC-adapter-01` | The code base | It is searched | No provider name or URL pattern exists in source (a grep test) | `T-e2e-22` |
+| `AC-adapter-02` | A registry entry | It changes | Buttons change with no deploy | `T-e2e-22` |
+| `AC-adapter-03` | An adapter | It runs | It builds a link or copy text only; it never reads a chat, holds a credential or submits for anyone | `T-e2e-22`, `T-rtl-12` |
+| `AC-gate-01` | A new environment | It starts | `launch.members_may_join`, `launch.member_jobs_enabled` and `launch.minting_enabled` are false | `T-e2e-06` |
+| `AC-gate-02` | A switch flip | It is attempted before the gate | It is refused unless `G0`, `G1` and the required service entries are signed by `launch.min_signoffs` distinct admins with evidence | `T-e2e-06`, `T-adv-14` |
+| `AC-gate-03` | A signed gate item | New adverse evidence arrives | The item can be reopened and the guard turns red | `T-e2e-06` |
+| `AC-gate-04` | A passing test run | It is offered as gate evidence | It is refused as evidence for `G0`..`G4` | `S18.1` |
+| `AC-sim-01` | One scenario run twice | The outputs are compared | They are byte-identical | `T-sim-01` |
+| `AC-sim-02` | Every simulation run | It ends | Invariants hold at every sample and the sanity checks of `S18.12.9` pass | `T-sim-02`, `T-sim-03` |
+| `AC-sim-03` | Every output | It is written | It carries the banner, `evidence_status`, and the "(simulated)" labels | `T-sim-19` |
+| `AC-sim-04` | The harness | It is started against a non-simulation database | It refuses | `T-sim-20` |
+| `AC-sim-05` | A sweep | It is run | Invalid points are skipped and reported, size is bounded, aggregation is labelled across seeds | `T-sim-18` |
