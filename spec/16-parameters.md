@@ -202,3 +202,119 @@ Owner `operator`. Binding: a quote, hold or reservation keeps the parameter vers
 | `reservation.late_cancel_cooldown_days` | days | 0..90 | 7 | `T↑` | `OPS`: no-show rate | S6.30.3 |
 
 `job.max_overrun_ratio` is listed here because the admission part reads it (hard stop, 6.33); its S0 area is `job` and its owner `operator`. The default 4,800 of `mint.monthly_cap_credits` derives from phi, not from (1 - phi); the two coincide only at 0.5 (`ISS-166`). [D]
+
+## 16.8 Verification
+
+Owner `operator`. Binding: the sampling rates and multipliers that decided whether a cell was gold-checked or audited are stamped on the `Lease` at issue (`ledger_versions`), so a later change never re-decides an old cell; reliability and duplicate thresholds are read when the next evaluation runs. The ratios g and s move by the adaptive rule (`verify.adapt.*`), never below their floors (FD§4.4). [D]
+
+| Name | Type · unit | Validation | Initial configurable default | Chg | Cal | Used |
+| --- | --- | --- | --- | --- | --- | --- |
+| `verify.gold_rate_g` (g) | ratio | `C2` | 0.05 | `T↑` | `P1M`: reliability-estimate variance and false-accept estimate | S8.*, S9.* |
+| `verify.gold_rate_floor` | ratio | `C2` | 0.01 | `T↑` | `FND` | S8.* |
+| `verify.gold_rate_max` | ratio | `C2` | 0.20 | `N` | `FND` | S8.* |
+| `verify.audit_rate_s` (s) | ratio | `C2` | 0.10 | `T↑` (S0) | `P1M`: false-accept estimate, v | S8.*, S6.* |
+| `verify.audit_rate_floor` | ratio | `C2`; > 0 | 0.02 (FD§4.4: sampling never falls to zero) | `T↑` | `FND` | S8.* |
+| `verify.audit_rate_max` | ratio | `C2` | 0.50 | `N` | `FND` | S8.* |
+| `verify.blanket_redundancy_n` | int | 2..5 | 3 (FD§4.4 "triple") | `T↑` | `P1M` | S8.* |
+| `verify.new_donor_blanket_cells` | int | 0..50 | 5 first cells of a new donor | `T↑` | `P1M` | S8.*, S5.* |
+| `verify.adapt.clean_streak` | int | 1..1000 | 20 clean observations before a step down | `T↑` | `P1M` | S8.* |
+| `verify.adapt.step_down_ratio` | ratio | 0 < x < 1 | 0.80 | `T↑` (a larger ratio lowers the rate more slowly) | `P1M` | S8.* |
+| `verify.adapt.step_up_ratio` | ratio | > 1 | 2.00 | `T↑` | `P1M` | S8.* |
+| `verify.reliability_prior_a` | int | >= 1 | 1 (Beta prior, successes) | `N` | `P1M` | S8.* |
+| `verify.reliability_prior_b` | int | >= 1 | 1 (Beta prior, failures) | `N` | `P1M` | S8.* |
+| `verify.reliability_window_obs` | int | 5..1000 | 50 most recent gold and audit observations | `N` | `P1M` | S8.* |
+| `verify.human_review_rate` | ratio | 0..1 | 0.20 of subjective outputs | `T↑` | `P1M` | S8.*, S9.* |
+| `verify.human_review_gold_rate` | ratio | 0..1 | 0.10 | `T↑` | `P1M` | S8.* |
+| `verify.timing_min_s` | duration_s | >= 0 | 5 (below this a submission is a timing anomaly) | `T↑` | `CAL`: seconds-per-cell distribution | S9.12 |
+| `verify.timing_soft_ratio` | ratio | 0..1 | 0.25 | `N` | `CAL` | S9.12 |
+| `verify.timing_regular_window_obs` | int | 5..1000 | 20 | `N` | `P1M` | S9.12 |
+| `verify.timing_regular_cv` | ratio | 0..1 | 0.05 [H] | `T↑` (a higher coefficient flags more) | `P1M` | S9.12 |
+| `verify.duplicate_similarity_threshold` | ratio | 0..1 | 0.95 | `T↓` | `P1M` | S9.11 |
+| `verify.duplicate_min_chars` | int | 1..10000 | 80 | `T↓` | `P1M`: rate of honest short agreement | S9.11 |
+| `verify.duplicate_shingle_chars` | int | 2..20 | 5 | `N` | `P1M` | S9.11 |
+| `verify.duplicate_minhash_perms` | int | multiple of 4; `S9-C2` | 128 (32 bands of 4 rows) | `N` | `OPS`: index cost | S9.11 |
+| `verify.duplicate_window_days` | days | 1..90 | 14 | `T↑` | `P1M` | S9.11 |
+| `verify.false_accept_alarm` | ratio | 0..1 | 0.05 | `T↓` (an earlier alarm) | `FND` (pre-registered, 16.15) | S8.*, S13.* |
+| `verify.false_reject_alarm` | ratio | 0..1 | 0.10 | `T↓` | `FND` (pre-registered, 16.15) | S8.*, S13.* |
+| `verify.third_exec_on_mismatch` | bool | constant | true (FD§4.4) | `C` | `CON` | S8.* |
+| `verify.model_judge_mints_credit` | bool | constant in Phase 1 | false (FD§4.4) | `C` | `CON` | S8.* |
+
+## 16.9 Lease
+
+Owner `operator`. Binding: `timeout_s`, `extend_s` and `max_extensions` are stamped on the `Lease` at issue and decide its `expires_at`; the others are read at the event they govern. A lease already issued is never shortened. [D]
+
+| Name | Type · unit | Validation | Initial configurable default | Chg | Cal | Used |
+| --- | --- | --- | --- | --- | --- | --- |
+| `lease.timeout_s` | duration_s | `C3`, `C14` | 1200 = 10 x 120 s, ten times the FD§3.2 first-contribution estimate | `N` | `CAL`: p95 of seconds per cell | S5.23.3, S9.4.4 |
+| `lease.max_active_per_member` | int | 1..50 | 3 (a daily batch is one card or a few, FD§3.2) | `T↓` | `P1M` | S5.23, S9.6 |
+| `lease.max_extensions` | int | 0..5 | 1 | `T↓` | `CAL` | S9.4.4 |
+| `lease.extend_s` | duration_s | 60..3600; `C14` | 600 | `T↓` | `CAL` | S9.4.4 |
+| `lease.submit_grace_s` | duration_s | 0..900; `C14` | 120 (a late paste-back is accepted if the cell is not yet re-leased) | `T↓` | `CAL`: copy-paste timing | S9.4.4 |
+| `lease.reap_interval_s` | duration_s | 5..300 | 30 | `N` | `OPS` | S5.23, S4.19.1 |
+| `lease.max_gate_failures` | int | 1..100; `S9-C3` | 5 | `T↓` | `OPS`: honest retry counts | S9.7 |
+| `lease.max_validations` | int | 0..100; `S9-C3` | 10 | `T↓` | `CAL`: copy-paste error rate | S9.7 |
+| `lease.max_nonce_rotations` | int | 0..10 | 2 | `T↓` | `OPS`: reload frequency on phones | S9.4 |
+| `lease.nonce_bytes` | int | constant | 16 | `C` | `CON` | S9.4.1 |
+| `lease.decline_cooldown_s` | duration_s | constant | 0 (a decline is never punished, FD§5.5) | `C` | `CON` | S9.* |
+
+## 16.10 Trust, invite, rate limits
+
+Owner `operator`. Binding: `trust.cap_multiplier.*` and `trust.audit_multiplier.*` are stamped on the `Lease`; tier thresholds are read at the next tier evaluation and never demote a member retroactively for cells already accepted. `trust.audit_multiplier.*` multiplies s, then the result is clamped to `[verify.audit_rate_floor, verify.audit_rate_max]`. A cap multiplier changes what a member may hold, so it is `N` like K. `ratelimit.*` is read per request (no stamp). [D]
+
+| Name | Type · unit | Validation | Initial configurable default | Chg | Cal | Used |
+| --- | --- | --- | --- | --- | --- | --- |
+| `trust.established_min_cells` | int | 1..10000 | 10 accepted cells | `T↑` | `P1M` | S8.*, S10.* |
+| `trust.established_min_reliability` | ratio | 0..1; `C16` | 0.80 | `T↑` | `P1M` | S8.* |
+| `trust.trusted_min_cells` | int | 1..100000 | 100 | `T↑` | `P1M` | S8.* |
+| `trust.trusted_min_reliability` | ratio | 0..1; `C16` | 0.95 | `T↑` | `P1M` | S8.* |
+| `trust.demote_below_reliability` | ratio | 0..1; `C16` | 0.70 | `T↑` | `P1M` | S8.* |
+| `trust.restrict_after_gold_fails` | int | 1..20 | 2 consecutive failed gold cells | `T↓` | `P1M` | S8.* |
+| `trust.restriction_days` | days | 1..90 | 7 | `T↑` | `OPS` | S8.* |
+| `trust.cap_multiplier.new` | ratio | 0..10 | 0.50 of K | `N` | `P1M` | S6.*, S8.* |
+| `trust.cap_multiplier.established` | ratio | 0..10 | 1.00 of K | `N` | `P1M` | S6.*, S8.* |
+| `trust.cap_multiplier.trusted` | ratio | 0..10 | 1.50 of K (FD§6.1: tiers raise caps) | `N` | `P1M` | S6.*, S8.* |
+| `trust.cap_multiplier.restricted` | ratio | 0..10 | 0.25 of K | `N` | `P1M` | S6.*, S8.* |
+| `trust.audit_multiplier.new` | ratio | 0..10 | 1.0 of s | `T↑` | `P1M` | S8.* |
+| `trust.audit_multiplier.established` | ratio | 0..10 | 1.0 of s | `T↑` | `P1M` | S8.* |
+| `trust.audit_multiplier.trusted` | ratio | 0..10 | 0.5 of s (FD§6.1: tiers lower sampling) | `T↑` | `P1M` | S8.* |
+| `trust.audit_multiplier.restricted` | ratio | 0..10 | 3.0 of s | `T↑` | `P1M` | S8.* |
+| `invite.max_active_per_member` | int | 0..100 | 3 | `T↓` | `OPS`: farming flags | S10.* |
+| `invite.ttl_days` | days | 1..90 | 14 | `T↓` | `OPS` | S10.* |
+| `invite.min_accepted_cells_to_issue` | int | 0..1000 | 3 | `T↑` | `OPS` | S10.* |
+| `invite.tree_max_members` | int | 1..10000 | 50 | `T↓` | `OPS` | S10.* |
+| `invite.tree_max_depth` | int | 1..20 | 4 | `T↓` | `OPS` | S10.* |
+| `ratelimit.device_new_members_per_day` | int | 1..100 | 3 | `T↓` | `OPS` | S10.* |
+| `ratelimit.ip_hash_new_members_per_day` | int | 1..1000 | 10 | `T↓` | `OPS`, `SEC` | S10.* |
+| `ratelimit.invite_tree_new_members_per_day` | int | 1..1000 | 10 | `T↓` | `OPS` | S10.* |
+| `ratelimit.member_leases_per_hour` | int | 1..1000 | 30 | `T↓` | `P1M` | S9.6 |
+| `ratelimit.member_submissions_per_hour` | int | 1..1000 | 60 | `T↓` | `P1M` | S9.6 |
+| `ratelimit.member_api_rpm` | int | 10..10000 | 120 | `T↓` | `OPS` | S9.6, S15.* |
+| `ratelimit.admin_api_rpm` | int | 10..10000 | 300 | `T↓` | `OPS` | S15.* |
+| `ratelimit.public_rpm` | int · per IP hash | 1..10000 | 60 | `T↓` | `OPS` | S9.6, S12.* |
+| `ratelimit.recovery_attempts_per_day` | int | 1..100 | 5 | `T↓` | `SEC` | S10.* |
+
+## 16.11 Identity, session, privacy and retention
+
+Owner `operator`; measurement `SEC` (the G1 threat-model decision) unless stated. Binding: a session stores its own expiry at creation, so a TTL change applies to sessions created afterwards; `identity.*` is read at the event. **Retention is the one group with a stated exception to prospective-only [A]:** lowering a `retention.*` value (a tightening) is applied to existing rows by the next purge run, because data minimisation must not wait for old rows to age out; raising a value applies only to rows created after the change and never restores deleted rows. Every retention change is public (16.17.5). [D]
+
+| Name | Type · unit | Validation | Initial configurable default | Chg | Cal | Used |
+| --- | --- | --- | --- | --- | --- | --- |
+| `identity.recovery_key_bits` | int | >= 128 | 128 | `T↑` | `SEC` | S10.* |
+| `identity.key_rotation_grace_s` | duration_s | 0..2592000 | 604,800 | `T↓` | `SEC` | S10.* |
+| `identity.device_link_code_ttl_s` | duration_s | 30..3600 | 300 | `T↓` | `SEC` | S10.* |
+| `identity.recovery_cooldown_s` | duration_s | 0..2592000 | 86,400 (a recovered identity cannot start jobs or spend for this long) | `T↑` | `SEC` | S10.*, S6.* |
+| `identity.recovery_max_per_90d` | int | 0..20 | 2 | `T↓` | `SEC` | S10.* |
+| `identity.email_optional` | bool | constant | true (FD§3.2) | `C` | `CON` | S10.* |
+| `session.member_idle_ttl_s` | duration_s | 600..31536000; `C15` | 2,592,000 | `T↓` | `SEC` | S10.* |
+| `session.member_abs_ttl_s` | duration_s | 600..31536000; `C15` | 7,776,000 | `T↓` | `SEC` | S10.* |
+| `session.admin_idle_ttl_s` | duration_s | 60..86400; `C15` | 1800 | `T↓` | `SEC` | S10.*, S15.* |
+| `session.admin_abs_ttl_s` | duration_s | 600..86400; `C15` | 28,800 | `T↓` | `SEC` | S10.*, S15.* |
+| `retention.raw_ip_stored` | bool | constant | false | `C` | `CON` | S10.*, S0 0.6.4 |
+| `retention.ip_hash_ttl_days` | days | 0..30 | 1 | `T↓` | `SEC` | S10.* |
+| `retention.session_days` | days | 1..365 | 90 | `T↓` | `SEC` | S10.* |
+| `retention.request_log_days` | days | 0..90 | 7 | `T↓` | `SEC` | S4.*, S10.* |
+| `retention.ops_log_days` | days | 0..365 | 30 | `T↓` | `SEC` | S4.* |
+| `retention.event_raw_days` | days | 0..365 | 30 | `T↓` | `SEC` | S4.*, S9.* |
+| `retention.job_payload_days` | days | 0..365 | 30 | `T↓` | `SEC`, `DEM` | S9.14.3, S10.* |
+| `retention.moderation_days` | days | 0..1095 | 180 | `T↓` | `SEC`, `CNS` | S7.*, S10.* |
+| `retention.member_inactive_days` | days | 30..3650 | 365 (then status `closed`) | `T↓` | `SEC` | S5.*, S10.* |
