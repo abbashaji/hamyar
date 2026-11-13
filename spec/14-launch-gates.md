@@ -483,3 +483,32 @@ FD section 8.3 lists the fallbacks as what happens if no service clears G0; this
 - `g0.fb.iii` adopted: `fallback_adopted_and_sufficient` returns true for `launch.member_jobs_enabled` with zero approved services, provided `job_type = human_review` is the only job type admitted (enforced by `admission.allowed_job_types = ['human_review']`, checked at the same time) and `ff.channel.human_review` is on; `M0`/`M1`/`M2` service requirements (S14.3) do not apply to `human_review` jobs by definition.
 - `g0.fb.iv` adopted: this is a decision to stop, not to proceed differently; adopting it has no effect on `evaluate_switch` (none of the three switches can be truthfully described as 'ready' once the operator has decided to stop) and instead is intended as a trigger for the operator to engage `kill.all_new_jobs` and `kill.all_minting` by the ordinary engage procedure, which the tool does not do automatically, because stopping is an operator act, not a side effect of recording a decision.
 - No fallback item adopted and the service count is below the minimum: `reasons += 'no_approved_service_and_no_fallback'`, as written above.
+
+## 14.8 Launch switches and kill switches
+
+### 14.8.1 Opening a launch switch (two admins, R10)
+
+1. `launch.switch_propose` (holder of `perm.launch.switch_propose`): calls `evaluate_switch` fresh; if `Fail`, the proposal is refused with the reasons (`FORBIDDEN`), so a doomed proposal never reaches a second admin. If `Pass`, writes an `AdminAction` of type `proposal` holding the evaluation result and a snapshot of `relied_on` (the exact items and generations the `Pass` used).
+2. `launch.switch_approve` (holder of `perm.launch.switch_approve`, distinct `adm_` id from the proposer): within `param('launch.approval_window_s')` (default 86400) of the proposal, re-runs `evaluate_switch`. If anything has changed (a different reason set, a different `relied_on`), the approval is refused and the proposer must propose again against the new state, with no silent reuse of a stale evaluation. If unchanged, writes the `LaunchAuthorization` row (S14.4.4), sets the parameter to `true` via the ordinary parameter-write path (0.10.3), and both writes happen in one transaction so a switch is never `true` without an active authorization or vice versa.
+3. The authorization's `authorized_until` is the minimum `valid_until` across `relied_on` items (null `valid_until` entries do not constrain it); when that instant arrives the switch is no longer open even though the parameter row still reads `true` (S14.4.4's active-authorization definition is what enforcement actually reads, per `GI-01`).
+
+### 14.8.2 Closing a launch switch (one admin)
+
+`launch.switch_close` (holder of `perm.launch.switch_close`): sets the parameter to `false` and sets `revoked_at`, `revoked_by`, `revoked_reason = closed_by_admin` on the active authorization, in one transaction. No second admin and no evaluation are required, consistent with rule 4 (tighten at once). [D]
+
+### 14.8.3 Automatic revocation
+
+`reevaluate_dependents`, run inside the same transaction as `gate.reopened` and as any watched parameter or `TermsCopy`/`FlagAnswer` write, re-evaluates every switch whose `relied_on` set intersects the changed item or value. A switch that was open and now fails is closed in that same transaction: parameter set to `false`, authorization revoked with `revoked_reason = gate_regressed`. This is the only path by which a switch closes itself without an admin action, and it is deliberately synchronous, not queued, so the window between a gate regressing and the switch closing is zero, not 'until the next sweep'. The nightly sweep additionally revokes any authorization whose `authorized_until` has passed with `revoked_reason = expired`, though as noted this is a cleanup of the stored row, not what enforcement relies on. [D]
+
+### 14.8.4 Kill switches: engage (one admin) and release (two admins)
+
+Kill switches are the brake of rule 6: they stop new starts, never in-flight closure, refunds or exits. [D]
+
+- `killswitch.engage` (holder of `perm.killswitch.engage` for that key): inserts a new `KillSwitch` row with `state = engaged`, `seq` incremented, `reason_code`, `reason_text`; takes effect the instant the row commits, because every enforcement point reads the latest row live (S14.9), never a cached flag.
+- Release needs two admins, mirroring switch-open: `killswitch.release_propose` then `killswitch.release_approve` by a distinct admin, each holder of `perm.killswitch.release_approve`; the released row sets `approved_by`. There is no time window requirement on release the way there is on switch approval, because release only restores a state that engage can immediately re-close if something is still wrong.
+- Scope resolution for `kill.template.<id>` and `kill.service.<id>`: a missing row for a specific `tpl_id` or `svc_id` means `released`, because no kill switch has ever been engaged for that specific entity is not itself a dangerous default, since the entity is already gated by `service_gate` or template approval; a missing row for `kill.all_minting` or `kill.all_new_jobs` cannot occur because migrations always insert `seq = 1, state = released` for those two keys (S14.4.5), so their absence is never a case the code has to reason about.
+- `kill.member.<mem_id>` stops that member leasing new cells and creating new jobs; a lease already held at engage time may still be submitted (rule 6: not trapping an already-leased cell's value).
+
+### 14.8.5 Panel
+
+The launch panel (a screen, not a new concept) shows, per switch: current parameter value, whether an active authorization exists and its `authorized_until`, the live `evaluate_switch` result, and for `Fail`, the reasons grouped by gate with a link to each failing item. It shows the kill-switch board: every key, its current state, and the three most recent rows. Full specification of the screen and its copy keys belongs to S11.* and S15.*; this part only fixes what must be true of the data it reads. [D]
