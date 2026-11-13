@@ -587,3 +587,117 @@ Statuses and events are S0 0.9.1. Each action is a separate noun so every one ha
 | `restrictInviteTree` | `POST /v1/admin/members/{mem_id}/invite-tree/restrictions` | `admin` `SU` `perm.member.restrict` | `{reason_code, reason, reason_copy_key, linked_ids: [], member_ids?: [mem_id]}` (default: the whole tree, at most `invite.tree_max_members`) | 200 `{restricted: [mem_id]}`; one `member.restricted` event per member, one audit row naming the tree | `STATE_CONFLICT` | req | - | `A-W` |
 
 A ban stays appealable (`appeal.*`); the balance of a banned member is not touched by this API, and expiry continues as for any account (S10.*). A ban is two-person because a capture of one reviewer account would otherwise be enough to expel any member (FD§5.7 failure mode 10) [D].
+
+## 15.30 Ledger explorer, invariant status, reversal
+
+The explorer is read-only. The only write path from the admin API to the ledger is the two-person reversal of 15.30.3, which posts new entries and edits nothing [D]. Amounts are integer strings in micro-credits (S0 0.6.1); `seq` is the global monotonic entry number; every entry carries `prev_hash` and `entry_hash` (S0 0.6.4).
+
+### 15.30.1 Read endpoints
+
+| op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `getLedgerHead` | `GET /v1/admin/ledger/head` | `admin` `perm.ledger.read` | - | `{seq, entry_hash, last_checkpoint: {date, seq, hash}, invariants_status}` | - | n/a | - | `A-R` |
+| `listLedgerAccounts` | `GET /v1/admin/ledger/accounts` | `admin` `perm.ledger.read`; `?member_id` needs `perm.ledger.read_member` and is logged | `?type` (the account types of S0 0.7), `?member_id` | list of `{lac_id, type, owner_ref, balance_ucr}` | - | n/a | cursor | `A-R` |
+| `getLedgerAccount` | `GET /v1/admin/ledger/accounts/{lac_id}` | `admin` `perm.ledger.read` | - | `{lac_id, type, owner_ref, balance_ucr, lots: {count, remaining_ucr, expiring_within_expiry_notice_days_ucr}}` | `NOT_FOUND` | n/a | - | `A-R` |
+| `listAccountEntries` | `GET /v1/admin/ledger/accounts/{lac_id}/entries` | `admin` `perm.ledger.read` | `?from_seq`, `?to_seq`, `?entry_type`, `?order` (`desc` default, `asc`) | list of `LedgerEntry` | `NOT_FOUND` | n/a | cursor | `A-W` |
+| `listLedgerEntries` | `GET /v1/admin/ledger/entries` | `admin` `perm.ledger.read` | `?from_seq`, `?to_seq`, `?entry_type`, `?txn_kind`, `?from`, `?to`, `?order` | list of `LedgerEntry`; at most `api.max_page_size` per page, scan by `seq` cursor | `VALIDATION_FAILED` (range wider than 31 days or 1,000,000 seq values: narrow it) [A] | n/a | cursor | `A-W` |
+| `getLedgerEntry` | `GET /v1/admin/ledger/entries/{lge_id}` | `admin` `perm.ledger.read` | - | `LedgerEntry` | `NOT_FOUND` | n/a | - | `A-R` |
+| `getLedgerTransaction` | `GET /v1/admin/ledger/transactions/{txn_id}` | `admin` `perm.ledger.read` | - | `{txn_id, txn_kind, entries: [LedgerEntry], balanced: bool, reverses_txn_id}` | `NOT_FOUND` | n/a | - | `A-R` |
+| `listLots` | `GET /v1/admin/ledger/lots` | `admin` `perm.ledger.read_member` | `?member_id`, `?expiring_before` | list of `{lot_id, member_id, original_ucr, remaining_ucr, earned_at, expires_at, source_entry_id}` | - | n/a | cursor | `A-R` |
+| `listLedgerCheckpoints` | `GET /v1/admin/ledger/checkpoints` | `admin` `perm.ledger.read` | `?from`, `?to` | list of `{date, seq, entry_hash, checkpoint_hash, signed: bool}` | - | n/a | cursor | `A-R` |
+
+`LedgerEntry` = `{lge_id, seq, txn_id, txn_kind, entry_type, debit_account_id, credit_account_id, amount_ucr, lot_effects: [{lot_id, delta_ucr}], reverses_entry_id, parameter_epoch, occurred_at, prev_hash, entry_hash}`. `parameter_epoch` is the `config_epoch` of 15.34.1 at posting time.
+
+### 15.30.2 Invariants and hash-chain checks
+
+The invariants `INV-L*` are defined by S6.*; this API exposes their status and lets an operator run them on demand. `InvariantCheck` (`ivc_`, S0 0.6.3) rows are produced by the scheduler and by `runInvariant`.
+
+| op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `listInvariants` | `GET /v1/admin/ledger/invariants` | `admin` `perm.ledger.read` | - | `{data: [{inv_id, title_key, mode (per_commit, sampled, full_recompute), last_check: {ivc_id, result (pass, fail, error), ran_at, duration_ms}, last_pass_at, consecutive_failures}]}` | - | n/a | - | `A-R` |
+| `getInvariant` | `GET /v1/admin/ledger/invariants/{inv_id}` | `admin` `perm.ledger.read` | - | invariant with its statement (`copy.*` key) and last result | `NOT_FOUND` | n/a | - | `A-R` |
+| `listInvariantChecks` | `GET /v1/admin/ledger/invariants/{inv_id}/checks` | `admin` `perm.ledger.read` | `?result` | list of `InvariantCheck` | `NOT_FOUND` | n/a | cursor | `A-R` |
+| `runInvariant` | `POST /v1/admin/ledger/invariants/{inv_id}/runs` | `admin` `perm.ledger.verify` | `{mode (sampled, full)}` | 202 `{ivc_id, state: running}`; poll `getInvariantCheck`; a failure emits `ledger.invariant_violated` and raises a critical alarm | `STATE_CONFLICT` (a run of this invariant is already running) | req | - | `A-W` |
+| `getInvariantCheck` | `GET /v1/admin/ledger/invariant-checks/{ivc_id}` | `admin` `perm.ledger.read` | - | `InvariantCheck` with `details` (ids only) | `NOT_FOUND` | n/a | - | `A-R` |
+| `startHashChainVerification` | `POST /v1/admin/ledger/verifications` | `admin` `perm.ledger.verify` | `{from_seq, to_seq}` | 202 `{ivc_id, state: running}`; recomputes every `entry_hash` in the range from the canonical entry bytes and the previous hash | `VALIDATION_FAILED` (range over 1,000,000 seq values) | req | - | `A-W` |
+
+A hash-chain result is `{ok: bool, entries_checked, first_bad_seq?}`; `ok = false` is a critical `ledger` alarm and, per 15.28.3, a freeze [D][A].
+
+### 15.30.3 Reversal (the only write)
+
+| op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `reverseLedgerEntry` | `POST /v1/admin/ledger/reversals` | `admin` `SU` `2P` `ledger.reversal` `perm.ledger.reverse` | `{entry_id or txn_id, reason_code, reason, linked_ids: []}` | 202 approval (`required_approvals` = `ledger.reversal_min_approvers` = 2, a constant); on approval 201 `{txn_id, entries}`; events `ledger.entry_committed` per posted entry | `STATE_CONFLICT` (`already_reversed`; `would_overdraw_lot`: the reversal would drive a lot or an account below zero where S0 forbids it; `outside_policy`), `VALIDATION_FAILED` | req | - | `A-W` |
+
+A reversal posts new mirror entries in a transaction of kind `reversal` whose entries carry `reverses_entry_id`; the original entries are never altered or deleted. Reversals do not recreate expired lots; whatever S6.* rules for such cases is what the ledger service enforces, and this API passes its `STATE_CONFLICT` through [A].
+
+## 15.31 Capacity dashboard
+
+The figures are computed by the admission and forecast services (S6.*); this part fixes only how they are exposed. All ratios are integers in ppm (parts per million); all counts are integers; no float appears in a payload [D].
+
+| op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `getCapacitySnapshot` | `GET /v1/admin/capacity` | `admin` `perm.capacity.read` | - | `{as_of, active_donors, forecast: {redeemable_cells, committed_cells, phi_ppm, headroom_cells}, claim_ratio_ppm, mint: {month_utc, minted_ucr, cap_ucr, utilization_ppm}, v_by_job_type: [{job_type, v_ppm, sample_cells}], eta_ppm, reserve: {balance_ucr, ceiling_ucr}, waitlist: {count}, reservations: {active, capacity_share_ppm}, concentration: {top_decile_share_ppm}}` | - | n/a | - | `A-R` |
+| `listCapacityDays` | `GET /v1/admin/capacity/days` | `admin` `perm.capacity.read` | `?from`, `?to` (UTC dates, at most 90 days) | list of `{date, forecast_cells, committed_cells, reserved_cells, cap_cells}`, ascending by date | `VALIDATION_FAILED` | n/a | cursor | `A-R` |
+| `listSupplyGauges` | `GET /v1/admin/capacity/supply-gauges` | `admin` `perm.capacity.read` | `?purpose`, `?sensitivity`, `?license`, `?service_id` | list of `{purpose, sensitivity, license, service_id, donors, suppressed}`; a bucket with fewer than `analytics.min_cohort_k` donors is returned as `donors: null, suppressed: true` | - | n/a | cursor | `A-R` |
+
+Supply gauges show which kinds of work have too few opted-in donors for the demand (the supply gauges of FD§5.7 failure mode 8); small buckets are suppressed so the dashboard cannot be used to single out individuals [D].
+
+## 15.32 Pre-registration, experiments, calibration, milestones
+
+### 15.32.1 Pre-registration lock [D]
+
+A `PreRegistration` (`prr_`, permanent) fixes the thresholds and decision rules before the data exist (FD§9). `PreRegistration` = `{prr_id, scope (phase_0, phase_1, phase_2, experiment), title, thresholds: [{measure_key, comparator (gte, lte, gt, lt), threshold, unit, window_days}], decision_rules: [{rule_key, text: {fa, en}, if: [measure_key], then (continue, stop, pivot)}], linked_experiment_ids, status (draft, locked), locked_at, content_hash, supersedes_id, post_launch (bool, computed), row_version, created_at}`. `status` and `content_hash` are convention additions (`ISS-154`). `measure_key` values come from the S13.* catalogue of measures (FD§9); this part checks the format `^[a-z][a-z0-9_]*$` and asks the S13.* catalogue whether the key exists.
+
+| op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `listPreRegistrations` | `GET /v1/admin/pre-registrations` | `admin` `perm.prereg.read` | `?scope`, `?status` | list | - | n/a | cursor | `A-R` |
+| `getPreRegistration` | `GET /v1/admin/pre-registrations/{prr_id}` | `admin` `perm.prereg.read` | - | `PreRegistration`, `ETag` | `NOT_FOUND` | n/a | - | `A-R` |
+| `createPreRegistration` | `POST /v1/admin/pre-registrations` | `admin` `perm.prereg.edit` | `{scope, title, thresholds, decision_rules, linked_experiment_ids?, supersedes_id?}` | 201 `PreRegistration` (`draft`) | `VALIDATION_FAILED` (unknown `measure_key`) | req | - | `A-W` |
+| `updatePreRegistration` | `PATCH /v1/admin/pre-registrations/{prr_id}` | `admin` `perm.prereg.edit` | Merge Patch; `If-Match` | 200 `PreRegistration` | `STATE_CONFLICT` (`locked`), `PRECONDITION_FAILED` | req | - | `A-W` |
+| `lockPreRegistration` | `POST /v1/admin/pre-registrations/{prr_id}/lock` | `admin` `SU` `2P` `preregistration.lock` `perm.prereg.lock` | `{reason}` | 202 approval; on approval 200 `PreRegistration` (`locked`, `locked_at`, `content_hash`); event `preregistration.locked`; a public change-log entry of kind `preregistration_lock` that carries the hash and the content | `STATE_CONFLICT` (already locked) | req | - | `A-W` |
+
+`content_hash` = SHA-256 over the RFC 8785 canonical JSON of `{scope, title, thresholds, decision_rules, linked_experiment_ids}`. After the lock the row is immutable at the database level. A change after the lock is a new `PreRegistration` with `supersedes_id`; the old one stays, and a new one created after `launch.members_may_join` first became true is shown with `post_launch = true` in the public view, so a changed threshold is visible as changed [D].
+
+### 15.32.2 Experiments [D]
+
+An `Experiment` (`exp_`) = `{exp_id, key, flag_key, hypothesis, arms: [{arm_key, fraction_ppm, config}], fraction_source (null or a parameter name), metrics: [measure_key], prereg_id, status (draft, running, stopped), assignment_seed_version, started_at, stopped_at, row_version}`. Arm fractions sum to exactly 1,000,000. The arm of a given member is a deterministic, logged function of the member id and the seed version (assignment mechanism S13.*); the API never lets an admin pick a member's arm. `status` and `fraction_source` are convention additions (`ISS-154`).
+
+| op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `listExperiments` | `GET /v1/admin/experiments` | `admin` `perm.experiment.read` | `?status` | list | - | n/a | cursor | `A-R` |
+| `getExperiment` | `GET /v1/admin/experiments/{exp_id}` | `admin` `perm.experiment.read` | - | `Experiment`, `ETag` | `NOT_FOUND` | n/a | - | `A-R` |
+| `createExperiment` | `POST /v1/admin/experiments` | `admin` `perm.experiment.edit` | `{key, flag_key, hypothesis, arms, fraction_source?, metrics, prereg_id?}` | 201 `Experiment` (`draft`) | `VALIDATION_FAILED` (fractions do not sum; the flag is not experiment-capable), `ALREADY_EXISTS` (the flag is already bound) | req | - | `A-W` |
+| `updateExperiment` | `PATCH /v1/admin/experiments/{exp_id}` | `admin` `perm.experiment.edit` | Merge Patch; `If-Match` | 200 `Experiment` | `STATE_CONFLICT` (not `draft`) | req | - | `A-W` |
+| `startExperiment` | `POST /v1/admin/experiments/{exp_id}/starts` | `admin` `SU` `perm.experiment.run` | `{reason}` | 200 `Experiment` (`running`, arms frozen, `assignment_seed_version` recorded; when `fraction_source` is set the parameter's value at this moment becomes the arm fraction); event `experiment.started` | `UNPROCESSABLE` (`prereg_not_locked`: `prereg_id` must name a locked `PreRegistration` that lists this experiment), `STATE_CONFLICT` | req | - | `A-W` |
+| `stopExperiment` | `POST /v1/admin/experiments/{exp_id}/stops` | `admin` `SU` `perm.experiment.run` | `{reason}` | 200 `Experiment` (`stopped`); event `experiment.stopped`; assignments stay frozen | `STATE_CONFLICT` | req | - | `A-W` |
+| `getExperimentSummary` | `GET /v1/admin/experiments/{exp_id}/summary` | `admin` `perm.experiment.read` | - | `{arms: [{arm_key, members, exposures}], metrics: [{measure_key, by_arm}]}`; any cell smaller than `analytics.min_cohort_k` is `null` | `NOT_FOUND` | n/a | - | `A-R` |
+| `checkExperimentAssignment` | `POST /v1/admin/experiments/{exp_id}/assignment-checks` | `admin` `perm.experiment.read` | `{member_id}` | 200 `{arm_key, matches_logged: bool}`; logged as a read action | `NOT_FOUND` | opt | - | `A-W` |
+
+There is no endpoint that lists which member is in which arm; a per-member view exists only through `checkExperimentAssignment`, one member at a time and logged [D]. `ff.experiment.expiry_arm` takes the treatment arm fraction from `experiment.expiry_arm.fraction` (initial configurable default 500,000 ppm, replaced by the `FND` pre-registration) so the parameter editor stays the single place where it changes.
+
+### 15.32.3 Calibration records [D]
+
+Phase 0 replaces guessed defaults with measurements typed in by a human working through each service's own interface (FD§6). The platform never reads a volunteer's account, never drives a service, and stores only the numbers below.
+
+`CalibrationRecord` (`cal_`, permanent) = `{cal_id, service_id, template_version_id?, observed_on (UTC date), observer_admin_id, cells_attempted, cells_completed, limit_reached (bool), seconds_per_cell: [int] (1..200 values), refusals, failures, copy_paste_errors, check_passes, corrects_id?, note, created_at}`. Corrections are new records with `corrects_id`; nothing is edited.
+
+| op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `listCalibrationRecords` | `GET /v1/admin/calibration-records` | `admin` `perm.calibration.read` | `?service_id`, `?from`, `?to` | list | - | n/a | cursor | `A-R` |
+| `getCalibrationRecord` | `GET /v1/admin/calibration-records/{cal_id}` | `admin` `perm.calibration.read` | - | `CalibrationRecord` | `NOT_FOUND` | n/a | - | `A-R` |
+| `createCalibrationRecord` | `POST /v1/admin/calibration-records` | `admin` `perm.calibration.write` | `{service_id, template_version_id?, observed_on, cells_attempted, cells_completed, limit_reached, seconds_per_cell, refusals, failures, copy_paste_errors, check_passes, corrects_id?, note?}` | 201 `CalibrationRecord`; event `calibration.recorded` | `VALIDATION_FAILED` (`cells_completed` > `cells_attempted`; any count negative) | req | - | `A-W` |
+| `getCalibrationSummary` | `GET /v1/admin/calibration/summary` | `admin` `perm.calibration.read` | `?service_id` (default: all) | per service `{n_cells, days, cells_per_day: {min, median, max}, seconds_per_cell: {p50, p95}, refusal_ppm, failure_ppm, copy_paste_error_ppm, check_pass_ppm, meets_min_samples (n_cells >= calibration.min_samples_per_service), informs: [parameter names]}` | `VALIDATION_FAILED` | n/a | - | `A-R` |
+
+`informs` is a fixed mapping: `seconds_per_cell.p50` informs `cell.envelope.expected_time_s`; `p95` informs `lease.timeout_s`; the low end informs `verify.timing_min_s`; `cells_per_day` informs `lease.max_active_per_member` and `mint.monthly_cap_credits`; `copy_paste_error_ppm` and `check_pass_ppm` inform `verify.*` thresholds [A]. The summary suggests no number; a person decides and enters it through `proposeParameterChange` with `calibration_basis` (15.26 rule 6). Percentiles use the nearest-rank method on the pooled `seconds_per_cell` values [D].
+
+### 15.32.4 Milestones [D]
+
+A `Milestone` (`mls_`; convention addition, `ISS-154`) is a public marker tied to a real output (FD V6): `{mls_id, key, title: {fa, en}, criterion: {kind (verified_cells_total or manual), threshold?}, output_ref: {title, url (text, never fetched), license, sha256?}, status (draft, published), reached_at, published_at, row_version}`.
+
+| op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `listMilestones` | `GET /v1/admin/milestones` | `admin` `perm.milestone.edit` | `?status` | list | - | n/a | cursor | `A-R` |
+| `createMilestone` | `POST /v1/admin/milestones` | `admin` `perm.milestone.edit` | `{key, title, criterion, output_ref?}` | 201 `Milestone` (`draft`) | `ALREADY_EXISTS` | req | - | `A-W` |
+| `updateMilestone` | `PATCH /v1/admin/milestones/{mls_id}` | `admin` `perm.milestone.edit` | Merge Patch; `If-Match` | 200 `Milestone` | `STATE_CONFLICT` (`published`) | req | - | `A-W` |
+| `publishMilestone` | `POST /v1/admin/milestones/{mls_id}/publications` | `admin` `SU` `perm.milestone.edit` | `{reason}` | 200 `Milestone` (`published`); event `milestone.published` | `UNPROCESSABLE` (`output_ref_required`: no milestone is published without an output it points at; `criterion_not_reached` for `verified_cells_total` below its threshold) | req | - | `A-W` |
