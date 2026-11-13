@@ -874,3 +874,76 @@ Columns: `After` lists the packages of the same milestone whose provided contrac
 | `WP-BM9-07` | `drills-and-host-bindings` | `platform/bindings/*`, `docs/runbooks/*`: host-bound bindings or contract-tested candidates, restore and rotation drills, kill-switch and handle-rotation drills, production config validator extension | S4, S10, S19, 17.4.3 | none | `AC-bm9-08`, `-09`, `-15` |
 | `WP-BM9-08` | `threat-map-and-prebuild-closure` | `build/threat-map.*`, `ci/suites/threat-coverage`, `build/prebuild-checklist.*`: `THR-<nn>` to test mapping, `S19.*` checklist status | S10, S19 | none | `AC-bm9-12`, `-13` |
 | `WP-BM9-09` | `staging-e2e-and-metrics-console` | `ci/suites/e2e-staging`, `web/console/metrics`: rehearsal end-to-end in both locales, measures and simulation-report views | S13, S18 | `-02`, `-05` | `AC-bm9-14` |
+
+### 17.9.3 Waves, concurrency across milestones, conflict rules [A]
+
+**Waves inside a milestone.** Wave 1 holds the packages whose `After` column is empty; wave `k+1` holds the packages whose `After` entries all lie in waves `<= k`. Every package of a milestone may be *developed* from the first day, because it codes against mocks and contracts (`WR3`); packages are *merged* in wave order (`CR3`), so that the acceptance tests which need a real neighbour run against merged code. Packages of one wave own disjoint paths (`WR2`) and never import each other.
+
+| Milestone | Wave 1 | Wave 2 | Wave 3 | Wave 4 | Wave 5 | Wave 6 | Waves / widest wave / longest chain (packages) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `BM0` | `01`, `02`, `08`, `09` | `03`, `04`, `05`, `06` | `07` | | | | 3 / 4 / 3 (`02`, `06`, `07`) |
+| `BM1` | `01` | `02`, `07` | `03`, `06`, `08` | `04`, `05`, `09` | | | 4 / 3 / 4 (`01`, `02`, `03`, `04`) |
+| `BM2` | `01` | `02` | `03`, `04`, `05`, `07` | `06`, `09` | `08` | | 5 / 4 / 5 (`01`, `02`, `03`, `06`, `08`) |
+| `BM3` | `01`, `03`, `04` | `02`, `05`, `06`, `07` | `08`, `09` | | | | 3 / 4 / 3 (`04`, `05`, `09`) |
+| `BM4` | `01`, `05` | `02`, `03`, `04`, `06`, `07`, `08`, `09` | | | | | 2 / 7 / 2 (`01`, any of wave 2) |
+| `BM5` | `01`, `03`, `05`, `06` | `02`, `04`, `07`, `08` | `09` | | | | 3 / 4 / 3 (`05`, `07`, `09`) |
+| `BM6` | `01` | `02`, `03` | `04`, `07`, `08` | `05` | `06` | `09` | 6 / 3 / 6 (`01`, `02`, `04`, `05`, `06`, `09`) |
+| `BM7` | `01`, `02`, `05`, `06` | `03`, `07` | `04`, `08` | `09` | | | 4 / 4 / 4 (`01`, `03`, `04`, `09`) |
+| `BM8` | `01` | `02`, `03`, `04`, `05`, `06`, `07`, `08` | `09` | | | | 3 / 7 / 3 (`01`, any of wave 2, `09`) |
+| `BM9` | `01`, `04`, `06`, `07`, `08` | `02`, `03`, `05` | `09` | | | | 3 / 5 / 3 (`04`, `05`, `09`) |
+
+Each row lists package numbers `kk` of `WP-BM<n>-<kk>`; every row sums to nine packages (`BM0`: 4 + 4 + 1). Reading the table: the longest chains are `BM6` (six waves) and `BM2` (five), so those two milestones set the elapsed time of the critical path of 17.2 once packages are small; `BM4` and `BM8` are wide and finish as fast as their slowest single package. [A]
+
+**Concurrency across milestones.** Rules `CM1`..`CM5` [A]
+
+| Rule | Statement |
+| --- | --- |
+| `CM1` | *Merge gate.* A package of `BM<n>` merges only after every package of every milestone in the `Depends on` column of S0.12 for `BM<n>` has merged. Merge order across milestones therefore follows the graph of 17.2 and nothing else |
+| `CM2` | *Close gate.* A milestone is closed by a human (`BR10`) after its own packages and its prerequisites' packages have merged; a milestone is never closed before all its prerequisites are closed. Closure may lag merging; a build is called `BM<n>` in any release note only when `BM<n>` is closed |
+| `CM3` | *Early start.* A package may be developed before its milestone's prerequisites have merged when every contract it needs is already in the spec and every neighbour is mocked (`WR3`). The candidates are in the table below; any other package waits for its milestone to open |
+| `CM4` | *Amendments.* A gap found in a closed milestone (17.3, item 7) is fixed by an amendment card `build/wp/AM-BM<k>-<nn>.md` with its own acceptance test, merged before the finder's milestone closes. An amendment is not one of the nine packages; its migrations use `j = 0` in the formula of 17.8.1 (numbers `100k + 0 .. 100k + 9`), which no package uses |
+| `CM5` | *Human steps do not block code.* PB-1 and PB-2 (17.4) gate the start of `BM0` code only; PB-3 gates exposure (17.5.2) and nothing else; Phase 0 (FD§9) runs on the founders' accounts concurrently with `BM3`..`BM9` and blocks no package |
+
+Number of milestones open at once, and number of agents, are staffing decisions of the owner, not product parameters; this plan only guarantees which packages *can* run together (waves above and early starts below). [A]
+
+| Early-start package | May start during | Merges after (`CM1`) | Reason it is safe |
+| --- | --- | --- | --- |
+| `WP-BM8-01` design system and i18n | after `BM2` cards exist | `BM2` merged, as library-only code | No route and no data; all screens that use it merge with their own milestone (17.2) |
+| `WP-BM5-03` lint and wrapping; `WP-BM5-05` uploads and screening; `WP-BM5-06` job and cell machines | `BM3` and `BM4` | `BM3` and `BM4` merged | Pure functions or own tables; neighbours (evaluator, identity) are mocked |
+| `WP-BM6-01` lease engine | `BM5` | `BM5` merged | Needs the `Cell` table contract (S5.*) only; the cell table is mocked |
+| `WP-BM7-01` pricing, `-02` admission, `-05` sweeps, `-06` grants | `BM6` | `BM6` merged | Pure over the ledger interface (merged in `BM1`) and a mocked execution read model |
+| `WP-BM9-04` simulation core, `-06` load and chaos, `-08` threat map | `BM6` and `BM7` | `BM7` and `BM8` merged | They code against the public API contract (S15.*); the scenarios that need every flow run after `BM7` |
+| `WP-BM9-07` drills and host bindings | after PB-2 is recorded and the owner has chosen hosts | `BM7` and `BM8` merged | Bindings are contract-tested against the ports of `BM0` |
+
+**Conflict rules** `CR1`..`CR10` (checked by `ci/path-rules` and a card linter unless noted) [A]
+
+| Rule | Situation | Rule and resolution |
+| --- | --- | --- |
+| `CR1` | Two cards claim the same path | The card linter refuses to merge the second card; ownership is by card, one owner per path in a milestone, and a path that two packages truly need moves into the package earlier in wave order, which exposes it as a contract |
+| `CR2` | Two packages append to a shared append-only file (`seed/parameters/<area>.*`, `api/ops/<area>.*`, `copy/<area>.*`, `build/stubs.md`) | Each package appends inside its own marked block `# WP-BM<n>-<kk> begin` .. `# WP-BM<n>-<kk> end`; on a textual conflict both blocks are kept in package-id order and no existing row is edited. An edit of another package's block fails the path rule |
+| `CR3` | A package finished before its `After` packages | It waits: the merge gate (`ci/wave-check`) reads the cards and refuses the merge until every `After` package and every prerequisite milestone (`CM1`) has merged |
+| `CR4` | Two packages create migrations | Numbers come from the package's own range (17.8.1); a migration outside the range fails `migrations`; a table created by one package and altered by another is created by the earlier package and altered through a numbered expand step of the later one, never by editing the earlier file |
+| `CR5` | Two packages need different shapes of one operation, event, port or enum | The shape lives in the spec (S0, S15) and the provider's contract test; neither package decides it. Both stop at that point and raise a convention issue (`WR5`); the provider package owns the contract test and consumers use it read-only |
+| `CR6` | A package is behind `main` at merge time | It is rebased and CI re-runs on the new head (`WR7`); a red suite of an earlier milestone blocks the merge even if the package's own tests pass (`BR6`) |
+| `CR7` | Shared fixtures | Fixtures are namespaced `fx_<package>`; the entity's creator owns shared fixtures: fixture admins and the `launch-open` profile by `WP-BM2-01` and `WP-BM2-06`, fictitious services by `WP-BM3-01`, fixture members by `WP-BM4-01`. Other packages import them read-only |
+| `CR8` | Regression manifest | Each package adds its suites to `ci/suites/<package>.yaml`; the milestone closer assembles `ci/milestone-suites.yaml` by append (`BR6`); nobody removes a suite without a referenced spec change |
+| `CR9` | Stub replacement | The package named in the "Stubbed" row replaces the binding and removes the `build/stubs.md` row in the same change; the contract test of the port must pass for both the stub and the real binding |
+| `CR10` | A package finds its `owns` set insufficient | It stops, writes the missing path and the reason in a card amendment request, and the human assigner amends the card (and moves ownership under `CR1`); it never edits outside `owns` |
+
+**Example card** (filled for one package; the other cards are produced the same way from the tables of 17.9.2) [A]
+
+```
+id:        WP-BM6-02
+title:     submission-intake
+owns:      execution/submission/**, api/ops/submissions.*, copy/submission.*, seed/parameters/submission.*
+needs:     S5 (Lease, Submission machines), S9 (paste-back fields), S0.11.1; mocks: Lease engine port, ledger mint port
+provides:  POST /v1/leases/{lease_id}/submission; events submission.received, submission.quarantined,
+           submission.released_from_quarantine; copy keys for rejection reasons
+stubs:     verification pipeline port (answers pending until WP-BM6-04 merges)
+accept:    AC-bm6-04, AC-bm6-05, AC-bm6-06, AC-bm6-07; command: ci run --suite bm6-submission
+forbidden: edits outside owns; any field naming a provider credential, session or chat content (BR9);
+           production secrets; provider names
+done_when: GD1..GD13 for the parts touched; DoD rows of BM6 on escaping and quarantine
+```
+
+A package card is a Blueprint cell of the existing panel in shape (`id`, `after`, `allowed_paths`, acceptance command), which lets the panel's engine or an equivalent hand the packages to coding agents; whether the panel runtime is used for this is the PB-1 decision, and nothing in the product depends on it (17.4.1). [A]
