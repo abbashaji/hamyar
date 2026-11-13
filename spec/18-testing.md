@@ -687,3 +687,93 @@ A simulator can be wrong. These checks keep the harness honest; they test the ha
 - A flaky test is a bug in the test or the system. It is fixed within `test.flaky_fix_days` (`initial configurable default` 7) or quarantined with an issue; invariant, policy and ledger tests are never quarantined (rule 7 of `S18.1`).
 - Test code that reads or prints a secret, a member id, a raw IP or a token fails review.
 - Parameter names in this part are quoted from `S0.10.6`; `C-001`'s name check (`S0.13`) verifies them against the table, and a mismatch is fixed here, not in `S0.10.6`. [V]
+
+## 18.14 Acceptance criteria
+
+### 18.14.1 Feature to criteria to milestone map
+
+Every major feature of the prompt (scopes A to J) maps to criteria below, and every criterion to the tests that prove it and the milestone in which it must first pass. The area codes are defined here (`ISS-184`); parts that specify a feature may add criteria in the same area and must not reuse an id (`C-001` checks). The milestone is the first one in which the criterion is mandatory; it then stays green (regression ratchet). [D]
+
+| Scope | Feature | Criteria | First `BM` |
+| --- | --- | --- | --- |
+| A | Anonymous identity, recovery, optional e-mail, key rotation, device linking, rate limits, invite trees, permissions, sessions, data minimization | `AC-ident-01`..`AC-ident-10` | `BM4` |
+| A | Admin login, two-person actions, admin audit trail | `AC-admin-01`..`AC-admin-03` | `BM2` |
+| B | Domain model, state machines, events, outbox, races | `AC-fsm-01`..`AC-fsm-06` | `BM1` (ledger side), `BM6` |
+| C | Ledger and invariants, mint, caps, expiry, Reserve, grants, reversal | `AC-ledger-01`..`AC-ledger-12` | `BM1` |
+| C | Pricing, round-trip efficiency, parameter changes | `AC-price-01`..`AC-price-03` | `BM2`, `BM7` |
+| C | Admission control, quotes, waitlist, reservations | `AC-admit-01`..`AC-admit-06` | `BM7` |
+| D | Policy engine, rules `R1`..`R10`, opt-ins | `AC-policy-01`..`AC-policy-06` | `BM3` |
+| D | Service registry and gate | `AC-registry-01`..`AC-registry-05` | `BM3` |
+| D | Injection defenses, template wrapping, screening, output flagging | `AC-inj-01`..`AC-inj-04` | `BM5`, `BM6` |
+| E | Templates and their review | `AC-tpl-01`..`AC-tpl-03` | `BM5` |
+| E | Verification, audits, gold cells, appeals, estimators | `AC-verify-01`..`AC-verify-09` | `BM6` |
+| E | Return path, nonce, expiry, size, duplicates, timing | `AC-return-01`..`AC-return-06` | `BM6` |
+| F | Volunteer experience | `AC-volx-01`..`AC-volx-09` | `BM8` |
+| F | Requester experience | `AC-reqx-01`..`AC-reqx-05` | `BM8` |
+| F | Operator experience, queues, kill switches | `AC-ops-01`..`AC-ops-08` | `BM2`..`BM8` |
+| F | Persian, RTL, numerals, calendars, accessibility, low bandwidth | `AC-i18n-01`..`AC-i18n-08` | `BM8` |
+| G | Public surfaces, counters, referral, teams, share cards | `AC-public-01`..`AC-public-08` | `BM8` |
+| G | Growth experiments behind flags | `AC-growth-01`..`AC-growth-03` | `BM8` |
+| H | Measurement, pre-registration, calibration, analytics privacy | `AC-measure-01`..`AC-measure-05` | `BM9` |
+| I | Threat model, secrets, privacy, takedown, hosting swap, disclosure | `AC-sec-01`..`AC-sec-06` | `BM4`..`BM9` |
+| J | API, errors, idempotency, pagination, rate limits, auth schemes | `AC-api-01`..`AC-api-05` | `BM0` |
+| J | Background jobs, observability, backup, configuration | `AC-jobs-01`..`AC-jobs-05` | `BM0`..`BM9` |
+| J | Service adapters | `AC-adapter-01`..`AC-adapter-03` | `BM8` |
+| J | Launch gate | `AC-gate-01`..`AC-gate-04` | `BM2` |
+| K | Simulation harness | `AC-sim-01`..`AC-sim-05` | `BM9` |
+
+### 18.14.2 Identity, administration, state and ledger
+
+| Id | Given | When | Then | Tests |
+| --- | --- | --- | --- | --- |
+| `AC-ident-01` | A visitor with no account | They press the contribute action | An anonymous identity (`mem_` id, key material kept on the device, `vol_` handle) is created with no e-mail, no phone number and no password; no personal data is stored | `T-e2e-07`, `T-unit-14`, `T-unit-18` |
+| `AC-ident-02` | A member with a recovery key who lost their device | They recover on a new device | The identity is restored, old keys and sessions stop working, spending and job start are refused until `identity.recovery_cooldown_s` has passed, and at most `identity.recovery_max_per_90d` recoveries are allowed | `T-adv-16`, `T-unit-24`, `T-e2e-07` |
+| `AC-ident-03` | A member who chooses to add an e-mail | They add it | It is stored hashed or encrypted as `S10.*` says, used only for recovery and notices, optional to remove, and never shown to others | `T-e2e-07`, `T-e2e-19` |
+| `AC-ident-04` | A member rotating keys | They rotate | The new key works at once, the old key works only for the stated grace period, and the rotation is logged as an event without key material | `T-e2e-07` |
+| `AC-ident-05` | A member linking a second device | They request a linking code | The code is single-use, expires after `identity.link_code_ttl_s`, and a used or expired code is refused | `T-e2e-07`, `T-adv-16` |
+| `AC-ident-06` | New-member traffic from one device, IP hash or invite tree | The per-day limits are reached | The next creation is refused with `RATE_LIMITED`, limits key on the trusted peer chain and never on a client header, and refusals feed the abuse queue | `T-unit-25`, `T-adv-17`, `T-adv-19` |
+| `AC-ident-07` | An invite tree | It reaches `invite.tree_max_members` or `invite.tree_max_depth`, or a member holds `invite.max_active_per_member` active invites | Further invites or joins are refused with `CAP_EXCEEDED`, and the tree is visible to operators | `T-unit-25`, `T-adv-17` |
+| `AC-ident-08` | Any caller | They request an object they may not see, or call a route of the other scheme | The result is `NOT_FOUND`, `FORBIDDEN` or `AUTH_INVALID` with identical shape for existing and non-existing objects, and a member never receives another member's `mem_` id | `T-adv-15`, `T-adv-22` |
+| `AC-ident-09` | A member session | It is idle or old beyond its TTL | It expires (`AUTH_EXPIRED`), a refresh follows the rules of `S10.*`, and admin sessions are shorter than member sessions | `T-unit-24` |
+| `AC-ident-10` | Any request | Logs, metrics and the database are inspected | No raw IP address is stored anywhere; only a keyed IP hash with its retention class exists | `T-e2e-19`, `T-e2e-20` |
+| `AC-admin-01` | An operator | They sign in | They use a passkey on the admin origin; there is no shared password and no member credential works | `T-adv-15`, `T-inj-04` |
+| `AC-admin-02` | Any two-person action (`ledger.reversal`, `launch.signoff`, `parameter.loosen`, `killswitch.release`, bans) | One admin tries alone, with two sessions, or as the author | The action is refused and recorded; with a second distinct admin it succeeds | `T-adv-14`, `T-prop-14` |
+| `AC-admin-03` | Any admin write | It is performed | Exactly one `AdminAction` exists with actor, role, target, reason and before and after hashes, and it cannot be edited | `T-unit-09`, `T-e2e-18` |
+| `AC-fsm-01` | Any entity in any state | An event not listed for that state arrives | `STATE_CONFLICT`, no state change, no event, no ledger entry | `T-fsm-01` |
+| `AC-fsm-02` | A legal transition | It occurs | Exactly one event with the machine's event name, version, actor and stamped versions is written in the same transaction | `T-fsm-01`, `T-fsm-09` |
+| `AC-fsm-03` | Concurrent lease, submit, cancel and reaper requests | They race | At most one active lease per cell, at most one accepted submission per lease, no partial state (`X1`, `X2`, `X8`) | `T-adv-03`, `T-adv-08`, `T-adv-09` |
+| `AC-fsm-04` | A submission replayed with the same lease and nonce | It arrives again | The stored outcome is returned, nothing changes and no event is emitted (`X3`) | `T-adv-02`, `T-fsm-03` |
+| `AC-fsm-05` | Concurrent settle, cancel and late audit | They race | The escrow settles once and closes at 0; a late overturn uses a `reversal` (`X4`, `X5`) | `T-adv-10` |
+| `AC-fsm-06` | A crash between state write and event write | The system restarts | State and event are both present or both absent; the relay delivers each event at least once; consumers are idempotent | `T-fsm-09` |
+| `AC-ledger-01` | The FD§3.3 inputs | The job is requested, executed and settled | Every figure of the table in `S18.3.1` is reproduced, including price 1.15 credits, escrow 276, refund 0, levy 12, efficiency 869,565 ppm | `T-unit-01`, `T-e2e-01` |
+| `AC-ledger-02` | A seeded corruption (a balance edit or an unbalanced entry) | The invariant job runs | `ledger.invariant_violated` and an `Alarm` are raised within `ledger.invariant_check_interval_s`, and new money-moving operations pause as `S6.*` specifies | `T-adv-21`, `T-prop-05` |
+| `AC-ledger-03` | Minting at the monthly or daily cap | Another accepted Commons cell arrives | Cumulative mint in the UTC month never exceeds `mint.monthly_cap_credits`, per-member daily mint never exceeds `mint.per_member_daily_cap_credits`, and the alarm of `inflation.mint_utilization_alarm` fires | `T-prop-09`, `T-e2e-03`, `T-sim-13` |
+| `AC-ledger-04` | A member with several lots | They spend | Lots are consumed oldest `expires_at` first and each lot's remainder is consumed once | `T-unit-07`, `T-prop-06`, `T-adv-12` |
+| `AC-ledger-05` | A lot past its expiry | The expiry sweep runs | The remainder moves to the Reserve, the total in existence is unchanged, and a spend racing the sweep consumes the lot once | `T-prop-12`, `T-adv-12`, `T-e2e-09` |
+| `AC-ledger-06` | A Reserve above `reserve.ceiling_credits` | The retirement sweep runs | Only the excess (at least `reserve.retire_min_credits`) moves to `retired`, and the entry is logged and public | `T-prop-13`, `T-e2e-09` |
+| `AC-ledger-07` | A member at their cap | They earn, receive a grant or receive a refund | The result follows the single rule of `S6.*` (earnings above the cap refused or deferred, refunds restoring lots exempt) and the cap is never exceeded otherwise [V: `ISS-185`] | `T-prop-16` |
+| `AC-ledger-08` | A new member | They complete `grant.required_verified_cells` verified cells | One starter grant is issued within the limits, from the Reserve, never below `grant.reserve_floor_credits`, with starter lifetime; with the Reserve short the grant pauses | `T-unit-27`, `T-prop-16`, `T-sim-07` |
+| `AC-ledger-09` | A cancelled or partly failed job | It settles | Refunds restore the consumed lots with their original expiry | `T-unit-07`, `T-prop-06`, `T-e2e-04` |
+| `AC-ledger-10` | A settled job | The levy is posted | `lambda` x N goes to the Reserve in the same transaction as the last payout, once | `T-prop-07`, `T-e2e-01` |
+| `AC-ledger-11` | A request to reverse an entry | It has fewer than two distinct approvers, or is repeated | It is refused; with two approvers a single mirrored reversal posts and invariants hold | `T-prop-14`, `T-adv-14` |
+| `AC-ledger-12` | Any mutation of a stored entry, a deleted entry or a reordering | Verification runs | The hash chain fails at that index, privileges refuse the write, and the daily checkpoint disagrees | `T-prop-10`, `T-adv-21` |
+| `AC-price-01` | A job type with history | A quote is made | `p = 1 + v + lambda` in ppm with v measured over `price.v_window_days` per job type, the prior below `price.v_min_sample_cells`, never above `price.v_cap`, rounded up | `T-unit-06`, `T-unit-21`, `T-prop-24` |
+| `AC-price-02` | The published gauges | They are refreshed | Round-trip efficiency, claim ratio and mint utilization are computed from integers, versioned, public, and alarm at their thresholds | `T-unit-22`, `T-sim-13` |
+| `AC-price-03` | A parameter change | It is made | The class (`tighten`, `neutral`, `loosen`) is computed from the diff; `loosen` and `neutral` apply after the notice period; `tighten` applies at once; each change makes a `ParameterVersion`, a public `ChangeLogEntry` and an `AdminAction`; jobs, lots, leases and quotes keep their stamped versions | `T-unit-09`, `T-prop-26` |
+| `AC-admit-01` | A job request | Cells committed over the window would exceed `admission.phi` x forecast capacity | The job is not admitted; otherwise it is, and commitments never exceed capacity (`T-prop-17`) | `T-unit-02`, `T-prop-17`, `T-sim-05` |
+| `AC-admit-02` | An admissible request | A quote is made | It states window, price and parameter versions, is deterministic, lasts `price.quote_ttl_s`, and its window lies within `admission.min_window_s` and `admission.max_window_days` | `T-prop-19`, `T-adv-11` |
+| `AC-admit-03` | No capacity | The request is made | The job is waitlisted in first-come order up to `admission.waitlist_max_per_member` per member, released when capacity returns, expired after `admission.waitlist_ttl_days` with no escrow taken | `T-prop-20`, `T-prop-23` |
+| `AC-admit-04` | A member reserving capacity | They reserve, activate or let it expire | Reserved share per day stays under `reservation.capacity_share_cap`, escrow is held at booking, activation moves it into the job, expiry returns it | `T-prop-21`, `T-sim-15` |
+| `AC-admit-05` | A member with running jobs | They submit another | The cap `admission.max_concurrent_jobs_per_member` holds and the refusal says why | `T-prop-20` |
+| `AC-admit-06` | An admitted job | It is cancelled before any cell starts | Committed cells and balance return exactly to their previous values | `T-prop-22`, `T-e2e-04` |
+| `AC-policy-01` | The rules `R1`..`R10` | A job is evaluated | Rules are rows of a versioned `PolicyVersion`; a changed row changes behavior with no code change; one outcome with the first failing rule's reasons | `T-policy-01`, `T-policy-02`, `T-policy-05`, `T-prop-29` |
+| `AC-policy-02` | The 192 combinations with an all-yes service | They are evaluated | Exactly 12 are accepted, 108 rejected by `R1`, 42 by `R2`, 9 by `R6`, 21 by the allowlist check | `T-policy-01` |
+| `AC-policy-03` | A job accepted under `PolicyVersion` n | The policy changes | Acceptance re-checks under the stamped version (`R9`); a tightening can refuse acceptance; a loosening is not retroactive | `T-policy-06` |
+| `AC-policy-04` | A policy edit | It tightens or loosens | A tightening is immediate and published within `change.tighten_publish_within_s`; a loosening needs a change-log entry and notice | `T-policy-07` |
+| `AC-policy-05` | A rejected job | The requester views the result | Reasons are shown as `policy.<rule>.<slug>` copy in the requester's language | `T-policy-12`, `T-e2e-16` |
+| `AC-policy-06` | A volunteer with default opt-ins | Cells are offered | Only cells inside their opt-ins appear, the lease of an uncovered cell is refused without leaking existence | `T-policy-08` |
+| `AC-registry-01` | A service with `unreviewed` or `unknown` flags | A job targets it | It counts as no: the job is refused | `T-policy-03`, `T-policy-11` |
+| `AC-registry-02` | Any service | It is set `approved` | Only with `third_party_task_use` and `prohibited_content_compatible` `yes`, a saved `TermsCopy`, a dated `FlagAnswer` each, and `service.min_approvers` approvers | `T-policy-04`, `T-fsm-06` |
+| `AC-registry-03` | An approved entry | `service.review_max_age_days` passes | It becomes `review_due`, new jobs stop, in-flight cells run for `service.review_grace_days`, then it lapses | `T-fsm-06` |
+| `AC-registry-04` | A revoked service | Cells are in flight | They are handled as `S7.*` specifies and no credit moves for voided cells | `T-policy-13`, `T-e2e-05` |
+| `AC-registry-05` | A fresh build | Jobs are created | Every entry is `unreviewed` and every job is refused until the gate items are signed | `T-policy-11`, `T-e2e-06` |
