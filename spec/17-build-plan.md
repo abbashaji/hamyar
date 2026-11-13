@@ -728,3 +728,77 @@ accept:    <AC and T ids that must pass; the CI command that runs them>
 forbidden: <everything outside owns; production secrets; provider facts>
 done_when: GD1..GD13 for the parts this WP touches, plus the milestone checklist rows it owns
 ```
+
+### 17.9.2 Work packages by milestone
+
+Columns: `After` lists the packages of the same milestone whose provided contract this package needs a mock of; packages with an empty `After` start at once, and packages that do not list each other run in parallel (17.9.3). `Accept` lists the tests of 17.6 that the package makes pass (`BM` tests are cited by the number only). [A]
+
+**BM0 `foundation`** (steps PB-1..PB-3 are human tasks with recorded outputs, not work packages, 17.4)
+
+| WP | Title | Owns | Needs | After | Accept |
+| --- | --- | --- | --- | --- | --- |
+| `WP-BM0-01` | `repo-ci-skeleton` | `ci/**`, repository layout, path rules, regression manifest, CI job definitions | 17.1 `BR1`..`BR10`, 17.5.3 | none | `AC-bm0-17` (partly) |
+| `WP-BM0-02` | `core-libs` | `platform/ids`, `platform/money`, `platform/clock`, `platform/hash`, `platform/tokens`, id-prefix registry data | S0.6, S0.7 | none | `AC-bm0-04`, `-05`, `-06`; `T-unit-01` |
+| `WP-BM0-03` | `api-framework` | `platform/http`, `api/` assembly, conformance suite, `GET /v1/public/health` | S0.11 | `-02` | `AC-bm0-02`, `-03`, `-07`, `-08`, `-09`, `-11` |
+| `WP-BM0-04` | `config-store-and-seed` | `platform/config`, `seed/parameters/` loader and validator, genesis change-log seed | S0.10 (`C1`..`C8`, 0.10.6), S16 | `-02` | `AC-bm0-01`, `-10` |
+| `WP-BM0-05` | `outbox-observability` | `platform/events`, `platform/obs` (scrubber, metric registry and linter), event registry data | S0.5, S0.9, S4 | `-02` | `AC-bm0-16`; `GD6` linters |
+| `WP-BM0-06` | `ports-and-stub-guard` | `platform/ports/*` (storage, objects, secrets, scheduler, clock, mail, ratelimit_store), local bindings, `build/stubs.md`, production config validator | S4 | `-02` | `AC-bm0-12` |
+| `WP-BM0-07` | `migrations-backup-restore` | `migrations/` runner, numbering check (17.8.1), upgrade-test harness, backup and restore runbook and test | 17.8.1, S4 | `-06` | `AC-bm0-15`; `BR2` |
+| `WP-BM0-08` | `scanners` | `ci/scanners/*`: secret scan, forbidden-capability scan, external-hosts scan | `BR8`, `BR9`, S10 | none | `AC-bm0-13`, `-14` |
+| `WP-BM0-09` | `i18n-scaffold-and-probe` | `web/shared` scaffold (copy registry and validator, logical-property CSS convention, bundled-font loader), `probe/` (static reachability page and JSON) | S11, S0.3 | none | `AC-bm0-14` (bundle side); copy-registry validator |
+
+**BM1 `ledger_and_invariants`**
+
+| WP | Title | Owns | Needs | After | Accept |
+| --- | --- | --- | --- | --- | --- |
+| `WP-BM1-01` | `ledger-schema-and-accounts` | `ledger/schema`, migrations `1xx`, singleton bootstrap seed | S6, S0.8.5 | none | seed-closed rows for the ledger |
+| `WP-BM1-02` | `posting-engine` | `ledger/posting`: transactions, entries, `seq`, hash chain, per-commit check, idempotent postings | S6, S0.6 | `-01` | `AC-bm1-09`, `-11`, `-14` |
+| `WP-BM1-03` | `lots-and-expiry` | `ledger/lots`: oldest-first spend, restore with original expiry, sweep and retirement functions | S6, `ISS-07` | `-02` | `AC-bm1-04`, `-05`, `-06` |
+| `WP-BM1-04` | `escrow-and-reserve-ops` | `ledger/escrow`: hold, release, settle, refund, `reserve_donation`, `transfer`, `grant` primitives | S6, S0.8.5 | `-02`, `-03` | `AC-bm1-01`, `-03`, `-13` |
+| `WP-BM1-05` | `reversal` | `ledger/reversal` (two distinct approver ids, mirrored lot effect) | S6, S0.10.6 `ledger.reversal_min_approvers` | `-02`, `-03` | `AC-bm1-10` |
+| `WP-BM1-06` | `invariant-engine` | `ledger/invariants`: per-class checks, sampled and full jobs, `InvariantCheck`, `Alarm`, event and metric | S6 (`INV-L<nn>`), S0.5 | `-02` | `AC-bm1-08` |
+| `WP-BM1-07` | `db-role-append-only` | `ledger/dbrole`: application role grants, trigger or equivalent refusing update and delete, tamper test role | S4, S6 | `-01` | `AC-bm1-07` |
+| `WP-BM1-08` | `property-harness` | `ledger/testkit`: seedable operation generators, serial-order oracle, documented inputs | S6, S18 `T-prop-*` | `-02` | `AC-bm1-02`, `-15` |
+| `WP-BM1-09` | `ledger-cli-and-checkpoint` | `ledger/cli` (`verify`, `checkpoint`, `explain`), checkpoint job | S6 | `-02`, `-06` | `AC-bm1-12` |
+
+**BM2 `admin_gates_and_config`**
+
+| WP | Title | Owns | Needs | After | Accept |
+| --- | --- | --- | --- | --- | --- |
+| `WP-BM2-01` | `admin-auth` | `admin/auth`: `AdminUser`, `AdminCredential`, admin `Session`, WebAuthn, origin rule, bootstrap command | S10, S0.11.4 | none | `AC-bm2-03`, `-04`, `-12`, `-13` |
+| `WP-BM2-02` | `admin-actions-two-person` | `admin/actions`: `AdminAction` log, two-person framework | S10, S0.10.6 `security.two_person_actions` | `-01` | `AC-bm2-11`, `-14` |
+| `WP-BM2-03` | `parameter-editor` | `admin/params`: versions, `effective_from`, tighten and loosen, public change-log entries | S16, S0.10.3 | `-02` | `AC-bm2-05`, `-06` |
+| `WP-BM2-04` | `kill-switches-and-flags` | `admin/kill` (`assertNotKilled`), `admin/flags` | S14 | `-02` | `AC-bm2-07`, `-08` (flags) |
+| `WP-BM2-05` | `experiments-and-prereg` | `admin/experiments`: assignment library, logging, `PreRegistration` lock | S13 | `-02` | `AC-bm2-08`, `-09` |
+| `WP-BM2-06` | `launch-gates-and-rule` | `admin/gates`: `LaunchGateItem` machine, sign-offs, gate rule, `launch.*` enforcement library | S14, S0.9.8 | `-02`, `-03` | `AC-bm2-01`, `-02`, `-15` |
+| `WP-BM2-07` | `calibration-tool` | `admin/calibration`: `CalibrationRecord`, aggregates, insufficiency flag | S13, S0.10.4 | `-02` | `AC-bm2-10` |
+| `WP-BM2-08` | `ops-console-shell` | `web/console` shell and screens for parameters, gates, kill switches, calibration, ledger explorer, alarms (`en`) | S11, S15 (mock API) | contracts of `-01`..`-07` | console part of 17.6 `BM2` DoD |
+| `WP-BM2-09` | `public-params-and-changelog` | `api/ops/public-config.*`: `/v1/public/parameters`, `/v1/public/change-log` | S12, S15 | `-03` | cache and `ETag` checks of `GD5` |
+
+**BM3 `registry_and_policy`**
+
+| WP | Title | Owns | Needs | After | Accept |
+| --- | --- | --- | --- | --- | --- |
+| `WP-BM3-01` | `registry-core` | `registry/services`: entries, review machine (S0.9.6), approval guard, age and grace timers, gate-rule counter binding | S7 | none | `AC-bm3-01`, `-02`, `-05`, `-12` |
+| `WP-BM3-02` | `terms-copies-and-flags` | `registry/terms`, `registry/flags`: `TermsCopy` in the `objects` port, `FlagAnswer` history, region field, link of `CalibrationRecord` | S7, S0.8.3 | `-01` | `AC-bm3-03`, `-04` |
+| `WP-BM3-03` | `adapter-port-and-builder` | `registry/adapter`: capability object, pure URL builder, copy-only logic | S7, S11 | none | `AC-bm3-10` |
+| `WP-BM3-04` | `policy-data-and-seed` | `policy/model`, `seed/policy/*`: `Policy`, `PolicyVersion`, `Rule` rows `R1`..`R10`, allowlist, `TopicCategory` seed | S7 | none | seed rows 8 and 9 of 17.8.2 |
+| `WP-BM3-05` | `policy-evaluator` | `policy/eval`: registered handlers, metadata validation, reason codes, stamping, acceptance re-check library | S7 | `-04` | `AC-bm3-06`, `-07`, `-09` |
+| `WP-BM3-06` | `policy-change-workflow` | `policy/change`: tighten at once, loosen with change-log and notice (`R10`) | S7, S16 | `-04` | `AC-bm3-08` |
+| `WP-BM3-07` | `optin-model-and-r8` | `policy/optin`: `OptIn` data model, `optin.*` defaults, `R8` predicate | S7, S10 | `-04` | `AC-bm3-11` |
+| `WP-BM3-08` | `review-screens-services` | `web/console/review/services` (`SCR-rev`, `en`) | S11 (mock API) | contracts of `-01`, `-02` | DoD rows on screens |
+| `WP-BM3-09` | `dry-run-and-oracle` | `api/ops/policy-eval.*`, `policy/oracle` (executable table of S7), `AC-bm3-13` repository scan | S7, S15 | `-05` | `AC-bm3-06`, `-13` |
+
+**BM4 `identity_and_access`**
+
+| WP | Title | Owns | Needs | After | Accept |
+| --- | --- | --- | --- | --- | --- |
+| `WP-BM4-01` | `member-identity-core` | `identity/core`: `Member`, `MemberKey`, member `Session`, challenge-response, creation guard | S10, S0.6.4 | none | `AC-bm4-01`, `-03` |
+| `WP-BM4-02` | `recovery-rotation-devices` | `identity/recovery`: recovery flow and cooldown flag, rotation, `Device`, link codes, optional e-mail via `mail` port | S10 | `-01` | `AC-bm4-04`, `-05` |
+| `WP-BM4-03` | `invites-and-trees` | `identity/invites`: `Invite`, tree limits, operator root invites | S10 | `-01` | `AC-bm4-06` |
+| `WP-BM4-04` | `rate-limits-and-ip-hash` | `identity/limits`: per device, IP-hash, tree and day limits on the `ratelimit_store` port | S10, S0.11.7 | `-01` | `AC-bm4-02`, `-12` |
+| `WP-BM4-05` | `roles-and-permission-matrix` | `identity/perm`, `seed/roles`, generator from the S10 table, coverage test | S10 | none | `AC-bm4-07` |
+| `WP-BM4-06` | `trust-status-and-moderation` | `identity/trust`: tier and status machines (S0.9.4), suspend, ban, close, restrict; `kill.member` binding | S10, S0.9.4, S14 | `-01` | `AC-bm4-10` |
+| `WP-BM4-07` | `retention-and-privacy-tests` | `identity/retention`: retention jobs, canary scans for IP and e-mail | S10 (retention table) | `-01` | `AC-bm4-08`, `-09` |
+| `WP-BM4-08` | `identity-client-sdk` | `sdk/identity`, `web/shared/keystore` (keys stay on the device), test harness client | S10, S15 | contract of `-01` | SDK rows of the `BM4` DoD |
+| `WP-BM4-09` | `member-ledger-link` | `identity/accounts`: ledger account created in the member transaction, deferred foreign keys of 17.8.1, experiment assignment hook, opt-in defaults | S10, S6, 17.8.1 | `-01` | `AC-bm4-11`, `-13` |
