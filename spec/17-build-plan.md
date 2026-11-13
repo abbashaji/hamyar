@@ -172,3 +172,120 @@ A milestone is done only if every box is ticked and a human has filed `build/dod
 - [ ] `GD12` The previous release can be redeployed against the migrated schema (expand-then-contract holds).
 - [ ] `GD13` Newly found problems in the Founding Document or in this spec are filed as issues in the `## Issues raised` list of the owning part (S0.4).
 
+## 17.6 Milestones in detail
+
+Each milestone has the same rows: scope (by reference), dependencies, stubbed, the working system at its end, acceptance tests, its Definition of Done (added to 17.5.3) and its demo. Acceptance tests are written Given / When / Then; every number is a parameter name or a value derived in S0.6.1. [D]
+
+### BM0 `foundation`
+
+| Row | Content |
+| --- | --- |
+| Scope | Steps PB-1..PB-3 (17.4) as exit conditions. Repository, module map and protected files (17.9); CI pipelines (`lint`, `unit`, `migrations`, `api-conformance`, `secret-scan`, `forbidden-capability`, `external-hosts`, `regression-manifest`); environments of 17.5.1. Libraries of S0.6: id generator with the prefix registry of S0.7 as data, `Money` (int64 `ucr`, integer-string JSON), `Clock` (UTC, injectable), SHA-256 and RFC 8785 canonical JSON, CSPRNG token helpers, `HMAC` IP hashing. API framework of S0.11: error model and code list, `Idempotency-Key` store, cursor pagination with MAC, rate-limit headers and limiter port, `ETag`/`If-Match`, auth-scheme skeleton, request ids, 415 on non-JSON. Config store: tables `parameters`, `parameter_versions`, `change_log_entries`; the validation engine for the `validation` json and constraints `C1`..`C8` (S0.10.3); the seed loader for the full parameter list of S0.10.6 / `S16.*`. Outbox and event bus (`S4.*`). Observability skeleton: structured logs named `<area>.<event>`, log scrubber, metric registry with the `hamyar_<area>_<name>_<unit>` linter, health endpoint. Ports with local bindings: `storage`, `objects`, `secrets`, `scheduler`, `clock`, `mail`, `ratelimit_store`. i18n scaffold: copy-key registry (`copy.<area>.<key>`, `fa` and `en`, marker `needs_human_and_legal_review`) and the logical-property CSS convention for RTL. Backup and restore runbook. Reachability probe (static, no data) for gate `G2` |
+| Entities | `Parameter`, `ParameterVersion`, `ChangeLogEntry`, `Event` (S0.7) and the outbox table |
+| Endpoints | `GET /v1/public/health` (public, S0.11.2); test-only conformance routes mounted only when environment is `ci` |
+| Depends on | none (PB-1..PB-3 inputs) |
+| Stubbed | Member and admin token verifiers (answer `AUTH_REQUIRED`); `secrets` (local file in `dev` only); `mail` (no-op); `objects` (local directory); `scheduler` (in-process); `ratelimit_store` (in memory). Removed by: `BM2` (admin verifier), `BM4` (member verifier, `mail`), host-bound implementations by `BM9` |
+| Working system | An API serves `/v1/public/health` in the S0.11 shapes; migrations, seeds and API conformance run in CI; production configuration refuses stubs |
+| Demo | Call health; list the seeded parameters; replay an idempotent request; show the CI run and the stub register |
+
+**Acceptance tests (BM0)**
+
+- `AC-bm0-01` Given an empty database, When migrations and the seed run, Then every parameter name of S0.10.6 exists with `ParameterVersion` 1 equal to its default, and `launch.members_may_join`, `launch.member_jobs_enabled`, `launch.minting_enabled` are `false`.
+- `AC-bm0-02` Given an operation that requires `Idempotency-Key`, When it is called without the header, Then `400 VALIDATION_FAILED`; When called twice with the same key and body, Then the stored response is replayed with `Idempotent-Replayed: true`; When called with the same key and a different body, Then `422 IDEMPOTENCY_KEY_MISMATCH`.
+- `AC-bm0-03` Given a request still running, When a second request with the same key arrives, Then `409 IDEMPOTENCY_IN_PROGRESS` with `Retry-After`; a `5xx` outcome is not stored.
+- `AC-bm0-04` Given the id generator, When many ids are generated across processes, Then each matches `^[a-z]{3}_[0-9a-hjkmnp-tv-z]{26}$`, prefixes match S0.7, ids sort by creation time within a process, and no two prefixes collide.
+- `AC-bm0-05` Given amounts above 2^53, When serialized to JSON, Then they are integer strings and round-trip exactly; a value outside int64 is refused; no float type exists in the money path.
+- `AC-bm0-06` Given an injected `Clock`, When time advances, Then `_days` parameters mean exactly 86,400 seconds, no column stores local time, and a client-supplied timestamp never sets `expires_at`.
+- `AC-bm0-07` Given a list operation, When the cursor is altered or older than `api.cursor_ttl_s`, Then `400 VALIDATION_FAILED`; the page size never exceeds `api.page_size_max`.
+- `AC-bm0-08` Given a rate-limited route, When the limit is exceeded, Then `429 RATE_LIMITED` with `Retry-After`, every response carries `RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset`, the key is an HMAC of the IP, and a canary IP address appears in no database dump and no log line.
+- `AC-bm0-09` Given a non-JSON body, Then `415 UNSUPPORTED_MEDIA_TYPE`; given an unknown id, Then `404 NOT_FOUND`; every error has the one-key body of S0.11.3 with a `request_id` equal to `X-Request-Id`.
+- `AC-bm0-10` Given the validation engine, When a write violates `C1`..`C7`, Then `VALIDATION_FAILED`; `C8` yields a warning only; a constant parameter cannot be written; a non-tightening change with `effective_from` earlier than `now + notice_days` is refused.
+- `AC-bm0-11` Given health is called, Then `200` with no authentication and a `Cache-Control` no larger than its refresh setting; authenticated responses carry `Cache-Control: no-store`.
+- `AC-bm0-12` Given a production configuration that binds a stub from `build/stubs.md`, When the application starts, Then it refuses to start and names the stub.
+- `AC-bm0-13` Given the forbidden-capability scan, When it inspects dependency manifests, route tables and request schemas, Then it finds no browser-automation dependency, no field named for a provider credential, session or chat content, and no auto-submit mechanism (`BR9`).
+- `AC-bm0-14` Given a built front-end bundle and a recorded network log, When scanned, Then no request goes to a host outside the allowlist and the content policy header is present (`BR8`).
+- `AC-bm0-15` Given a populated CI database, When backup then restore into an empty database runs, Then row counts and the content hashes of all tables are equal.
+- `AC-bm0-16` Given a state change and its event, When the transaction rolls back, Then neither exists; When it commits, Then both exist (outbox atomicity).
+- `AC-bm0-17` Given the repository, Then `docs/adr/panel-reuse` and `docs/adr/stack-and-host` exist with the required headings, a secret scan of the tree finds nothing, `staging` refuses a request from a non-allowlisted source, and `security.rotate_before_public_exposure` is `true`.
+
+**Definition of Done (BM0)** adds to 17.5.3:
+
+- [ ] PB-1 decision record and PB-2 stack record merged; PB-3 inventory filed (rotation done or scheduled before exposure per 17.5.2).
+- [ ] Module map, protected-file list and the work-package template of 17.9 merged and enforced by CI path rules.
+- [ ] The seed covers every name in S0.10.6 and `S16.*`; the metric-name linter and `copy.*` registry validator run in CI.
+- [ ] Restore from backup is rehearsed once on `staging`.
+
+### BM1 `ledger_and_invariants`
+
+| Row | Content |
+| --- | --- |
+| Scope | `S6.*` ledger core: append-only double-entry ledger in integer `ucr`; account types and entry types of S0.8.5; `LedgerTransaction` groups (`ledger_txn_kind`); `CreditLot` with oldest-first spending, per-lot `expires_at` using the parameter version at `earned_at`, refund that restores lots with their original expiry (`ISS-07`); per-ledger `seq`; hash chain `entry_hash = SHA-256(prev_hash \|\| canonical(entry))` and daily checkpoint; `Escrow` and `Reserve` rows; bootstrap of the three singleton accounts (`issuance`, `retired`, `reserve`); reversal with two approvers (`ledger.reversal_min_approvers`, constant) as a ledger function that takes two distinct approver ids. Invariant machinery: the per-commit check (constant) and the sampled and full recompute jobs (`ledger.invariant_check_interval_s`, `ledger.full_recompute_interval_s`, `ledger.checkpoint_interval_s`), `InvariantCheck`, `Alarm`, event `ledger.invariant_violated`, metric `hamyar_ledger_invariant_violations_total`. Invariant classes (exact `INV-L<nn>` ids are in `S6.*`): conservation (all accounts sum to zero); `issuance` equals minus cumulative mint; `retired` equals cumulative retired; non-negative member, escrow and reserve balances; a closed escrow is exactly zero; lots of a member sum to the member balance; gapless `seq`; unbroken hash chain; no update or delete path |
+| Entities | `LedgerAccount`, `LedgerEntry`, `LedgerTransaction`, `CreditLot`, `Escrow`, `Reserve`, `InvariantCheck`, `Alarm` |
+| Endpoints | None public. Internal ledger interface and a command-line tool `ledger-cli` (`verify`, `checkpoint`, `explain`) |
+| Depends on | `BM0` |
+| Stubbed | Approver identities (test principals; admin flow arrives in `BM2`); lot-lifetime resolver (returns `credit.lifetime_days`; the expiry-arm resolver arrives in `BM6`); member accounts refer to a `mem_` id without a foreign key and escrows to a `job_` id without one (constraints added by `BM4`, `BM5`, 17.8, `ISS-176`); alarm delivery is log and console only |
+| Working system | A ledger driven through its internal interface; the FD§3.3 example posts and closes exactly; a seeded corruption raises `ledger.invariant_violated` |
+| Demo | In a throwaway database post the FD§3.3 example with `ledger-cli`, print the closing identity (264,000,000 + 12,000,000 = 276,000,000 ucr); then run the corruption script and watch the alarm |
+
+**Acceptance tests (BM1)**
+
+- `AC-bm1-01` `AC-ledger-01` (the FD§3.3 example of S0.6.1) passes against the real ledger, including the refund of 0 and the closing identity.
+- `AC-bm1-02` Given random sequences of valid operations (property test `T-prop-*`), When executed, Then every invariant class holds after every commit.
+- `AC-bm1-03` Given a member balance of `b` ucr, When a hold of more than `b` is posted, Then it is refused, nothing is written and `ledger.allow_negative_balance` is not consulted (constant `false`).
+- `AC-bm1-04` Given lots with different `earned_at`, When a hold consumes credit, Then the oldest lot is consumed first; When the escrow is refunded, Then the consumed lots are restored with their original `expires_at`.
+- `AC-bm1-05` Given a lot, When the sweep runs before `expires_at`, Then nothing moves; after `expires_at`, Then an `expire` entry moves exactly the lot's remaining amount to the `reserve` account, using the lifetime in force at `earned_at` even if `credit.lifetime_days` changed since.
+- `AC-bm1-06` Given the Reserve above `reserve.ceiling_credits` by at least `reserve.retire_min_credits`, When the retirement job runs, Then a `retire` entry removes exactly the excess and `retired` equals cumulative retired.
+- `AC-bm1-07` Given the application database role, When it attempts `UPDATE` or `DELETE` on any ledger table, Then the database refuses.
+- `AC-bm1-08` Given an entry altered by a privileged test role, When the full recompute runs, Then the chain check fails, `ledger.invariant_violated` is emitted once per violation, an `Alarm` is raised and stays raised until acknowledged, and the metric increments.
+- `AC-bm1-09` Given parallel postings on the same account, When run, Then no balance goes negative, `seq` is gapless and strictly ordered, and the result equals some serial order.
+- `AC-bm1-10` Given a reversal request, When only one approver, or the same approver twice, is supplied, Then it is refused; with two distinct approvers it posts the mirror entry with the mirrored lot effect and the original row is untouched.
+- `AC-bm1-11` Given a posting with an idempotency key, When it is retried, Then exactly one transaction exists.
+- `AC-bm1-12` Given the checkpoint job, When it runs, Then a checkpoint hash is stored, and verification from that checkpoint forward succeeds and fails after tampering.
+- `AC-bm1-13` Given a synthetic escrow, When `settle` posts the levy and the refund, Then the escrow account is exactly zero and `Escrow` is `closed`.
+- `AC-bm1-14` Given a transaction that would break conservation, When it commits, Then the per-commit check rejects it.
+- `AC-bm1-15` Given the integer rules of S0.6.1 (`p_ucr = 1,000,000 + v_ppm + lambda_ppm`, `v_ppm` rounded up, `eta_ppm = floor(10^12 / p_ucr)`), When property-tested, Then identities hold with zero tolerance.
+
+**Definition of Done (BM1)** adds to 17.5.3:
+
+- [ ] Every invariant class has a positive test and a deliberately corrupting negative test.
+- [ ] The database-level append-only guarantee is verified under the real application role, not only in application code.
+- [ ] The property-test harness is reusable (documented inputs, seedable generator) for `BM7`.
+- [ ] Second human signature on the DoD record (`BR10`).
+
+### BM2 `admin_gates_and_config`
+
+| Row | Content |
+| --- | --- |
+| Scope | `S10.*` admin authentication: `AdminUser`, `AdminCredential` (WebAuthn passkeys, no shared password), admin `Session` with `session.admin_*` TTLs, admin API on a separate origin, one-time bootstrap command that refuses to run when an `AdminUser` exists and seeds no credential [A]. `AdminAction` log (append-only) and the two-person framework for `security.two_person_actions` (`ledger.reversal`, `launch.signoff`, `parameter.loosen`, `killswitch.release`). `S14.*`: `LaunchGateItem` checklist for `G0`..`G5` with evidence and sign-offs (machine in S0.9.8), the gate rule and enforcement of `launch.*` (settable only when the rule passes; reopening a required gate turns the dependent switches off), `KillSwitch` (`kill.all_minting`, `kill.all_new_jobs`, `kill.template.<tpl_id>`, `kill.service.<svc_id>`, `kill.member.<mem_id>`) with the evaluation library `assertNotKilled(scope)`. `S16.*`: the parameter editor (versions, `effective_from`, `tighten` immediate and `loosen` with notice and second operator, public `ChangeLogEntry`, `change.tighten_publish_within_s`). `FeatureFlag`, `Experiment`, `ExperimentAssignment` (seeded, append-only, logged) and `PreRegistration` with lock. Phase 0 `CalibrationRecord` tool (S0.10.4 `CAL`) with `calibration.min_samples_per_service`. Operator console (`SCR-ops`) for the above, plus a read-only ledger explorer and alarm list. Admin side of the permission matrix (`reviewer`, `operator`). Reachability-probe evidence entry for `G2` |
+| Entities | `AdminUser`, `AdminCredential`, `Session` (admin), `AdminAction`, `KillSwitch`, `FeatureFlag`, `Experiment`, `ExperimentAssignment`, `PreRegistration`, `LaunchGateItem`, `CalibrationRecord`; `Parameter` editor on the `BM0` tables |
+| Endpoints | `/v1/admin/*` families: sessions, admin users, parameters, change-log, kill-switches, feature-flags, experiments, pre-registrations, launch-gates, calibration-records, admin-actions, ledger (read), alarms; public read: `/v1/public/parameters`, `/v1/public/change-log` (exact paths and `op` ids in `S15.*`) |
+| Depends on | `BM0`, `BM1` |
+| Stubbed | The approved-service count used by the gate rule is `0` until `BM3`, so the rule can never pass in `BM2`; `CalibrationRecord.service_key` is a free-text label until `BM3` adds a link to the registry (`ISS-173`); alarm delivery is console only (paging is an owner decision, `S3.*`); the assignment library is exercised with synthetic subjects until `BM4` |
+| Working system | An operator signs in with a passkey, edits a parameter prospectively, engages a kill switch, records calibration data, attaches evidence to a gate, and is refused when trying to turn a `launch.*` switch on |
+| Demo | Virtual passkey sign-in; loosen a parameter (needs second operator, notice period shown); engage and release a kill switch; enter calibration rows; try `launch.members_may_join` and read the list of unmet gate conditions |
+
+**Acceptance tests (BM2)**
+
+- `AC-bm2-01` Given a fresh database, When an operator sets `launch.members_may_join` to `true`, Then `403 LAUNCH_GATE_CLOSED`, the parameter version is unchanged, and the reply lists the unmet conditions; this still holds when every gate is signed, because the approved-service count is `0`.
+- `AC-bm2-02` Given two sign-offs by the same admin, When counted, Then they count once; `launch.min_signoffs` distinct admins are required.
+- `AC-bm2-03` Given the admin sign-in flow, Then no password field or password endpoint exists; a passkey registration and authentication complete with a virtual authenticator; a member-scheme token sent to `/v1/admin/*` returns `AUTH_INVALID` and counts against the rate limit.
+- `AC-bm2-04` Given an injected clock, When `session.admin_idle_ttl_s` or `session.admin_abs_ttl_s` elapses, Then `AUTH_EXPIRED`.
+- `AC-bm2-05` Given a `loosen` change, When made, Then it needs a second operator and `effective_from >= now + notice_days`; Given a `tighten` change, Then it applies at once and its public `ChangeLogEntry` is published within `change.tighten_publish_within_s`; each change writes one `ParameterVersion`, one `ChangeLogEntry`, one `AdminAction` and `parameter.changed`.
+- `AC-bm2-06` Given a constant parameter or a violation of `C1`..`C7`, When written through the editor, Then `VALIDATION_FAILED`.
+- `AC-bm2-07` Given a kill switch engaged, Then a fixture route using `assertNotKilled` answers `503 KILL_SWITCH_ENGAGED`; release needs two operators; each state change is a row and an event.
+- `AC-bm2-08` Given any feature flag, Then its default is off; Given an experiment assignment, When requested twice for the same subject and `experiment.assignment_seed_version`, Then the same arm is returned and the assignment is logged once and cannot be edited.
+- `AC-bm2-09` Given a pre-registration, When locked, Then edits return `409 STATE_CONFLICT`, its content hash is stable and the lock is logged; the lock time is recorded for the gate rule.
+- `AC-bm2-10` Given fewer than `calibration.min_samples_per_service` records for a service label, Then the aggregate is marked insufficient; no parameter is changed automatically from a calibration record (a human edits the parameter citing it) [D].
+- `AC-bm2-11` Given any admin write, Then exactly one `AdminAction` exists and the log has no update or delete path.
+- `AC-bm2-12` Given an existing `AdminUser`, When the bootstrap command runs, Then it refuses; given none, Then it creates a single-use, expiring enrollment and no credential is seeded.
+- `AC-bm2-13` Given a request to the admin API with a foreign `Origin`, Then it is refused.
+- `AC-bm2-14` Given a ledger reversal request, When two distinct admins approve, Then `AC-bm1-10` is satisfied through the admin flow; one admin cannot complete it.
+- `AC-bm2-15` Given the checklist seeded at `open`, When evidence is attached, Then the item does not become `signed_off`; When a required gate is reopened in a database where the rule had been satisfied by fixtures, Then the dependent `launch.*` switches become `false` and `launch.members_may_join_changed` is emitted (`S14.*`).
+
+**Definition of Done (BM2)** adds to 17.5.3:
+
+- [ ] No production code path reads a `launch.*` value without going through the gate library.
+- [ ] The console works in `en` with copy keys for every string and logical-property CSS; Persian strings and polish are completed in `BM8` (`ISS-174`).
+- [ ] The reachability-probe result and the PB-1, PB-3 records can be attached to gate items `G2`, `G4`, `G1`.
+- [ ] Second human signature on the DoD record (`BR10`).
+
