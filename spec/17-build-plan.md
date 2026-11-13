@@ -573,3 +573,88 @@ FD§9 Phase 1 measures and their sources (metric names and queries are owned by 
 - [ ] Completion of `BM9` is recorded as a build fact only; the statement "this authorizes no launch" is part of the record (`BR10`, S0.12 rule 6).
 - [ ] Second human signature on the DoD record (`BR10`).
 
+## 17.7 Launch gates versus build milestones
+
+Building and launching are separate tracks. The build supplies the machinery and the evidence slots; humans supply the answers. Gates `G0`..`G5` are defined in FD§8.3 and specified as product features in `S14.*`. [D]
+
+| Gate | What must be true (FD§8.3) | Machinery built in | Evidence a human enters | Effect on the build |
+| --- | --- | --- | --- | --- |
+| `G0` terms and law | A dated `ServiceRegistryEntry` per candidate service with saved terms copy and flags `(a)`..`(k)`; counsel answers `[V]` | `BM2` (checklist), `BM3` (registry, flags, terms copies, review machine) | Flags, terms copies, counsel memo reference | None: nothing in the build depends on a particular provider; fictitious services stand in |
+| `G1` safety | Written threat model, logging and retention decisions, member notice | `BM2` (checklist), `BM0`/`BM4` (scrubber, retention), `BM8` (notices) | Threat-model decision, notice review | Retention and logging defaults are parameters; exposure rule 17.5.2 |
+| `G2` technical feasibility | Prefill and URL limits, clipboard flow, copy-paste error rate, result path, reachability from Iran, Persian RTL on real devices | `BM0` (probe), `BM3` (adapter fields), `BM8` (flows) | Device test results, probe results | Adapter capabilities are data; copy-only is always available |
+| `G3` calibration | Cells per day per service, seconds per cell, refusal and failure rates, copy-paste error rate | `BM2` (`CalibrationRecord` tool) | Calibration records (`CAL`) | Defaults stay until a human edits a parameter citing the records |
+| `G4` repo review | Code and docs of the panel read; the four secrets audited | PB-1 and PB-3 (17.4), `BM2` (evidence slot) | Decision record, rotation record | Decides keep, wrap, replace |
+| `G5` demand check | Interviews on real jobs, splittability, acceptable windows | `BM2` (evidence slot) | Interview summary (`DEM`) | Informs `admission.*`, `credit.member_cap_credits`, `admission.max_job_cells` |
+
+**Exit rule versus the build-everything instruction** [D]. FD§8.3 says building beyond a throwaway prototype starts only when `G0` yields at least one approved service (or a documented fallback) and `G1` is complete. The brief instructs the opposite for construction: build the full system, and launch only through the gates. This plan reads the FD exit rule as governing launch (`launch.required_gate_ids` defaults to `G0`, `G1`; `launch.min_approved_services` to 1) and construction as proceeding under the owner's instruction. The cost is that effort is at risk if no service clears `G0` (`ISS-171`, `needs_owner`). The built system already supports every FD§8.3 fallback without a rebuild: (i) written permission is recorded with `info.written_permission` and a saved terms copy; (ii) open-weight models run through service requirement `M2` and registry entries for those services; (iii) a human-review-only commons runs on `cell_kind` `review` and the `human_review` template behind `ff.channel.human_review` (`BM6`); (iv) stopping leaves a working, closed system [H].
+
+**Reachability probe** (`BM0`, evidence in `BM2`) [A][V]. A static page and a static JSON file, no data, no secrets, no third-party resource, deployed to each candidate host. Testers record whether it loads from their vantage points and when; the record is attached to gate `G2`. The probe measures reachability only. It does not provide, test or recommend any way around a restriction, and nothing in the build does (ground rule 3).
+
+## 17.8 Migration and seed order (fresh database)
+
+### 17.8.1 Migration numbering [D]
+
+Migration number `= 100 * n + 10 * j + i`, where `n` is the milestone index, `j` in `1..9` is the work package index inside the milestone (`WP-BM<n>-<jj>`) and `i` in `0..9` is the sequence inside the package. Migrations apply in ascending number. Two work packages therefore never collide, and ordering inside a milestone follows package order only where a dependency says so. A milestone has at most nine work packages (17.9).
+
+Tables are created in this order (each group is one or more migrations of its milestone; a table appears once):
+
+| Milestone | Tables created (S0.7 names) |
+| --- | --- |
+| `BM0` | `parameters`, `parameter_versions`, `change_log_entries`, `events`, outbox, idempotency store |
+| `BM1` | `ledger_accounts`, `ledger_transactions`, `ledger_entries`, `credit_lots`, `escrows`, `reserves`, checkpoint rows (`S6.*`), `invariant_checks`, `alarms` |
+| `BM2` | `admin_users`, `admin_credentials`, `sessions` (admin rows), `admin_actions`, `kill_switches`, `feature_flags`, `experiments`, `experiment_assignments`, `pre_registrations`, `launch_gate_items`, `calibration_records` |
+| `BM3` | `service_registry_entries`, `terms_copies`, `flag_answers`, `policies`, `policy_versions`, `rules`, `topic_categories`, `opt_ins` |
+| `BM4` | `members`, `member_keys`, `devices`, `invites`; `sessions` extended with member rows (relaxation of the principal check, expand-only) |
+| `BM5` | `templates`, `template_versions`, `jobs`, `cells`, `uploads`, `glossaries` |
+| `BM6` | `leases`, `submissions`, `verification_records`, `gold_cells`, `audits`, `reports`, `appeals` |
+| `BM7` | `reservations`, `deliverables`, `manifests`, `waitlist_entries`, `metric_snapshots`, `referrals` |
+| `BM8` | `teams`, `badges`, `badge_awards` |
+| `BM9` | Rollup tables and indexes for metrics (`S13.*`); no new domain entity |
+
+**Deferred foreign keys** (`ISS-176`) [D]. A table that points at an entity of a later milestone stores the opaque id first; the constraint is added, validated, by the milestone that creates the target. There is no data to backfill in a fresh database; in an upgraded database the validation step fails the migration if an orphan exists.
+
+| Column | Target | Added by |
+| --- | --- | --- |
+| `ledger_accounts.member_id` (member accounts) | `members` | `BM4` |
+| `opt_ins.member_id` | `members` | `BM4` |
+| `calibration_records.service_id` (nullable link next to `service_key`) | `service_registry_entries` | `BM3` |
+| `escrows.job_id` | `jobs` | `BM5` |
+| `escrows.reservation_id` | `reservations` | `BM7` |
+| `cells.template_version_id`, `jobs.template_version_id`, `jobs.policy_version_id` | `template_versions`, `policy_versions` | created with their tables (`BM5`) |
+
+### 17.8.2 Seed order [D]
+
+Seeds are idempotent scripts run after the migrations in this order. The reason for the order is in the last column: a seed never refers to something a later seed creates.
+
+| Order | Seed | Milestone | Why here |
+| --- | --- | --- | --- |
+| 1 | Every parameter of S0.10.6 / `S16.*`: `Parameter` row and `ParameterVersion` 1 equal to the default, `effective_from` = seed time; constants immutable | `BM0` | Everything else reads parameters |
+| 2 | Genesis `ChangeLogEntry` stating that the initial parameters were published | `BM0` | The public log starts at the first values [A] |
+| 3 | Ledger singletons: `issuance`, `retired`, `reserve` accounts, the `Reserve` row, the chain anchor of `S6.*`; all balances zero | `BM1` | No member account may exist before the Reserve |
+| 4 | Global kill switches `kill.all_minting`, `kill.all_new_jobs` in state `released`; scoped switches are created on first use | `BM2` | Needed by every guard |
+| 5 | Feature flags `ff.*` (all off) and the `Experiment` definition of the expiry arm (inactive, fraction from `experiment.expiry_arm.fraction`) | `BM2` | Flags are read by later features |
+| 6 | `LaunchGateItem` rows for `G0`..`G5` in state `open` (per-service `G0` items are created with each service entry) | `BM2` | The gate rule needs the checklist |
+| 7 | Roles and the permission matrix from the table of `S10.*` | `BM4` | Before any principal exists |
+| 8 | `Policy` default profile and `PolicyVersion` 1 with `R1`..`R10` and the allowlist, published with its genesis change-log entry | `BM3` | Templates and jobs validate against it |
+| 9 | `TopicCategory` list of `S7.*` | `BM3` | Opt-ins refer to it |
+| 10 | Templates: the five required as `draft`; the `human_review` template as `draft` | `BM5`, `BM6` | A seed never approves a template [D] |
+| 11 | Badge definitions (criteria in verified cells only) | `BM8` | Referenced by awards |
+| 12 | Services: entries read from an owner-supplied file; each `unreviewed`, no flag answered (every flag therefore `unknown`, evaluated as `no`), no adapter value. The repository ships no provider data. Fictitious services exist only in `dev`, `ci` and `staging` fixtures | `BM3` | Registry exists before jobs |
+| 13 | No admin (enrolled out of band by the bootstrap command, `AC-bm2-12`), no member, no session, no gold cell, no job, no waitlist entry | all | Closed by default |
+
+**Fixture overlays** (`seed/fixtures/`) create fixture admins, fictitious services, sample templates and the `launch-open` profile; they load only when the environment is `dev` or `ci` (and a marked rehearsal subset in `staging`); the loader refuses in `production` and startup validation fails if any fixture row exists there (`AC-bm9-15`). [D]
+
+**Post-seed closed-state test** (`seed-closed`; part of `GD4`, grows with each milestone) [D]:
+
+| Assertion on a fresh seeded database | Expected |
+| --- | --- |
+| Services whose state is not `unreviewed` | 0 |
+| Launch gate items not `open` | 0 |
+| `launch.members_may_join`, `launch.member_jobs_enabled`, `launch.minting_enabled` | all `false` |
+| Kill switches engaged | 0 |
+| Feature flags on | 0 |
+| Members, admin users, sessions, jobs, cells, leases | 0 |
+| Templates `approved` | 0 |
+| Ledger entries; sum of all account balances | 0; 0 |
+| Parameter rows without a `ParameterVersion` 1 equal to the default | 0 |
+
