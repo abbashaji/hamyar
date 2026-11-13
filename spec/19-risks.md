@@ -185,3 +185,31 @@ The FD§8.3 checklist is data in the system, not only a document: each line of G
 **Exit rule** (FD§8.3) [D]: building beyond a throwaway prototype starts only when G0 yields at least one approved service (or a documented fallback) and G1 is complete. This specification is written to be built with the launch switches `false`, which is why it conflicts with the exit rule when read strictly; that conflict is `ISS-192` and the decision is `OD-01` (19.9). If G0 yields no approved service, the fallbacks (i) to (iv) of FD§8.3 apply and the choice is the owner's (`CHK-01`). [D]
 
 **Rule for sign-offs** [A]: a `LaunchGateItem` is signed by a person who did not collect its evidence where the team size allows it. With two or three people this cannot always hold; when it does not, the item says so in its evidence and the self-judgment risk is disclosed rather than hidden (`RISK-38`). [A]
+
+
+## 19.7 Questions for counsel
+
+Each item is a question, never a conclusion. This specification does not answer any of them and does not predict the answers [V]. Counsel means a lawyer qualified in the operator's jurisdiction, which the owner chooses (`OD-05`); `counsel` is not a system role (19.1). The answer is stored as a memo that is referenced from the evidence of the `LaunchGateItem` of G0 (and of G1 for `CQ-06`, `CQ-10`, `CQ-15`), and the parameter or flag it unlocks names the memo in its change-log entry (`CNS`). [D]
+
+| id | Question for counsel | Source | Risks | Blocks until answered | Needed by |
+| --- | --- | --- | --- | --- | --- |
+| `CQ-01` | Which entity form, if any, fits a project run by two or three founders, and in which jurisdiction | FD§8.3 G0 legal list | `RISK-12` | Signing any vendor or provider agreement as an entity; the wording of member terms | Before the first member |
+| `CQ-02` | Does the credit, as declared (non-monetary, non-redeemable, expiring, non-transferable), count as regulated stored value or a virtual currency anywhere that matters | FD§8.3 G0 legal list | `RISK-12` | The first member; any change to `credit.*` or `grant.*` that makes credit more transferable | Before the first member |
+| `CQ-03` | Do teams, badges, milestones, referral bonuses or share cards raise consumer-protection or gambling-like questions | FD§8.3 G0 legal list; FD§6.2 | `RISK-29` | Each `ff.growth.*` flag | Before public exposure |
+| `CQ-04` | What sanctions and export-control exposure arises from dealings with people or services in Iran, for the operator, for vendors and for members | FD§8.3 G0 legal list | `RISK-02`, `RISK-25` | `launch.members_may_join` | Before the first member |
+| `CQ-05` | Do promotional mechanics, and promises in copy and share cards, raise consumer-facing duties; what wording avoids a promise | FD Principle 11 | `RISK-29`, `RISK-45` | Public copy and any referral bonus | Before public exposure |
+| `CQ-06` | How does privacy law treat opaque member ids, keyed IP hashes, device records and invite trees; how does a permanent append-only ledger relate to erasure requests; what retention is defensible | FD§8.3 G0 legal list | `RISK-27` | Final `retention.*` values; the `closed` procedure of S10.* | Before the first member |
+| `CQ-07` | May the name Hamyar be used, and the words "cooperative" and "bank" | FD§8.3 G0 legal list | `RISK-12`, `RISK-45` | Those words in any public copy; a public domain and brand | Before public exposure |
+| `CQ-08` | Is AI output protectable; what may provider terms limit on licensing of output; does the contributor waiver work as worded; do `L1` and `L2` promise more than exists | FD§8.3 G0 legal list | `RISK-28` | The license allowlist of `PolicyVersion`; Commons jobs | Before the first member |
+| `CQ-09` | What responsibility does the project carry toward a volunteer who loses an account or suffers a consequence after doing a task the project asked for; what may the project say and promise about that risk | FD§9 Phase 1 setup | `RISK-24` | The member-facing risk notice and the explicit opt-in | Before the first member |
+| `CQ-10` | How should the operator respond to a legal demand or access request for member data; what exists to disclose; what may be refused | FD§8.3 G1 (who could compel disclosure) | `RISK-31` | The disclosure procedure of S10.* | Before the first member |
+| `CQ-11` | What duties follow from storing requester inputs and publishing open-licensed outputs: unlawful or infringing content, notice and takedown, by place | FD§5.4 R3, R7 | `RISK-26` | Commons content before it is seeded; the report and takedown path | Before the first member |
+| `CQ-12` | What may the project say or do about people in regions that a service's terms exclude; which wording would amount to circumvention advice | FD Principle 9 | `RISK-02`, `RISK-24` | Region-related copy; `regional_availability` answers shown to members | Before the first member |
+| `CQ-13` | What payment, money-transmission and regulatory questions arise for a marketplace and money | FD§9 Phase 3 | `RISK-12` | Phase 3 (not scheduled) | Not on the path of Phases 1 and 2 |
+| `CQ-14` | Which hosting, storage, domain and other vendors may serve this project, given their terms and sanctions rules | FD§10 (host reachability) | `RISK-25` | The choice of vendor (`OD-08`) | Before the first member |
+| `CQ-15` | What the member-facing terms, risk notice and disclaimers may and must say, in which language and form | FD§8.3 G1 | `RISK-24`, `RISK-45` | Anything a member is shown at sign-up | Before the first member |
+
+**Two limits** [A]
+
+- Counsel in the operator's jurisdiction may not be able to advise on the law that applies to members in Iran or on personal risk there. That part sits in the G1 threat model with someone qualified to advise (`OD-09`) and is not assumed to be covered by `CQ-04` or `CQ-09`. [V]
+- The platform says "declared", never "guaranteed", in every promise (FD Principle 11); a counsel answer does not change that rule, it only decides what may be declared. [D]
