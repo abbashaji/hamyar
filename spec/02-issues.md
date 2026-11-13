@@ -396,3 +396,128 @@ Each entry has the same four parts: what the FD says and where it fails; why it 
 3. Until the owner accepts the change to S0.6.4, parts use the S0.6.4 formula.
 
 **Applied in.** S10.*, S5.* (`Manifest`), S12.* (public ledger), S4.* (secrets).
+
+## 2.6 Major and minor issues, part C (`ISS-31`..`ISS-38`)
+
+### ISS-31 · major · FD§8.3 · applied
+
+**Finding.** FD§8.3 sets an exit rule: building beyond a throwaway prototype starts only when G0 yields at least one approved service (or a documented fallback) and G1 is complete. The brief overrides it: build the full system and gate the launch. Applied to building, the FD rule would stop the work this spec exists to enable.
+
+**Resolution.** The exit rule governs launching. [D][A]
+
+1. `launch.required_gate_ids` defaults to `["G0","G1"]`, `launch.min_approved_services` is strengthened by `ISS-11`, and `launch.min_signoffs` applies (S0.10.6, table C).
+2. `G2`..`G5` are not required by default. Each stays a `LaunchGateItem` that an operator may add to the required list.
+3. Phase 0 calibration (`G3`, FD§9 Phase 0) is what replaces the envelope and lease defaults, and it may not have happened when the switches are turned on. The sign-off screen therefore lists every parameter that still holds an `initial configurable default`, grouped by measurement code (`CAL`, `DEM`, `P1M`, `FND`, ...), so signers know which values are still guesses.
+
+**Applied in.** S14.*, S17.*, S13.*.
+
+### ISS-32 · minor · FD§4.4 · proposed
+
+**Finding.** Audits compare a second execution under a task-specific comparator (FD§4.4), and model-based judging is not used to mint credit in Phase 1. For translation and summarization the correct outputs are not unique, so a deterministic comparator is either exact match, which mismatches almost always, or an overlap measure with a threshold. A high mismatch rate would trigger third executions at scale and inflate v. Whether any deterministic comparator separates good outputs from bad ones is untested [H].
+
+**Resolution.** [D][H]
+
+1. The comparator is a mandatory field of every template (S8.*), chosen from a closed list of deterministic functions: exact match, normalized equality of fields, structural equality, an edit-distance or token-overlap threshold, patch equality. Thresholds are template parameters. No model is used.
+2. Before approval a template's comparator is run on reviewer-made pairs of acceptable and unacceptable outputs, and the measured separation is stored on the template version. A template with no usable comparator samples by human-review cells and is marked so.
+3. Success of a comparator is the separation measured on those pairs against a threshold the reviewers set before approval; failure means the template is not approved. [H]
+
+**Applied in.** S8.*, S6.* (effect on v).
+
+### ISS-33 · minor · FD§4.5, FD§4.6 · applied
+
+**Finding.** FD§4.5 gives earned credit a lifetime E from minting. FD§4.6 says the starter grant “expires quickly” and gives no number, so oldest-first spending mixes lots of two lifetimes with one of them undefined.
+
+**Resolution.** `grant.starter_lifetime_days`, `initial configurable default` 14, validated by C4 (not above `credit.lifetime_days`) and replaced by a `P1M` measurement (S0.10.6). Every lot carries its own `expires_at`, so oldest-first spending works per lot. See also the consequence recorded in `ISS-13`. [D]
+
+### ISS-34 · minor · FD§4.8 · applied
+
+**Finding.** FD§4.8 orders requests first-come within a deadline class and fixes deadline-class multipliers at 1.0 in Phase 1. No class list exists, and FD§5.2 lists a deadline among the system-added fields. At a multiplier of 1.0 a faster class would be free priority, every requester would pick it, and classes would carry no information.
+
+**Resolution.** One class, `standard` (S0.8.6), with `admission.deadline_multiplier_standard` fixed at 1.0. Requests are ordered by admission time. The deadline of FD§5.2 is the end of the quoted window, computed by the platform and never chosen. Further classes need prices first and wait for data (FD§4.3); adding one is a convention edit. [D]
+
+### ISS-35 · minor · FD§5.7 · proposed
+
+**Finding.** Failure mode 5 of FD§5.7 says Phase 1 runs two active profiles, written as `P0`/`P1` × `S0`/`S1` × `M0`/`M1`. Those axes give 2 × 2 × 2 = 8 value combinations. Adding the license pairing of FD§5.3 (`L0` with `P0`; `L1` or `L2` with `P1`) gives 3 purpose-license pairs × 2 × 2 = 12 allowlist rows. “Two” matches neither count; it presumably means the two purposes.
+
+**Resolution.** The allowlist is data (S7.*). The initial active rows are the 12 derived above, each with its required flags (`ISS-11`). In this spec a profile is one row. The concern of the FD, that too many combinations cannot be reviewed, is met because 12 rows fit on one reviewable table. [D]
+
+### ISS-36 · minor · FD§6.1 · proposed
+
+**Finding.** FD§6.1 says location or affiliation is opt-in, never required and never inferred, and also that Iran-based members are not shown by place by default. The second clause requires the platform to know who is Iran-based, which is inference, which the first clause forbids.
+
+**Resolution.** No member's place is shown by default; display is opt-in, chosen by the member for themselves, and identical for every member (`public.location_display` default `never`, S0.10.6). The platform never infers it. The per-country carve-out is dropped. [D]
+
+**Applied in.** S10.*, S12.*.
+
+### ISS-37 · minor · none · applied
+
+**Finding.** The instruction for this part numbers new issues from `ISS-01` and reserves `ISS-50` onward for later parts. S0.4 already gives `ISS-01`..`ISS-09` to part 0 with other content and gives each part a block of nine; ids are never reused. S0.13 gives later parts blocks starting at `ISS-41`. Following the instruction literally would put two different issues under `ISS-01`, while S0 and every part written in parallel cite the S0 numbers.
+
+**Resolution.** Part-0 issues keep their ids (2.3). This part uses the blocks of the superseded first cell. Later parts keep the S0.13 blocks. The decision was recorded as a binding note on the cell before any file was written. `ISS-37` is listed in S1's table because it concerns how the spec is numbered. [D]
+
+### ISS-38 · minor · none · proposed
+
+**Finding.** S0.5 gives id schemes for invariants, threats, risks, screens, acceptance criteria and tests, but none for assumptions [A] or owner decisions. S3 needs stable ids so that other parts can point at them.
+
+**Resolution.** `ASM-nn` for assumptions and `OD-nn` for open owner decisions: two digits at least, never reused, owned by S3 (convention gap, 2.8). [D]
+
+## 2.7 Examined and found consistent (not raised)
+
+Checks made against the FD text and S0 that produced no issue. They are listed so that a reader can see what was examined. [D]
+
+| Item | Check | Result |
+| --- | --- | --- |
+| Worked example, FD§3.3 | Capacity 40 × 8 × 2 × 0.5 = 320 against committed 240 + 24 = 264; levy 0.05 × 240 = 12; payout 264 + levy 12 = 276 = 240 × 1.15; η = 1 ÷ 1.15 ≈ 0.87; 240 cells at 8 a day = 30 days | Every figure reproduces; S0.6.1 carries the same steps as `AC-ledger-01` |
+| FD symbols and the brief's TBD list | Cell envelope, E, K, v, λ, g, s, φ, G, mint cap and lease timeout each map to a named parameter in S0.10.1 | Complete |
+| Policy rules | `R1`..`R10` each have a slug and reason code in S0.8.4 | Complete |
+| G0 questions | (a) to (k) are 11 questions, each mapped to a flag key in S0.8.3 | Complete once `ISS-23` is applied |
+| Principle count, FD§7 | Three kept, three changed, two merged into one, four added: 3 + 3 + 1 + 4 = 11, from 3 + 3 + 2 = 8 originals | Consistent |
+| Cell states, FD§3.4 against S0.9.3 | S0 extends the FD states with `suspended`, `cancelled`, `voided`, `exhausted` and `overturned`; none contradicts the FD | Consistent |
+
+## 2.8 Convention gaps reported by this part
+
+S0.1 allows a part to add a missing name if it reports the addition. The names below are used by the resolutions above and are not yet in S0. The owning part finalizes each; assembly folds them into S0. [D]
+
+| Name | Kind | Needed by | Owning part |
+| --- | --- | --- | --- |
+| `ASM-nn`, `OD-nn` | Id schemes | `ISS-38` | S3.* |
+| `reject.service_not_permitted` | Cell rejection reason | `ISS-11` | S8.*, S9.* |
+| `verification_budget_exhausted` | Job closure reason (extends the list in S0.9.2) | `ISS-16` | S5.*, S6.* |
+| `C9` | Cross-parameter warning: `mint.monthly_cap_credits` against redeemable capacity | `ISS-15` | S16.* |
+| `claim_ratio_redeemable`, `attempt_yield`, `review_share_of_mint` | Published `MetricSnapshot` values | `ISS-15`, `ISS-16`, `ISS-21` | S6.*, S13.* |
+| `Lease.credit_reserved_ucr` | Field | `ISS-15`, `ISS-18` | S5.*, S9.* |
+| `Job.is_commons`, `Job.sponsor_label`, `Job.publication_target`; `Job.requester_member_id` empty for Commons jobs | Fields | `ISS-22` | S5.* |
+| `perm.job.create_commons`; `commons.job_approve` added to `security.two_person_actions` | Permission, action | `ISS-22` | S10.* |
+| `ServiceRegistryEntry.service_kind` (`hosted_service`, `open_weight_model`); `FlagAnswer.note` | Field, enum | `ISS-23`, `ISS-24` | S5.*, S7.* |
+| `TemplateVersion.topic_category_ids`; `TopicCategory.is_sensitive` | Fields | `ISS-26` | S5.*, S8.* |
+| Template fields `output_kind` (`text`, `json`, `code`) and `comparator` | Fields | `ISS-12`, `ISS-32` | S8.* |
+| `unrecovered_ucr` on the reversal `LedgerTransaction` | Field | `ISS-17` | S6.* |
+| `Member.member_salt` | Field, only if the change to S0.6.4 in `ISS-29` is accepted | `ISS-29` | S5.*, S10.* |
+| `commons_capable(service)` | Derived predicate, not stored; `launch.min_approved_services` counts services for which it is true | `ISS-11` | S7.*, S14.* |
+
+## 2.9 Appending issues from later parts
+
+Later parts append issues as `ISS-5x` and above, each in its own file and inside its own S0.13 block: S4 `ISS-41`..`ISS-49`, S5 `ISS-51`..`ISS-56`, S6 `ISS-61`..`ISS-66`, and so on. Assembly lists them in this register under the same severity grouping. [D]
+
+1. Every part ends with `## Issues raised`, with the columns of S0.4 (`id`, `severity`, `fd_ref`, `issue`, `resolution`, `status`). An empty table says “none”.
+2. Ids are never reused or renumbered. This register uses `ISS-01`..`ISS-38`; no later part may use an id in that range.
+3. A part applies its own proposed resolution until this register records a different one. Where the two differ, this register wins.
+4. An issue with status `needs_owner` is also listed in S3.2 with the default the spec uses meanwhile.
+5. A name that S0 lacks is reported in the same table as a convention gap and appears in 2.8 at assembly.
+6. Assembly checks that every `ISS-nn` cited anywhere in the spec appears in this register.
+
+## Issues raised
+
+This file is the register; the table below lists the issues numbered inside its own S0.13 block. The other ids of this part are raised in S1 and S3 and are all in 2.2. [D]
+
+| id | severity | fd_ref | issue | resolution | status |
+| --- | --- | --- | --- | --- | --- |
+| `ISS-21` | major | FD§2, FD§3.1, FD§4.4, FD§6.4 | “Reviewer” means two roles; review cells pay a credit but use no allowance | 2.5 | proposed |
+| `ISS-22` | major | FD§4.2, FD§5.2 | Commons jobs have no requester, declarant or publisher | 2.5 | needs_owner |
+| `ISS-23` | major | FD§5.3, FD§8.3 | G0 questions, registry flags and region handling do not line up | 2.5 | proposed |
+| `ISS-24` | major | FD§5.3, FD§5.6 | `M2` has no registry record and no proof of the model | 2.5 | proposed |
+| `ISS-25` | major | FD§5.4 R3, FD§3.2 | R3 conflicts with “open the prompt” and is not testable | 2.5 | proposed |
+| `ISS-26` | major | FD§5.4 R8, FD§5.2 | R8 filters on a topic that nothing declares | 2.5 | proposed |
+| `ISS-27` | major | FD§5.4 R9 | Re-check version and payment for in-flight work | 2.5 | proposed |
+| `ISS-28` | major | FD§5.5, FD§4.4 | The card sentence is untrue for gold and Commons cells and unreviewed data | 2.5 | proposed |
+| `ISS-29` | major | FD§5.6 | The scope of the salted volunteer ID | 2.5 | proposed |
