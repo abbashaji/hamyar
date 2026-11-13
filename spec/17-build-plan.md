@@ -658,3 +658,73 @@ Seeds are idempotent scripts run after the migrations in this order. The reason 
 | Ledger entries; sum of all account balances | 0; 0 |
 | Parameter rows without a `ParameterVersion` 1 equal to the default | 0 |
 
+
+## 17.9 Work packages for parallel coding agents [A]
+
+A **work package** (`WP-BM<n>-<kk>`, `kk` = `01`..`09`; the same number `j` as in the migration formula of 17.8.1) is the unit of assignment to one coding agent or one human. The shape is borrowed from the cells of the existing panel (small, one owner of a path set, a test command that decides pass or fail, inputs given as contracts, protected shared files; panel-review sections 1, 3 and 8), as a working method only; no panel runtime is reused by this rule (17.4.1). Everything in 17.9 is an assumption [A]: it organizes the build and changes no product behavior. A work-package id never appears in the normative text of another part.
+
+### 17.9.1 Rules, module map, protected files, WP card
+
+**Rules for every work package** [A]
+
+| Rule | Statement |
+| --- | --- |
+| `WR1` | One WP is one reviewable change set that a single agent can finish in one session. A WP that grows past that is split; a milestone never has more than nine (17.8.1), so a split is first made by merging two small neighbours elsewhere or by moving the extra work to the milestone's last package |
+| `WR2` | A WP owns a set of paths (`owns`) and may write only there. CI path rules (`ci/path-rules`) fail a change that touches a path outside the `owns` of the WP named in its branch. Two WPs of the same milestone never own the same path |
+| `WR3` | Inputs are contracts, not code: the S-part cited in `needs`, the names of S0, and a mock or fake of every port or neighbour module. A WP never waits for, reads or depends on the implementation of another WP; it codes against the contract and the port's contract test (`BR4`) |
+| `WR4` | A WP ends with its acceptance tests green by id (`AC-bm<n>-nn`, `T-*`), the regression manifest updated by append, its stubs registered in `build/stubs.md` and its parameters, flags, copy keys and operations added to the files it owns (`BR7`, `GD5`..`GD10`) |
+| `WR5` | A name that is wrong or missing in S0 is not invented or locally varied: the WP files a convention issue against the owning part (S0.1, S0.4) and stops on that point |
+| `WR6` | No agent receives or writes a production secret; tests use fixtures and fictitious services; a WP never embeds a provider name, URL template or terms fact (`BR8`, ground rule 2) |
+| `WR7` | Merge happens through the CI gate on the head commit that was tested; a WP that needs a change in a protected file asks the file's owner (table below) instead of editing it |
+| `WR8` | A WP that adds a screen adds its copy keys in `fa` and `en` (marker `needs_human_and_legal_review`) and no hardcoded string; a milestone before `BM8` may ship `en` only for console screens (`ISS-174`) |
+
+**Module map** (logical directories; the extension, framework and test runner come from `docs/adr/stack-and-host`, PB-2, and no WP imports a framework before that record exists) [A]
+
+| Module | Content | Layer | May import | Built in |
+| --- | --- | --- | --- | --- |
+| `platform/` | ids, `Money`, `Clock`, hashing and canonical JSON, tokens; error model, idempotency, pagination, rate-limit headers, ETag; config store and validation; outbox and events; log scrubber, metric registry; ports and local bindings; migration runner; the S0 name registries as data | L0 | nothing | `BM0` |
+| `ledger/` | accounts, postings, lots, escrow and reserve operations, reversal, invariants, `ledger-cli` | L1 | `platform` | `BM1` |
+| `admin/` | admin identity and sessions, admin actions and two-person rule, parameter editor, kill switches, flags, experiments, pre-registrations, launch gates, calibration | L1 | `platform`, `ledger` (read) | `BM2` |
+| `registry/` | services, terms copies, flag answers, adapter port and URL builder | L1 | `platform`, `admin` (guards) | `BM3` |
+| `policy/` | policy data, evaluator, change workflow, opt-ins and `R8` | L1 | `platform`, `registry` | `BM3` |
+| `identity/` | members, keys, sessions, devices, recovery, invites, roles and permissions, trust and status machines, retention | L1 | `platform`, `admin`, `ledger` (account creation port) | `BM4` |
+| `templates/` | template model and review, lint, wrapping, seed set, harness | L2 | `platform`, `admin`, `policy`, `registry` | `BM5` |
+| `jobs/` | `Job` and `Cell` creation and machines, uploads, glossaries, screening, splitter | L2 | `platform`, `policy`, `registry`, `templates`, `identity` | `BM5`, completed `BM7` |
+| `execution/` | leases, submissions, verification, gold, audits, trust inputs, minting at acceptance, reports, appeals | L3 | `platform`, `ledger`, `jobs`, `policy`, `identity`, `templates` | `BM6` |
+| `economy/` | pricing, admission, escrow flow, payout, settlement, sweeps, grants, snapshots, reservations, deliverables, manifests | L3 | `platform`, `ledger`, `jobs`, `policy`, `identity` | `BM7` |
+| `metrics/` | event schema, rollups, Phase 1 measures, arm analysis | L4 | `platform` and read models | `BM9` |
+| `sim/` | simulation harness and agents | L4 | the public API only | `BM9` |
+| `api/` | route registration, `x-milestone` manifest, generated operation list, conformance suite | top | every server module | `BM0`, extended each milestone |
+| `web/shared`, `web/member`, `web/requester`, `web/console`, `web/public` | design system, i18n, calendar and bidi helpers; member screens; requester screens; reviewer and operator console; public pages | UI | the generated API client and `web/shared` only | `BM0` scaffold, `BM2`, `BM8` |
+| `seed/`, `migrations/`, `ci/`, `build/`, `copy/`, `docs/adr/` | seeds and fixtures; migrations; pipelines and manifests; stub register and DoD records; copy registry; decision records | support | n/a | all |
+
+Import direction is one-way (lower layers never import higher ones); modules of the same layer talk through ports or events (outbox, S0.9), never through each other's tables. `economy/` reads verified throughput from the read model fed by `execution/` events, not from `execution/` code. A boundary test (`T-unit-arch`) fails the build on a forbidden import. [A]
+
+**Protected shared files** (a WP may only append its own rows or ask the owner) [A]
+
+| File or path | Why shared | Who changes it |
+| --- | --- | --- |
+| `spec/**` | The contract | Spec cells only; a WP raises an issue (`WR5`) |
+| `platform/registry/*` (ids, events, error codes, metric names, enums) | Data copy of S0.5, S0.7..S0.9, S0.11.3 | Changed only after the S0 change; `WP-BM0-02`, `WP-BM0-03`, `WP-BM0-05` own the loaders |
+| `seed/parameters/<area>.*` | One file per area, so parameter additions never collide | The WP that owns that area; the loader and validator are owned by `WP-BM0-04` |
+| `migrations/` | Numbered by 17.8.1 | A WP adds files only inside its own number range; the runner and numbering check are owned by `WP-BM0-07` |
+| `api/ops/<area>.*` (operation declarations with `op` id and `x-milestone`) | Route registration | One file per area, owned by the area's WP; `api/` assembly is owned by `WP-BM0-03` |
+| `ci/**`, `ci/milestone-suites.yaml` | Gate definitions and the regression ratchet (`BR6`) | `WP-BM0-01`; each milestone's closer appends one block; removal needs a referenced spec change |
+| `build/stubs.md`, `build/dod/BM<n>.md` | Stub register; closure records | Append by the WP that adds a stub; removal by the WP that replaces it; DoD records by the human closer (`BR10`) |
+| `copy/<area>.*` | One file per area | The area's WP; the registry validator is owned by `WP-BM0-09` |
+| `web/shared/**` | Used by every screen | `WP-BM0-09` (scaffold), `WP-BM2-08` (console shell), `WP-BM8-01` (design system); other WPs import only |
+| `docs/adr/**` | Decisions | Humans (PB-1, PB-2) |
+
+**Work-package card** (what the person or tool that assigns a WP writes; one per WP, stored as `build/wp/WP-BM<n>-<kk>.md`) [A]
+
+```
+id:        WP-BM<n>-<kk>
+title:     <name from the 17.9.2 tables>
+owns:      <path globs from the table; nothing else may change>
+needs:     <contracts: S-part sections, S0 names, ports to mock>
+provides:  <operations (op ids), tables, events, parameters, copy keys, ports>
+stubs:     <ports bound to a stub, with the removing milestone>
+accept:    <AC and T ids that must pass; the CI command that runs them>
+forbidden: <everything outside owns; production secrets; provider facts>
+done_when: GD1..GD13 for the parts this WP touches, plus the milestone checklist rows it owns
+```
