@@ -888,3 +888,72 @@ Each proposal shows: the parameter, the current value, the proposed value, the r
 ### 13.9.5 Exit check for Phase 0
 
 The tool shows an exit checklist (informational, never a gate; the gates are S14.*): at least 3 and at most 5 templates have `CAL-05` rows (FD§9: 3 to 5 templates), each service in the candidate set has `sufficient = true` for `CAL-02`, `CAL-03` and `CAL-04`, and every parameter of the table above has a proposal with `ready = true` or a written reason it does not. [D]
+
+## 13.10 Pipeline, jobs, interfaces, permissions
+
+### 13.10.1 Background jobs
+
+Names and schedules for S4.*'s job table (S4.* owns the runner, locks and retry rules). Every job is idempotent and safe to run twice. [D]
+
+| Job | Schedule | Does |
+| --- | --- | --- |
+| `metrics.projector` | Continuous (outbox poll, S4.*) | Outbox to `events` (13.3.5); advances `metrics_projector_offsets` |
+| `metrics.rollup_hourly` | Every `metrics.rollup_interval_s` | `MET-13`, open-window partials, projector lag gauge |
+| `metrics.rollup_daily` | Daily at `metrics.daily_rollup_offset_s` after 00:00 UTC | `MET-02` (open jobs), `MET-03` to `MET-09`, `MET-12`, `MET-15` partials |
+| `metrics.rollup_weekly` | When a pilot week closes (13.5.1) plus one `metrics.rollup_interval_s` | `MET-01`, `MET-07` (closed values), `MET-10`, `MET-11`, `MET-15` |
+| `metrics.prereg_evaluator` | Daily after the daily rollup; once at pilot end | 13.7.7 |
+| `experiment.balance_check` | Daily | 13.8.4 step 6 |
+| `metrics.retention_purge` | Daily | Deletes `events` rows with `expires_at < now`; sets `Incident.note` and `Interview.notes_ref` to null `retention.moderation_days` after resolution or record; never touches `metric_snapshots` |
+
+**Materialization of `card_opened_at`.** The client-event endpoint also writes `leases.last_card_opened_at` (a column added to the lease, `ISS-138`) when it accepts `ui.card_opened`, so that `MET-08` stays recomputable after the raw events expire. [D]
+
+**Rebuildability.** Every snapshot except those derived from `events` can be recomputed from operational tables, which are permanent or `job_bound`; recomputation inserts superseding rows (13.5.4). Derived-from-events inputs are only `ui.*` timing fields, materialized above. After a restore from backup, the projector replays the outbox from the offset recorded in the restored `metrics_projector_offsets`. [D]
+
+**Failure behavior.** A failed rollup leaves the previous snapshot as the latest and raises `Alarm` kind `metrics.rollup_failed` after `ops.alarm_retry_count`-style retries as defined by S4.*; dashboards show the `source_watermark` of every number so that stale data is visible as stale. The projector lagging by more than `2 * metrics.rollup_interval_s` raises `Alarm` kind `metrics.projector_lag`. A pre-registration evaluation never runs on a window that is not closed except as `inconclusive`. [D]
+
+### 13.10.2 Operations (proposals for S15.*, which assigns ids and shapes)
+
+Conventions of S0.11 apply: plural resource nouns, commands as `POST` creating a sub-resource, `If-Match` on `PATCH`, `Idempotency-Key` on `POST` that changes state. [A]
+
+| Operation (camelCase id) | Method and path | Scheme | Permission |
+| --- | --- | --- | --- |
+| `recordClientEvents` | `POST /v1/events` | member | none (own leases only; 13.3.5) |
+| `listMetricSnapshots` | `GET /v1/admin/metric-snapshots` | admin | `perm.metrics.view`; `perm.metrics.view_small_cells` for `suppressed` values |
+| `createPreRegistration`, `updatePreRegistration` | `POST`, `PATCH /v1/admin/pre-registrations[/{prr_id}]` | admin | `perm.prereg.edit` |
+| `approvePreRegistrationLock` | `POST /v1/admin/pre-registrations/{prr_id}/lock-approvals` | admin, step-up | `perm.prereg.lock` |
+| `getPreRegistrationProof` | `GET /v1/public/pre-registrations/{prr_id}/proof` | none | Returns `content_hash`, `chain_hash`, `locked_at`, `phase`, `version` only |
+| `listPreRegistrationEvaluations` | `GET /v1/admin/pre-registrations/{prr_id}/evaluations` | admin | `perm.metrics.view` |
+| `createDecisionReport` | `POST /v1/admin/decision-reports` | admin | `perm.metrics.export` |
+| `createExperiment`, `updateExperiment` | `POST`, `PATCH /v1/admin/experiments[/{exp_id}]` | admin | `perm.experiment.manage` |
+| `registerExperiment`, `startExperiment`, `stopExperiment` | `POST /v1/admin/experiments/{exp_id}/registrations`, `/starts`, `/stops` | admin; `startExperiment` two-person | `perm.experiment.manage` |
+| `getExperimentBalance` | `GET /v1/admin/experiments/{exp_id}/balance` | admin | `perm.metrics.view`; counts only |
+| `createCalibrationRecords` | `POST /v1/admin/calibration-records` | admin | `perm.calibration.record` |
+| `getCalibrationStatistics`, `getCalibrationProposals` | `GET /v1/admin/calibration-statistics`, `/calibration-proposals` | admin | `perm.calibration.record` |
+| `createCalibrationReport` | `POST /v1/admin/calibration-reports` | admin | `perm.calibration.record` |
+| `createIncident`, `updateIncident`, `listIncidents` | `POST`, `PATCH`, `GET /v1/admin/incidents` | admin | `perm.incident.record` |
+| `createInterview`, `getInterviewCoverage` | `POST /v1/admin/interviews`, `GET /v1/admin/interview-coverage` | admin | `perm.interview.record` |
+
+No endpoint returns events or operational rows per member. Error codes are those of S0.8.5; this part adds none. S10.* owns the role matrix; the permission names above are `perm.<area>.<action>` per S0.5 (`ISS-138`). [D]
+
+### 13.10.3 Operational metrics of the pipeline itself
+
+Exposed to the ops scrape (S4.*), with no member-level label: `hamyar_metrics_projector_lag_seconds`, `hamyar_metrics_events_rejected_total` (label `name`), `hamyar_metrics_rollup_duration_seconds` (label `job`), `hamyar_metrics_suppressed_cells_total`, `hamyar_experiment_assignments_total` (labels `experiment_code`, `arm_key`), `hamyar_prereg_locked_total` (label `phase`). Labels are enum values only (`AN-04`). [D]
+
+## 13.11 What the data cannot support (to be printed in every report)
+
+The pilot is 30 to 50 people for 30 days (FD§9). The report generator prints this section with the actual `n` filled in. Every number is derived from the formulas of 13.5.3 and 13.8.6. [D]
+
+| Limit | Consequence |
+| --- | --- |
+| **Wide intervals.** Worst-case (`p = 0.5`) 95 percent Wilson half-width of a proportion: `n = 10` is 0.263, `n = 20` is 0.201, `n = 30` is 0.169, `n = 50` is 0.134 | A week-2 return of 60 percent among 20 contributors is compatible with about 39 to 78 percent. A decision threshold set tighter than the interval is a coin flip, and the evaluator returns `inconclusive` below `min_sample` rather than a verdict |
+| **Zero events prove little.** With 0 events in `n` trials the 95 percent upper bound is about `3 / n`: 0.10 at `n = 30`, 0.06 at `n = 50`, 0.03 at `n = 100`, 0.01 at `n = 300` | "No incident" and "no false accept observed" over a pilot-sized sample cannot show a rate below the alarm values 0.05 and 0.10 |
+| **Three jobs are a count.** FD§9 rule (a) needs two of three large jobs within quote | The result is 0, 1, 2 or 3. It is a go/no-go sanity check and carries no estimate of the probability of finishing in time; if fewer than three large jobs complete, TH-01 is `inconclusive` |
+| **No subgroup analysis.** Splits by template, service, tier, locale or category leave fewer than `analytics.min_cohort_k` members per cell | They are suppressed by design (`AN-06`). The report shows only pooled values and says so; it does not offer them as "insufficient trend" |
+| **Small experiment.** `EXP-01` can detect only large differences (13.8.6: about 0.4 to 0.5 for a proportion at 15 to 25 members per arm) | A null result does not show that the arms are equal; a large observed difference is a hypothesis for Phase 2, not a conclusion |
+| **Clustering.** Members who joined by one invite tree or team are not independent. Design effect `1 + (m - 1) * rho` for clusters of `m` members with intra-cluster correlation `rho` (unknown, [H]); for illustration only, `m = 5` and `rho = 0.2` give 1.8, so 40 members carry the information of about 22 | Reported intervals are too narrow by the square root of the design effect when clustering is real; the report lists invite-tree sizes, never members |
+| **Many metrics.** About 15 metrics are monitored; at 5 percent each, `0.05 * 15 = 0.75` "significant" differences are expected by chance if each were tested | Only metrics with `role = decision` in the locked pre-registration can decide anything; all others are labeled exploratory |
+| **Selection and novelty.** Invited, Persian-speaking, motivated participants who have accepted the G0 risks; a 30-day window with launch-week novelty | Week-2 and week-4 return, capacity and decline rates will not transfer to an open beta; the week-4 return is censored (`ISS-131`) |
+| **Interviews.** 8 to 10 interviews, self-selected and reachable | Themes and reasons for stopping, not frequencies; members who left silently for safety reasons are not heard |
+| **Observation changes behavior.** Members who know they are measured and that their arm differs may behave differently | Reported as a possible effect, not corrected |
+| **Verification estimates are bounds.** False-accept from audits is a lower bound under correlated errors (`MET-05`); false-reject needs adjudication (`MET-04`) | Reported with that wording |
+| **Simulation is not evidence.** Any run with simulated members (prompt K) may test the pipeline (formulas, suppression, assignment, evaluation) and is labeled `simulated` | Simulated outputs are never written to `metric_snapshots` with `visibility = public` and never enter a decision report as results |
