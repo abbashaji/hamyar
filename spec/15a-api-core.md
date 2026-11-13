@@ -500,3 +500,84 @@ confirmJob  req { quote_hash: hash, reservation_id: id<rsn>? }
 - **Admission outcomes.** `admit`: job `quoted`, quote valid until `expires_at = created + price.quote_ttl_s`. `waitlist`: no window up to `admission.max_window_days` fits the capacity rule (committed cells over the window at most `admission.phi` x forecast active capacity), the job becomes `waitlisted` with `waitlist.expires_at` after `admission.waitlist_ttl_days`; at most `admission.waitlist_max_per_member` waitlisted jobs per member (`CAP_EXCEEDED`, `waitlist_limit`, job stays `draft`). The window in the quote is never shorter than `window_preference_s` and never an instant-completion promise (FD Principle 10). [D]
 - **Confirm** runs in one transaction. Guards in order: job `quoted` (else `409 job_state_invalid`); `now < quote.expires_at` (else `409 quote_expired`, and the job moves to `quote_expired`); `quote_hash` equals the hash of the current quote (else `409 quote_changed`: a parameter or policy version moved); recovery cooldown (`403`); `admission.max_concurrent_jobs_per_member` (`CAP_EXCEEDED`, `concurrent_jobs`); `cell_count <= admission.max_job_cells` (`CAP_EXCEEDED`, `job_too_large`); capacity re-checked (`422 NO_CAPACITY`, reason `capacity_changed`, the job stays `quoted` and `getJobQuote` returns the re-computed quote); balance at least `escrow_ucr` (`422 INSUFFICIENT_CREDIT`, `details.required_ucr`, `available_ucr`, `short_by_ucr`); `launch.member_jobs_enabled` and `kill.all_new_jobs` are checked at pipeline step 7. Effects: `escrow_hold` oldest-first over the member's lots (0.8.5), `Escrow` opened, one `cel_` per primary cell created `queued`, job `admitted`, parameter and policy versions pinned. With `reservation_id` the escrow comes from the reservation (`escrow_release`) and any price difference is topped up or refunded at confirm. Nothing is posted if any guard fails. [D]
 - A job whose quote is not confirmed in time is moved by a timer to `quote_expired` (terminal); the requester creates a copy. A `waitlisted` job is re-quoted by the system (`job.waitlist_released`) and returns to `quoted` with a new `expires_at`; if its waitlist time ends it is `cancelled` (`job.waitlist_expired`).
+
+### 15.7.3 Progress, cancellation, results, manifest, rating
+
+```
+JobProgress { job_id: id<job>, state: enum<job states>, as_of: ts,
+              cells: { total: int, queued: int, in_progress: int, accepted: int, exhausted: int, cancelled: int, voided: int, suspended: int },
+              verification: { pool_cells: int, accepted: int },
+              window: { window_s: dur_s, completes_by: ts/null, projected_completes_by: ts/null, overrun_limit_at: ts/null },
+              escrow: { held_ucr: ucr, paid_out_ucr: ucr } }
+JobCell     { ordinal: int, cell_id: id<cel>, state: "queued"/"in_progress"/"accepted"/"exhausted"/"cancelled"/"voided"/"suspended", attempts: int }
+ResultItem  { ordinal: int, cell_id: id<cel>, output_text: string, output_hash: hash, accepted_at: ts,
+              verification: { method: enum<verification_method>, outcome: "agreed"/"checked"/"resolved" } }
+Deliverable { id: id<dlv>, job_id: id<job>, state: "assembling"/"ready"/"partial"/"purged", format: "txt"/"csv"/"jsonl"/"json"/"md",
+              size_bytes: int, content_hash: hash, item_count: int, missing_ordinals: [int], manifest_id: id<mfs>/null,
+              created_at: ts, available_until: ts }
+Manifest    { id: id<mfs>, job_id: id<job>, deliverable_id: id<dlv>, manifest_version: int, generated_at: ts,
+              job: { template: { id: id<tpl>, version_id: id<tpv> }, declarations: Declarations,
+                     policy: { profile_id: id<pol>, version_id: id<plv> }, no_training: bool,
+                     downstream_use: "uncontrolled"/"requester_only", content_hash: hash },
+              cells: [ { ordinal: int, cell_id: id<cel>, input_hash: hash, output_hash: hash,
+                         service: { id: id<svc>/null, model_reported: text<80>/null, attested: true },
+                         verification: { method: enum<verification_method>, outcome: string }, accepted_at: ts } ],
+              manifest_hash: hash }
+```
+
+- **Per-cell status map.** `JobCell.state` collapses the 0.9.3 cell states for the requester: `queued` = `queued`; `in_progress` = `leased`, `submitted`, `flagged_for_audit`, `rejected`, `expired`, `overturned`; the others map one to one. Only primary cells are listed (verification cells are visible only as `verification` counts), and no volunteer identity, handle or lease id is ever shown. `listJobCells` is ordered by `ordinal`. [D]
+- **Cancel.** `cancelJob` body `{ reason: text<200>? }`. State `draft`, `quoted` or `waitlisted`: `200`, job `cancelled` at once, nothing held. State `admitted`, `running` or `suspended`: `202`, job `cancelling` (unstarted cells voided and refunded, in-flight cells finish under the pinned policy, `job.cancel_settled`), response `{ job, refund_ucr: ucr/null }` with `refund_ucr` known after settlement and visible in `getJob`. Any other state: `409 STATE_CONFLICT`, reason `not_cancellable`. What part of the levy and the pool remains payable on a partial run is `S6.*`. [D]
+- **Results.** `listJobResults` (ordered by `ordinal`, `Page<ResultItem>`) and the deliverable are available in `completed` and `failed` (partial) jobs; before that `409 STATE_CONFLICT`, reason `job_state_invalid`. Quarantined and unaccepted cells are never included; a `partial` deliverable lists `missing_ordinals`. `getJobDeliverableContent` returns `{ media_type: string, encoding: "utf-8", content: string, content_hash: hash }` as `application/json` (never a raw file type, so nothing is rendered by a browser; the client saves it). `available_until` is the terminal time plus `retention.job_payload_days`; afterward `state` is `purged` and the content is gone while the hashes in the manifest remain. [D]
+- **Manifest** (FD§5.6). Contains the declared purpose, license and sensitivity, the policy profile and version, per-cell input and output hashes, the service and model *as reported by the volunteer* (attested, not proven), the verification method and result, and timestamps. It contains no volunteer handle (0.6.4: requesters never see it) and no member id. `no_training` is a contractual flag (`false` when the requester declared `P1`, `true` otherwise), not a technical control. `manifest_hash` is the SHA-256 of the RFC 8785 canonical JSON of the manifest without that field. [D][A]
+- **Rating.** `rateJob` body `{ score: int 1..5, comment: text<500>? }`, allowed in `completed` and `failed`, replaces an earlier rating; response `{ rating: { score, comment, updated_at } }`. A rating feeds template and job-type quality measures only and is never attached to a volunteer, so it cannot be used for retaliation. [D]
+
+### 15.7.4 Reservations (`ff.job.reservations`)
+
+```
+Reservation { id: id<rsn>, state: "held"/"activated"/"cancelled"/"expired", target_date: date, template_id: id<tpl>,
+              cells: int, price_per_cell_ucr: ucr, escrow_ucr: ucr, free_cancel_until: ts, created_at: ts }
+createReservation  req { target_date: date, template_id: id<tpl>, cells: int, dry_run: bool? }
+                   201 Reservation   (dry_run true: 200 with the would-be Reservation, nothing held)
+cancelReservation  req {}   200 { reservation: Reservation, refund_ucr: ucr, penalty_ucr: ucr }
+```
+
+Creation holds `cells x p_ucr` in escrow at booking (FD§4.5 "price is locked"). Limits: `target_date` at most `reservation.max_horizon_days` ahead (`CAP_EXCEEDED`, `reservation_horizon`); at most `reservation.max_active_per_member` held reservations (`reservation_limit`); one date's share of capacity at most `reservation.capacity_share_cap` (`reservation_capacity_share`); a full date is `422 NO_CAPACITY`, reason `date_full`. `free_cancel_until = start of target_date (UTC) - reservation.free_cancel_notice_s`. When the flag is off every reservation endpoint returns `403 FORBIDDEN`, reason `feature_disabled`, `details.flag` = `ff.job.reservations`. A reservation becomes `activated` when `confirmJob` names it, and `expired` (escrow refunded) if its date passes unused. The penalty for cancelling after `free_cancel_until` is not defined in S0 or FD: this API returns `penalty_ucr` as computed by `S6.*` and treats it as `0` until `S6.*` defines it [A][P: `S6.*` decides whether late cancellation costs anything]. [D]
+
+## 15.8 Teams, badges, share card, referral, feature flags
+
+Growth mechanics are experiments behind flags (FD§6; `ff.growth.v1_onboarding_story` .. `ff.growth.v5_referral`); the server decides which mechanics a member sees and logs the assignment (`Experiment`), and never uses a growth mechanic to give anyone a weaker privacy or safety guarantee. All of these count verified cells only, never raw volume. [D][H: each mechanic is a hypothesis with a pre-stated kill threshold, `S13.*`]
+
+| op | Method and path | Auth | Idem | RL | OK | Events |
+| --- | --- | --- | --- | --- | --- | --- |
+| `getFeatures` | `GET /v1/members/me/features` | member | - | `RL-READ` | 200 | - |
+| `createTeam` (active only) | `POST /v1/teams` | member | R | `RL-WRITE` | 201 | `+team.created` |
+| `listTeams` | `GET /v1/teams` | member | - | `RL-READ` | 200 | - |
+| `getTeam` | `GET /v1/teams/{team_id}` | member | - | `RL-READ` | 200 | - |
+| `updateTeam` | `PATCH /v1/teams/{team_id}` | member | O | `RL-WRITE` | 200 | - |
+| `createTeamJoinCode` | `POST /v1/teams/{team_id}/join-codes` | member | R | `RL-WRITE` | 201 | - |
+| `joinTeam` | `POST /v1/teams/{team_id}/memberships` | member | R | `RL-WRITE` | 201 | `+team.joined` |
+| `leaveTeam` | `DELETE /v1/teams/{team_id}/memberships/me` | member | O | `RL-WRITE` | 204 | `+team.left` |
+| `listTeamMembers` | `GET /v1/teams/{team_id}/members` | member | - | `RL-READ` | 200 | - |
+| `listBadges`, `listMyBadges` | `GET /v1/badges`, `GET /v1/members/me/badges` | member | - | `RL-READ` | 200 | - |
+| `getShareCard` | `GET /v1/members/me/share-card` | member | - | `RL-READ` | 200 | - |
+| `createReferral` (active only) | `POST /v1/referrals` | member | R | `RL-WRITE` | 201 | `+referral.issued` |
+| `listReferrals` | `GET /v1/referrals` | member | - | `RL-READ` | 200 | - |
+| `revokeReferral` | `DELETE /v1/referrals/{referral_id}` | member | R | `RL-WRITE` | 204 | `+referral.voided` |
+
+```
+Features   { flags: { "<ff name>": bool } }                                       only flags that affect the member's screens; no arm names
+Team       { id: id<tem>, name: text<40>, listed: bool, member_count: int, verified_cells_30d: int,
+             my_membership: { role: "owner"/"member", alias: text<24>, visible: bool }/null, created_at: ts }
+createTeam req { name: text<40>, listed: bool?, alias: text<24>? }   201 { team: Team, join_code: text<32> }       the code appears once
+joinTeam   req { join_code: text<32>, alias: text<24>?, visible: bool? }   201 { team: Team }
+TeamMember { alias: text<24>, verified_cells_30d: int }                         only members with visible = true; plus page.hidden_count
+Badge      { id: id<bdg>, name_key: copy_key, criterion_key: copy_key, awarded_at: ts/null }
+ShareCard  { generated_at: ts, contains_personal_data: false, verified_cells_total: int, badge_ids: [id<bdg>], referral_code_available: bool }
+Referral   { id: id<ref>, state: "issued"/"redeemed"/"activated"/"paid"/"expired"/"voided", created_at: ts, expires_at: ts, bonus_ucr: ucr, paid_at: ts/null, pending_reason: "hold"/"reserve_floor"/null }
+createReferral 201 { referral: Referral, code: text<32> }                          the code appears once
+```
+
+- **Teams** need `ff.growth.v4_teams` and trust tier at least `team.create_min_tier`; at most `team.max_members` members (`CAP_EXCEEDED`, `team_full`); joining needs the join code and an unexpired `active` member. Aliases are chosen per team, not unique, and are not linked to any other identifier. A member who sets `visible: false` is counted but never listed. `listed: true` allows the team name and its total to appear on public surfaces only while `member_count >= team.min_public_members` (`S12.*`). A team never shows per-member contribution except for `visible` members. [D]
+- **Share card** (`ff.growth.v3_share_card`). `getShareCard` is computed on request and returns only a verified-cell total and badges; it contains no member id, no handle, no location, no date of joining and no time series (`contains_personal_data` is always `false`). The client renders the image locally; the server stores no image and no share link, so there is nothing to track or revoke. [D]
+- **Referral** (`ff.growth.v5_referral`). A referral is an invite with a bonus attached: `createReferral` also creates the `Invite` (same guards as `createInvite`) and counts toward `growth.referral.max_per_referrer_per_30d` (`CAP_EXCEEDED`, `referral_limit`). Redemption is the `invite_code` of `createMember`; the referral becomes `activated` when the newcomer has `growth.referral.min_newcomer_verified_cells` verified cells, and `paid` after `growth.referral.hold_s`, when both parties receive `growth.referral.bonus_credits` as a `grant` entry from the Reserve; if the Reserve is at `grant.reserve_floor_credits` the state stays `activated` with `pending_reason` `reserve_floor`. The referrer sees counts and states only, never who the newcomer is. Anti-farming limits (`ratelimit.invite_tree_new_members_per_day`, the invite tree caps, `grant.max_per_device`) apply unchanged. [D]
+- **Feature flags.** `getFeatures` lets the client render only what the server enabled; a client must not call an endpoint whose flag is off. A call to a disabled mechanic is `403 FORBIDDEN`, reason `feature_disabled`, `details.flag`. [D]
