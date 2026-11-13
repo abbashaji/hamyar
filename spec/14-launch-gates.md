@@ -261,3 +261,72 @@ Further evidence on an item already in `evidence_attached` is not a state change
 - Trigger `launch_param_needs_authorization` on `parameter_versions`: a row that sets `launch.members_may_join`, `launch.member_jobs_enabled` or `launch.minting_enabled` to `true` requires an active `LaunchAuthorization` for that switch written in the same transaction; a row that sets one to `false` is always allowed (fail-closed direction).
 - Guard triggers on `members`, `jobs` and `ledger_entries` are listed in S14.9.
 - All of these are exercised by `AC-launch-40` and `AC-launch-18`.
+
+## 14.5 The checklist: G0..G5 as concrete items
+
+The catalog is seed data in migrations (`catalog_version` per row). Every gate below is broken into items a person can attach evidence to and sign. Global items are created at first boot; service items when `service.created` fires; the template item when a `Template` first reaches `approved`. Keys are stable. The catalog says what must be recorded; it contains no provider fact, no legal conclusion and no measured value. Every answer is entered by a human and is [V]. [D]
+
+Columns: **Role** is `required_role` (SO-3). **Watch** names the descriptors of S14.6.4. **Validity** refers to S14.6.3.
+
+### 14.5.1 G0, per service (scope `service`, 12 items per service)
+
+Created for every `ServiceRegistryEntry`, including those that stay `unreviewed`. Role `reviewer`. Watch for all: `terms_hash(svc)`, `flag_answers(svc)`. The system attaches the saved `TermsCopy` and the latest `FlagAnswer` rows as evidence (`terms_copy_ref`, `flag_answer_ref`) when the reviewer saves them, which moves the item to `evidence_attached`. [D]
+
+| `catalog_key` | FD section 8.3 | Question recorded against the saved terms | Flag keys (0.8.3) | Outcome rule |
+| --- | --- | --- | --- | --- |
+| `g0.svc.terms` | G0 lead-in | Dated copy of the terms saved: bytes, hash, source reference, capture date | none | `satisfied` only if a `TermsCopy` exists, its hash was re-verified at attach, and the capture date is within `service.review_max_age_days` of sign-off |
+| `g0.svc.a` | G0(a) | May a personal free account be used to do tasks for other people? | `third_party_task_use` | Gate flag |
+| `g0.svc.b` | G0(b) | Is sharing, pooling, reselling or crediting access prohibited? | `access_pooling_or_crediting` | Gate flag |
+| `g0.svc.c` | G0(c) | What do the terms say about automation, scraping, prefilled links and copy-and-paste workflows? | `human_copy_paste_use`, `prefilled_link_use`; reviewer note for automation and scraping (`ISS-147`) | Gate flags |
+| `g0.svc.d` | G0(d) | Regional availability: may people in each required region use the service, and what do the terms say about circumvention? | `regional_availability`, one answer per region in the catalog attribute `required_regions` (initially `IR`, from FD section 8.3 G0(d)) [P]; regions of the operator's jurisdiction are added after counsel [V] | Gate flag per region |
+| `g0.svc.e` | G0(e) | Is commercial use of outputs allowed on the free tier? | `commercial_use_of_output` | Gate flag |
+| `g0.svc.f` | G0(f) | Is using outputs to train or develop other models allowed? | `training_use_of_output` | Gate flag |
+| `g0.svc.g` | G0(g) | Is publishing outputs openly allowed? | `open_publication_of_output` | Gate flag |
+| `g0.svc.h` | G0(h) | Does the provider train on user chats by default; could account memory or connectors leak content? | `info.provider_trains_on_chats`, `info.memory_or_connectors_risk` | Info flags |
+| `g0.svc.i` | G0(i) | What do the usage policy and prohibited-content rules require; are they compatible with the content Hamyar accepts (R3)? | `prohibited_content_compatible`; reviewer summary of the requirements | Gate flag |
+| `g0.svc.j` | G0(j) | What does 'free allowance' formally mean and can it change without notice? | `info.allowance_may_change` | Info flag |
+| `g0.svc.k` | G0(k) | Would the provider give written permission for this use? | `info.written_permission`; if `yes`, the permission document as evidence (`document`, `restricted`) | Info flag |
+
+**Outcome rule for flag items** (`SO-7`): `satisfied` is allowed only when every gate flag behind the item is `yes` for the latest `TermsCopy`. If any is `no`, `unknown` or absent, the only allowed outcomes are `satisfied_with_conditions`, whose `conditions_text` states the effect (for example 'adapter is copy-only', 'purpose P2 stays locked', 'service stays unreviewed'), or `not_satisfied`. Info flags accept any recorded answer as `satisfied`, because the item records that the question was answered, not that the answer is favorable. A service can be approved only if `g0.svc.a` and `g0.svc.i` are `satisfied` (FD section 5.3, 0.8.3). [D]
+
+### 14.5.2 G0, counsel (scope `global`, role `operator`)
+
+FD section 8.3 lists legal questions for counsel in the operator's jurisdiction. The operator's jurisdiction is an open owner decision (S3.*) and entity form is itself a question, so the first item records the jurisdiction and the counsel engaged. Evidence for every item: a `counsel_memo` (restricted, `occurred_at` = memo date) and an `attestation` that the memo is a written answer from a person qualified in that jurisdiction and not an internal opinion [V]. Validity: generic. No watch is possible for law, so validity is the only re-validation. [D]
+
+| `catalog_key` | FD section 8.3 legal question |
+| --- | --- |
+| `g0.cns.jurisdiction` | Operator's jurisdiction and the counsel engaged (owner decision, S3.*) |
+| `g0.cns.entity` | Entity form |
+| `g0.cns.credit_status` | Whether credit counts as regulated stored value or a virtual currency |
+| `g0.cns.consumer` | Consumer-protection and gambling-like-mechanics exposure |
+| `g0.cns.sanctions` | Sanctions and export-control exposure for dealings with people or services in Iran |
+| `g0.cns.privacy` | Privacy law for pseudonymous data and IP logs |
+| `g0.cns.copyright` | Copyright of AI output and the wording of the contributor waiver |
+| `g0.cns.name` | Use of the name and of the words 'cooperative' and 'bank' |
+
+Conditions that counsel attaches go into `conditions_text` and the signers name which flag, parameter, policy rule or copy key implements each one; the tool does not verify that they are implemented. [A]
+
+### 14.5.3 G0, fallbacks (scope `global`, kind `decision`, role `operator`)
+
+FD section 8.3: 'Fallbacks if no service clears G0'. Each is a recorded decision, not a mode. Outcome `adopted` or `declined`; the decision record carries the rationale, the person-level decider list (admin ids), the date and a review date (`valid_until`). Their effect on the exit rule is defined once, in S14.7.4. [D]
+
+| `catalog_key` | FD section 8.3 wording | Evidence required |
+| --- | --- | --- |
+| `g0.fb.i` | (i) Seek written permission from a provider | `decision_record` naming the service entries concerned; later the permission itself on `g0.svc.k` of that service |
+| `g0.fb.ii` | (ii) Restrict the commons to open-weight models run by members or on free hosted services, after their own terms check | `decision_record`; the entries concerned go through `g0.svc.*` like any service; license checks for local models follow S7.* [V] |
+| `g0.fb.iii` | (iii) A human-review-only commons | `decision_record`; confirmation that `ff.channel.human_review` is configured |
+| `g0.fb.iv` | (iv) Stop, and publish what was learned | `decision_record`; link to the published write-up |
+
+### 14.5.4 G1, safety (scope `global`, role `operator`)
+
+FD section 8.3 G1 asks for a written threat model for Iranian participants. S10.* owns the content (threat table `THR-nn`, data inventory, retention). These items are the sign-off points. [D]
+
+| `catalog_key` | What must be attached | Machine check at attach | Watch |
+| --- | --- | --- | --- |
+| `g1.data_inventory` | Inventory of everything the platform stores, mapped to retention classes (0.7) | CI artifact `schema lint`: every table has a retention class and no column stores a raw IP, a clear e-mail, a provider credential, a provider session or chat-page text (0.7). The lint is also a standing CI check (S18.*); a later failure blocks the merge, not the launch | none |
+| `g1.observer` | What a network observer and the host can see, per surface | none | none |
+| `g1.compelled` | Who could compel disclosure, what a subpoena or seizure yields, and the resulting decisions | none | none |
+| `g1.logging_retention` | Decisions on logging and retention | Parameter values equal the evidence: `retention.raw_ip_stored` false, `analytics.third_party_trackers` false, `analytics.cookies_enabled` false, `public.location_display` `never` | `parameters(retention.*, analytics.*, public.location_display, identity.email_optional)` |
+| `g1.threat_table` | The S10.* threat table with every required threat, mitigation and residual risk | CI artifact: every `THR-nn` row has non-empty mitigation and residual-risk fields | none |
+| `g1.member_notice` | The member-facing notice, drafted with someone qualified to advise (FD section 8.3 G1) | Hash of the deployed `fa` and `en` text of the notice keys equals the evidence | `copy_bundle(copy.privacy., copy.risk.)` |
+| `g1.risk_ack` | Report showing that the first-contribution flow cannot complete without the explicit risk acknowledgement of FD section 9 Phase 1 | CI artifact of the end-to-end test | `copy_bundle(copy.risk.)` |
