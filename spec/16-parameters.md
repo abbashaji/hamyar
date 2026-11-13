@@ -431,7 +431,7 @@ Owner `founders` for rows marked † (thresholds and the experiment design), `op
 
 ## 16.15 Thresholds for pre-registration
 
-FD§9 requires every measure and every stop/continue rule to be written down **before day 1** of Phase 1 (`PreRegistration`, S0 0.7, `FND`). A pre-registered value is not an editable parameter after the lock: the parameters below seed the form, and the lock copies their value into the record. Editing the parameter afterwards changes behaviour, but the pre-registered threshold used to judge the pilot stays as locked and the change is itself shown in the pilot report (FD Principle 11). [D]
+FD§9 requires that every measure and every stop/continue rule is recorded **before day 1** of Phase 1 (`PreRegistration`, S0 0.7, `FND`). A pre-registered value is not an editable parameter after the lock: the parameters below seed the form, and the lock copies their value into the record. Editing the parameter afterwards changes behaviour, but the pre-registered threshold used to judge the pilot stays as locked and the change is itself shown in the pilot report (FD Principle 11). [D]
 
 | Pre-registered threshold | Seeded from parameter | FD source | Initial configurable default |
 | --- | --- | --- | --- |
