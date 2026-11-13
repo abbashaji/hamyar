@@ -159,4 +159,16 @@ A part that departs from the FD MUST cite the `ISS-nn` that records and justifie
 
 ## Issues raised
 
-none. The one finding made while writing this part, `ISS-37` (the instruction's issue numbering collides with S0.4), has its id in the block of S3 and is raised there; its detail is in S2.6.
+The nine findings of the block `ISS-11`..`ISS-19` are raised below; their detail is in S2.4. `ISS-37` (the instruction's issue numbering collides with S0.4), has its id in the block of S3 and is raised there; its detail is in S2.6.
+
+| id | severity | fd_ref | issue | resolution | status |
+| --- | --- | --- | --- | --- | --- |
+| `ISS-11` | blocking | FD§4.2, FD§5.4 R7, FD§8.3 | The exit rule can pass while no service can run a Commons cell, so nothing can mint | `commons_capable(service)` is counted at launch; R7 becomes data | proposed |
+| `ISS-12` | blocking | FD§2, FD§4.4, FD§5.5, FD§10 | The code-change template needs test execution; the FD forbids executing submitted content | No execution; sampled verification; code is inert text | proposed |
+| `ISS-13` | major | FD§4.1, FD§4.3 | A fractional price against a one-credit unit | Integer micro-credits | applied |
+| `ISS-14` | major | FD§4.2, Principle 2 | Every unit traces to a Commons cell cannot be checked for fungible credit | Two exact integer checks replace the trace | proposed |
+| `ISS-15` | major | FD§4.2, FD§4.7, FD§4.8 | Redeemable capacity is undefined and circular with φ; no exhaustion rule | Defined formulas; headroom reserved at lease time | proposed |
+| `ISS-16` | major | FD§4.3, FD§4.4 | v does not say who funds blanket redundancy or third executions | Hard verification budget per job | proposed |
+| `ISS-17` | major | FD§3.2, FD§4.2, FD§4.4 | No rule for credit already paid when a result is overturned or a member is banned | Reversal against unspent lots only | proposed |
+| `ISS-18` | major | FD§4.5 | K ignores escrow and has no rule when earning would exceed it | K counts escrow; earning is prevented, not clipped | proposed |
+| `ISS-19` | major | FD§4.6, FD§9 | The Reserve cannot be seeded in Phase 0 under the launch gates | Reserve starts empty; founders seed after launch | needs_owner |

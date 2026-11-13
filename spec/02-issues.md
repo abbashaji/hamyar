@@ -43,7 +43,7 @@
 | `ISS-14` | major | FD§4.2, Principle 2 | “Every unit traces to a Commons cell” cannot be checked for fungible credit | proposed | 2.4 |
 | `ISS-15` | major | FD§4.2, FD§4.7, FD§4.8 | “Redeemable capacity” is undefined, circular with φ, and the cap has no exhaustion rule | proposed | 2.4 |
 | `ISS-16` | major | FD§4.3, FD§4.4 | v does not say who funds blanket redundancy or third executions, and the pool is fixed while the need is random | proposed | 2.4 |
-| `ISS-17` | major | FD§4.4, prompt | No rule for credit already paid when a result is overturned or a member is banned | proposed | 2.4 |
+| `ISS-17` | major | FD§3.2, FD§4.4, prompt | No rule for credit already paid when a result is overturned or a member is banned | proposed | 2.4 |
 | `ISS-18` | major | FD§4.5 | K ignores escrow and has no rule when earning would exceed it | proposed | 2.4 |
 | `ISS-19` | major | FD§4.6, FD§9 | The Reserve cannot be seeded in Phase 0 under the launch gates | needs_owner | 2.4 |
 | `ISS-21` | major | FD§2, FD§3.1, FD§4.4, FD§6.4 | “Reviewer” means two roles, and review cells pay a credit though they use no allowance | proposed | 2.5 |
@@ -61,7 +61,7 @@
 | `ISS-34` | minor | FD§4.8 | Deadline classes are undefined at a multiplier of 1.0 | applied | 2.6 |
 | `ISS-35` | minor | FD§5.7 | “Two active profiles” does not match the axes it lists | proposed | 2.6 |
 | `ISS-36` | minor | FD§6.1 | “Iran-based members are not shown by place” needs inference of location | proposed | 2.6 |
-| `ISS-37` | minor | none | The cell instruction's issue numbering collides with S0.4 | applied | S1 |
+| `ISS-37` | minor | none | The cell instruction's issue numbering collides with S0.4 | applied | 2.6 |
 | `ISS-38` | minor | none | S0 has no id scheme for assumptions and open decisions | proposed | 2.6 |
 
 Counts: 35 issues in all: 2 `blocking`, 22 `major`, 11 `minor`. Part 0 contributes 9 (5 major, 4 minor); this part contributes 26 (2 blocking, 17 major, 7 minor). [D]
@@ -91,7 +91,7 @@ These nine were raised while fixing the shared vocabulary. Their resolutions are
 
 | Check | Given | When | Then |
 | --- | --- | --- | --- |
-| `ISS-07` reading, to be written as an `AC-ledger-nn` in S6.* | A lot of 10 credits expires in 5 days and is consumed into a reservation | The reservation is cancelled on day 10 | The refund restores the lot with the original expiry; the next sweep posts an `expire` entry of 10 credits to the Reserve; all `INV-L*` checks pass |
+| `ISS-07` reading, carried as an `AC-ledger-nn` in S6.* | A lot of 10 credits expires in 5 days and is consumed into a reservation | The reservation is cancelled on day 10 | The refund restores the lot with the original expiry; the next sweep posts an `expire` entry of 10 credits to the Reserve; all `INV-L*` checks pass |
 
 ## 2.4 Blocking and major issues, part A (`ISS-11`..`ISS-19`)
 
@@ -105,7 +105,7 @@ Each entry has the same four parts: what the FD says and where it fails; why it 
 - R7 requires the open-publication flag of the service to be `yes` for `P1`, and `unknown` counts as `no` (FD§5.3).
 - FD§5.3 lets a service reach `approved` on two flags alone (third-party task use, prohibited content), and the exit rule of FD§8.3 asks for one approved service or a documented fallback.
 - So one approved service can satisfy the exit rule while no Commons cell may run on it. Nothing can then be accepted, minted or spent.
-- R7 also maps `P1`, `L1` (public-domain dedication) and `L2` (open license with attribution) onto one flag, although dedicating rights is a different act from publishing.
+- R7 gives one example only, `P1` against the open-publication flag. It says nothing about `L1` (public-domain dedication) or `L2` (open license with attribution), although dedicating rights is a different act from publishing.
 
 **Why it matters.** The G0 sign-off would not reveal this. The system would launch into a state where the first donors can do nothing that earns credit.
 
@@ -208,9 +208,9 @@ Each entry has the same four parts: what the FD says and where it fails; why it 
 
 **Applied in.** S6.*, S8.*, S13.*.
 
-### ISS-17 · major · FD§4.4, prompt scope I · proposed
+### ISS-17 · major · FD§3.2, FD§4.2, FD§4.4, prompt scope I · proposed
 
-**Finding.** FD§4.4 pays at acceptance (`ISS-09`) and lets donors appeal rejections. The brief (scope I) adds takedown and bans. S0 adds the state `cell.overturned`. None of these says what happens to credit already paid when a cell is later overturned, when fraud is found after payment, or when a member is banned or closes. S0 forbids negative balances (`ledger.allow_negative_balance` = false), so a reversal that finds the credit spent cannot simply take it back.
+**Finding.** FD§3.2 and FD§4.2 pay at acceptance (`ISS-09`), and FD§4.4 lets donors appeal rejections. The brief (scope I) adds takedown and bans. S0 adds the state `cell.overturned`. None of these says what happens to credit already paid when a cell is later overturned, when fraud is found after payment, or when a member is banned or closes. S0 forbids negative balances (`ledger.allow_negative_balance` = false), so a reversal that finds the credit spent cannot simply take it back.
 
 **Resolution.** [D][A]
 
@@ -256,7 +256,7 @@ Each entry has the same four parts: what the FD says and where it fails; why it 
 **Finding.**
 
 - “Reviewer” names two things: the admin-side role for templates, policy and appeals (FD§3.1), and the people who rate sampled outputs, a role that needs no provider account (FD§2, FD§4.4, FD§6.4 channel 2). The first needs the admin tools; the second needs to read one output at a time and nothing else.
-- FD§4.3 pays exactly one credit per accepted cell of any kind, so a review cell pays a credit. A credit is a claim on provider allowance (FD§4.1: a prompt-and-response unit inside the cell envelope), and a review cell consumes none.
+- FD§4.3 pays exactly one credit per accepted cell of any kind, so a review cell pays a credit. A credit is a claim on future cells of work (FD glossary), and a cell is a prompt-and-response unit that a volunteer runs on their own allowance (FD§4.1); a review cell consumes none.
 
 **Resolution.** [D][H]
 
@@ -270,11 +270,11 @@ Each entry has the same four parts: what the FD says and where it fails; why it 
 
 ### ISS-22 · major · FD§4.2, FD§5.2, FD§9 · needs_owner
 
-**Finding.** A Commons job is a public-benefit job from a standing backlog (FD§4.2 and the glossary). Every other job in the FD has a requester who declares purpose, license, sensitivity and service requirement and whose pseudonym enters the provenance (FD§5.2, FD§5.6). Nobody is named as the requester of a Commons job: who declares its metadata, who approves it, who receives or publishes its output, and what a sponsor is in Phase 2 (FD§9) are all open. Open publication (`P1`) also cannot carry private input.
+**Finding.** A Commons job is a public-benefit job from a standing backlog (FD§4.2 and the glossary). Every other job in the FD has a requester who declares purpose, license, sensitivity and service requirement and whose pseudonym is added to the metadata (FD§5.2). Nobody is named as the requester of a Commons job: who declares its metadata, who approves it, who receives or publishes its output, and what a sponsor is in Phase 2 (FD§9) are all open. Open publication (`P1`) also cannot carry private input.
 
 **Resolution.** [D][A]
 
-1. A Commons job has no `requester_member_id` and carries a public `sponsor_label` (default `Hamyar`). The label stands where the requester pseudonym would stand in the provenance (2.8).
+1. A Commons job has no `requester_member_id` and carries a public `sponsor_label` (default `Hamyar`). The label stands where the requester pseudonym would stand in the job metadata (2.8).
 2. Authoring needs the permission `perm.job.create_commons`, held by operators. The author writes the declarations, and a second admin must approve the job (`commons.job_approve`, added to `security.two_person_actions`) before any cell is created.
 3. A Commons job is always `P1`, license `L1` or `L2`, sensitivity `S0` and requirement `M0` or `M1`. Sensitivity `S1` is excluded because publishing private material openly contradicts the definition of `S1` (FD§5.3).
 4. Outputs are published only to the `publication_target` recorded on the job. Until the owner has chosen an archive (S3.2), outputs stay in the deliverable and nothing is published.
@@ -453,7 +453,7 @@ Each entry has the same four parts: what the FD says and where it fails; why it 
 
 **Finding.** The instruction for this part numbers new issues from `ISS-01` and reserves `ISS-50` onward for later parts. S0.4 already gives `ISS-01`..`ISS-09` to part 0 with other content and gives each part a block of nine; ids are never reused. S0.13 gives later parts blocks starting at `ISS-41`. Following the instruction literally would put two different issues under `ISS-01`, while S0 and every part written in parallel cite the S0 numbers.
 
-**Resolution.** Part-0 issues keep their ids (2.3). This part uses the blocks of the superseded first cell. Later parts keep the S0.13 blocks. The decision was recorded as a binding note on the cell before any file was written. `ISS-37` is listed in S1's table because it concerns how the spec is numbered. [D]
+**Resolution.** Part-0 issues keep their ids (2.3). This part uses the blocks of the superseded first cell. Later parts keep the S0.13 blocks. The decision was recorded as a binding note on the cell before any file was written. `ISS-37` is listed in S1's table because it concerns how the spec is numbered. It is raised in the table of S3, which owns the block `ISS-31`..`ISS-39`, and not in S1. [D]
 
 ### ISS-38 · minor · none · proposed
 
