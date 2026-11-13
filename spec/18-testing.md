@@ -662,6 +662,19 @@ A simulator can be wrong. These checks keep the harness honest; they test the ha
 | Estimator coverage (`T-sim-17`) | In `sim.estimator_replicates` (`initial configurable default` 200) replicates of one scenario, the interval that `S8.*` computes for the false-accept rate contains the simulated true rate in at least nominal coverage minus 0.05 of replicates. This checks the estimator's code, not the world |
 | Sweep engine (`T-sim-18`) | A sweep of known size produces exactly the expected number of runs; invalid points are skipped and reported; the same sweep twice gives identical output; replicate seeds are distinct and derived from the master seed |
 
+### 18.12.10 Simulation test catalogue
+
+| Id | Subject | Assertion | BM |
+| --- | --- | --- | --- |
+| `T-sim-01` | Determinism | One scenario run twice (and once with replicates in a different process order) gives byte-identical outputs and equal manifests; a SUT module that reads the wall clock, OS entropy or the network fails | `BM9` |
+| `T-sim-02` | Sanity checks | The checks of `S18.12.9`: known-answer mini-world, closing identity, conservation, zero-adversary verification rate, ground-truth labelling | `BM9` |
+| `T-sim-03` | Invariants in every run | `T-prop-01`..`T-prop-05`, `T-prop-10` and `T-prop-12` hold at every sampling instant and after the last event of every run, and after every operation in smoke mode; the count of violations in `metrics.csv` is 0 | `BM7` (ledger only), `BM9` |
+| `T-sim-04`..`T-sim-16` | Scenarios `SIM-04`..`SIM-16` | Guard assertions of `S18.12.7` pass; mechanism observations are written and compared with the stored baseline within `sim.regression_tolerance`; the arithmetic oracle of `SIM-05` yields exactly 6 admitted and 4 waitlisted | `BM9` |
+| `T-sim-17` | Estimator coverage | `S18.12.9` | `BM9` |
+| `T-sim-18` | Sweep engine | `S18.12.9` | `BM9` |
+| `T-sim-19` | Labelling and containment | Every output carries the banner, `evidence_status` = `not_evidence` and the "(simulated)" labels; the measurement pipeline and `MetricSnapshot` refuse a row whose `source` is not `production`; a change-log entry citing a run is refused | `BM9` |
+| `T-sim-20` | Environment guard | The harness refuses a database not tagged `env=sim` or `env=load`, a non-allowlisted host, and any configuration that names a provider adapter | `BM9` |
+
 ## 18.13 Test data, environments, gates and rules of conduct
 
 ### 18.13.1 Test data and environments [D]
