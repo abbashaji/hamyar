@@ -605,7 +605,7 @@ Table `pre_registrations` (entity `PreRegistration`, prefix `prr_`, retention `p
 | `version` | int | 1 for the first row of a `name`; each amendment is a new row with `version + 1` |
 | `amends_id` | text, nullable | The `prr_` it amends |
 | `status` | enum | `draft`, `lock_requested`, `locked`, `abandoned` |
-| `content` | jsonb | The document of 13.7.4 |
+| `content` | jsonb | The document of 13.7.5 |
 | `content_hash` | text, nullable | `sha256:<hex>` of the RFC 8785 canonical form of `content` (S0.6.4); set at `lock_requested` |
 | `chain_hash` | text, nullable | `sha256(prev_chain_hash ":" content_hash ":" locked_at_rfc3339)`; `prev_chain_hash` is that of the previously locked pre-registration of any phase, or the SHA-256 of the ASCII string `hamyar-prereg-genesis` for the first |
 | `locked_at` | timestamptz, nullable | Server time of the second approval |
@@ -619,19 +619,19 @@ Table `pre_registrations` (entity `PreRegistration`, prefix `prr_`, retention `p
 | --- | --- | --- | --- | --- |
 | (none) | `draft` | `prereg.created` | `perm.prereg.edit` | Row created; `content` validated against the JSON Schema only as a draft |
 | `draft` | `lock_requested` | `prereg.lock_requested` | First approver has `perm.prereg.lock`; step-up re-authentication within `security.sensitive_reauth_s`; all lock guards (13.7.3) pass | `content_hash` computed and shown; `lock_approvals[0]` stored; `content` becomes read-only |
-| `lock_requested` | `draft` | `prereg.created` is NOT reused; event `prereg.lock_requested` is followed by `prereg.abandoned`? No: withdrawal returns to `draft` with an `AdminAction` of kind `prereg.lock_withdrawn` and no domain event | The approver withdraws, or `session`-bound TTL `security.two_person_ttl_s` expires | Approvals cleared; `content_hash` cleared |
+| `lock_requested` | `draft` | (none; `AdminAction` kind `prereg.lock_withdrawn`) | The first approver withdraws, or the two-person window `security.two_person_ttl_s` expires | Approvals cleared; `content_hash` cleared; `content` editable again |
 | `lock_requested` | `locked` | `prereg.locked` | A different admin with `perm.prereg.lock` approves the identical `content_hash`; all guards re-run | `locked_at` set; `chain_hash` computed; `ChangeLogEntry` published with `content_hash`, `chain_hash`, `locked_at`, `phase`, `version` (not the content); evidence attached to the gate item (13.7.6) |
 | `draft` | `abandoned` | `prereg.abandoned` | `perm.prereg.edit`, never locked | Terminal; row kept |
 | `locked` | `locked` | `prereg.evaluated` | System, per 13.7.7 | Evaluation snapshots written; no change to the row |
 | (amendment) | new row `draft` | `prereg.amended` | `amends_id` points at a `locked` row | The amended row follows the same machine; the amended row stays `locked` |
 
-The row for `lock_requested -> draft` above is a withdrawal without a domain event, because it is not a state the system moves into on its own. It writes an `AdminAction` only. [D]
+The withdrawal row writes an `AdminAction` only and emits no domain event, because S0.9 emits one event per state change of a machine named there and this machine's names are listed in 13.3.4. [D]
 
 ### 13.7.3 Lock guards
 
 The lock (both approvals) fails with `422 VALIDATION_FAILED` and `details.guards` listing every failed guard (S0.11.4) unless all hold [D]:
 
-1. `content` validates against the JSON Schema of 13.7.4 (`additionalProperties: false`).
+1. `content` validates against the JSON Schema of 13.7.5 (`additionalProperties: false`).
 2. Every `measures[].metric_id` exists in 13.6 or 13.8 and its `definition_version` equals the current one.
 3. Every threshold has a `min_sample` and a `comparator` and a `unit` matching its metric's `scale`.
 4. Every `parameter_ref` equals the current value of that parameter (for example `price.eta_alarm_threshold`, `verify.false_accept_alarm`, `verify.false_reject_alarm`); otherwise the lock fails, so the document and the live alarm never disagree at lock time. A later parameter change is allowed (operations) and is reported as drift in the evaluation (13.7.7).
@@ -653,3 +653,68 @@ The lock (both approvals) fails with `422 VALIDATION_FAILED` and `details.guards
 | Delete or hide a locked row | No | There is no delete path; only `abandoned` for unlocked drafts |
 
 The *effective* pre-registration for an evaluation is the last locked row of the phase with `locked_at <= first external member admitted`; later amendments are shown beside it, never instead of it (`DR` evaluation, 13.7.7). [D]
+
+### 13.7.5 The content document and the decision-rule grammar
+
+The JSON Schema is stored with the code as `schemas/pre_registration.v1.json` [A]. Fields (all required unless marked optional) [D]:
+
+| Path | Content |
+| --- | --- |
+| `study.name`, `study.phase` | Slug; `phase1` |
+| `study.cohort_start_at` | UTC instant of day 0 (`day0`, 13.5.1) |
+| `study.planned_days` | 30 (FD§9: 30 days) |
+| `study.planned_members` | `{ min: 30, max: 50 }` (FD§9) |
+| `study.large_job_weeks` | `[3, 4]` (FD§9 planned large-job event) |
+| `study.addendum` | optional bool |
+| `population` | `{ default: "external", exclude_internal: true }` |
+| `return_basis` | `pilot_calendar` or `member_relative` (13.6.7) |
+| `measures[]` | `{ metric_id, definition_version, role: decision \| monitoring \| exploratory, population, window }` |
+| `thresholds[]` | `{ id: "TH-nn", metric_id, stat, comparator: gte \| gt \| lte \| lt, value, unit, min_sample, parameter_ref? , fixed_m? }`; `value` is in the metric's scale (ppm, seconds, count); `fixed_m` is the `m` of `first_m_large(m)` |
+| `decision_rules[]` | `{ id: "DR-nn", expr, on_pass, on_fail, on_inconclusive }` |
+| `analysis_plan` | `{ interval: "wilson95", missing_data, exclusions[], estimator_notes }`; `exclusions[]` entries are `{ code, description }` fixed before day 1 |
+| `experiments[]` | `{ experiment_code: "EXP-nn", primary_outcome: "MET-..", analysis: "itt" }` |
+| `qualitative_plan` | `{ min_interviews: 8, max_interviews: 10, required_segments: ["active_donor","stopped_donor"] }` |
+| `amendment_reason` | Only for `post_launch_amendment` |
+
+**Grammar of `expr`** [D] (three-valued, Kleene): leaves are `TH-nn`, each evaluating to `pass`, `fail` or `inconclusive` (inconclusive when the observed `n_obs` is below the threshold's `min_sample`, the snapshot is `suppressed`, or the window is open). Operators: `AND(...)`, `OR(...)`, `NOT(x)`, `AT_LEAST(k, [..])`; `NOT(inconclusive) = inconclusive`; `AND` is `fail` if any operand is `fail`, else `inconclusive` if any is, else `pass`; `OR` is `pass` if any operand is `pass`, else `inconclusive` if any is, else `fail`. A rule's outcome is `proceed`, `do_not_proceed` or `inconclusive` mapped from `pass`, `fail`, `inconclusive`. `on_fail` is an action: `diagnose` with a list of `metric_id`s (the report must show those first), or `stop`. A rule MUST NOT depend on the order of evaluation or on any value not named in a threshold.
+
+**Template (non-binding; values with `FND` are for the founders).** It encodes FD§9 rules (a) to (d) as proposals:
+
+```json
+{
+  "study": { "name": "phase1-closed-pilot", "phase": "phase1", "cohort_start_at": "FND",
+             "planned_days": 30, "planned_members": { "min": 30, "max": 50 }, "large_job_weeks": [3, 4] },
+  "population": { "default": "external", "exclude_internal": true },
+  "return_basis": "pilot_calendar",
+  "thresholds": [
+    { "id": "TH-01", "metric_id": "MET-02", "stat": "large_within_quote_count", "comparator": "gte",
+      "value": 2, "unit": "count", "min_sample": 3, "fixed_m": 3 },
+    { "id": "TH-02", "metric_id": "MET-06", "stat": "eta_ppm_weekly_min", "comparator": "gte",
+      "value": 800000, "unit": "ppm", "min_sample": 100, "parameter_ref": "price.eta_alarm_threshold" },
+    { "id": "TH-03", "metric_id": "MET-13", "stat": "unresolved_safety_or_provider", "comparator": "lte",
+      "value": 0, "unit": "count", "min_sample": 0 },
+    { "id": "TH-04", "metric_id": "MET-07", "stat": "week2_return", "comparator": "gte",
+      "value": "FND", "unit": "ppm", "min_sample": "FND" }
+  ],
+  "decision_rules": [
+    { "id": "DR-01", "expr": "AND(TH-01, TH-02, TH-03, TH-04)",
+      "on_pass": "proceed", "on_inconclusive": "extend_or_repeat",
+      "on_fail": { "action": "diagnose", "metrics": ["MET-10", "MET-11", "MET-03", "MET-04", "MET-05", "MET-06", "MET-08", "MET-09", "MET-12"] } }
+  ]
+}
+```
+
+The value `800000` for `TH-02` is the conventions default `price.eta_alarm_threshold` = 0.80 (S0.10.6, `FND`), not an FD figure. `TH-03` has `min_sample = 0` because an empty incident list is a valid pass. The `diagnose` list is capacity (`MET-10`, `MET-11`), verification (`MET-03`..`MET-06`) and friction (`MET-08`, `MET-09`, `MET-12`), the three causes FD§9 names for a failure of rule (a). [D]
+
+### 13.7.6 Link to the launch gate and the launch switch
+
+- **Evidence.** On `prereg.locked`, the system attaches `{ prr_id, content_hash, chain_hash, locked_at }` as evidence to the `LaunchGateItem` identified by `gate_item_id` (event `gate.evidence_attached`, S0.9). Which gate group and item key carries it (provisionally item key `prereg_locked`, group `G3`) is decided by S14.*; FD§8.3 lists G0 to G5 and none is about thresholds (`ISS-132`). [A]
+- **Switch predicate.** Setting `launch.members_may_join` to true for a deployment whose pilot is Phase 1 is refused with `409 LAUNCH_GATE_CLOSED` and `details.reasons` containing `prereg_not_locked` unless a `PreRegistration` of `phase1` with status `locked` and `locked_at <= now` exists and its `study.cohort_start_at` is not earlier than its `locked_at`. S14.* owns the switch; this predicate is the requirement placed on it. [D]
+- **Day 0.** `day0` is the instant of `study.cohort_start_at`; `launch.members_may_join` MAY be set true earlier for founders' own rehearsal accounts flagged `is_internal`, never for external members before `locked_at`. [D]
+
+### 13.7.7 Evaluation and the decision report
+
+1. **When.** Job `metrics.prereg_evaluator` runs daily after the rollups, and once more when `study.planned_days` have elapsed and all pilot-week windows are closed. Each run writes one `MetricSnapshot` per threshold with `metric_no = 'PRR.<prr_id>.<TH-id>'`, `scale = count`, `value` 0 (`fail`), 1 (`pass`) or 2 (`inconclusive`), and the observed value in `numerator` and `n_obs`; and one per rule with `metric_no = 'PRR.<prr_id>.<DR-id>'`; then emits `prereg.evaluated`. [D]
+2. **Reading only what was locked.** The evaluator reads the thresholds, pins and population from the effective row (13.7.4) and the `definition_version` it pins; if a newer definition exists, the older one is still computed for the evaluation (recomputation is allowed because snapshots are versioned). [D]
+3. **Parameter drift.** For every `parameter_ref`, if the live value differs from the locked value, the report prints both and the evaluation uses the locked value. [D]
+4. **Report.** The decision report (generated Markdown and JSON, admin download, no volunteer identifiers) lists: the locked hash and time; each threshold, observed value, interval, `n`, and outcome; each rule outcome; every incident row (type, severity, resolution); the interview coverage; the experiment arms and the balance table; all `post_lock` and `post_launch_amendment` items with the outcomes under both versions; the list of suppressed cells; and the statement of limits of 13.11. It has no recommendation line: the decision belongs to the founders, and FD§9 Phase 3 asks for "an explicit decision memo" that they write. [D]
