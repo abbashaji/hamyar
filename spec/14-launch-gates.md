@@ -430,3 +430,56 @@ Descriptors used above: `terms_hash(svc)` hashes the latest `TermsCopy.content_h
 ### 14.6.5 Reopening a service item and its effect on the registry
 
 When any `g0.svc.*` item of a service is reopened for any reason, the service moves from `approved` to `review_due` in the same transaction (`RL-7`); it does not drop straight to `unreviewed`, because `review_due` preserves the grace period of S14.3's gate-obligations table and avoids silently aborting in-flight cells. If the grace period elapses without the item returning to `signed_off` and valid, a scheduled check moves the service to `suspended`, which has no grace period. [D]
+
+## 14.7 The exit rule: when a launch switch may open
+
+### 14.7.1 Evaluation is a pure function
+
+`evaluate_switch(switch_name, now)` reads current state and returns `Pass` or `Fail(reasons)`; it changes nothing by itself. It is called (a) on demand when an admin views the launch panel, (b) inside the transaction that proposes or approves opening a switch, and (c) after every `gate.signed_off` and `gate.reopened` event, as `reevaluate_dependents`. [D]
+
+```
+function evaluate_switch(switch_name, now) -> Pass | Fail(reasons)
+    reasons = []
+    required = param('launch.required_gate_ids')                  # e.g. ['G0','G1']
+    always_required = ['G4']                                      # security.rotate_before_public_exposure is a constant true
+    gate_ids = union(required, always_required intersect switch_scope_gates(switch_name))
+    for gate in gate_ids:
+        for item in blocking_items_for(gate, switch_name):        # S14.7.2 defines scope per switch
+            if not (item.state == 'signed_off' and item.valid_until is (null or > now)):
+                reasons += 'item_not_valid:' + item.catalog_key
+            if item.outcome == 'not_satisfied':
+                reasons += 'item_not_satisfied:' + item.catalog_key   # explicit, even though it also fails the line above
+    if gate_set_includes('G0', gate_ids):
+        if count(services where service_gate(svc, now) == Pass) < param('launch.min_approved_services'):
+            if not fallback_adopted_and_sufficient(switch_name, now):   # S14.7.4
+                reasons += 'no_approved_service_and_no_fallback'
+    if kill_switch_engaged(relevant_global_kill_keys(switch_name)):
+        reasons += 'kill_switch_engaged'
+    return Pass if reasons is empty else Fail(reasons)
+```
+
+`switch_scope_gates` and `blocking_items_for` restrict global items to the ones tagged for that switch in the catalog (most G1 and G4 items apply to all three switches; `g3.mint_cap_decision` applies only to `launch.minting_enabled`; `g5.*` applies only to `launch.member_jobs_enabled`); service-scoped items (`g0.svc.*`, `g2.svc.*`, `g3.svc.*`) are evaluated per service inside `service_gate`, not listed again at the top level, so they are not double-reasoned. [D]
+
+### 14.7.2 Required items per switch
+
+| Switch | Gates always in scope | Additional catalog-tagged items |
+| --- | --- | --- |
+| `launch.members_may_join` | `G1`, `G4` (plus whatever `launch.required_gate_ids` adds) | none beyond the gate's own blocking items |
+| `launch.member_jobs_enabled` | `G1`, `G4`, plus `G0` via the service-count rule below | `g2.*` global items, `g3.envelope_defined`, `g5.*` |
+| `launch.minting_enabled` | `G1`, `G4` | `g3.mint_cap_decision`; requires `launch.member_jobs_enabled` already open (`GI-03`: minting without jobs is meaningless and is refused with `reasons += 'jobs_not_enabled'`) |
+
+A catalog item not tagged `is_blocking = true` never appears in `reasons`; it is shown on the panel as advisory only (0.10.6 table C notwithstanding, since advisory items exist so the catalog can record useful context without becoming a new blocking requirement by accident). [D]
+
+### 14.7.3 Service count and the G0 requirement
+
+When `G0` is in the active `launch.required_gate_ids` (it is, by migration default) and a switch's scope includes it, `evaluate_switch` requires `count(service_gate == Pass) >= launch.min_approved_services` (default 1), **or** a sufficient fallback (S14.7.4). The count is computed fresh, not cached: a service that drops out of `approved` between two evaluations changes the answer the next time this function runs, and `reevaluate_dependents` (S14.4.6) is what notices the drop and revokes the authorization immediately rather than waiting for the next poll. [D]
+
+### 14.7.4 Effect of fallbacks on the exit rule
+
+FD section 8.3 lists the fallbacks as what happens if no service clears G0; this part makes each one's effect explicit rather than leaving 'no service clears G0' as an unhandled state. [D]
+
+- `g0.fb.i` adopted: no change to the rule; it is a statement of intent to seek permission, and the count still needs an approved service once `g0.svc.k` later turns `yes` and the terms questions clear.
+- `g0.fb.ii` adopted: `fallback_adopted_and_sufficient` returns true for `launch.member_jobs_enabled` once at least `launch.min_approved_services` registry entries tagged `local_model` or `free_hosted_checked` pass `service_gate`; local-model entries still need `g0.svc.*` items like any other entry (S14.5.3), so this fallback changes which services can count, not whether they need review.
+- `g0.fb.iii` adopted: `fallback_adopted_and_sufficient` returns true for `launch.member_jobs_enabled` with zero approved services, provided `job_type = human_review` is the only job type admitted (enforced by `admission.allowed_job_types = ['human_review']`, checked at the same time) and `ff.channel.human_review` is on; `M0`/`M1`/`M2` service requirements (S14.3) do not apply to `human_review` jobs by definition.
+- `g0.fb.iv` adopted: this is a decision to stop, not to proceed differently; adopting it has no effect on `evaluate_switch` (none of the three switches can be truthfully described as 'ready' once the operator has decided to stop) and instead is intended as a trigger for the operator to engage `kill.all_new_jobs` and `kill.all_minting` by the ordinary engage procedure, which the tool does not do automatically, because stopping is an operator act, not a side effect of recording a decision.
+- No fallback item adopted and the service count is below the minimum: `reasons += 'no_approved_service_and_no_fallback'`, as written above.
