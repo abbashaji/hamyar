@@ -318,3 +318,170 @@ Owner `operator`; measurement `SEC` (the G1 threat-model decision) unless stated
 | `retention.job_payload_days` | days | 0..365 | 30 | `T↓` | `SEC`, `DEM` | S9.14.3, S10.* |
 | `retention.moderation_days` | days | 0..1095 | 180 | `T↓` | `SEC`, `CNS` | S7.*, S10.* |
 | `retention.member_inactive_days` | days | 30..3650 | 365 (then status `closed`) | `T↓` | `SEC` | S5.*, S10.* |
+
+## 16.12 Policy, screening, service, template, opt-in, appeal, report
+
+Owner `reviewer` for the first table, `operator` for the second (the owner column of S7 7.15.1 (b) is copied). Binding: a `PolicyVersion` stamps the parameter versions it was approved under; `optin.default_*` apply only to members created after the change and never alter an existing member's choices; `screen.*` is read at the stage that applies it; `service.*` and `template.*` are read at the next review or sweep. Tightening is immediate and loosening needs notice (R10, FD Principle 5). An enum moves toward its stricter end by the order `flag_for_review` < `quarantine` < `reject`. [D]
+
+| Name | Type · unit | Validation | Initial configurable default | Chg | Cal | Used |
+| --- | --- | --- | --- | --- | --- | --- |
+| `policy.loosen_min_notice_days` | days | >= `change.notice_days_default`; `C20` | 7 (R10) | `T↑` | `FND` | S7.* |
+| `policy.tighten_immediate` | bool | constant | true (R10) | `C` | `CON` | S7.* |
+| `policy.recheck_on_accept` | bool | constant | true (R9) | `C` | `CON` | S7.*, S9.* |
+| `policy.max_pinned_services` | int | 1..10 | 3 | `T↓` | `DEM`: how many services requesters actually pin | S7.* |
+| `screen.url_action` | enum | `reject`, `flag_for_review` | `flag_for_review` | `T→reject` | `P1M`: incident log | S7.12, S9.9 |
+| `screen.pii_action` | enum | `reject`, `flag_for_review` | `reject` | `T→reject` | `P1M` | S7.12 |
+| `screen.output_url_action` | enum | `reject`, `flag_for_review`, `quarantine` | `quarantine` (FD§5.5: flagged, not shown as a result) | `T→reject` | `P1M` | S9.9 |
+| `screen.output_code_action` | enum | same | `quarantine` | `T→reject` | `P1M`: release ratio | S9.9 |
+| `screen.output_request_action` | enum | same union (`ISS-163`) | `quarantine` | `T→reject` | `P1M`: quarantine outcomes | S7.*, S9.9 |
+| `screen.instruction_action` | enum | `flag_for_review`, `reject` | `flag_for_review` | `T→reject` | `P1M`: reviewer false positives | S7.12 |
+| `screen.max_urls_per_input` | int | 0..100 | 0 | `T↓` | `P1M` | S7.12 |
+| `screen.output_max_urls` | int | 0..100 | 0 | `T↓` | `P1M` | S9.9 |
+| `screen.invisible_char_max` | int | 0..50 | 0 | `T↓` | `P1M`: real Persian inputs | S7.12 |
+| `screen.max_combining_run` | int | 1..64 | 8 | `T↓` | `P1M`: reviewed Persian sample | S9.7 |
+| `screen.review_rate_new_requester` | ratio | 0..1 | 1.0 (every input reviewed) | `T↑` | `OPS`: reviewer load | S7.12 |
+| `screen.review_rate_established_requester` | ratio | 0..1 | 0.20 | `T↑` | `OPS` | S7.12 |
+| `service.review_max_age_days` | days | 1..365 | 90 | `T↓` | `CNS` | S7.10 |
+| `service.review_grace_days` | days | 0..90 | 14 | `T↓` | `CNS` | S7.10 |
+| `service.min_approvers` | int | 1..5 | 1 (FD§5.3: a reviewer records the answers); 2 is an owner decision [A] | `T↑` | `FND` | S7.10 |
+| `service.terms_copy_allowed_types` | json list | MIME types | `["text/html","application/pdf","text/plain"]` | `T↓` (shorter list) | `P1M`: reviewer practice | S7.10 |
+| `template.min_reviewers_new` | int | 1..5 | 2 (FD§5.7 failure mode 10) | `T↑` | `FND` | S8.* |
+| `template.min_reviewers_edit` | int | 1..5 | 1 | `T↑` | `FND` | S8.* |
+| `optin.default_purposes` | json | subset of P0..P3 | `["P0","P1"]` (FD§5.4 R8) | `T↓` (shorter list) | `FND` | S7.*, S10.* |
+| `optin.default_sensitivities` | json | subset of S0..S1 | `["S0","S1"]` (R8) | `T↓` | `FND` | S7.* |
+| `optin.default_licenses` | json | subset of L0..L3 | `["L0","L1","L2"]` [A] | `T↓` | `FND` | S7.* |
+| `optin.default_service_requirements` | json | subset of M0..M2 | `["M0","M1","M2"]` [A] | `T↓` | `FND` | S7.* |
+| `optin.sensitive_topics_default` | bool | constant | false (each sensitive category is opt-in, R8) | `C` | `CON` | S7.* |
+| `appeal.window_days` | days | 1..90 | 14 | `N` | `FND` | S7.*, S10.* |
+| `appeal.max_per_decision` | int | 1..5 | 1 | `N` | `FND` | S10.* |
+| `appeal.reviewer_sla_days` | days | 1..60 | 7 (target, published) | `T↓` | `OPS` | S10.* |
+| `appeal.ban_min_reviewers` | int | 1..5 | 2 | `T↑` | `FND` | S10.* |
+| `report.triage_sla_days` | days | 1..30 | 3 (target, published) | `T↓` | `OPS` | S10.* |
+| `report.max_per_member_per_day` | int | 1..1000 | 20 | `T↓` | `OPS` | S10.* |
+
+**Operator-owned rows in the same areas** (S7 7.15.1 (b); template rows below are `operator` too):
+
+| Name | Type · unit | Validation | Initial configurable default | Chg | Cal | Used |
+| --- | --- | --- | --- | --- | --- | --- |
+| `policy.tighten_min_approvers` | int · distinct admins | 1..3; `C20` | 1 | `T↑` | `OPS`: reviewer capacity | S7.8 |
+| `policy.loosen_min_approvers` | int · distinct admins, author counted | 2..5; `C20` | 2 (`ISS-168`) | `T↑` | `OPS`: size of the reviewer pool | S7.8 |
+| `policy.loosen_reason_min_chars` | int · chars | 0..2000 | 40 | `T↑` | `OPS` | S7.8 |
+| `policy.revert_window_s` | duration_s | 0..604800 | 86,400 | `T↓` | `OPS`: incident review of mistaken tightenings | S7.8 |
+| `policy.reconcile_interval_s` | duration_s | 30..86400 | 300 | `T↓` | `OPS`: sweep duration | S7.7.5 |
+| `policy.invariant_check_interval_s` | duration_s | 5..3600 | 60 | `T↓` | `OPS`: check cost | S7.* |
+| `screen.review_sla_s` | duration_s | 3600..2592000 | 172,800 | `T↓` | `OPS`: reviewer throughput | S7.12 |
+| `screen.quarantine_max_age_days` | days | 1..60 | 7 | `T↓` | `OPS`: reviewer capacity | S9.9 |
+| `service.required_regions` | json list | ISO 3166-1 alpha-2 codes | `["IR"]`; the operator's jurisdiction is added once chosen [V] | `T↑` (longer list) | `CNS` | S7.10 |
+| `service.terms_copy_max_bytes` | int · bytes | 1024..52428800 | 5,242,880 (S0 value kept, `ISS-163`) | `T↓` | `OPS`: size of real terms documents | S7.10 |
+| `template.autopause_report_count` | int | 1..1000 | 5 reports inside `template.autopause_window_s` | `T↓` | `OPS` | S9.9.2, S8.* |
+| `template.autopause_window_s` | duration_s | 60..604800 | 3600 | `N` | `OPS` | S9.9.2, S8.* |
+
+## 16.13 Launch, change control, ledger checks, job size
+
+Owner `operator`; `launch.*` needs `launch.min_signoffs` distinct admins and the gate rule of S14.*. The three `launch.*_enabled` and `launch.members_may_join` switches are `T→false`: switching off is always immediate; switching on is possible only through gate sign-off and is never a plain edit. Binding: `ledger.*` is read by the next check run; `change.*` is read at the next change request. [D]
+
+| Name | Type · unit | Validation | Initial configurable default | Chg | Cal | Used |
+| --- | --- | --- | --- | --- | --- | --- |
+| `launch.members_may_join` | bool | only settable when the gate rule in S14.* passes | false | `T→false` | `CON` default; flipped by sign-off | S14.*, S10.* |
+| `launch.member_jobs_enabled` | bool | as above | false | `T→false` | flipped by sign-off | S14.*, S6.* |
+| `launch.minting_enabled` | bool | as above | false | `T→false` | flipped by sign-off | S14.*, S6.* |
+| `launch.required_gate_ids` | json | subset of G0..G5 containing G0 and G1; `C19` | `["G0","G1"]` (FD§8.3 exit rule) | `T↑` (more ids) | `FND` | S14.* |
+| `launch.min_signoffs` | int | 1..5; `C19` | 2 distinct admins [A]; an owner decision if the team has one person (`ISS-168`) | `T↑` | `FND` | S14.* |
+| `launch.min_approved_services` | int | 0..20 | 1 (FD§8.3 exit rule; or a documented fallback) | `T↑` | `FND` | S14.*, S7.* |
+| `change.notice_days_default` | days | 0..90; `C20` | 7 (FD Principle 5) | `T↑` | `FND` | S0 R10, all parts |
+| `change.notice_days_price` | days | 0..90 | 14 (for `price.*`, `admission.*`, `credit.*`) | `T↑` | `FND` | S6.* |
+| `change.tighten_publish_within_s` | duration_s | 0..604800 | 86,400 (tightening is immediate, its public log entry follows within a day) | `T↓` | `FND` | S7.*, 16.17 |
+| `ledger.invariant_check_interval_s` | duration_s | 5..3600 | 60 (sampled checks; the per-commit check is a constant) | `T↓` | `OPS` | S6.*, S4.* |
+| `ledger.full_recompute_interval_s` | duration_s | 60..86400 | 3600 | `T↓` | `OPS` | S6.* |
+| `ledger.checkpoint_interval_s` | duration_s | 3600..604800 | 86,400 | `T↓` | `OPS` | S6.* |
+| `ledger.reversal_min_approvers` | int | constant | 2 | `C` | `CON` | S6.*, S10.* |
+| `ledger.allow_negative_balance` | bool | constant | false | `C` | `CON` | S6.* |
+| `job.max_upload_bytes` | int · bytes | 1..104857600 | 4,194,304 (300 cells x 4,000 chars x up to 3 bytes of UTF-8 is about 3.6 MB) | `T↓` | `TEC` | S9.*, S15.* |
+
+## 16.14 Analytics, experiment, growth, team, public, UI, i18n
+
+Owner `founders` for rows marked † (thresholds and the experiment design), `operator` for the rest. Binding: the experiment assignment writes its parameter versions with each logged assignment (`ExperimentAssignment`), so a member's arm never changes when a parameter changes (FD§5.6 pre-registration); `growth.referral.*` is stamped on the referral at acceptance. UI budgets such as page weight and first-load size are **not named by any merged part**; S11.* adds them (`ISS-169`). [D]
+
+| Name | Type · unit | Validation | Initial configurable default | Chg | Cal | Used |
+| --- | --- | --- | --- | --- | --- | --- |
+| `analytics.third_party_trackers` | bool | constant | false | `C` | `CON` | S12.*, S13.* |
+| `analytics.cookies_enabled` | bool | constant | false | `C` | `CON` | S12.*, S13.* |
+| `analytics.min_cohort_k` | int | 1..1000 | 10 (cohorts smaller than this are suppressed in aggregates) | `T↑` | `SEC` | S13.*, S12.* |
+| `experiment.expiry_arm.fraction` † | ratio | 0..1 | 0.50 of Phase 1 members (FD§9 "part of the group") | `N` | `FND` (pre-registered, 16.15) | S6.*, S13.* |
+| `experiment.assignment_seed_version` | int | >= 1 | 1 | `N` | `OPS` | S13.* |
+| `experiment.assignment_log_enabled` | bool | constant | true | `C` | `CON` | S13.* |
+| `growth.referral.bonus_referrer_credits` † | credits | 0..100 | 1 | `N` | `FND`, `P1M` | S6.*, S12.* |
+| `growth.referral.bonus_newcomer_credits` † | credits | 0..100 | 1 | `N` | `FND`, `P1M` | S6.*, S12.* |
+| `growth.referral.min_newcomer_verified_cells` | int | 1..50 | 1 (FD§6.2 V5) | `T↑` | `FND` | S12.* |
+| `growth.referral.max_per_referrer_per_30d` | int | 0..1000 | 5 | `T↓` | `OPS`: farming flags | S12.* |
+| `growth.referral.hold_s` | duration_s | 0..2592000 | 86,400 (bonus paid after this delay) | `T↑` | `OPS` | S12.* |
+| `team.max_members` | int | 2..10000 | 50 | `T↓` | `OPS` | S12.* |
+| `team.min_public_members` | int | 1..1000 | 5 (a team is not shown publicly below this size) | `T↑` | `SEC` | S12.* |
+| `team.create_min_tier` | enum | `new`, `established`, `trusted` | `established` | `T→trusted` | `OPS` | S12.* |
+| `public.counter_refresh_s` | duration_s | 5..3600 | 60 | `N` | `OPS` | S12.* |
+| `public.ledger_lag_s` | duration_s | 0..86400 | 300 (the public ledger page trails the ledger by this much) | `T↑` | `SEC` | S12.*, S6.* |
+| `public.location_display` | enum | `never`, `opt_in` | `never` (FD§6.1 row 5) | `T→never` | `SEC` | S12.* |
+| `ui.card.expand_required_first_use` | bool | constant | true (FD§5.5) | `C` | `CON` | S11.* |
+| `ui.comprehension_check_rate` | ratio | 0..1 | 0.00 (FD§5.7 failure mode 6 is a hypothesis [H]) | `N` | `P1M` | S11.* |
+| `ui.fast_contribution_threshold_s` | duration_s | 1..600 | 60 (FD§6.2 V1) | `N` | `FND` | S11.*, S12.* |
+| `i18n.default_locale` | enum | `fa`, `en` | `fa` | `N` | `FND` | S11.* |
+| `i18n.supported_locales` | json | subset of `locale` | `["fa","en"]` | `C` | `CON` | S11.* |
+| `i18n.digits_default_fa` | enum | `latin`, `persian` | `persian` [A][H]; the member can switch to `latin` | `N` | `P1M`: interviews | S11.* |
+| `i18n.dual_calendar_detail` | bool | | true (FD§10: Jalali and Gregorian) | `N` | `FND` | S11.* |
+
+## 16.15 Thresholds for pre-registration
+
+FD§9 requires every measure and every stop/continue rule to be written down **before day 1** of Phase 1 (`PreRegistration`, S0 0.7, `FND`). A pre-registered value is not an editable parameter after the lock: the parameters below seed the form, and the lock copies their value into the record. Editing the parameter afterwards changes behaviour, but the pre-registered threshold used to judge the pilot stays as locked and the change is itself shown in the pilot report (FD Principle 11). [D]
+
+| Pre-registered threshold | Seeded from parameter | FD source | Initial configurable default |
+| --- | --- | --- | --- |
+| Minimum eta (Reserve inflow versus spend) | `price.eta_alarm_threshold` | FD§4.3, FD§9 | 0.80 |
+| Maximum false-accept rate | `verify.false_accept_alarm` | FD§4.4, FD§9 | 0.05 |
+| Maximum false-reject rate | `verify.false_reject_alarm` | FD§4.4, FD§9 | 0.10 |
+| Claim-to-capacity ratio that forces a mint cut | `inflation.claim_ratio_threshold_weeks` | FD§4.5, FD§9 | 6.0 weeks |
+| Share of members in the accelerated-expiry arm | `experiment.expiry_arm.fraction` | FD§4.5, FD§9 | 0.50 |
+| Fast-contribution threshold | `ui.fast_contribution_threshold_s` | FD§6.2 V1 | 60 s |
+| Week-2 return bar | none: the form has no default | FD§9 ("a bar you set") | **no initial default**: the lock is refused while empty [A] |
+| Large-job trial success rule (jobs finishing within the quoted window, of the trial jobs) | none | FD§9 decision rule (a) | **no initial default**; the FD proposes a starting rule that is "arbitrary until you set it" [A] |
+| Unresolved incident rule (no open safety or provider incident at pilot end) | none | FD§9 | rule text only, no number |
+
+The three rows without a default are keys of `PreRegistration.thresholds` (`thr.week2_return_min`, `thr.large_job_trial_rule`, `thr.open_incident_rule`), not parameters: they exist only inside a lock record, are never in the parameter store and cannot be loosened after locking (`ISS-167`). A pre-registered threshold also lists the decision it feeds (`continue`, `extend`, `stop`) and the data source; S13.* owns the form. [A]
+
+## 16.16 API, security, calibration, metrics, operations
+
+Owner `operator` (`calibration.min_samples_per_service` is `founders`). Binding: read at the next request, job run or cache refresh (`ops.config_cache_ttl_s`); none is stamped on a domain object. All `ops.*` rows are `public: no` except `ops.rpo_s`, `ops.rto_s` and `ops.backup_retention_days` (they are promises members can read) [A]. [D]
+
+| Name | Type · unit | Validation | Initial configurable default | Chg | Cal | Used |
+| --- | --- | --- | --- | --- | --- | --- |
+| `api.idempotency_ttl_s` | duration_s | 3600..604800 | 86,400 | `N` | `OPS` | S0 0.11.5, S9.10 |
+| `api.page_size_default` | int | 1..`api.page_size_max` | 50 | `N` | `OPS` | S15.* |
+| `api.page_size_max` | int | 1..1000 | 200 | `T↓` | `OPS` | S15.* |
+| `api.cursor_ttl_s` | duration_s | 60..86400 | 3600 | `T↓` | `OPS` | S15.* |
+| `api.max_body_bytes` | int · bytes | 1024..104857600 | 1,048,576 (uploads use `job.max_upload_bytes`) | `T↓` | `TEC` | S15.*, S4.* |
+| `api.request_timeout_s` | duration_s | 1..300 | 30 | `N` | `TEC` | S15.*, S4.* |
+| `security.secret_rotation_days` | int | 1..365 | 90 | `T↓` | `SEC` | S10.* |
+| `security.rotate_before_public_exposure` | bool | constant | true (FD§10) | `C` | `CON` | S10.*, S14.* |
+| `security.two_person_actions` | json | subset of the action names in S10.* | `["ledger.reversal","launch.signoff","parameter.loosen","killswitch.release"]` [A] | `T↑` (more actions) | `SEC` | S10.*, 16.17 |
+| `calibration.min_samples_per_service` | int · cells | 1..10000 | 30 | `T↑` | `FND` | S0 0.10.4, S9.12 |
+| `metrics.rollup_interval_s` | duration_s | 60..86400 | 3600 | `N` | `OPS` | S13.*, S4.* |
+| `ops.rpo_s` | duration_s | 0..86400 | 300 | `T↓` | `OPS`: restore drill | S4.* |
+| `ops.rto_s` | duration_s | 60..604800 | 14,400 | `T↓` | `OPS`: restore drill duration | S4.* |
+| `ops.txn_retry_max` | int | 0..20 | 5 | `N` | `OPS`: retry counters | S4.* |
+| `ops.capacity_headroom_ratio` | ratio | >= 1 | 5.0 | `T↑` | `OPS`: load test (S4.6.2) | S4.* |
+| `ops.clock_skew_alarm_s` | duration_s | 0..60 | 2 | `T↓` | `OPS` | S4.* |
+| `ops.outbox_relay_interval_s` | duration_s | 1..60 | 2 | `N` | `OPS` | S4.* |
+| `ops.outbox_max_attempts` | int | 1..100 | 10 | `N` | `OPS` | S4.* |
+| `ops.outbox_retention_days` | days | 1..90 | 7 | `T↓` | `OPS` | S4.* |
+| `ops.outbox_lag_alarm_s` | duration_s | 1..86400 | 60 | `T↓` | `OPS` | S4.* |
+| `ops.job_lock_ttl_s` | duration_s | 10..3600 | 120 = 4 x `lease.reap_interval_s` | `N` | `OPS` | S4.* |
+| `ops.job_max_runtime_s` | duration_s | 10..3600 (the lock is renewed below it) | 300 | `N` | `OPS` | S4.* |
+| `ops.job_overdue_factor` | ratio | >= 1 | 3.0 | `T↓` | `OPS` | S4.* |
+| `ops.ttl_sweep_interval_s` | duration_s | 5..3600 | 60 | `N` | `OPS` | S4.* |
+| `ops.purge_interval_s` | duration_s | 60..86400 | 3600 | `T↓` | `OPS` | S4.*, S10.* |
+| `ops.backup_interval_s` | duration_s | 3600..604800 | 86,400 (meets `ops.rpo_s` together with log archiving) | `T↓` | `OPS` | S4.* |
+| `ops.backup_retention_days` | days | 1..365 | 35 | `T↓` | `CNS` (privacy duties), `OPS` | S4.*, S10.* |
+| `ops.restore_drill_interval_days` | days | 7..365 | 90 | `T↓` | `OPS` | S4.* |
+| `ops.config_cache_ttl_s` | duration_s | 1..600 | 30 | `T↓` | `OPS` | S4.9.2, 16.17 |
+| `ops.migration_batch_size` | int | 1..100000 | 1000 | `N` | `OPS` | S4.* |
+| `ops.alert_error_ratio` | ratio | 0..1 | 0.05 | `T↓` | `OPS` | S4.11 |
+| `ops.alert_window_s` | duration_s | 30..86400 | 300 | `N` | `OPS` | S4.11 |
