@@ -1057,3 +1057,112 @@ Scripted in the staging suite (`AC-bm9-17`); the figures are for the initial con
 | 2 open beta | Flip `ff.growth.v1_fast_path`..`v6_milestones` (V2 to V5 as randomized tests, logged), `ff.channel.human_review`, `ff.job.reservations`, `ff.public.ledger_page`; widen `launch.required_gate_ids` if the founders decide; a Commons sponsor is a human process | None: flags and parameters through the editor |
 | 2, not in scope A to K | Small conditional rewards (FD§9 Phase 2, conditions of FD§6.3) and the parked test of combining several answers have no milestone [A] | A separate decision memo and a spec change would be needed [V] |
 | 3 marketplace and money | Not scheduled (FD§9). Entry needs the payment and legal answers of `G0` and a decision memo | No payment code exists in `BM0`..`BM9`; `BR9` and the scans keep it out |
+
+## 17.12 Scope coverage matrix
+
+Every bullet of the prompt's product scope `A`..`K` and of the build-order requirements maps to the milestone that builds it and the tests that verify it. Nothing is deferred or shrunk: a row that depends on a human (counsel, interviews, a Persian reader, a penetration test, reachability measurements, host choice) is built as machinery with an evidence slot, and the human step is tagged `[V]`. The feature specification stays in the owning part. [D]
+
+| Row | Scope item (prompt) | Built in | Verified by |
+| --- | --- | --- | --- |
+| `A1` | Anonymous identity, recovery key, optional e-mail, key rotation, device linking | `BM4`; recovery-key screen `BM8` | `AC-bm4-01`, `-03`, `-04`, `-05`; `AC-bm8-05` |
+| `A2` | Account recovery and its abuse risks | `BM4` cooldown flag and caps; enforcement on spending `BM7` | `AC-bm4-04`; `AC-bm7-18` |
+| `A3` | Rate limits per device, invite tree and day | `BM0` limiter port and headers; `BM4` limits | `AC-bm0-08`; `AC-bm4-02`, `-12` |
+| `A4` | Vouched invitations and invite trees | `BM4`; issue counter real in `BM6`; invite screens `BM8` | `AC-bm4-06` |
+| `A5` | Roles and permission matrix | `BM4` (member roles), `BM2` (admin roles) | `AC-bm4-07` |
+| `A6` | Admin authentication separate from members, no shared password | `BM2` | `AC-bm2-03`, `-12`, `-13` |
+| `A7` | Session handling | `BM2` admin sessions; `BM4` member sessions | `AC-bm2-04`; `AC-bm4-03`, `-10` |
+| `A8` | Logging, data minimization, retention, IP handling | `BM0` scrubber and IP hash; `BM4` retention jobs | `AC-bm0-08`; `AC-bm4-08`, `-09` |
+| `B1` | Entities with fields, constraints, indexes, retention | `BM0`..`BM8` per the table of 17.8.1 | `GD3`, `GD4`, `seed-closed`; field tests of `S5.*` |
+| `B2` | State machines: `Job`, `Cell`, trust tiers, template review, service review, appeal | `Job` `BM5`, `BM7`; `Cell` `BM5`, `BM6`; trust `BM4`, `BM6`; template review `BM5`; service review `BM3`; appeal `BM6` | `AC-bm5-10`, `AC-bm7-04`, `AC-bm6-02`, `AC-bm4-10`, `AC-bm6-09`, `AC-bm5-01`, `AC-bm3-02`, `AC-bm6-22` (`T-fsm-*`) |
+| `B3` | Idempotency, concurrency and races for leasing, submission, settlement | `BM0`, `BM1`, `BM6`, `BM7` | `AC-bm0-02`, `-03`; `AC-bm1-09`, `-11`; `AC-bm6-02`..`-05`, `-25`; `AC-bm7-06`, `-10`; `AC-bm9-07` |
+| `C1` | Append-only double-entry ledger; invariants checked continuously with alarms | `BM1` | `AC-bm1-01`..`-15` |
+| `C2` | Minting (Commons only) under a monthly cap | `BM1` function; `BM6` at acceptance | `AC-bm6-18`; `AC-bm2-01` |
+| `C3` | Transfer, escrow, settlement, refunds, levy into the Reserve | `BM1` primitives; `BM7` flows | `AC-bm1-13`; `AC-bm7-06`..`-10` |
+| `C4` | Expiry (oldest first), retirement, per-member cap K | `BM1` functions; `BM7` sweeps and cap | `AC-bm1-05`, `-06`; `AC-bm7-11`, `-12`, `-14` |
+| `C5` | Starter grant G with conditions and anti-farming limits | `BM7` | `AC-bm7-13` |
+| `C6` | Price formula, v, eta, claim ratio, publication, versioning, prospective-only changes | `BM7`; editor and public log `BM2` | `AC-bm7-03`, `-15`, `-19`; `AC-bm2-05` |
+| `C7` | Admission control: forecast, phi, quote, waitlist, reservations, fairness, cancellation | `BM7`; property harness from `BM1` | `AC-bm7-04`, `-05`, `-08`, `-16` |
+| `C8` | The FD§3.3 worked example as an automated test | `BM0` unit, `BM1` ledger, `BM7` whole flow | `T-unit-01`, `AC-bm1-01`, `AC-bm7-02` |
+| `D1` | `R1`..`R10` as data with an evaluator, versioning, stamping, re-check, tighten and loosen | `BM3`; re-check at acceptance `BM6` | `AC-bm3-06`..`-09`; `AC-bm6-20` |
+| `D2` | Metadata schema, validation, allowlist, rejection reasons, opt-in model, topic categories | `BM3`; opt-in rows `BM4`; reason copy `BM8` | `AC-bm3-06`, `-11`; `AC-bm8-10` |
+| `D3` | Service Registry workflow, revocation and in-flight cells | `BM3`; in-flight effect `BM6` | `AC-bm3-01`..`-05`; `AC-bm6-21` |
+| `D4` | Prompt-injection and abuse defenses | `BM5` (wrapping, lint, screening); `BM6` (output flagging, quarantine) | `AC-bm5-05`..`-07`; `AC-bm6-07`, `-24` |
+| `E1` | Template format, review with second reviewer, versioning | `BM5` | `AC-bm5-01`, `-02` |
+| `E2` | First template set; effectiveness `[H]` | `BM5`; `human_review` `BM6` | `AC-bm5-08`; `AC-bm6-16` |
+| `E3` | Verification pipeline: checks, gold, audits, adaptive sampling, blanket redundancy, review cells, appeals | `BM5` (checks defined); `BM6` | `AC-bm6-08`..`-12`, `-15`, `-16`, `-22` |
+| `E4` | Reliability, false-accept and false-reject estimation with stated limits | `BM6` | `AC-bm6-13`, `-14` |
+| `E5` | Result return and anti-forgery | `BM6` | `AC-bm6-02`..`-07`, `-15`, `-24`, `-25` |
+| `F1` | Volunteer screens from landing to help, adapter buttons, paste-back | `BM8` (scripted donor in `BM6`) | `AC-bm8-01`..`-05`, `-09`, `-17` |
+| `F2` | Requester wizard, progress, cancellation, results, rating | `BM7` behind, `BM8` screens | `AC-bm8-10` |
+| `F3` | Reviewer and Operator tools: template review, service review, audit, appeals, flags, ledger explorer, parameter editor, capacity dashboard, gate checklist, kill switches | `BM5`, `BM3`, `BM6`, `BM2`, `BM7`; completed in `fa` and `en` in `BM8` | `AC-bm5-12`; `AC-bm3-*`; `AC-bm6-22`, `-23`; `AC-bm2-05`, `-07`, `-15`; `AC-bm8-11` |
+| `F4` | Persian first: RTL, numerals, Jalali and Gregorian, bidi, fonts, English | `BM0` scaffold; `BM8` | `AC-bm8-04`, `-06`, `-07` |
+| `F5` | Accessibility and low bandwidth | `BM8` | `AC-bm8-08`, `-09` |
+| `F6` | Copy that promises says declared; notices in both languages marked for review | `BM8` | `AC-bm8-07`, `-17` |
+| `G1` | Live counter, public ledger and parameter page, change log, milestone pages | Data `BM2`, `BM7`; pages `BM8` | `AC-bm8-12` |
+| `G2` | Share cards without personal data, teams opt-in | `BM8` | `AC-bm8-13`, `-14` |
+| `G3` | Referral with a two-sided bonus and anti-farming | Ledger operation `BM7`; rules `BM8` | `AC-bm8-15` |
+| `G4` | Growth mechanics V1..V6 as flagged, randomizable, logged experiments | Assignment library `BM2`; flags and mechanics `BM8` | `AC-bm2-08`; `AC-bm8-16` |
+| `H1` | Event schema and pipeline for every Phase 1 measure | Outbox `BM0`; pipeline `BM9` | `AC-bm9-01`, `-11` |
+| `H2` | Pre-registration with lock | `BM2`; launch-rule check `BM9` | `AC-bm2-09`; `AC-bm9-10` |
+| `H3` | Accelerated-expiry arm and other arms as configuration with random assignment | `BM2`, `BM4` hook, `BM6` resolver, `BM9` analysis | `AC-bm2-08`; `AC-bm4-13`; `AC-bm6-19`; `AC-bm9-04` |
+| `H4` | Phase 0 calibration tool | `BM2` | `AC-bm2-10` |
+| `H5` | Analytics privacy: aggregate, no trackers, minimal retention | `BM0` scans; `BM4` retention; `BM9` | `AC-bm0-14`; `AC-bm4-08`; `AC-bm9-11` |
+| `I1` | Threat model table mapped to tests | Table in `S10.*`; tests `BM4`, `BM6`, `BM9` | `AC-bm9-12`; DoD row of `BM4` |
+| `I2` | Member safety in a high-risk context; what the platform cannot promise | `BM4`; notices `BM8` | `AC-bm4-08`, `-09`; `AC-bm8-12`, `-13`, `-17` |
+| `I3` | Secrets management and rotation before exposure | `PB-3` (17.4.3), `BM0`, drill `BM9` | `AC-bm0-17`; `AC-bm9-09` |
+| `I4` | Hosting and reachability behind interfaces; low bandwidth; no third-party resource | `PB-2`, `BM0` ports and probe, `BM8`, bindings `BM9` | `AC-bm0-12`, `-14`; `AC-bm8-09`; `AC-bm9-15` |
+| `I5` | Abuse reporting, takedown, ban process, appeals | `BM6`; suspend and ban `BM4`; screens `BM8` | `AC-bm6-22`, `-23`; `AC-bm4-10` |
+| `J1` | Review the existing panel repo; keep, wrap or replace (`G4`) | `PB-1` (17.4.1) | `AC-bm0-17` |
+| `J2` | Stack-agnostic architecture, recommended stack and alternatives | `S4.*`; decision `PB-2` | `AC-bm0-17` |
+| `J3` | Components and interfaces | `BM0` ports; module map 17.9.1 | `AC-bm0-12`; `T-unit-arch` |
+| `J4` | API: endpoints, schemas, auth, errors, idempotency, pagination, rate limits | `BM0` framework; each milestone registers its operations | `AC-bm0-02`..`-09`, `-11`; `GD5` |
+| `J5` | Event model | `BM0` outbox; events per milestone | `AC-bm0-16`; `BR5` |
+| `J6` | Background jobs: lease expiry, settlement, credit expiry, audits, rollups, invariant checks | `BM6`, `BM7`, `BM1`, `BM9` | `AC-bm6-03`; `AC-bm7-08`, `-11`; `AC-bm1-08`, `-12`; `AC-bm9-01` |
+| `J7` | Storage and consistency for the ledger | `BM1`; `PB-2` | `AC-bm1-07`, `-09` |
+| `J8` | Configuration management, feature flags, migrations | `BM0`, `BM2` | `AC-bm0-01`, `-10`; `AC-bm2-08`; `BR2` |
+| `J9` | Observability: logs without personal data, metrics, alerts | `BM0`; alarms `BM1`; tuning `BM9` | `AC-bm0-08`; `GD6`; `AC-bm1-08` |
+| `J10` | Backup and recovery | `BM0` runbook; drill `BM9` | `AC-bm0-15`; `AC-bm9-08` |
+| `J11` | Deployment and environments | `BM0` (17.5.1); validator `BM9` | `AC-bm0-12`; `AC-bm9-15` |
+| `J12` | Service-adapter interface, no provider hardcoded | `BM3`; UI `BM8` | `AC-bm3-10`, `-13`; `AC-bm8-03` |
+| `J13` | Build order in milestones with acceptance tests; ledger and gates early | This part (17.2, 17.6) | `BR1`, `BR6`; every `AC-bm<n>-nn` |
+| `J14` | Migration and seed order for a fresh database | 17.8 | `GD4`, `seed-closed` |
+| `J15` | Parallelizable work packages with ownership boundaries | 17.9 | `ci/path-rules`, `ci/wave-check` |
+| `J16` | Secret rotation step before any public exposure | `PB-3`, 17.5.2 | `AC-bm0-17`; `AC-bm9-09` |
+| `K1` | Test strategy by layer: unit, property, state machine, policy, adversarial, injection, RTL, load, end to end | `BM0`, `BM1`, `BM7`, `BM5`, `BM3`, `BM6`, `BM8`, `BM9` | `T-unit-*`, `T-prop-*`, `T-fsm-*`, `T-adv-*`, `T-inj-*`, `T-rtl-*`; `AC-bm9-06`, `-07`, `-14` |
+| `K2` | Simulation harness, labeled as not evidence about human behavior | `BM9` | `AC-bm9-02`..`-05` |
+| `K3` | Given / When / Then criteria and a Definition of Done per milestone | 17.6, 17.5.3 | `GD1`..`GD13`, `BR10` |
+
+**Rows by milestone** (the inverse view; a milestone that closes a row only partly is named in its first row cell) [D]
+
+| Milestone | Rows it builds or completes |
+| --- | --- |
+| `BM0` | `A3`, `A8`, `B1`, `B3`, `C8`, `F4`, `H1`, `H5`, `I3`, `I4`, `J1`..`J5`, `J8`..`J11`, `J14`..`J16`, `K1`, `K3` |
+| `BM1` | `B3`, `C1`..`C4`, `C7`, `J6`, `J7` |
+| `BM2` | `A5`..`A7`, `C6`, `F3`, `G1`, `G4`, `H2`..`H4` |
+| `BM3` | `B2`, `D1`..`D3`, `J12` |
+| `BM4` | `A1`..`A5`, `A7`, `A8`, `B2`, `H3`, `I1`, `I2`, `I5` |
+| `BM5` | `B2`, `D4`, `E1`, `E2`, `E3`, `F3` |
+| `BM6` | `B2`, `B3`, `C2`, `D3`, `D4`, `E3`..`E5`, `H3`, `I5`, `J6` |
+| `BM7` | `A2`, `B3`, `C3`..`C8`, `F2`, `F3`, `G1`, `G3` |
+| `BM8` | `A1`, `A4`, `D2`, `F1`..`F6`, `G1`..`G4`, `I2`, `I4` |
+| `BM9` | `H1`, `H2`, `H3`, `H5`, `I1`, `I4`, `J6`, `J9`, `J10`, `K1`, `K2` |
+
+**Coverage check** [D]: every row names at least one milestone and at least one test id; every milestone builds or completes at least one row; no prompt scope letter has an empty milestone set (`AC-bm9-18`). Items that stay outside the system and are recorded as evidence only: counsel's answers (`G0`), interviews (`G5`, FD§9), the Persian reading and legal review of copy, the human penetration test, reachability and device measurements, and the choice of host, mail and alerting providers (`S3.*`). Each has a gate item or a pre-build checklist row (`S19.*`) and an owner [V].
+
+## Issues raised
+
+Problems and gaps found while planning the build. Each resolution is already applied in this file; `C-001` consolidates them into S2.* and may record a different resolution. [D]
+
+| id | severity | fd_ref | issue | resolution | status |
+| --- | --- | --- | --- | --- | --- |
+| `ISS-171` | major | FD§8.3 | The FD exit rule says building beyond a throwaway prototype starts only when `G0` yields an approved service or a documented fallback and `G1` is complete; the brief instructs building the full system first | The exit rule governs launch (`launch.required_gate_ids`, `launch.min_approved_services`); construction proceeds under the owner's instruction; the built system supports every FD§8.3 fallback without a rebuild (17.7) | needs_owner |
+| `ISS-172` | minor | prompt | Feature-level acceptance ids `AC-<area>-<nn>` could collide with milestone-level tests | Milestone tests use the area `bm<n>` (`AC-bm3-04`); tests owned by another part keep their own id (17.1) | proposed |
+| `ISS-173` | minor | FD§8.3 | `CalibrationRecord` is built in `BM2`, before the Service Registry of `BM3`, so it cannot link to a service | `service_key` is a free-text label in `BM2`; `BM3` adds a nullable link `service_id` (17.8.1) | applied |
+| `ISS-174` | minor | prompt | Persian first conflicts with console screens built in `BM2`..`BM7` before the locale work of `BM8` | Console screens ship `en` with copy keys and logical-property CSS; `fa` strings and polish are completed in `BM8`; member-facing screens exist only in `BM8` | proposed |
+| `ISS-175` | major | FD§8.3 | Acceptance tests need an open launch gate, but a test must not bypass the guard it tests | Tests obtain the gate through the real sign-off flow with fixture admins in `ci` and `dev`, and with marked rehearsal sign-offs on fictitious services in `staging`; `production` refuses fixtures and rehearsals (17.3, 17.5.1) | proposed |
+| `ISS-176` | minor | none | Tables point at entities of later milestones (ledger accounts at members, escrows at jobs) | The opaque id is stored first; the foreign key is added and validated by the milestone that creates the target (17.8.1) | applied |
+| `ISS-177` | minor | FD§10 | FD§10 orders additions by priority for a panel rewrite, not by dependency, and lists teams, share cards, referral and the human-review channel as later | Build order follows S0.12 (ledger and gates before identity; screens after behavior); the late items are built and ship off behind `ff.*`, so “later” governs launch timing, not construction (17.2, 17.10) | applied |
+| `ISS-178` | major | FD§10 | FD§10 says the Windows launcher becomes optional, extended beyond Windows or retired; the reviewed README hardcodes one provider host, which breaks ground rule 2 and the no-hardcoded-provider rule | No launcher is part of the platform; registry-driven adapters (`BM3`, `BM8`) replace it; an opt-in auto-send script is excluded (ground rule 3) (17.4.1) | proposed |
+| `ISS-179` | major | FD§9 | FD§9 leaves the decision thresholds (eta threshold, week-2 return bar) to the founders and gives 30 to 50 people as a size, but no parameter bounds total members | Thresholds are `PreRegistration` content with no default supplied; pilot size is held by invite supply [A] and is not hardcoded. A hard cap such as `launch.max_members` would be a convention gap for `S10.*` and `S16.*` to add; this part adds no parameter (17.11.2) | needs_owner |
+
+Convention additions made by this part (not issues, listed so `C-001` can fold them back): the ids `BR1`..`BR10`, `GD1`..`GD13`, `PB-1`..`PB-3`, `WP-BM<n>-<kk>`, `WR1`..`WR8`, `CM1`..`CM5`, `CR1`..`CR10`, the acceptance id area `bm<n>`, the test slugs `T-unit-arch` and `seed-closed`, the paths `build/stubs.md`, `build/dod/BM<n>.md`, `build/wp/*.md`, `ci/trace/scope-coverage.yaml` and `docs/runbooks/phase1-configuration.md`, and the environment names `dev`, `ci`, `staging`, `production`.
