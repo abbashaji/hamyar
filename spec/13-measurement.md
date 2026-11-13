@@ -718,3 +718,92 @@ The value `800000` for `TH-02` is the conventions default `price.eta_alarm_thres
 2. **Reading only what was locked.** The evaluator reads the thresholds, pins and population from the effective row (13.7.4) and the `definition_version` it pins; if a newer definition exists, the older one is still computed for the evaluation (recomputation is allowed because snapshots are versioned). [D]
 3. **Parameter drift.** For every `parameter_ref`, if the live value differs from the locked value, the report prints both and the evaluation uses the locked value. [D]
 4. **Report.** The decision report (generated Markdown and JSON, admin download, no volunteer identifiers) lists: the locked hash and time; each threshold, observed value, interval, `n`, and outcome; each rule outcome; every incident row (type, severity, resolution); the interview coverage; the experiment arms and the balance table; all `post_lock` and `post_launch_amendment` items with the outcomes under both versions; the list of suppressed cells; and the statement of limits of 13.11. It has no recommendation line: the decision belongs to the founders, and FD§9 Phase 3 asks for "an explicit decision memo" that they write. [D]
+
+## 13.8 Experiment support: arms as configuration, logged random assignment
+
+Experiments in this product are not code branches. An experiment is a row that says which members are eligible, which arms exist, what each arm overrides, and how members are assigned; every other part reads the effective configuration through one resolver. The accelerated-expiry arm of FD§4.5 and FD§9 (`EXP-01`) and the growth variants `V2` to `V5` of FD§9 Phase 2 (S12.*) use the same mechanism. [D]
+
+### 13.8.1 Data model
+
+Table `experiments` (`Experiment`, `exp_`, `permanent`). [D]
+
+| Column | Type | Rule |
+| --- | --- | --- |
+| `id`, `created_at`, `row_version` | S0.7 | |
+| `code` | text | `EXP-<nn>` (S0.5) |
+| `status` | enum `draft`, `registered`, `running`, `stopped` | `stopped` is terminal (13.8.2) |
+| `hypothesis` | text, 1..500 chars | Plain statement, written before `registered` |
+| `flag_key` | text | The kill flag, for `EXP-01` `ff.experiment.expiry_arm` (S0.10.7). The flag off means no new assignment and no new application (13.8.4) |
+| `unit` | enum `member`, `invite_tree` | `invite_tree` assigns every member of one invite tree the arm of the tree's root, for mechanisms that spill between members; Phase 1 uses `member` [A] |
+| `eligibility` | json | `{ created_at_gte, population: "external"\|"all", include_existing: false }` |
+| `strata` | json array | Allowed entries: `pilot_week`, `locale`. Default `["pilot_week"]` |
+| `arms` | json array | `{ arm_key, weight_ppm, parameter_overrides, flag_overrides }` (13.8.3) |
+| `block_size` | int | Derived and stored at `registered` (13.8.3) |
+| `salt` | bytea (32) | Generated at `draft` by a CSPRNG; never shown until `stopped`; stored encrypted like other S10.* secrets |
+| `salt_published_at` | timestamptz, nullable | Set at `stopped`; the salt then goes in a change-log entry so that any outsider can regenerate every block |
+| `prereg_id` | text, nullable | The locked `prr_` that lists this experiment; required for `registered` |
+| `start_at`, `stop_at` | timestamptz, nullable | Server time |
+
+Table `experiment_assignments` (`ExperimentAssignment`, `asg_`, `permanent`): `id`, `experiment_id`, `member_id` (the opaque `mem_` id; the row survives the member's closure and then points to nothing), `arm_key`, `stratum`, `block_id`, `position_in_block`, `assigned_at`, `source` (`random`, `forced_by_admin` with an `AdminAction`, never used for eligible members of a running experiment unless `FND` documents a defect). Unique `(experiment_id, member_id)`. Table `experiment_blocks` (`ExperimentBlock`, `blk_`): `id`, `experiment_id`, `stratum`, `block_index`, `permutation` (json array of `arm_key`), `next_position`, `created_at`. [D]
+
+### 13.8.2 State machine
+
+| From | To | Event | Guard | Effects |
+| --- | --- | --- | --- | --- |
+| (none) | `draft` | `experiment.created` | `perm.experiment.manage` | Salt generated |
+| `draft` | `registered` | `experiment.registered` | A locked `PreRegistration` lists the `code`; weights sum to 1,000,000; block size `<= 100` (13.8.3); every override passes validation | `block_size` stored; arms and weights frozen |
+| `registered` | `running` | `experiment.started` | Two admins (`experiment.start` in `security.two_person_actions`); flag `flag_key` is on; `experiment.assignment_log_enabled` is true; `now >= cohort_start_at` of the pre-registration | `start_at` set; `ChangeLogEntry` published (`experiment` kind: code, arms, weights, overridden parameter names, start); notice to members per `change.notice_days_default` is not required for prospective-only overrides on members first assigned after start, but the pilot opt-in text names the experiment (`AN-11`) |
+| `running` | `stopped` | `experiment.stopped` | Any admin with `perm.experiment.manage`, or the flag turned off, or the kill switch scope covering it | `stop_at` set; salt published in a change-log entry |
+
+Editing `arms` after `registered` is rejected (`409 STATE_CONFLICT`). A changed design is a new experiment code. [D]
+
+### 13.8.3 Arms as configuration
+
+```json
+{ "code": "EXP-01", "flag_key": "ff.experiment.expiry_arm", "unit": "member", "strata": ["pilot_week"],
+  "arms": [
+    { "arm_key": "control",     "weight_ppm": 500000, "parameter_overrides": {}, "flag_overrides": {} },
+    { "arm_key": "accelerated", "weight_ppm": 500000,
+      "parameter_overrides": { "credit.lifetime_days": { "ref": "credit.lifetime_days_accelerated" } },
+      "flag_overrides": {} } ] }
+```
+
+- The accelerated arm's weight is `experiment.expiry_arm.fraction` (initial configurable default 0.50) times 1,000,000, read once at `registered` and frozen. The control weight is the remainder. [D]
+- An override is a literal or `{ "ref": "<parameter>" }`. A ref follows that parameter's own versioning, so the arm tracks the published `credit.lifetime_days_accelerated`. Only parameters with `experiment_overridable = true` may be overridden; the initial set is `credit.lifetime_days` (a convention addition to the parameter record, `ISS-138`). The resolved value must pass the target parameter's validation and the cross-checks of S0.10.5 (C4: accelerated lifetime must not exceed the base lifetime). [D]
+- `flag_overrides` maps a flag key to a boolean, resolved the same way; this is how Phase 2 variants are randomized (S12.*). [D]
+- **Block size.** Reduce the weights by their greatest common divisor `g`; `block_size = sum(weight_i / g)`. Weights 500,000 and 500,000 give `g = 500,000` and block size 2. Registration is refused if `block_size > 100` (hard cap [A]), and warns when it exceeds the expected size of the smallest stratum, because then blocks no longer balance. [D]
+
+### 13.8.4 Logged assignment
+
+1. **When.** In the same database transaction that creates the `Member` row (`member.created`), for every `running` experiment whose `eligibility` matches. Members who existed before `start_at` are not assigned unless `eligibility.include_existing` is true. [D]
+2. **Stratum.** `pilot_week:<k>` with `k = wk(member.created_at)` (13.5.1), optionally with `locale:<l>`. [D]
+3. **Block draw.** Lock the open block row `(experiment_id, stratum)` with `SELECT ... FOR UPDATE`; if none is open, create block `block_index = max + 1` with a permutation derived as below. Take `permutation[next_position]`, increment `next_position`, insert the `ExperimentAssignment`, emit `experiment.member_assigned` (no member id in the event). Replays are safe: the unique key returns the existing row. [D]
+4. **Permutation.** `seed = HMAC-SHA-256(key = salt, msg = "v" || experiment.assignment_seed_version || 0x00 || stratum || 0x00 || block_index)`. Build the list of arm keys with multiplicities `weight_i / g` in ascending `arm_key` order. Fisher-Yates from the last position `j = B-1` down to 1: draw `r` uniform in `[0, j]` from the stream `HMAC-SHA-256(seed, counter)` taken as 64-bit unsigned integers with rejection sampling (reject `v >= floor(2^64 / (j+1)) * (j+1)`), swap positions `r` and `j`. The same salt, version, stratum and index always give the same permutation, so an auditor holding the published salt can regenerate every block and compare it with the stored one. [D]
+5. **No re-draw.** A member's arm never changes. Re-registering creates a new `mem_` id and a new draw, which the platform cannot prevent; the arm is therefore not described to members as better or worse (`ISS-139` rationale below). [D]
+6. **Balance guarantee and check.** Within a stratum the count of any arm differs from `n * weight_i / 1,000,000` by less than `block_size`. Job `experiment.balance_check` runs daily and writes an `Alarm` of kind `experiment.balance_violated` if it does not (a defect, not a finding), and publishes the per-stratum count table (counts only). A table of baseline covariates by arm (`locale`, pilot week, invite depth) is reported descriptively; with the pilot's size no covariate test is run. [D]
+
+### 13.8.5 Applying an arm
+
+`effective_param(name, member_id, at)` returns the arm override when a `running` experiment assigns that member an arm with an override for `name`, and the flag of the experiment is on at `at`; otherwise the value of the parameter in force at `at` (S0.10.3). `effective_flag(key, member_id, at)` is the same for flags. Resolution happens when the dependent object is created and the result is stored on it: a credit lot stores `lifetime_days_applied` and `assignment_id` (convention additions to S6.*'s lot, `ISS-138`), so analysis never re-derives it. Overrides are prospective only: they apply to lots earned at or after the assignment and never to a lot or ledger entry that already exists (S0.6.1: the expiry date is fixed when the lot is earned). If the flag is turned off, lots earned afterwards use the base value, lots already earned keep their expiry, and no new member is assigned. [D]
+
+**Disclosure.** The pilot opt-in tells members that credit lifetimes may differ between participants during the pilot (`copy.experiment.expiry_arm_notice`, marker `needs_human_and_legal_review`); every lot shows its own `expires_at`. The arm name is not shown. Whether an arm that shortens credit life is acceptable to participants and under any applicable consumer rules is not checked here [V]. [D]
+
+### 13.8.6 `MET-15` Outcomes of `EXP-01` and how they are analysed
+
+| Field | Value |
+| --- | --- |
+| Analysis | Intention to treat: members are analysed in the arm they were assigned, whether or not they ever earned or spent anything. Per-protocol views are exploratory and labeled |
+| Primary | Week-2 return (`MET-07`, 13.6.7) by arm. Secondary: `spent_within_h_share`, `expired_share_matured`, accepted cells per member-week |
+| `spent_within_h_share` | Share of credit earned that is spent within `h = credit.lifetime_days_accelerated` days of being earned, over lots with `earned_at <= as_of - h days`. Both arms are observed over the same horizon, which removes the bias below |
+| `expired_share_matured` | `expired_ucr / earned_ucr` over lots whose `expires_at <= as_of`. Not comparable across arms on its own: accelerated lots mature earlier, so a naive share compares different ages (`ISS-139`); it is shown only next to `spent_within_h_share` |
+| Difference of two proportions | Newcombe hybrid score interval from the two Wilson intervals: with `p1, p2` and Wilson bounds `(l1, u1)`, `(l2, u2)`: `low = (p1 - p2) - sqrt((p1 - l1)^2 + (u2 - p2)^2)`, `high = (p1 - p2) + sqrt((u1 - p1)^2 + (p2 - l2)^2)`. No p-value gates a decision; the interval is reported |
+
+```sql
+SELECT a.arm_key, count(DISTINCT l.member_ref) AS n_members,
+       sum(l.earned_ucr) AS earned, sum(lot_spent_within(l.lot_id, :h * interval '1 day')) AS spent_h
+FROM mv_lot l JOIN experiment_assignments a ON a.id = l.assignment_id AND a.experiment_id = :exp_id
+WHERE l.earned_at <= :as_of - :h * interval '1 day'
+GROUP BY a.arm_key;   -- spent_within_h_share = spent_h * 1e6 / earned
+```
+
+**What a pilot of this size can detect.** With `n` members per arm, a difference in a proportion of about `delta = sqrt(2 * (1.96 + 0.84)^2 * 0.25 / n)` is detectable with 80 percent power at the two-sided 5 percent level in the worst case `p = 0.5` (normal approximation, rough at these sizes): `n = 15` gives about 0.51, `n = 20` about 0.44, `n = 25` about 0.40 (`1.96` and `0.84` are the standard normal quantiles for 95 percent two-sided and 80 percent power; `2.80^2 = 7.84`). Differences smaller than 40 to 50 percentage points in week-2 return are not detectable in a 30 to 50 member pilot, so `EXP-01` is a feasibility and mechanism check; the report says so (13.11). [D]
