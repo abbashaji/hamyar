@@ -282,3 +282,50 @@ All `launch.*` switches are still `false` while this table is worked through; `l
 | `CHK-41` | Reachability of the public host from Iran is tested again, and a move to another host is rehearsed from a backup (`TRIP-16`) | `LaunchGateItem` of G2; drill record | `owner`, `builder` |
 | `CHK-42` | Persian and English copy and the member-facing notice are read again after the Phase 1 incidents, and any public message is checked against FD Principle 8 (`RISK-32`) | Review record | `founders`, `reviewer` |
 | `CHK-43` | The owner's Phase 2 decision memo: what is being exposed, to whom, with which `ff.growth.*` flags on, and which stop conditions apply (`TRIP-13`, `TRIP-14`) | Decision memo in the change log | `owner` |
+
+
+## 19.9 Open decisions of the owner
+
+Only the owner can decide these. They are listed with the default that applies if nobody decides, so that silence never loosens anything. [D]
+
+| id | Decision | Default until decided [A] | Stage | Linked |
+| --- | --- | --- | --- | --- |
+| `OD-01` | May the full system be built while G0 and G1 are open, with all `launch.*` switches `false` and nothing member-facing | The FD§8.3 exit rule stands: nothing beyond a throwaway prototype | Before coding | `ISS-192`, `CHK-07`, `RISK-39` |
+| `OD-02` | How to satisfy the second-reviewer rule when two founders cannot give two non-author approvals to a template one of them wrote: a third reviewer, an outside reviewer, or a lower `template.min_reviewers_new` | No template is approved with fewer approvals than `template.min_reviewers_new`; Phase 1 stays blocked on templates | Before coding | `ISS-196`, `RISK-13`, `CHK-09`, `CHK-39` |
+| `OD-03` | Who is on call, who may engage a kill switch, the escalation interval for an unacknowledged `Alarm` | No first member without a named person | Before the first member | `ISS-194`, `CHK-37`, `RISK-34` |
+| `OD-04` | How the reachability test from Iran is run without exposing the tester | `launch.members_may_join` stays `false` | Before the first member | `ISS-197`, `CHK-14`, `UNV-20` |
+| `OD-05` | Which counsel, in which jurisdiction | No legal question is treated as answered | Before coding | `CHK-08`, 19.7 |
+| `OD-06` | The stop-loss condition and the fallback among FD§8.3 (i) to (iv) if no service clears G0 | Fallback (iv), stop and publish what was learned, is the only one that needs no further permission | Before coding | `CHK-01`, `RISK-39` |
+| `OD-07` | Keep, wrap or replace the existing panel | Replace: no panel code or secret is reused | Before coding | `CHK-02`, `RISK-44` |
+| `OD-08` | Hosting and storage vendors | Both stay behind interfaces; no vendor is chosen | Before coding | `CHK-10`, `CQ-14`, `RISK-25` |
+| `OD-09` | Who is qualified to advise on the threat model and the member-facing notice | G1 is not complete | Before coding | `CHK-06`, `CHK-13` |
+| `OD-10` | A Commons sponsor, or another source of Commons jobs | Founder seeding only | Before public exposure | `CHK-36`, `RISK-10` |
+| `OD-11` | The values of the Phase 1 thresholds and decision rules: the η threshold (`price.eta_alarm_threshold`), the return bar, the share of exhausted cells and the false-accept level | None is assumed; Phase 1 does not start | Before the first member | `ISS-198`, `CHK-25`, `TRIP-14` |
+| `OD-12` | The project's stance on legal demands for member data: what it commits to publish and what it refuses | Nothing is disclosed by an operator alone | Before the first member | `CQ-10`, `CHK-38`, `TRIP-08` |
+
+**S3.* by reference.** The consolidated register of open decisions is S3.* (`needs_owner` issues from every part, 0.4). This part restates none of them. The `needs_owner` issues raised here are `ISS-192`, `ISS-194`, `ISS-196`, `ISS-197` and `ISS-198`, and they correspond to `OD-01`, `OD-03`, `OD-02`, `OD-04` and `OD-11`; where S3.* holds the same decision, S3.* is authoritative and the `OD-nn` row is only a pointer. I could not read S3.* while writing this part, so the mapping from `OD-nn` to S3.* entries is left to C-001 (`ISS-195`). [A]
+
+## 19.10 What this part does and does not promise
+
+- **Minimization, never anonymity.** The platform promises to store as little as it can (`retention.raw_ip_stored` = `false`, keyed hashes, no mandatory identity). It does not promise that a member cannot be identified, and no user-facing text says it does (`RISK-05`, `RISK-30`, `RISK-31`). [D]
+- **No legal advice and no legal conclusion.** Every legal statement here is a question for counsel [V]. Nothing here has been checked against a law or a provider's terms. [D]
+- **No completeness claim.** The register, the tripwires and the checklists name the risks and gaps this specification can see. Finishing the checklist does not make the project safe, lawful or sustainable; unknown risks remain, and a risk marked `[D]` is mitigated by a design decision that is itself untested until built. [D]
+- **Labels are judgments.** Likelihood and impact labels are the spec author's judgments [A], not measurements, and they carry no probability. They are revised when a measurement (`CAL`, `P1M`, `SEC`, `OPS`) exists. [D]
+- **Tripwires are alarms.** A tripped wire asks a human to look; it does not establish a cause. Thresholds that depend on a measurement not yet made are tagged [H]. [D]
+- **The human presses Send.** No item in this part relies on automating a volunteer's account, reading a chat page, storing provider credentials or bypassing a regional restriction. Where a risk response would need that, the response is excluded (FD Principle 9, ground rules 1 and 2). [D]
+- **Simulation is not evidence.** Simulation output may test the system's mechanics; it says nothing about human behavior (`RISK-43`). [D]
+
+## Issues raised
+
+Ids `ISS-191` to `ISS-199` belong to this part (0.4). Each resolution is already applied in this file until C-001 records a different one. [D]
+
+| id | severity | fd_ref | issue | resolution | status |
+| --- | --- | --- | --- | --- | --- |
+| `ISS-191` | minor | none | `RISK-nn` is in 0.5, but `UNV-nn`, `CQ-nn`, `CHK-nn`, `OD-nn` and `TRIP-nn` are not in the conventions | Added by this part (19.1, 19.4 to 19.9); `RISK-16` and up are spec-level risks, ids are never reused | proposed |
+| `ISS-192` | major | FD§8.3 | The exit rule forbids building beyond a throwaway prototype until G0 yields an approved service and G1 is complete, while the prompt and `docs/decisions.md` call for the full system with launch machinery early | Both are kept visible: all `launch.*` switches are `false`, the default of `OD-01` is that the FD rule stands, and `RISK-39` and `TRIP-13` watch it | needs_owner |
+| `ISS-193` | minor | FD§8.2 | The FD list has 15 risks and none for ledger defects, races, template capture, display injection, vendor suspension, data-protection exposure, operator abuse or untested specifications | `RISK-16` to `RISK-45` added in 19.3, with tripwires in 19.4 | proposed |
+| `ISS-194` | major | FD§8.2 | No one is named to act on an alarm, and with two or three people an alarm can go unanswered | `CHK-37` and `OD-03`; every tripwire names who acts; the escalation interval is left to the owner | needs_owner |
+| `ISS-195` | minor | none | This part could not read S3.*, so `OD-nn` rows may duplicate or differ from S3.* entries | `OD-nn` rows are pointers; C-001 maps them to S3.* (19.9) | proposed |
+| `ISS-196` | major | FD§8.2 row 13 | A second-reviewer rule that excludes the author cannot be met by two founders for a template one of them wrote | `OD-02`; until decided no template is approved below `template.min_reviewers_new` | needs_owner |
+| `ISS-197` | major | FD§8.3 G2 | A reachability test from Iran needs a vantage point inside Iran, which can put the tester at risk, and one test does not show that the host stays reachable | The method is the owner's decision (`OD-04`); the test is repeated before public exposure (`CHK-41`); `launch.members_may_join` stays `false` until then | needs_owner |
+| `ISS-198` | major | FD§9 | The Phase 1 decision rules say the thresholds are "arbitrary until you set them" and no values exist | `OD-11` and `CHK-25`: values are locked in a `PreRegistration` before day 1; Phase 1 does not start without them | needs_owner |
