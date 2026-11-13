@@ -588,3 +588,68 @@ FD§9 asks for 8 to 10 interviews including reasons for stopping. The platform t
 | `notes_ref` | text, 0..200 | Optional pointer |
 
 Reporting: counts by `segment` against the target range stored in the pre-registration (`qualitative_plan.min_interviews` = 8, `max_interviews` = 10, FD§9), counts by `stop_reason_codes`, and the coverage flag `has_stopped_donor` (an interview set with no `stopped_donor` cannot report reasons for stopping). Counts under `analytics.min_cohort_k` are shown as ranges only in the admin report, never published. Cadence: on record. Known biases: interviewees are self-selected and reachable, which excludes members who left because of safety concerns and went silent; eight to ten interviews support hypothesis generation, not frequencies (S13.11). [D]
+
+## 13.7 Pre-registration
+
+FD§9 requires the Phase 1 thresholds to be pre-registered before day 1 and calls its decision rules "arbitrary until you set them". This section makes the setting auditable: the thresholds and rules are written down, canonicalized, hashed, timestamped and locked by two admins before anyone outside the founders can join, and the evaluation later reads only what was locked. The values themselves are decisions for the founders (`FND`); this part provides the mechanism and a template, not the numbers. [D]
+
+### 13.7.1 Data model
+
+Table `pre_registrations` (entity `PreRegistration`, prefix `prr_`, retention `permanent`, S0.7). A row is never deleted and, once `locked`, its `content` is never updated: a database trigger rejects any `UPDATE` of `content`, `content_hash`, `chain_hash` or `locked_at` on a row whose status is `locked`. [D]
+
+| Column | Type | Rule |
+| --- | --- | --- |
+| `id`, `created_at`, `row_version` | S0.7 | |
+| `name` | text | Short slug, for example `phase1-closed-pilot` |
+| `phase` | enum `phase0`, `phase1`, `phase2` | Which phase it governs |
+| `version` | int | 1 for the first row of a `name`; each amendment is a new row with `version + 1` |
+| `amends_id` | text, nullable | The `prr_` it amends |
+| `status` | enum | `draft`, `lock_requested`, `locked`, `abandoned` |
+| `content` | jsonb | The document of 13.7.4 |
+| `content_hash` | text, nullable | `sha256:<hex>` of the RFC 8785 canonical form of `content` (S0.6.4); set at `lock_requested` |
+| `chain_hash` | text, nullable | `sha256(prev_chain_hash ":" content_hash ":" locked_at_rfc3339)`; `prev_chain_hash` is that of the previously locked pre-registration of any phase, or the SHA-256 of the ASCII string `hamyar-prereg-genesis` for the first |
+| `locked_at` | timestamptz, nullable | Server time of the second approval |
+| `lock_approvals` | jsonb | Array of `{ admin_action_id, approved_hash }`, at most one per admin |
+| `gate_item_id` | text, nullable | `lgi_` of the launch-gate item that carries this as evidence (13.7.6) |
+| `annotations` | jsonb | Append-only array of `{ at, admin_action_id, kind, text }` where `kind` is `deviation`, `clarification`, `evidence`, `external_anchor`; never hashed, never changes meaning of `content` |
+
+### 13.7.2 State machine
+
+| From | To | Event | Guard | Effects |
+| --- | --- | --- | --- | --- |
+| (none) | `draft` | `prereg.created` | `perm.prereg.edit` | Row created; `content` validated against the JSON Schema only as a draft |
+| `draft` | `lock_requested` | `prereg.lock_requested` | First approver has `perm.prereg.lock`; step-up re-authentication within `security.sensitive_reauth_s`; all lock guards (13.7.3) pass | `content_hash` computed and shown; `lock_approvals[0]` stored; `content` becomes read-only |
+| `lock_requested` | `draft` | `prereg.created` is NOT reused; event `prereg.lock_requested` is followed by `prereg.abandoned`? No: withdrawal returns to `draft` with an `AdminAction` of kind `prereg.lock_withdrawn` and no domain event | The approver withdraws, or `session`-bound TTL `security.two_person_ttl_s` expires | Approvals cleared; `content_hash` cleared |
+| `lock_requested` | `locked` | `prereg.locked` | A different admin with `perm.prereg.lock` approves the identical `content_hash`; all guards re-run | `locked_at` set; `chain_hash` computed; `ChangeLogEntry` published with `content_hash`, `chain_hash`, `locked_at`, `phase`, `version` (not the content); evidence attached to the gate item (13.7.6) |
+| `draft` | `abandoned` | `prereg.abandoned` | `perm.prereg.edit`, never locked | Terminal; row kept |
+| `locked` | `locked` | `prereg.evaluated` | System, per 13.7.7 | Evaluation snapshots written; no change to the row |
+| (amendment) | new row `draft` | `prereg.amended` | `amends_id` points at a `locked` row | The amended row follows the same machine; the amended row stays `locked` |
+
+The row for `lock_requested -> draft` above is a withdrawal without a domain event, because it is not a state the system moves into on its own. It writes an `AdminAction` only. [D]
+
+### 13.7.3 Lock guards
+
+The lock (both approvals) fails with `422 VALIDATION_FAILED` and `details.guards` listing every failed guard (S0.11.4) unless all hold [D]:
+
+1. `content` validates against the JSON Schema of 13.7.4 (`additionalProperties: false`).
+2. Every `measures[].metric_id` exists in 13.6 or 13.8 and its `definition_version` equals the current one.
+3. Every threshold has a `min_sample` and a `comparator` and a `unit` matching its metric's `scale`.
+4. Every `parameter_ref` equals the current value of that parameter (for example `price.eta_alarm_threshold`, `verify.false_accept_alarm`, `verify.false_reject_alarm`); otherwise the lock fails, so the document and the live alarm never disagree at lock time. A later parameter change is allowed (operations) and is reported as drift in the evaluation (13.7.7).
+5. Every decision rule parses (13.7.5), references only existing `TH-nn` ids, and has an `on_fail` branch where FD§9 requires one.
+6. `study.cohort_start_at` is later than now and later than `locked_at` would be at the earliest.
+7. Phase `phase1` only: there is no `Member` with `is_internal = false` created before now. (Founders and testers MAY exist; they must be flagged.)
+8. `qualitative_plan.min_interviews <= max_interviews` and the experiment arms listed exist as `Experiment` rows in status `draft` or `registered`.
+9. Two distinct admins approve the same `content_hash`. The action name `prereg.lock` MUST be in `security.two_person_actions` (`ISS-132`, convention addition).
+
+### 13.7.4 What may change after the lock
+
+| Change | Allowed | How |
+| --- | --- | --- |
+| Edit a locked threshold, rule, metric definition pin or population | No, in place | Never; a new amendment row (below) |
+| Add an exploratory analysis or measure after the lock | Yes | New amendment row; the added items are `role = exploratory` and are labeled `post_lock` in every report |
+| Change a threshold or decision rule after `cohort_start_at` | Only as an amendment labeled `post_launch_amendment`, two-person approved, with `amendment_reason` (enum `unit_error`, `definition_defect`, `new_information_external`, `other`) in `content`; it is published in the change log; the decision report shows the outcome under BOTH the last version locked before `cohort_start_at` and the amended one, and says which one the founders chose and why | Prevents quietly moving the goalposts |
+| Add an experiment arm after the lock | Yes | A separate pre-registration of `phase = phase1` with `study.addendum = true`, locked before the first assignment of that experiment |
+| Record a deviation from the analysis plan | Yes | `annotations` entry of kind `deviation` |
+| Delete or hide a locked row | No | There is no delete path; only `abandoned` for unlocked drafts |
+
+The *effective* pre-registration for an evaluation is the last locked row of the phase with `locked_at <= first external member admitted`; later amendments are shown beside it, never instead of it (`DR` evaluation, 13.7.7). [D]
