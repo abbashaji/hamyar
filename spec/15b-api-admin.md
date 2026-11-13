@@ -453,3 +453,137 @@ Feature flags (`ff.*`, S0 0.8.5) change behavior, never rules or money. Flags th
 | `updateFeatureFlag` | `PATCH /v1/admin/feature-flags/{flag_key}` | `admin` `SU` `perm.flag.edit` | `{enabled?, exposure_ppm? (0..1,000,000), reason}`; `If-Match` | 200 flag; event `feature_flag.changed`; a public change-log entry of kind `feature_flag` when the flag is member-visible | `STATE_CONFLICT` (`experiment_running`: `exposure_ppm` and `enabled` of a flag bound to a running experiment cannot be changed; stop the experiment), `UNPROCESSABLE` (`prereg_required` for `ff.experiment.expiry_arm`, 15.32.2), `PRECONDITION_FAILED` | req | - | - | `A-W` |
 
 Disabling a flag is tightening and takes effect at once; enabling takes effect at once as well, because a flag is not a rule. A flag is never the only guard of a safety property [D].
+
+## 15.28 Kill switches
+
+A kill switch is the fast, reversible brake (S0 0.9.8). Engaging is tightening: one admin, at once. Releasing is loosening: two admins. A `KillSwitch` row (`ksw_`, permanent) is one state change of one switch; the current state is the newest row, and the five scopes below are the only keys [D].
+
+### 15.28.1 Switch keys and API-visible effects [D]
+
+| Key | Created | Effect visible through the API while engaged | Events produced and consumed |
+| --- | --- | --- | --- |
+| `kill.all_minting` | seeded, `released` | Operations that would post a `mint` (cell acceptance, grants that mint) answer `503 KILL_SWITCH_ENGAGED` or are held by the ledger service until release (the holding rule is S6.*, `ISS-156`); no new Commons cell leases are issued | `killswitch.engaged`; ledger service stops minting postings |
+| `kill.all_new_jobs` | seeded, `released` | `createJob`, quote acceptance, waitlist release and reservation activation answer `503 KILL_SWITCH_ENGAGED`; jobs already running continue | `killswitch.engaged`; job service stops admitting |
+| `kill.template.<tpl_id>` | on first engage | New jobs naming the template are refused; its queued cells are paused (`cell.paused`), its leases revoked (`lease.revoked`), its running jobs paused (`job.paused`) | `template.paused` (S0 0.9.5) and the job and cell events listed |
+| `kill.service.<svc_id>` | on first engage | The service is shown as blocked in adapters; jobs requiring it are refused; its pinned cells are paused | `service.suspended` (S0 0.9.6) and the job and cell events |
+| `kill.member.<mem_id>` | on first engage | That member's leases, submissions, job creation and invitations answer `403 FORBIDDEN` with `details.copy_key = copy.member.account_frozen` (not 503: a retry would be misleading); reads and appeals still work | `killswitch.engaged`; lease service revokes the member's active leases. The member's `status` is NOT changed; use 15.29.6 for sanctions |
+
+The in-flight handling of each cascade is owned by S7.* and S8.*; this table lists only what a client and an operator can observe. A member-scoped switch is never published; the other four are published in the change log with their `public_text` [D].
+
+### 15.28.2 Endpoints
+
+| op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `listKillSwitches` | `GET /v1/admin/kill-switches` | `admin` `perm.killswitch.read` | `?scope` (`all`, `template`, `service`, `member`), `?state` | list of `{switch_key, state, changed_at, reason_code}` (the two global keys always present; scoped keys only if ever touched) | - | n/a | cursor | `A-R` |
+| `getKillSwitch` | `GET /v1/admin/kill-switches/{switch_key}` | `admin` `perm.killswitch.read` | - | `{switch_key, state, engaged_by, engaged_at, reason_code, reason, linked_report_id, linked_alarm_id, release_approval_id}` | `NOT_FOUND` (unknown scope id) | n/a | - | `A-R` |
+| `listKillSwitchHistory` | `GET /v1/admin/kill-switches/{switch_key}/history` | `admin` `perm.killswitch.read` | - | list of `KillSwitch` rows, newest first | - | n/a | cursor | `A-R` |
+| `engageKillSwitch` | `POST /v1/admin/kill-switches/{switch_key}/engagements` | `admin` `SU` `perm.killswitch.engage.<scope>` | `{reason_code (safety_incident, integrity_violation, provider_notice, policy_defect, abuse, capacity, other), reason, public_text?: {fa, en}, linked_report_id?, linked_alarm_id?}` | 201 `{switch, effects: {jobs_paused, cells_paused, leases_revoked}}` counted at commit; event `killswitch.engaged` | `STATE_CONFLICT` (`already_engaged`), `VALIDATION_FAILED` (`public_text` required for the four published scopes), `NOT_FOUND` (the template, service or member does not exist) | req | - | `A-W` |
+| `releaseKillSwitch` | `POST /v1/admin/kill-switches/{switch_key}/releases` | `admin` `SU` `2P` `killswitch.release` `perm.killswitch.release` | `{reason, verification: [{check, passed}], public_text?}` | 202 approval; on approval 200 `{switch}`; event `killswitch.released`, then `template.resumed` or `service.resumed` as applicable | `STATE_CONFLICT` (`not_engaged`; `release_guard_failed` with `details.missing`) | req | - | `A-W` |
+
+### 15.28.3 Release guards and automatic engagement [D][A]
+
+```
+releaseGuard(key):                         # evaluated at initiate and again at approval
+  kill.service.<id>:  approvalGuard-minus-state(service)     # flags still yes, sealed copy younger than service.review_max_age_days
+                      and service.closure_cause == kill_switch   # a revoked service is never resumed (S0 0.9.6)
+  kill.template.<id>: active version still review_status == approved (or paused)
+  kill.all_minting:   latest full-recompute invariant run passed after engage time
+                      and no open critical Alarm of category ledger
+  kill.all_new_jobs:  no open critical Alarm of category capacity or ledger
+  kill.member.<id>:   linked reports and alarms of that member are acknowledged
+```
+
+The system itself engages switches in two cases and records `actor.principal_type = system` [A]: (1) a template that gets `template.autopause_report_count` reports within `template.autopause_window_s` (initial configurable default 5 within 3,600 s) is paused with `reason_code = abuse`; (2) a critical ledger invariant violation (`ledger.invariant_violated`, 15.30.2) engages `kill.all_minting` and `kill.all_new_jobs`. Releasing either always needs two admins. Case (2) is a proposal that S6.* and S14.* must confirm (`ISS-156`).
+
+## 15.29 Queues, alarms, abuse flags, sanctions
+
+### 15.29.1 Audit queue
+
+Audits compare an independent re-execution with the first (S0 0.9.4). The comparator runs automatically; a human decides only what it cannot.
+
+| op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `listAudits` | `GET /v1/admin/audits` | `admin` `perm.audit.read` | `?state`, `?template_version_id`, `?stalled=true` | list of `{aud_id, cell_id, state, comparator_verdict, created_at}` | - | n/a | cursor | `A-R` |
+| `getAudit` | `GET /v1/admin/audits/{aud_id}` | `admin` `perm.audit.read` | - | `{aud_id, cell_id, state, comparator: {method, verdict, score_ppm}, executions: [{submission_id, output_hash, is_third}]}` (no content) | `NOT_FOUND` | n/a | - | `A-R` |
+| `getAuditContent` | `GET /v1/admin/audits/{aud_id}/content` | `admin` `perm.audit.resolve` | - | `{input, outputs: [string]}`; logged as a read action (15.21.3); strings are data, escaped by the client | `NOT_FOUND` | n/a | - | `A-W` |
+| `resolveAudit` | `POST /v1/admin/audits/{aud_id}/resolutions` | `admin` `SU` `perm.audit.resolve` | `{verdict (first_correct, second_correct, both_acceptable, neither), rationale}` | 200 `{audit}`; event `audit.resolved`, then the cell events of S0 0.9.3 | `STATE_CONFLICT` (the comparator or the third execution can still decide; a human decides only `mismatched` audits stalled longer than `audit.human_after_hours` [A]) | req | - | `A-W` |
+| `cancelAudit` | `POST /v1/admin/audits/{aud_id}/cancellations` | `admin` `SU` `perm.audit.resolve` | `{reason}` | 200 `{audit}`; event `audit.cancelled` | `STATE_CONFLICT` | req | - | `A-W` |
+
+There is no endpoint that marks an audit passed without a verdict from the comparator, a third execution or `resolveAudit` with a rationale [D].
+
+### 15.29.2 Appeals queue
+
+`due_at = filed_at + appeal.reviewer_sla_days * 86,400 s` (initial configurable default 7 days); the queue sorts overdue first.
+
+| op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `listAppeals` | `GET /v1/admin/appeals` | `admin` `perm.appeal.read` | `?state`, `?kind`, `?assigned_to=me`, `?overdue=true` | list of `{apl_id, kind, state, filed_at, due_at, assigned_admin_id}` | - | n/a | cursor | `A-R` |
+| `getAppeal` | `GET /v1/admin/appeals/{apl_id}` | `admin` `perm.appeal.read` | - | appeal with `subject_ref`, the member's text (at most `appeal.max_chars` [A]), prior decisions; logged as a read action | `NOT_FOUND` | n/a | - | `A-R` |
+| `assignAppeal` | `POST /v1/admin/appeals/{apl_id}/assignments` | `admin` `perm.appeal.decide` | `{admin_id?}` (default: caller) | 200 appeal; event `appeal.assigned` (or `appeal.reassigned` when already assigned) | `FORBIDDEN` (the assignee made the decision under appeal) | req | - | `A-W` |
+| `startAppealReview` | `POST /v1/admin/appeals/{apl_id}/review-starts` | `admin` `perm.appeal.decide` | `{}` | 200 appeal (`in_review`); event `appeal.review_started` | `STATE_CONFLICT` | req | - | `A-W` |
+| `requestSecondAppealReview` | `POST /v1/admin/appeals/{apl_id}/second-review-requests` | `admin` `perm.appeal.decide` | `{reason}` | 200 appeal; event `appeal.second_review_requested` | `STATE_CONFLICT` | req | - | `A-W` |
+| `decideAppeal` | `POST /v1/admin/appeals/{apl_id}/decisions` | `admin` `SU` `perm.appeal.decide` | `{decision (upheld, overturned), rationale, member_message_copy_key}` | 201 `{decision, appeal}`; final decision emits `appeal.upheld` or `appeal.overturned` | `FORBIDDEN` (made the original decision, or already decided this appeal), `STATE_CONFLICT` | req | - | `A-W` |
+
+For appeal kinds `member_ban` and `template_rejection`, a decision is final only when `appeal.ban_min_reviewers` distinct reviewers (initial configurable default 2) recorded the same decision; if the first two differ, a third distinct reviewer breaks the tie [A]. The consequences of `appeal.overturned` (restoring a status, re-crediting an accepted cell, re-opening a template) are carried out by the consumers named in 15.34 under S8.* and S10.*; this API only records the decision and emits the event.
+
+### 15.29.3 Reports queue
+
+`due_at = filed_at + report.triage_sla_days * 86,400 s` (initial configurable default 3).
+
+| op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `listReports` | `GET /v1/admin/reports` | `admin` `perm.report.read` | `?state`, `?overdue=true` | list of `{rpt_id, category, state, filed_at, due_at}` | - | n/a | cursor | `A-R` |
+| `getReport` | `GET /v1/admin/reports/{rpt_id}` | `admin` `perm.report.read` | - | report with its subject reference and reporter text (no reporter identity beyond the pseudonymous `mem_id`) | `NOT_FOUND` | n/a | - | `A-R` |
+| `triageReport` | `POST /v1/admin/reports/{rpt_id}/triages` | `admin` `perm.report.triage` | `{note}` | 200 report; event `report.triaged` | `STATE_CONFLICT` | req | - | `A-W` |
+| `closeReport` | `POST /v1/admin/reports/{rpt_id}/outcomes` | `admin` `SU` `perm.report.triage` | `{outcome (actioned, dismissed), linked_admin_action_ids: [act_id], note, reporter_message_copy_key}` | 200 report; event `report.actioned` or `report.dismissed` | `VALIDATION_FAILED` (`actioned` needs at least one linked action) | req | - | `A-W` |
+
+The actions themselves (engage a kill switch, retire a template, sanction a member) are ordinary calls of 15.28, 15.24 and 15.29.6; the report records which actions it led to [D].
+
+### 15.29.4 Alarms and abuse flags
+
+An abuse flag is an `Alarm` (`alm_`) with `category = abuse`; there is one resource, not two [D]. `Alarm` = `{alm_id, category (abuse, ledger, capacity, launch, ops, security), kind, severity (info, warning, critical), subject_ref: {type, id}, state (open, acknowledged), raised_at, acknowledged_by, acknowledged_at, details}`. `details` never contains personal data; it holds counts, thresholds and ids.
+
+| Kind (category) | Raised when | Parameter |
+| --- | --- | --- |
+| `farming.device_limit` (abuse) | more accounts than allowed share one device attestation | `grant.max_per_device` |
+| `farming.invite_tree` (abuse) | an invite tree exceeds depth or size, or its members behave in lock-step | `invite.tree_max_depth`, `invite.tree_max_members` |
+| `farming.referral` (abuse) | referrals per referrer exceed the cap | `growth.referral.max_per_referrer_per_30d` |
+| `integrity.duplicate_output` (abuse) | identical or near-identical outputs across many cells of one member | `verify.duplicate_threshold_ppm` [A] |
+| `integrity.timing_anomaly` (abuse) | many submissions faster than the minimum plausible time | `verify.timing_min_s` |
+| `injection.output_flagged` (abuse) | outputs carry instruction-like text that the input screens would reject | `screen.*` |
+| `template.report_burst` (abuse) | the autopause threshold of 15.28.3 was hit | `template.autopause_*` |
+| `changelog.explanation_overdue` (ops) | no explanation note was added before `explanation_due_at` | `change.tighten_publish_within_s` |
+| `parameter.activation_blocked` (ops) | a scheduled parameter version failed validation at activation | C1..C8 |
+| `launch.rule_broken` (launch) | a signed-off item was reopened or the approved-service floor was crossed | `launch.*` |
+| `ledger.invariant_violated` (ledger) | an invariant check failed | S6.* |
+
+| op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `listAlarms` | `GET /v1/admin/alarms` | `admin` `perm.alarm.read` | `?category`, `?severity`, `?state`, `?subject_id` | list of `Alarm` | - | n/a | cursor | `A-R` |
+| `getAlarm` | `GET /v1/admin/alarms/{alm_id}` | `admin` `perm.alarm.read` | - | `Alarm` | `NOT_FOUND` | n/a | - | `A-R` |
+| `acknowledgeAlarm` | `POST /v1/admin/alarms/{alm_id}/acknowledgements` | `admin` `perm.alarm.ack` | `{note}` | 200 `Alarm` (`acknowledged`); event `alarm.acknowledged` | `STATE_CONFLICT` | req | - | `A-W` |
+
+Acknowledging an alarm does not fix its cause; a critical `ledger` or `launch` alarm still blocks the switches of 15.27.3 until the cause is cleared and the next check passes [D].
+
+### 15.29.5 Member view for admins [D]
+
+| op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `listMembersAdmin` | `GET /v1/admin/members` | `admin` `perm.member.read_admin` | `?status`, `?trust_tier`, `?has_open_report=true`; no search by name, e-mail or handle (there are none) | list of `{mem_id, status, trust_tier, created_on}` | - | n/a | cursor | `A-R` |
+| `getMemberAdmin` | `GET /v1/admin/members/{mem_id}` | `admin` `perm.member.read_admin` | - | `{mem_id, status, trust_tier, created_on, accepted_cells, reliability_ppm, open_reports, open_appeals, restriction, invite_tree: {root_mem_id, size, depth}}`; no devices, no keys, no balance (the ledger explorer has it); logged as a read action | `NOT_FOUND` | n/a | - | `A-R` |
+| `getInviteTree` | `GET /v1/admin/members/{mem_id}/invite-tree` | `admin` `perm.member.read_admin` | - | `{root_mem_id, size, depth, status_counts, members: [{mem_id, status, depth}]}` | `NOT_FOUND` | n/a | cursor | `A-R` |
+
+### 15.29.6 Restrictions, suspensions, bans [D]
+
+Statuses and events are S0 0.9.1. Each action is a separate noun so every one has one audit row and one event. The member sees the outcome through a notice in the member inbox (part a), chosen from `reason_copy_key`, a fixed `copy.*` key; no free text reaches the member.
+
+| op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `restrictMember` | `POST /v1/admin/members/{mem_id}/restrictions` | `admin` `SU` `perm.member.restrict` | `{reason_code, reason, reason_copy_key, linked_ids: [], ends_at?}` | 200 member (`restricted`); event `member.restricted` | `STATE_CONFLICT` | req | - | `A-W` |
+| `liftMemberRestriction` | `POST /v1/admin/members/{mem_id}/restriction-lifts` | `admin` `SU` `perm.member.restrict` | `{reason}` | 200 member (`active`); event `member.restriction_lifted` | `STATE_CONFLICT` | req | - | `A-W` |
+| `suspendMember` | `POST /v1/admin/members/{mem_id}/suspensions` | `admin` `SU` `perm.member.suspend` | `{reason_code, reason, reason_copy_key, linked_ids: [], ends_at?}` | 200 member (`suspended`); event `member.suspended`; active leases revoked | `STATE_CONFLICT` | req | - | `A-W` |
+| `reinstateMember` | `POST /v1/admin/members/{mem_id}/reinstatements` | `admin` `SU` `perm.member.suspend` | `{reason}` | 200 member (`active`); event `member.reinstated` | `STATE_CONFLICT` | req | - | `A-W` |
+| `banMember` | `POST /v1/admin/members/{mem_id}/bans` | `admin` `SU` `2P` `member.ban` `perm.member.ban` | `{reason_code, reason, reason_copy_key, linked_ids: [at least one report, alarm or audit id]}` | 202 approval; on approval 200 member (`banned`); event `member.banned`; sessions and leases revoked | `VALIDATION_FAILED` (no linked evidence), `STATE_CONFLICT` | req | - | `A-W` |
+| `restrictInviteTree` | `POST /v1/admin/members/{mem_id}/invite-tree/restrictions` | `admin` `SU` `perm.member.restrict` | `{reason_code, reason, reason_copy_key, linked_ids: [], member_ids?: [mem_id]}` (default: the whole tree, at most `invite.tree_max_members`) | 200 `{restricted: [mem_id]}`; one `member.restricted` event per member, one audit row naming the tree | `STATE_CONFLICT` | req | - | `A-W` |
+
+A ban stays appealable (`appeal.*`); the balance of a banned member is not touched by this API, and expiry continues as for any account (S10.*). A ban is two-person because a capture of one reviewer account would otherwise be enough to expel any member (FD§5.7 failure mode 10) [D].
