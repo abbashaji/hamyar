@@ -512,3 +512,34 @@ Kill switches are the brake of rule 6: they stop new starts, never in-flight clo
 ### 14.8.5 Panel
 
 The launch panel (a screen, not a new concept) shows, per switch: current parameter value, whether an active authorization exists and its `authorized_until`, the live `evaluate_switch` result, and for `Fail`, the reasons grouped by gate with a link to each failing item. It shows the kill-switch board: every key, its current state, and the three most recent rows. Full specification of the screen and its copy keys belongs to S11.* and S15.*; this part only fixes what must be true of the data it reads. [D]
+
+## 14.9 Enforcement points
+
+Every enforcement point runs inside the same database transaction as the state change it guards (rule 2, server-side only); none is a check performed earlier and trusted later. [D]
+
+| Point | Guard | On failure |
+| --- | --- | --- |
+| `member.created` (registration completing) | `launch.members_may_join` is open (S14.4.4 active-authorization sense); `kill` has no relevant global key | `FORBIDDEN`, `reasons: ['members_not_open']` |
+| `job.created` | `launch.member_jobs_enabled` open; job's `service_requirement` satisfiable per S14.3's table (at least one, every, or open-weight service passes `service_gate`, or `human_review` fallback is active); `kill.all_new_jobs` released; requester's `kill.member.<id>` released | `FORBIDDEN` with the specific reason (`jobs_not_open`, `no_eligible_service`, `kill_switch_engaged`) |
+| `job.submitted` (job moving from draft/funding into queued, i.e. escrow confirmation) | Re-checks `service_gate` for every pinned service, since time has passed since creation; a service that regressed between creation and funding blocks submission rather than silently queuing cells against a now-unapproved service | `FORBIDDEN`, `reasons: ['service_gate_regressed:' + svc_id]` |
+| `cell.leased` | `service_gate` for the cell's service; `kill.template.<tpl_id>`, `kill.service.<svc_id>` and `kill.member.<mem_id>` of the leasing member all released | `FORBIDDEN` with the failing key named |
+| `cell.accepted` (R9's attested-service check) | `service_gate` for the attested service at the moment of acceptance, independent of what passed at lease time | Rejected per R9's existing `reject.policy_changed` path; this part adds no new rejection code here, it only adds `service_gate` as one more input R9 already expected to receive from S7.* |
+| `ledger.mint` (any entry with `kind = mint`) | `launch.minting_enabled` open; `kill.all_minting` released; the member's `kill.member.<id>` released | `FORBIDDEN`, `reasons: ['minting_not_open']` or `['kill_switch_engaged']` |
+| `parameter write` of any `launch.*` boolean to `true` | Trigger `launch_param_needs_authorization` (S14.4.7) | Write refused at the database level, `INTERNAL` surfaced as `VALIDATION_FAILED` to the caller, since reaching this point without going through S14.8.1 is already a bug, not a user error |
+
+Transitions rule 6 exempts (never blocked by any switch or kill switch): refund and cancellation paths, settlement, escrow release on completion, expiry sweeps, data export, account recovery, and reading any of the data this part defines. These are enumerated here because a generic 'brakes stop everything' reading would be wrong and unsafe; `AC-launch-32` tests each one explicitly against every switch-closed and every kill-engaged combination. [D]
+
+### 14.9.1 Fail-closed cases (rule 1, exhaustive)
+
+| Input | Treated as |
+| --- | --- |
+| `ServiceRegistryEntry` missing or unknown id | `service_unknown`, fails `service_gate` |
+| `FlagAnswer` absent for a required key | `unknown`, which is `no` (`RL-3`) |
+| `FlagAnswer` present but for a stale `terms_copy_id` | `flag_answer_stale`, fails `service_gate` |
+| `LaunchGateItem` row does not exist for a catalog key that should apply to this scope | Treated as `open` (the worst case), never skipped; a missing row is itself a data-integrity signal and `AC-launch-41` checks that every expected row exists after `service.created` and after `Template` approval |
+| `GateEvidence` with unreadable storage (object missing from the store) | Item cannot be newly signed off against it; an existing `signed_off` state is not retroactively invalidated by storage loss, but any later reopen attempt that needs to re-display the evidence fails clearly rather than silently |
+| `KillSwitch` row missing for a scoped key | `released` (S14.8.4); missing for `kill.all_minting`/`kill.all_new_jobs` cannot happen (seeded) |
+| `LaunchAuthorization` missing for a switch whose parameter reads `true` | Treated as closed; this state should be unreachable given the trigger in S14.4.7, and `AC-launch-18` specifically tries to force it via direct parameter manipulation under the migration role to confirm the trigger, not application code, is what prevents it |
+| `Parameter` for a `launch.*` or `kill.*`-adjacent value missing | Falls back to the compiled default (0.10.3's existing rule), which for every boolean in this part is the closed value |
+| Clock skew between the node evaluating and the node that wrote `valid_until` | Evaluation always uses the database's `now()`, never an application-server clock, so skew across app nodes cannot produce different answers (`AC-launch-27`) |
+| Two concurrent `gate.signed_off` calls on the same item and generation | Serialized by the unique constraint on `GateSignoff` and a row lock on the item during `SO-1`..`SO-8`; the loser sees a normal `CONFLICT` and may retry, which simply re-reads the now-updated state |
