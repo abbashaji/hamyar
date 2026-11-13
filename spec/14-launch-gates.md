@@ -568,3 +568,43 @@ All follow 0.9.1's envelope. New event names introduced by this part, beyond `ga
 | `service.review_due`, `service.suspended` | `RL-7` transition, grace-period sweep | `svc_id`, `cause` (`item_reopened` or `review_expired`) |
 
 Every row this part defines that is written by `system` still emits the same event as a human-caused write of the same kind, with `actor = system`, so downstream consumers (audit, S10.*) need no special case for machine-attached evidence. [D]
+
+## 14.12 Acceptance criteria
+
+Every `AC-launch-nn` referenced above, collected: [D]
+
+| Id | Criterion |
+| --- | --- |
+| `AC-launch-03` | Migrations and seed data never set a launch switch true, create a service other than `unreviewed`, or create a signed-off item; CI fails the build otherwise. No flag, env var, header, debug route or build option bypasses a gate; test suites open gates only through the real flow with seeded test admins. |
+| `AC-launch-04` | A direct `UPDATE` to `ServiceRegistryEntry.state = 'approved'` issued by the application role fails; only `service.approved` through its guard succeeds. |
+| `AC-launch-18` | Attempting to set a `launch.*` boolean to `true` without a same-transaction active `LaunchAuthorization`, including under the migration role manipulating the parameter table directly, is refused by `launch_param_needs_authorization`. |
+| `AC-launch-21` | A `FlagAnswer` bound to a superseded `TermsCopy` is evaluated as `flag_answer_stale` and fails `service_gate`, even though the answer itself was `yes`. |
+| `AC-launch-27` | Evaluation run from app nodes with artificially skewed system clocks produces identical `Pass`/`Fail` results, because `now()` is read from the database. |
+| `AC-launch-32` | For every switch-closed and every kill-engaged combination, refunds, cancellations, settlement, escrow release on completion, expiry sweeps, data export and account recovery all still succeed. |
+| `AC-launch-40` | The application database role has no `DELETE` on `launch_gate_items`, `gate_evidences`, `gate_signoffs`, `launch_authorizations` or `kill_switches`, and no unrestricted `UPDATE` on `launch_gate_items` or `launch_authorizations`. |
+| `AC-launch-41` | After `service.created`, exactly the 12 `g0.svc.*` items exist for that service in state `open`; after a `Template` first reaches `approved`, its `g3.tpl.consistency` item exists. |
+
+## 14.13 Parameters introduced by this part (S16.* is authoritative; listed here for traceability)
+
+| Parameter | Type | Default |
+| --- | --- | --- |
+| `launch.members_may_join`, `launch.member_jobs_enabled`, `launch.minting_enabled` | `bool` | `false` |
+| `launch.required_gate_ids` | `json` | `["G0","G1"]` |
+| `launch.min_signoffs` | `int` | `2` |
+| `launch.min_approved_services` | `int` | `1` |
+| `launch.approval_window_s` | `int` | `86400` |
+| `launch.generic_validity_days` | `int` | `180` |
+| `launch.counsel_validity_days` | `int` | `365` |
+| `launch.measurement_validity_days` | `int` | `120` |
+| `launch.evidence_max_bytes` | `int` | `10485760` |
+| `security.secret_rotation_max_age_days` | `int` | `90` |
+| `security.rotate_before_public_exposure` | `bool` (constant, not editable) | `true` |
+| `service.review_max_age_days` | `int` | `90` |
+| `service.review_grace_days` | `int` | `14` |
+| `calibration.min_samples_per_service` | `int` | `20` |
+
+## 14.14 Honest limits
+
+This part enforces that evidence was attached and that two qualified people recorded a sign-off against it. It cannot read a terms-of-service document and decide whether a reviewer's `yes` was correct, cannot verify that a counsel memo reflects real legal advice rather than a convenient guess, cannot confirm a secret was actually rotated versus merely marked as rotated, and cannot detect collusion between the two required signers. The secret-pattern guard (`EV-3`) is a heuristic, not a proof of absence. Every regional availability answer, every counsel conclusion, every measured throughput number and every interview count is [V] until a named human has actually produced it; this document creates the places those things are recorded and the rule that nothing launches without them, not the things themselves. Where the Founding Document is itself unresolved (operator jurisdiction, FD section 8.3's open items, the minimum interview count), this part records that as an open item rather than inventing an answer, per ground rule 8. [D]
+
+Open issues this part raises for the tracker, beyond `ISS-141`, `ISS-143`, `ISS-144` and `ISS-147` already cited above: whether `kill.member.<id>` should also block that member's existing unleased job postings from attracting new leases from other members (current reading: no, since the kill is scoped to the member's own actions, and a separate `kill.job.<id>` would be needed for that, left out of scope here) [A]; and whether `g0.fb.ii`'s 'free hosted services, after their own terms check' needs its own sub-registry distinct from the main one, left to S7.*. [A]
