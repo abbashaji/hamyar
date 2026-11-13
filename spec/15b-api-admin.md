@@ -352,3 +352,104 @@ classify(base, proposed):
 | `annotateChangeLog` | `POST /v1/admin/changelog-entries` | `admin` `perm.policy.tighten` or `perm.parameter.edit.<owner>` of the amended entry | `{amends_id, public_text: {fa, en}}` | 201 `ChangeLogEntry` (kind `note`, `amends_id` set); event `changelog.entry_published` | `NOT_FOUND`, `STATE_CONFLICT` (already annotated) | req | - | `A-W` |
 
 Change-log entries are immutable; an annotation is a new entry that points at the one it explains.
+
+## 15.26 Parameter editor
+
+Every number in the system lives in the parameter table (S0 0.10); this is the only write path to it. Constants (S0 0.10.2, the set marked `constant`) and secrets (never parameters) have no write path at all.
+
+**Schemas** [D]: `Parameter` = `{name, area, owner, type, unit, value, tighten_direction (up, down, none), is_public, mutable, version, effective_from, pending: ParameterVersion or null}`. `ParameterVersion` (`pmv_`, immutable in `value` and `effective_from`) = `{pmv_id, parameter_name, version (int), value, effective_from, change_class (tighten, loosen, neutral), reason, calibration_basis, changelog_entry_id, created_by_admin_id, created_at, withdrawn_at}`. `withdrawn_at` is the single write-once column of that entity (`ISS-154`). A reader asks for the value at time `t` and gets the newest non-withdrawn version with `effective_from <= t`.
+
+**Classification** [D]. `tighten_direction` is declared per parameter. A change is `tighten` when it moves the value the way the declared direction says makes the system safer, `loosen` when it moves the other way, `neutral` when the direction is `none` (every enum, bool and text parameter that has no declared order; for an enum whose direction is `up` or `down`, the order of `validation.enum` is the tightening order) [A]. Notice rules:
+
+```
+notice_days(p) = p.notice_days                       if the parameter declares one
+              or change.notice_days_price            if p.name starts with price., admission. or credit.   # initial configurable default 14
+              or change.notice_days_default          otherwise                                             # initial configurable default 7
+effective_from(change) = now                                            if class == tighten
+                       = max(requested, accepted_at + notice_days * 86,400 s)   otherwise
+```
+
+| op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `listParameters` | `GET /v1/admin/parameters` | `admin` `perm.parameter.read` | `?area`, `?owner`, `?mutable`, `?q` | list of `Parameter` | - | n/a | cursor | `A-R` |
+| `getParameter` | `GET /v1/admin/parameters/{name}` | `admin` `perm.parameter.read` | - | `Parameter` | `NOT_FOUND` | n/a | - | `A-R` |
+| `listParameterVersions` | `GET /v1/admin/parameters/{name}/versions` | `admin` `perm.parameter.read` | - | list of `ParameterVersion`, newest first | `NOT_FOUND` | n/a | cursor | `A-R` |
+| `listParameterConstraints` | `GET /v1/admin/parameter-constraints` | `admin` `perm.parameter.read` | - | `{data: [{id: "C1", text_key, satisfied: bool, inputs: {name: value}}]}` for the cross-parameter constraints C1..C8 of S0 0.10.3 evaluated on current values | - | n/a | - | `A-R` |
+| `previewParameterChange` | `POST /v1/admin/parameter-changes/previews` | `admin` `perm.parameter.read` | `{name, value}` | 200 `{change_class, notice_days, earliest_effective_from, violations: [{constraint, detail}], warnings: [{code, detail}]}`; no state change | `VALIDATION_FAILED` | opt | - | `A-W` |
+| `proposeParameterChange` | `POST /v1/admin/parameter-changes` | `admin` `SU` `perm.parameter.edit.<owner>`; `2P` `parameter.loosen` when the class is `loosen` | `{name, value, expected_version, reason, public_text?: {fa, en}, requested_effective_from?, calibration_basis?}` | tighten: 201 `{parameter_version, changelog_entry}`. Loosen: 202 approval, then 201 at approval. Neutral: 201 with a prospective `effective_from`. Events `parameter.changed`, `changelog.entry_published`; at effective time `parameter.activated` | `UNPROCESSABLE` (`details.reason` = `immutable_constant`, `use_launch_endpoints` for `launch.*`, `not_a_parameter`), `VALIDATION_FAILED` (type, range, enum; `details.constraints` lists violated C-ids), `ALREADY_EXISTS` (a scheduled version for this name exists: withdraw it first), `PRECONDITION_FAILED` (`expected_version` is not the newest) | req | - | `A-W` |
+| `withdrawParameterChange` | `POST /v1/admin/parameter-versions/{pmv_id}/withdrawals` | `admin` `SU` `perm.parameter.edit.<owner>` | `{reason}` | 200 `ParameterVersion` with `withdrawn_at` set; event `parameter.change_withdrawn`; a change-log note. Single admin: withdrawing a scheduled loosening is tightening | `STATE_CONFLICT` (`effective_from` already passed) | req | - | `A-W` |
+
+**Rules** [D]
+
+1. **One pending change per parameter.** A scheduled version blocks a second proposal for the same name.
+2. **Validation at propose and again at activation.** The value must satisfy `validation` and every cross-parameter constraint C1..C8 against the values that will be in force at `effective_from` (current values plus other scheduled versions). The scheduler (`parameter.activate_due`) re-checks at activation; on a violation it does not activate, raises an alarm (category `ops`, kind `parameter.activation_blocked`) and the version stays scheduled until an operator withdraws or fixes it. C8 (fee against level) is a warning at propose time, because S0 defines it as a margin check [A].
+3. **Public by default.** A `loosen` or `neutral` acceptance publishes its `ChangeLogEntry` at acceptance; that publication is the notice. A `tighten` publishes at once with the machine summary and the same `explanation_due_at` as 15.25.1. `public_text` is required for every class where `is_public` is true.
+4. **Prospective only** (FD Principle 5): no change ever alters a transaction already posted, a lot already earned, an escrow already held, a quote already issued or a job's stamped values. Services read a value as of the time the thing was created.
+5. **`launch.*` parameters** (`launch.min_signoffs`, `launch.required_gate_ids`, `launch.min_approved_services`) and the three switches are changed only by the endpoints of 15.27. Attempting it here is `UNPROCESSABLE` (`use_launch_endpoints`).
+6. **Leaving an initial configurable default.** The first change of a parameter away from its `initial configurable default` MUST carry `calibration_basis = {code, ref}`, where `code` is the replacement measurement code of its S0 0.10.4 entry (`CAL`, `FND`, `OPS`, `LEG`) and `ref` points at the evidence: `CAL` needs `calibration_record_ids` (15.32.3) from at least `calibration.min_samples_per_service` accepted samples per approved service in scope; `FND` needs a locked `PreRegistration` id; `LEG` needs a reference text (a counsel sign-off id kept outside the system, never its content) [V]. This keeps a guess from being replaced by another guess.
+7. **Owners.** `perm.parameter.edit.<owner>` follows the `owner` column of the parameter (S0 0.10.5). Thresholds owned by `founders` are the only ones an `operator` alone cannot change.
+
+## 15.27 Launch gates, launch switches, feature flags
+
+### 15.27.1 Objects [D]
+
+| Object | Fields |
+| --- | --- |
+| `LaunchGateItem` (`lgi_`, S0 0.6.3) | `lgi_id`, `gate_id` (`G0`..`G5`, S0 0.8.4), `key` (such as `G0.service_registry`), `title_key` (a `copy.*` key), `state` (`open`, `evidence_attached`, `signed_off`, `reopened`), `required_signoffs` (= `launch.min_signoffs`, copied when evidence is first attached), `evidence`, `signoffs`, `tags` (`V` when the item rests on a [V] item) |
+| evidence entry | `{evidence_id, kind (service_review, terms_copy, counsel_ref, threat_model_ref, calibration_ref, measurement_ref, fallback_decision, other), ref (text, 1..500, where it is kept; the content itself is not stored here), sha256?, note, attached_by_admin_id, attached_at}` |
+| sign-off | `{admin_id, signed_at, comment}` |
+
+The item list per gate is seeded data (S14.*). Item states and the events `gate.evidence_attached`, `gate.signed_off`, `gate.reopened` are S0 0.9.9.
+
+### 15.27.2 Gate endpoints
+
+| op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `listLaunchGates` | `GET /v1/admin/launch/gates` | `admin` `perm.launch.read` | - | `{data: [{gate_id, state (open, ready_for_signoff, signed_off), items_total, items_signed_off}]}` | - | n/a | - | `A-R` |
+| `getLaunchGate` | `GET /v1/admin/launch/gates/{gate_id}` | `admin` `perm.launch.read` | - | gate with its `LaunchGateItem` list | `NOT_FOUND` | n/a | - | `A-R` |
+| `getLaunchGateItem` | `GET /v1/admin/launch/gate-items/{lgi_id}` | `admin` `perm.launch.read` | - | `LaunchGateItem` | `NOT_FOUND` | n/a | - | `A-R` |
+| `attachGateEvidence` | `POST /v1/admin/launch/gate-items/{lgi_id}/evidence` | `admin` `perm.launch.evidence` | `{kind, ref, sha256?, note}` | 201 `LaunchGateItem` (`evidence_attached`); event `gate.evidence_attached`; for `kind = service_review` the server checks that `ref` is a `svc_` id in state `approved` | `VALIDATION_FAILED`, `STATE_CONFLICT` (already `signed_off`: reopen first) | req | - | `A-W` |
+| `signOffGateItem` | `POST /v1/admin/launch/gate-items/{lgi_id}/signoffs` | `admin` `SU` `perm.launch.signoff` | `{comment}` | 201 `LaunchGateItem`; when distinct sign-offs reach `launch.min_signoffs` (initial configurable default 2) the item becomes `signed_off` and the event `gate.signed_off` is emitted once | `FORBIDDEN` (this admin has already signed this item), `STATE_CONFLICT` (not `evidence_attached`; or evidence changed after the first sign-off, in which case all sign-offs were voided and the state is `evidence_attached`) | req | - | `A-W` |
+| `reopenGateItem` | `POST /v1/admin/launch/gate-items/{lgi_id}/reopenings` | `admin` `SU` `perm.launch.signoff` | `{reason}` | 200 `LaunchGateItem` (`reopened`); event `gate.reopened`; signoffs voided; single admin, because reopening tightens | `STATE_CONFLICT` | req | - | `A-W` |
+
+The sign-off is the implementation of the `launch.signoff` two-person action: the pending object is the item, every signer passes a step-up bound to the item's current evidence hash, and signers are distinct admins. A gate is `signed_off` when all its `required` items are. Attaching evidence to a `signed_off` item is refused; `reopenGateItem` first [D].
+
+### 15.27.3 Switches [D]
+
+The three switches are `launch.members_may_join`, `launch.member_jobs_enabled` and `launch.minting_enabled` (S0 0.8.4, default `false`; the initial configurable default of a closed system).
+
+```
+switchBlockers(sw):                                   # [] means the switch may be turned on
+  b = []
+  for g in launch.required_gate_ids:                  # initial configurable default [G0, G1, G2, G3]
+      if gate(g).state != signed_off: b += gate_not_signed_off:<g>
+  if count(Service where state == approved) < launch.min_approved_services          # initial configurable default 1
+     and no signed_off evidence of kind fallback_decision on G0:  b += not_enough_approved_services
+  if sw == members_may_join and launch.require_locked_preregistration              # convention addition, default true
+     and no PreRegistration(scope=phase_1, status=locked):  b += preregistration_not_locked
+  if sw in [member_jobs_enabled, minting_enabled] and not members_may_join.value:  b += members_may_join_off
+  if sw == minting_enabled and kill.all_minting is engaged:                         b += kill_switch_engaged
+  if any open Alarm of category ledger with severity critical:                      b += open_critical_ledger_alarm
+  return b
+```
+
+The `preregistration_not_locked` clause carries FD§9 ("thresholds pre-registered before day 1") into the rule; S13.* and S14.* may move it into a gate item without changing any endpoint (`ISS-156`) [A].
+
+| op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `getLaunchStatus` | `GET /v1/admin/launch/status` | `admin` `perm.launch.read` | - | `{switches: {name: {value, changed_at, approval_id}}, gates: {G0: state, ...}, approved_services: {count, min}, preregistration_locked: bool, blockers: {members_may_join: [string], member_jobs_enabled: [string], minting_enabled: [string]}}` | - | n/a | - | `A-R` |
+| `changeLaunchSwitch` | `POST /v1/admin/launch/switch-changes` | `admin` `SU` `perm.launch.switch`; `2P` `launch.switch_on` when `value = true` | `{switch, value, reason}` | `value = false`: 200 `{switch}` at once, one operator. `value = true`: 202 approval; at approval the blockers are recomputed; 200 `{switch}` when empty. Events `launch.members_may_join_changed`, `launch.member_jobs_enabled_changed`, `launch.minting_enabled_changed` | `STATE_CONFLICT` (`details.blockers` non-empty), `UNPROCESSABLE` (`no_change`) | req | - | `A-W` |
+
+**Behavior when the rule stops holding** [D]: reopening a required gate item, or dropping below `launch.min_approved_services`, raises a `critical` alarm of category `launch` (kind `launch.rule_broken`); it does not flip a switch by itself, because an automatic flip in the middle of members' sessions is a surprise and the operator already has the immediate `value = false` path and the kill switches (15.28). New work is blocked separately by service and template state.
+
+### 15.27.4 Feature flags
+
+Feature flags (`ff.*`, S0 0.8.5) change behavior, never rules or money. Flags the platform ships: `ff.channel.human_review`, `ff.growth.v1_fast_path`, `ff.growth.v2_live_counter`, `ff.growth.v3_share_card`, `ff.growth.v4_trial_job`, `ff.growth.v5_referral`, `ff.growth.v6_milestones`, `ff.public.ledger_page`, `ff.experiment.expiry_arm`.
+
+| op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `listFeatureFlags` | `GET /v1/admin/feature-flags` | `admin` `perm.flag.read` | - | list of `{flag_key, enabled, exposure_ppm, experiment_id, row_version, changed_at}` | - | n/a | - | `A-R` |
+| `getFeatureFlag` | `GET /v1/admin/feature-flags/{flag_key}` | `admin` `perm.flag.read` | - | flag, `ETag` | `NOT_FOUND` | n/a | - | `A-R` |
+| `updateFeatureFlag` | `PATCH /v1/admin/feature-flags/{flag_key}` | `admin` `SU` `perm.flag.edit` | `{enabled?, exposure_ppm? (0..1,000,000), reason}`; `If-Match` | 200 flag; event `feature_flag.changed`; a public change-log entry of kind `feature_flag` when the flag is member-visible | `STATE_CONFLICT` (`experiment_running`: `exposure_ppm` and `enabled` of a flag bound to a running experiment cannot be changed; stop the experiment), `UNPROCESSABLE` (`prereg_required` for `ff.experiment.expiry_arm`, 15.32.2), `PRECONDITION_FAILED` | req | - | - | `A-W` |
+
+Disabling a flag is tightening and takes effect at once; enabling takes effect at once as well, because a flag is not a rule. A flag is never the only guard of a safety property [D].
