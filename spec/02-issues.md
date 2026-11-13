@@ -64,4 +64,31 @@
 | `ISS-37` | minor | none | The cell instruction's issue numbering collides with S0.4 | applied | S1 |
 | `ISS-38` | minor | none | S0 has no id scheme for assumptions and open decisions | proposed | 2.6 |
 
-Counts: 9 part-0 issues, 2 blocking, 18 major in total across both groups, 14 minor in total; the rows above are the whole register. [D]
+Counts: 35 issues in all: 2 `blocking`, 22 `major`, 11 `minor`. Part 0 contributes 9 (5 major, 4 minor); this part contributes 26 (2 blocking, 17 major, 7 minor). [D]
+
+## 2.3 Issues consolidated from S0 (`ISS-01`..`ISS-09`)
+
+These nine were raised while fixing the shared vocabulary. Their resolutions are already in S0 and are kept as they are. The last column records what this register adds, so a part reading only S0 does not miss it. [D]
+
+| id | Resolution in force (S0) | Applied in | What this register adds |
+| --- | --- | --- | --- |
+| `ISS-01` | Build milestones are `BM0`..`BM9`; `M0`..`M2` stay service requirements (S0.12) | S17.*, every part | Nothing |
+| `ISS-02` | Every gating flag is phrased as a permission; risk flags are `info.*` and never gate (S0.8.3) | S7.*, S14.* | `ISS-23` shows the flag list still does not cover every G0 question |
+| `ISS-03` | Every accepted Commons cell of any `cell_kind` mints 1,000,000 `ucr` and counts against `mint.monthly_cap_credits`; the Commons verification share is published | S6.*, S8.*, S13.* | `ISS-15` adds the lease-time headroom rule so a capped period never leaves accepted work unpaid; `ISS-21` applies the rule to review cells |
+| `ISS-04` | v is stored in ppm and rounded up; the pool is `floor(pool / 10^6)` cells; the remainder is refunded | S6.* | `ISS-16` makes the pool a hard budget and says what happens when verification needs more |
+| `ISS-05` | `rework` is a replacement cell created by `cell.overturned`, paid from the pool, counted in v | S5.*, S6.*, S8.* | `ISS-17` says what happens to the credit already paid for the overturned cell |
+| `ISS-06` | Referral bonuses are `grant` entries from the Reserve, never `mint` | S6.*, S12.* | `ISS-19` says how the Reserve is first funded, which both grants and bonuses depend on |
+| `ISS-07` | A refund restores consumed lots with their original expiry; a restored lot past expiry moves to the Reserve at the next sweep | S6.* | Read as set out below; reservations follow the same rule |
+| `ISS-08` | Entry type `reserve_donation`, `member` to `reserve`, oldest lots first | S6.*, S10.* | `ISS-19` says when founders can use it |
+| `ISS-09` | Donors are paid per accepted cell at acceptance; settlement posts only levy and refund and leaves the escrow at zero | S6.*, S9.* | `ISS-27` says what is paid when a policy change voids work that was already submitted |
+
+**Reading of `ISS-07` applied by this spec [A].** The S0 wording “escrow neither extends nor stops expiry” can be read two ways: that lots inside an escrow keep expiring, or that a lot is not extended by having been escrowed. This spec applies the second reading, because the first would shrink an escrow that is already priced and quoted: [D]
+
+1. Credit consumed into an escrow has left the member's lots (S0.8.5, `escrow_hold`). While it is held it cannot expire.
+2. Donors paid from the escrow receive new lots dated from the payout. No lot's expiry is extended.
+3. A refund restores the unspent part with its original `expires_at`. If that date has passed, the lot moves to the Reserve at the next `expire` sweep.
+4. A reservation (`Reservation`, held up to `reservation.max_horizon_days`) follows the same rule. Booking early with credit close to expiry, then cancelling late, therefore returns that credit to the Reserve and not to the member.
+
+| Check | Given | When | Then |
+| --- | --- | --- | --- |
+| `ISS-07` reading, to be written as an `AC-ledger-nn` in S6.* | A lot of 10 credits expires in 5 days and is consumed into a reservation | The reservation is cancelled on day 10 | The refund restores the lot with the original expiry; the next sweep posts an `expire` entry of 10 credits to the Reserve; all `INV-L*` checks pass |
