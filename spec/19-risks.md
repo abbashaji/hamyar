@@ -213,3 +213,72 @@ Each item is a question, never a conclusion. This specification does not answer 
 
 - Counsel in the operator's jurisdiction may not be able to advise on the law that applies to members in Iran or on personal risk there. That part sits in the G1 threat model with someone qualified to advise (`OD-09`) and is not assumed to be covered by `CQ-04` or `CQ-09`. [V]
 - The platform says "declared", never "guaranteed", in every promise (FD Principle 11); a counsel answer does not change that rule, it only decides what may be declared. [D]
+
+
+## 19.8 Pre-build checklist
+
+Three stages, kept separate because they answer three different questions: what the owner must decide or do before coding starts (19.8.1), before the first member joins (19.8.2), and before any public exposure (19.8.3). A stage is not entered while an item of the previous stage is open, except where `OD-01` records a different choice for stage 1. Ids are stable labels, not an order: the stage tables decide the order, and `CHK-37` sits in stage 2 because the first member needs a named person on call. Each item says what evidence is stored, so the checklist can be loaded as `LaunchGateItem`s (19.6). This checklist reduces named gaps; it does not remove the risks of 19.2 and 19.3 (19.10). [D]
+
+### 19.8.1 Before coding starts
+
+The FD§8.3 exit rule applies to anything beyond a throwaway prototype. Items `CHK-04` to `CHK-06` are what the rule requires; `OD-01` decides whether coding of the full system may start with them open and every `launch.*` switch `false` (`ISS-192`). [D]
+
+| id | Item | Evidence stored as | Owner |
+| --- | --- | --- | --- |
+| `CHK-01` | Write the stop-loss: the condition under which the project stops spending effort, and which of the FD§8.3 fallbacks (i) to (iv) is taken if no service clears G0. The condition is the owner's wording; this spec sets no number (`OD-06`) | A dated owner decision recorded as a `PreRegistration` (`FND`) before any build spend | `owner` |
+| `CHK-02` | G4: read the panel's code and docs/, decide keep, wrap or replace (`OD-07`); record what the review could not determine | `docs/source/panel-review.md`; `LaunchGateItem` of G4 | `owner`, `builder` |
+| `CHK-03` | Inventory the four existing secrets (`PANEL_TOKEN`, `ADMIN_TOKEN`, `GITHUB_TOKEN`, `MCP_AUTH_TOKEN`): where each is stored, who holds it, what it opens. Treat all four as possibly exposed until the review says otherwise; none is reused by the new system, which uses new `secret.*` values only | `LaunchGateItem` of G4 | `owner` |
+| `CHK-04` | G0 start: choose the candidate services; create a `ServiceRegistryEntry` for each in the state that counts as no; save a dated `TermsCopy` (bytes and hash) for each | `ServiceRegistryEntry`, `TermsCopy` | `reviewer`, `owner` |
+| `CHK-05` | G0 answers: record `FlagAnswer`s (a) to (k) for each candidate (`UNV-01` to `UNV-11`); at least one service reaches `approved`, or a fallback of FD§8.3 is documented | `FlagAnswer`s; `LaunchGateItem` of G0 | `reviewer`, `owner`, `counsel` |
+| `CHK-06` | G1: the written threat model for Iranian participants, with decisions on logging and retention (`UNV-36`, `UNV-39`) | Threat-model document (`SEC`); `LaunchGateItem` of G1 | `owner`, person named in `OD-09` |
+| `CHK-07` | Decide `OD-01`: whether the full system is built while `CHK-04` to `CHK-06` are open. If the answer is no, coding stays at the prototype level until they close | Dated owner decision | `owner` |
+| `CHK-08` | Choose counsel and the operator's jurisdiction (`OD-05`); send the question list of 19.7; ask first for the answers that block the first member | The engagement and the list sent | `owner` |
+| `CHK-09` | Name who holds `reviewer` and `operator` at the start; resolve the reviewer arithmetic (`OD-02`, `ISS-196`) | `AdminUser` roster; owner decision | `owner`, `founders` |
+| `CHK-10` | Choose hosting and storage candidates and read their terms; decide that both stay behind interfaces (`OD-08`, `CQ-14`) | Hosting record | `owner` |
+| `CHK-11` | Name check: search for conflicts with existing names and marks for "Hamyar" in the operator's jurisdiction and ask counsel about it and about the words "cooperative" and "bank" (`CQ-07`). Until answered, no public use of those two words | Counsel memo (`CNS`) | `owner`, `counsel` |
+| `CHK-12` | Read S3.* and answer, or explicitly defer, each open decision that blocks `BM0` | Owner decisions in the change log | `owner` |
+
+### 19.8.2 Before the first member
+
+All `launch.*` switches are still `false` while this table is worked through; `launch.members_may_join` is set to `true` only after every item below is signed and the gates that S14.* names are signed off. [D]
+
+| id | Item | Evidence stored as | Owner |
+| --- | --- | --- | --- |
+| `CHK-13` | The member-facing safety and account-risk notice, drafted with someone qualified to advise, shown with an explicit opt-in; it states the G0 findings in plain words and promises minimization, never anonymity (19.10) (`UNV-35`) | `copy.*` keys cleared by human review; counsel memo for `CQ-09`, `CQ-15` | `owner`, `counsel` |
+| `CHK-14` | Reachability test of the actual host from Iran, using a method that does not put the tester at risk (`OD-04`, `ISS-197`) (`UNV-20`) | `LaunchGateItem` of G2 | `owner` |
+| `CHK-15` | G2 on real phones and desktops: prefill and URL limits per service, clipboard flow, copy-and-paste error rate, result return path, Persian right-to-left rendering (`UNV-13` to `UNV-17`) | `CalibrationRecord` (`TEC`); `T-e2e-*` and `T-rtl-*` results | `builder`, `founders` |
+| `CHK-16` | G3 on the founders' own accounts: cells per day per service, seconds per cell, refusal and failure rates, consistency on candidate templates; the cell envelope is defined (`UNV-12`, `UNV-18`) | `CalibrationRecord` (`CAL`) | `founders` |
+| `CHK-17` | G5: interview a handful of target requesters about real large jobs, splittability, sensitivity and accepted windows (`UNV-38`) | Interview notes without personal data (`DEM`) | `founders` |
+| `CHK-18` | The Service Registry holds at least one `approved` service with a saved `TermsCopy` and dated `FlagAnswer`s; every other entry stays in the state that counts as no; `service.review_max_age_days` is set | `ServiceRegistryEntry` records | `reviewer` |
+| `CHK-19` | Three to five Persian templates with automatic checks, each approved by `template.min_reviewers_new` reviewers who are not the author | `TemplateVersion` records | `reviewer` |
+| `CHK-20` | Copy review: every `copy.*` key with the marker `needs_human_and_legal_review` is read by a Persian-fluent human and by someone qualified before it ships; no promise says "guaranteed"; the words "cooperative" and "bank" are absent until `CQ-07` is answered (`UNV-40`) | Review record per key; marker cleared | `reviewer`, `counsel` |
+| `CHK-21` | Replace defaults where a `CAL` or `TEC` measurement exists; check the cross-constraints C1 to C8 on the result | `ParameterVersion`s and change-log entries | `operator`, `founders` |
+| `CHK-22` | Counsel answers needed before the first member: `CQ-01`, `CQ-02`, `CQ-04`, `CQ-06`, `CQ-08`, `CQ-09`, `CQ-10`, `CQ-11`, `CQ-12`, `CQ-14`, `CQ-15` | Counsel memos referenced from the `LaunchGateItem` of G0 and G1 (`CNS`) | `owner`, `counsel` |
+| `CHK-23` | The Phase 1 cohort and event plan: 30 to 50 people, Persian-speaking donors with a mix of requesters, vouched invitations only, a planned large-job event in weeks 3 to 4 (FD§9 Phase 1 setup) | Plan recorded; no personal data in it | `founders` |
+| `CHK-24` | The Commons backlog exists: jobs are written, their content is reviewed against R2 and R3 and against `CQ-11` before seeding, and the founders' Reserve seeding (`reserve_donation`, `ISS-08`) is in place (`RISK-10`, `RISK-26`) | `Job` records; ledger entries | `founders`, `reviewer` |
+| `CHK-25` | Lock the `PreRegistration`: the Phase 1 thresholds, the decision rules (a) to (d) of FD§9 with their values (`OD-11`), and the accelerated-expiry arm assignment, before day 1 | `PreRegistration` (`FND`), then locked | `founders` |
+| `CHK-26` | Ledger and verification readiness: invariants checked on every commit, `T-prop-*` and `AC-ledger-01` pass, adversarial tests `T-adv-*` pass, and all `launch.*` defaults are still `false` | CI results; `InvariantCheck` records | `builder`, `operator` |
+| `CHK-27` | The backup and restore drill (`BM9`) ends with a full invariant recompute that passes | Drill record | `builder`, `operator` |
+| `CHK-28` | Kill-switch drill: engage and release every `kill.*` switch once, with the two-person release (`security.two_person_actions`) | `KillSwitch` history; `AdminAction` | `operator` |
+| `CHK-29` | The consent record: each participant is informed of the account risks found in G0 and opts in explicitly; declining carries no penalty | `OptIn` records | `operator`, `owner` |
+| `CHK-37` | A named on-call person and an incident procedure: who acknowledges an `Alarm`, the escalation interval, who may engage a kill switch, who tells members (`OD-03`, `RISK-34`) | A written procedure; the first `Alarm` acknowledgement exercised in a drill | `owner`, `operator` |
+
+### 19.8.3 Before public exposure
+
+"Public exposure" means any member-facing surface open to people who were not individually invited in Phase 1, such as the open beta, a public counter or a public ledger page (FD§9 Phase 2). [D]
+
+| id | Item | Evidence stored as | Owner |
+| --- | --- | --- | --- |
+| `CHK-30` | Rotate all four existing secrets and every `secret.*` older than `security.secret_rotation_days`; run the rotation drill (`security.rotate_before_public_exposure` = `true`) | Rotation record; `BM9` drill | `owner`, `builder` |
+| `CHK-31` | Evaluate the Phase 1 decision rules (a) to (d) of FD§9 against the locked `PreRegistration`; proceed only if there is no unresolved safety or provider-account incident (rule (c)) | `MetricSnapshot`s; an explicit owner decision memo | `founders`, `owner` |
+| `CHK-32` | Review each public surface (live counter, public ledger and parameter page, change log, provenance export) for personal data: `analytics.min_cohort_k` applies, `public.location_display` is `never`, no third-party tracker | Review record per surface | `operator`, `reviewer` |
+| `CHK-33` | Counsel answers for the Phase 2 features: `CQ-03`, `CQ-05`, `CQ-07`; each `ff.growth.*` flag is turned on only after its answer, one at a time | Counsel memos (`CNS`); `FeatureFlag` history | `owner`, `counsel` |
+| `CHK-34` | An independent adversarial review of authentication, leasing, the result return path and the ledger by someone who did not build them | Review report | `owner` |
+| `CHK-35` | The exposure build passes `T-adv-*`, `T-inj-*`, `T-rtl-*` and `T-load-*`; low-bandwidth tests included | CI results | `builder` |
+| `CHK-36` | A Commons sponsor or an equivalent source of Commons jobs (`OD-10`; FD§9 Phase 2 exit) | A recorded commitment | `owner`, `founders` |
+| `CHK-38` | The incident and disclosure procedures are rehearsed once, including a legal demand for member data, with the answer to `CQ-10` in hand | Rehearsal record | `operator`, `counsel` |
+| `CHK-39` | The public abuse path works: report, takedown, ban and appeal (`report.triage_sla_days`, `appeal.window_days`); a third reviewer is in place or `OD-02` records the alternative | Test records; `AdminUser` roster | `operator`, `reviewer` |
+| `CHK-40` | Every `approved` service has been re-reviewed within `service.review_max_age_days` of the day of exposure | `TermsCopy` and `FlagAnswer` dates | `reviewer` |
+| `CHK-41` | Reachability of the public host from Iran is tested again, and a move to another host is rehearsed from a backup (`TRIP-16`) | `LaunchGateItem` of G2; drill record | `owner`, `builder` |
+| `CHK-42` | Persian and English copy and the member-facing notice are read again after the Phase 1 incidents, and any public message is checked against FD Principle 8 (`RISK-32`) | Review record | `founders`, `reviewer` |
+| `CHK-43` | The owner's Phase 2 decision memo: what is being exposed, to whom, with which `ff.growth.*` flags on, and which stop conditions apply (`TRIP-13`, `TRIP-14`) | Decision memo in the change log | `owner` |
