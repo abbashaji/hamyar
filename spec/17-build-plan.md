@@ -995,3 +995,65 @@ FD§10 rests on the panel README only [V]. Its eleven additions are a priority l
 **Two cautions of FD§10** [V]: reachability of the Worker host from Iran is measured with the probe (`BM0`, gate `G2`), and every host dependency sits behind a port (`BM0`; host bindings in `BM9`, `AC-bm9-15`); prefill support differs by provider, so the adapter capability object of `BM3` makes copy-only the safe default (`AC-bm3-10`, `AC-bm8-03`).
 
 **Traceability.** The tables of 17.10 and 17.12 are mirrored in `ci/trace/scope-coverage.yaml`; the check is `AC-bm9-18`. Each milestone's closer updates the file when a row's test id is added (`BR10`). [A]
+
+## 17.11 Phase 1 as a configuration of the finished system
+
+Phase 1 (FD§9: closed pilot, no money) is the finished system (`BM9`) plus parameter values, flags, operator-authored data and human processes. There is no pilot branch of the code, no phase constant and no pilot-size constant (S0.12 rule 4; `BR7`; `AC-bm9-16`). Every value below is an `initial configurable default` of S0.10.6 or a decision left to the founders (`FND`). [D]
+
+### 17.11.1 Mechanism
+
+1. Parameter values change only through the editor of `BM2` (`AdminAction`, `ParameterVersion`, `ChangeLogEntry`). A loosening needs a second operator and `change.notice_days_default` (`change.notice_days_price` for `price.*`, `admission.*`, `credit.*`), so the Phase 1 plan is applied early; no value is edited in the database.
+2. Flags flip through the admin flag control, logged. Operator data (invites, Commons jobs, template approvals, registry entries) is entered through the console.
+3. Human processes (counsel, interviews, copy review, Phase 0) are outside the system and leave evidence on gate items.
+4. The plan is the runbook `docs/runbooks/phase1-configuration.md` (owned by `WP-BM9-07`); it lists exactly the rows of 17.11.2. A change outside it needs a spec change. [A]
+
+### 17.11.2 Levers by FD§9 Phase 1 element
+
+| FD§9 Phase 1 element | Lever | Value or action | Provided by | Note |
+| --- | --- | --- | --- | --- |
+| 30 to 50 people for 30 days | Operator-issued root invites; `invite.max_active_per_member`; `invite.tree_max_members` (50) | Founders issue root invites to the pilot group; no total-member parameter exists (`ISS-179`) | `BM4` | Size is held by invite supply only if `S10.*` makes an invite required for member creation [V]; the 30 days are the founders' observation period, not a system value |
+| Persian-speaking donors, a mix of requesters | `i18n.default_locale` (`fa`); roles Donor and Requester of the permission matrix | Default `fa`; a member may hold both roles [A] | `BM4`, `BM8` | Who is invited is a human choice |
+| The Phase 0 templates | The five seeded `draft` templates (and `human_review`, unused) | Each approved through the review machine by `template.min_reviewers_new` (2) reviewers; no seed approves one | `BM5` | `ff.channel.human_review` stays off |
+| One size class | `size_class` and `deadline_class` have the single value `standard`; `admission.deadline_multiplier_standard` is 1.0 | No action | `BM7` (S0.8.6) | `admission.max_job_cells` (300) and `credit.member_cap_credits` (350) are replaced by `DEM` |
+| A Commons backlog | Operator-authored Commons jobs, screened and split into queued cells | At least `mint.monthly_cap_credits` cells (initial configurable default 4,800) if the cap, not the backlog, is to bind; verification cells also draw from it and also mint (`ISS-03`) | `BM5` | Content is a human choice and must pass `R1`..`R10` |
+| A planned large-job event in weeks 3 and 4, plus organic requests | `launch.member_jobs_enabled`; `admission.*`; `credit.member_cap_credits`; the reference job of S0.6.1 | Switch order in 17.11.3; three trial large jobs for decision rule (a) | `BM7` | 17.11.4 says what a 240-cell job needs |
+| Accelerated-expiry arm for part of the group | `ff.experiment.expiry_arm` on; `experiment.expiry_arm.fraction` (0.50); `credit.lifetime_days` (60); `credit.lifetime_days_accelerated` (14) | Turn the flag on before the first member joins; the arm is assigned at creation and logged [A] | `BM2` (assignment), `BM4` (hook), `BM6` (lot resolver), `BM9` (analysis) | 15 to 25 members per arm at 30 to 50 members; the comparison is descriptive, with no power claim [H] |
+| Participants informed of the G0 account risks and opting in explicitly | Required opt-in screen and notices in `fa` and `en` | Copy reviewed by a Persian reader and by counsel before use [V] | `BM8` (`AC-bm8-17`) | No contribution before acceptance |
+| Thresholds pre-registered before day 1 | `PreRegistration` lock; `price.eta_alarm_threshold`; `verify.false_accept_alarm`; `verify.false_reject_alarm`; `inflation.claim_ratio_threshold_weeks` | Founders enter and lock thresholds and decision rules (a) to (d). The eta threshold and the week-2 return bar are set only by the founders: no default is supplied (`ISS-179`) | `BM2`, `BM9` (`AC-bm9-10`) | The launch rule refuses `launch.members_may_join` while unlocked |
+| The Phase 1 measures | Rollups and queries | The table of 17.6 `BM9` | `BM9` | Interviews are outside the system |
+| Everything FD§9 places in Phase 2 | `ff.growth.v1_fast_path`..`v6_milestones`, `ff.channel.human_review`, `ff.job.reservations`, `ff.public.ledger_page` | Stay off [A]: FD§9 lists none of them for Phase 1 | `BM6`..`BM8` | Off is the default, so no action |
+| Gates | `launch.required_gate_ids` (`G0`, `G1`); `launch.min_approved_services` (1); `launch.min_signoffs` (2) | Founders decide whether to require `G2`..`G5` as well (`FND`); considering `G2` and `G3` is advised because Phase 1 relies on them [A] | `BM2` | The rule is `S14.*` |
+
+### 17.11.3 Day-1 readiness and switch order
+
+None of this authorizes a launch; each switch flips only through the sign-off flow (S0.12 rule 6). [D]
+
+1. Gates required by `launch.required_gate_ids` are signed by `launch.min_signoffs` distinct admins on real evidence; at least `launch.min_approved_services` real services are `approved` with saved terms copies [V].
+2. Templates approved (17.11.2); Commons backlog authored and screened; pre-registration locked.
+3. Exposure preconditions `E1`..`E5` (17.5.2) recorded; the Phase 1 plan applied and its notice periods elapsed.
+4. The Reserve is seeded by `reserve_donation` from the founders' own verified Commons work (`ISS-08`) so that starter grants are not paused (17.11.4, check 6).
+5. Order of switches [A]: `launch.members_may_join` and `launch.minting_enabled` first, so week-1 contributors earn credit; `launch.member_jobs_enabled` when the founders start requests, planned before weeks 3 and 4 so that the first trial jobs have funded requesters.
+
+### 17.11.4 Pilot planning checks
+
+Scripted in the staging suite (`AC-bm9-17`); the figures are for the initial configurable defaults and the donor rate of the FD§3.3 example, 8 cells a day per donor, which is a hypothesis [H] replaced by `CAL`. The script prints warnings and never edits a parameter. [D]
+
+| # | Check | Derivation | Reads as |
+| --- | --- | --- | --- |
+| 1 | Reference job | N = 240, price 1.15 per cell: escrow 276 credits, 264 committed cells, levy 12, donor payout 264 (S0.6.1, `AC-bm7-02`) | The job the event is sized on |
+| 2 | Cap versus escrow | `credit.member_cap_credits` x `trust.cap_multiplier.<tier>`: `new` 175, `established` 350, `trusted` 525, `restricted` 87.5; the job needs 276; `C8`: 350 >= 300 x 1.15 = 345 holds | A `new` member cannot hold the price of the reference job; requesters of large jobs must be `established` (10 accepted cells and reliability 0.80) |
+| 3 | Time to earn the escrow | 276 credits at 1 credit per accepted cell and `mint.per_member_daily_cap_credits` 30: ceil(276 / 30) = 10 days at best; at the FD§3.2 habit of about 10 cells a day: 28 days | Inside the 60-day lifetime |
+| 4 | Same, accelerated arm | Oldest-first expiry after 14 days, so 276 must be earned inside 14 days: 276 / 14 = 19.7, at least 20 cells a day; 10 cells a day gives 140 | An accelerated-arm member with the habit of 10 cells a day cannot fund the reference job alone [H]; plan requesters accordingly |
+| 5 | Mint cap | 4,800 / 30 = 160 credits a day on average. Commons share at phi 0.5: 30 donors 120 a day (3,600 a month, cap never binds); 40 donors 160 (4,800, binds at month end); 50 donors 200 (binds from day 24); alarm at 0.90 x 4,800 = 4,320 | The cap binds only above about 40 donors at 8 cells a day |
+| 6 | Reserve and starter grants | G = 3 credits, 50 members: 150 credits, below `reserve.ceiling_credits` (1,000); the Reserve starts at 0 and grants pause at `grant.reserve_floor_credits` (0) | Seed the Reserve by `reserve_donation` of at least 3 credits per expected newcomer |
+| 7 | Quote windows | Capacity open to member jobs per day = donors x 8 x phi: 30 donors 120, 40 donors 160, 50 donors 200. 264 committed cells need 2.2, 1.65 and 1.32 days; two reference jobs (528 cells) at 30 donors 4.4 days; three (792 cells) 6.6 days at 30 donors and 3.96 at 50 | The three trial jobs compete for one capacity share; windows beyond the 2 days of the FD§3.3 example are expected at 30 donors; `admission.forecast_haircut` is 0.00 by default and is expected to rise [H] |
+| 8 | Cross-parameter constraints | `C1`..`C8` evaluated on the live values | Any failure is shown before day 1 |
+
+### 17.11.5 Phases 0, 2 and 3
+
+| Phase | Configuration | System change |
+| --- | --- | --- |
+| 0 (FD§9) | Founders record `CalibrationRecord`s on their own accounts (`BM2`) and edit parameters citing them (`AC-bm2-10`); runs concurrently with `BM3`..`BM9` (17.2) | None |
+| 2 open beta | Flip `ff.growth.v1_fast_path`..`v6_milestones` (V2 to V5 as randomized tests, logged), `ff.channel.human_review`, `ff.job.reservations`, `ff.public.ledger_page`; widen `launch.required_gate_ids` if the founders decide; a Commons sponsor is a human process | None: flags and parameters through the editor |
+| 2, not in scope A to K | Small conditional rewards (FD§9 Phase 2, conditions of FD§6.3) and the parked test of combining several answers have no milestone [A] | A separate decision memo and a spec change would be needed [V] |
+| 3 marketplace and money | Not scheduled (FD§9). Entry needs the payment and legal answers of `G0` and a decision memo | No payment code exists in `BM0`..`BM9`; `BR9` and the scans keep it out |
