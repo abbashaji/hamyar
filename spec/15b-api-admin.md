@@ -789,3 +789,157 @@ Response of both: `{verdict (match, mismatch, unknown), manifest_hash, recorded:
 | `unknown` | No stored manifest has this hash and the manifest names none we hold | `null` | empty |
 
 `lookupManifestHash` can only answer `match` or `unknown`. `limits_copy_key` points at fixed text that MUST be shown next to any positive result (S11.*): a match proves that the document equals what the platform recorded; it does not prove which service or model produced the work (that is volunteer-attested), it is not a legal certificate, and the no-training flag is a contractual statement, not a technical lock (FD§5.6, Principle 3). Size is capped by `api.max_body_bytes`; the check never calls any other server [D].
+
+## 15.34 Event model
+
+A domain event records one state change. This section lists them all with payload, producer and consumers, consistent with the names of S0 0.9. Component names are the ones this file uses; S4.* owns the deployment and may rename them without changing an event (`ISS-156`) [A].
+
+### 15.34.1 Envelope and delivery [D]
+
+Every event has this envelope; the catalog below lists only the payload.
+
+| Field | Type | Rule |
+| --- | --- | --- |
+| `event_id` | id | `evt_` + ULID [A]; the idempotency key of every consumer |
+| `name` | string | `<entity>.<past_participle>` (S0 0.9.1) |
+| `event_version` | int | Starts at 1; a payload change that removes or renames a field increments it, an added optional field does not |
+| `occurred_at` | timestamp | UTC, set by the producer inside the transaction |
+| `actor` | object | `{principal_type (anonymous, member, admin, system), id}`; `id` is an opaque `mem_`, `adm_` or component name; never a name or address |
+| `aggregate_type`, `aggregate_id`, `aggregate_seq` | string, id, int | The entity that changed and its per-aggregate sequence number (starts at 1, no gaps) |
+| `policy_version_id` | id or null | The policy in force at that moment |
+| `config_epoch` | int | A global counter that increments every time a `ParameterVersion` becomes effective or a `PolicyVersion` becomes active; together with the history tables it answers "which parameter values were in force" without copying all of them into every event (convention addition, `ISS-154`) |
+| `request_id` | id or null | The `req_` that caused it, if any |
+
+- **Outbox** (S0 0.9.1): the event row is written in the same database transaction as the state change; a relay publishes it afterwards. A state change without its event, or an event without its state change, cannot exist.
+- **Delivery** is at least once. Consumers are idempotent on `event_id`. Order is guaranteed only per aggregate (by `aggregate_seq`); no consumer may assume order across aggregates. An event never carries personal data, message text, prompts, outputs or terms-page content, only ids, enums, counts, hashes and parameter names.
+- **Rejections are not events.** A request refused by a guard changes nothing and emits nothing (S0 0.9.1). The `AdminAction` log, not the event log, records refused admin attempts only when they fail for authorization reasons [A].
+- **Replay.** A new consumer is rebuilt by replaying the outbox from `aggregate_seq` 1; no consumer reads another consumer's table.
+
+**Components** [A]: `api` (request handlers), `job_svc`, `cell_svc` (cells, leases, submissions), `verify_svc` (checks, audits, reliability), `ledger_svc`, `policy_svc`, `registry_svc` (services, terms copies, flags), `template_svc`, `identity_svc` (members, sessions, appeals, reports), `config_svc` (parameters, change log, launch, kill switches, flags, pre-registrations, experiments), `admin_svc` (admins, approvals, action log), `scheduler` (timers), `metrics_svc`, `public_proj` (public read models and caches), `inbox_proj` (member inbox), `analytics` (aggregate counters, no personal data).
+
+### 15.34.2 Catalog: job, cell, lease, submission
+
+| Event | Payload (besides envelope) | Producer | Consumers |
+| --- | --- | --- | --- |
+| `job.created` | `job_id`, `requester_member_id`, `job_type`, `template_version_id` | `job_svc` | `analytics` |
+| `job.submitted` | `job_id`, `size_cells` | `job_svc` | `policy_svc` |
+| `job.policy_rejected` | `job_id`, `reason_codes` | `policy_svc` | `inbox_proj`, `analytics` |
+| `job.policy_passed` | `job_id`, `policy_version_id`, `quote_id` | `policy_svc` | `job_svc` |
+| `job.quote_expired` | `job_id`, `quote_id` | `scheduler` | `inbox_proj` |
+| `job.waitlisted` | `job_id`, `waitlist_entry_id`, `position` | `job_svc` | `inbox_proj`, `metrics_svc` |
+| `job.waitlist_released` | `job_id`, `waitlist_entry_id` | `scheduler` | `job_svc`, `inbox_proj` |
+| `job.waitlist_expired` | `job_id`, `waitlist_entry_id` | `scheduler` | `inbox_proj` |
+| `job.escrow_confirmed` | `job_id`, `escrow_id`, `amount_ucr` | `ledger_svc` | `job_svc`, `cell_svc` |
+| `job.started` | `job_id`, `first_cell_id` | `cell_svc` | `metrics_svc` |
+| `job.paused` | `job_id`, `cause (kill_switch, template, service, policy_tightening)`, `ref_id` | `job_svc` | `cell_svc`, `inbox_proj` |
+| `job.resumed` | `job_id` | `job_svc` | `cell_svc` |
+| `job.all_cells_accepted` | `job_id`, `cells_total` | `cell_svc` | `job_svc` |
+| `job.assembled` | `job_id`, `deliverable_id`, `manifest_id` | `job_svc` | `ledger_svc`, `public_proj` |
+| `job.stop_requested` | `job_id`, `closure_reason (policy_stopped, service_revoked, template_retired, operator_killed, overrun_timeout)` | `job_svc`, `config_svc` | `cell_svc`, `ledger_svc` |
+| `job.settled` | `job_id`, `levy_ucr`, `refund_ucr` | `ledger_svc` | `job_svc`, `inbox_proj`, `metrics_svc` |
+| `job.settled_partial` | `job_id`, `accepted_cells`, `refund_ucr` | `ledger_svc` | `job_svc`, `inbox_proj`, `metrics_svc` |
+| `job.cancel_requested` | `job_id` | `job_svc` | `cell_svc`, `ledger_svc` |
+| `job.cancel_settled` | `job_id`, `refund_ucr` | `ledger_svc` | `job_svc`, `inbox_proj` |
+| `cell.created` | `cell_id`, `job_id`, `kind`, `attempt` | `cell_svc` | `verify_svc` |
+| `cell.leased` | `cell_id`, `lease_id`, `member_id` | `cell_svc` | `metrics_svc` |
+| `cell.submitted` | `cell_id`, `submission_id` | `cell_svc` | `verify_svc` |
+| `cell.lease_expired` | `cell_id`, `lease_id` | `scheduler` | `cell_svc` |
+| `cell.declined` | `cell_id`, `lease_id` | `cell_svc` | `metrics_svc` |
+| `cell.checks_passed` | `cell_id`, `submission_id`, `method` | `verify_svc` | `cell_svc`, `ledger_svc` |
+| `cell.flagged_for_audit` | `cell_id`, `audit_id`, `reason` | `verify_svc` | `verify_svc` |
+| `cell.checks_failed` | `cell_id`, `submission_id`, `reject_reason` | `verify_svc` | `cell_svc`, `identity_svc` |
+| `cell.audit_passed` | `cell_id`, `audit_id` | `verify_svc` | `ledger_svc`, `cell_svc` |
+| `cell.audit_failed` | `cell_id`, `audit_id` | `verify_svc` | `cell_svc`, `identity_svc` |
+| `cell.requeued` | `cell_id`, `attempt` | `cell_svc` | `metrics_svc` |
+| `cell.attempts_exhausted` | `cell_id`, `job_id` | `cell_svc` | `job_svc` |
+| `cell.paused`, `cell.resumed` | `cell_id`, `cause` | `cell_svc` | `metrics_svc` |
+| `cell.cancelled` | `cell_id`, `job_id` | `cell_svc` | `ledger_svc` |
+| `cell.voided` | `cell_id`, `cause (service_revoked, policy_stop, integrity_finding)` | `cell_svc` | `ledger_svc`, `job_svc` |
+| `cell.overturned` | `cell_id`, `via (appeal, fraud_finding)`, `rework_cell_id` | `verify_svc` | `ledger_svc`, `cell_svc` |
+| `lease.issued`, `lease.submission_received`, `lease.expired`, `lease.released`, `lease.revoked` | `lease_id`, `cell_id`, `member_id` | `cell_svc` | `metrics_svc` (`lease.revoked` also `inbox_proj`) |
+| `submission.received`, `submission.schema_failed`, `submission.checks_passed`, `submission.checks_failed`, `submission.quarantined`, `submission.accepted`, `submission.rejected`, `submission.released_from_quarantine` | `submission_id`, `cell_id`, `reason_code?` | `cell_svc`, `verify_svc` | `verify_svc`, `inbox_proj` (rejections), `metrics_svc` |
+
+### 15.34.3 Catalog: member, template, service, appeal, audit, escrow, reservation, report
+
+| Event | Payload (besides envelope) | Producer | Consumers |
+| --- | --- | --- | --- |
+| `member.created` | `member_id`, `invite_id?` | `identity_svc` | `ledger_svc`, `analytics` |
+| `member.tier_promoted`, `member.tier_demoted` | `member_id`, `from_tier`, `to_tier` | `identity_svc` | `verify_svc`, `inbox_proj` |
+| `member.restricted`, `member.restriction_lifted` | `member_id`, `reason_code`, `action_id` | `admin_svc` or `identity_svc` (automatic on `trust.restrict_after_gold_fails`) | `verify_svc`, `inbox_proj` |
+| `member.suspended`, `member.reinstated`, `member.banned` | `member_id`, `reason_code`, `action_id`, `approval_id?` | `admin_svc` | `cell_svc` (revoke leases), `identity_svc` (revoke sessions), `inbox_proj` |
+| `member.closed` | `member_id`, `cause (member, inactivity)` | `identity_svc` | `ledger_svc` |
+| `member.key_rotated`, `member.device_linked`, `member.recovered`, `member.optin_changed` | `member_id` | `identity_svc` | `analytics` (`member.optin_changed` also `cell_svc`) |
+| `template.version_created` | `template_id`, `template_version_id`, `version` | `template_svc` | `analytics` |
+| `template.review_requested` | `template_version_id`, `required_approvals` | `template_svc` | `inbox_proj` (reviewers) |
+| `template.first_approved` | `template_version_id`, `admin_id`, `final (bool)` | `template_svc` | `public_proj` when `final` |
+| `template.second_approved` | `template_version_id`, `admin_id` | `template_svc` | `public_proj`, `job_svc` |
+| `template.changes_requested`, `template.rejected` | `template_version_id`, `admin_id`, `review_id` | `template_svc` | `inbox_proj` |
+| `template.paused`, `template.resumed` | `template_id`, `switch_key` | `config_svc` | `job_svc`, `cell_svc`, `public_proj` |
+| `template.retired` | `template_version_id`, `reason_code` | `template_svc` | `job_svc`, `public_proj` |
+| `service.created` | `service_id` | `registry_svc` | `analytics` |
+| `service.terms_copy_sealed` | `service_id`, `terms_copy_id`, `sha256` | `registry_svc` | (audit only) |
+| `service.flags_recorded` | `service_id`, `terms_copy_id`, `flag_keys` | `registry_svc` | (audit only) |
+| `service.review_started`, `service.rejected` | `service_id` | `registry_svc` | `public_proj` |
+| `service.approved` | `service_id`, `terms_copy_id`, `approved_by` | `registry_svc` | `public_proj`, `policy_svc`, `config_svc` (launch rule) |
+| `service.review_due`, `service.review_lapsed` | `service_id` | `scheduler` | `registry_svc`, `job_svc` |
+| `service.suspended`, `service.resumed` | `service_id`, `switch_key` | `config_svc` | `job_svc`, `cell_svc`, `public_proj` |
+| `service.revoked` | `service_id`, `reason_code`, `affected_open_jobs` | `registry_svc` | `job_svc`, `cell_svc`, `ledger_svc`, `public_proj`, `config_svc` |
+| `appeal.filed` | `appeal_id`, `kind`, `subject_ref` | `identity_svc` | `inbox_proj` (reviewers) |
+| `appeal.assigned`, `appeal.reassigned`, `appeal.review_started`, `appeal.second_review_requested` | `appeal_id`, `admin_id` | `admin_svc` | (audit only) |
+| `appeal.upheld`, `appeal.overturned` | `appeal_id`, `kind`, `subject_ref`, `decision_count` | `admin_svc` | `identity_svc`, `verify_svc`, `template_svc`, `ledger_svc` (per `kind`), `inbox_proj` |
+| `appeal.withdrawn` | `appeal_id` | `identity_svc` | (audit only) |
+| `audit.created`, `audit.second_submitted`, `audit.matched`, `audit.mismatched`, `audit.third_requested`, `audit.third_submitted` | `audit_id`, `cell_id` | `verify_svc` | `verify_svc`, `metrics_svc` |
+| `audit.resolved`, `audit.cancelled` | `audit_id`, `cell_id`, `verdict?`, `actor` | `verify_svc` or `admin_svc` | `cell_svc`, `ledger_svc`, `identity_svc` |
+| `escrow.opened`, `escrow.settling_started`, `escrow.closed` | `escrow_id`, `job_id` or `reservation_id` | `ledger_svc` | `job_svc` |
+| `reservation.held`, `reservation.activated`, `reservation.cancelled`, `reservation.expired` | `reservation_id`, `member_id`, `window_start` | `job_svc` | `ledger_svc`, `metrics_svc` |
+| `report.filed` | `report_id`, `category`, `subject_ref` | `identity_svc` | `config_svc` (template autopause counter) |
+| `report.triaged`, `report.actioned`, `report.dismissed` | `report_id`, `action_ids?` | `admin_svc` | `inbox_proj` |
+
+### 15.34.4 Catalog: ledger, configuration, launch, kill switches
+
+| Event | Payload (besides envelope) | Producer | Consumers |
+| --- | --- | --- | --- |
+| `ledger.entry_committed` | `entry_id`, `seq`, `txn_id`, `entry_type`, `amount_ucr`, `entry_hash` | `ledger_svc` | `public_proj`, `metrics_svc` |
+| `ledger.invariants_passed` | `check_ids`, `ran_at` | `ledger_svc` | `public_proj`, `config_svc` (launch rule) |
+| `ledger.invariant_violated` | `check_id`, `invariant_id`, `severity` | `ledger_svc` | `config_svc` (freeze per 15.28.3), `admin_svc` (alarm) |
+| `parameter.changed` | `parameter_name`, `parameter_version_id`, `version`, `change_class`, `effective_from`, `changelog_entry_id` | `config_svc` | `public_proj`, `analytics` |
+| `parameter.activated` | `parameter_name`, `parameter_version_id`, `config_epoch` | `scheduler` | every component that caches parameters |
+| `parameter.change_withdrawn` | `parameter_name`, `parameter_version_id` | `config_svc` | `public_proj` |
+| `policy.version_published` | `policy_id`, `policy_version_id`, `version`, `change_class`, `effective_from` | `policy_svc` | `public_proj` |
+| `policy.version_activated` | `policy_id`, `policy_version_id`, `change_class` | `policy_svc` (at once for `tighten`, `scheduler` for `loosen`) | `job_svc` (R9 pause), `cell_svc`, `public_proj` |
+| `policy.version_cancelled` | `policy_version_id` | `policy_svc` | `public_proj` |
+| `changelog.entry_published` | `changelog_entry_id`, `kind`, `change_class`, `subject` | `config_svc` | `public_proj`, `admin_svc` (explanation timer) |
+| `feature_flag.changed` | `flag_key`, `enabled`, `exposure_ppm` | `config_svc` | `public_proj`, `analytics` |
+| `launch.members_may_join_changed`, `launch.member_jobs_enabled_changed`, `launch.minting_enabled_changed` | `value`, `approval_id?` | `config_svc` | `identity_svc`, `job_svc`, `ledger_svc`, `public_proj` |
+| `gate.evidence_attached`, `gate.signed_off`, `gate.reopened` | `item_id`, `gate_id`, `admin_id?` | `config_svc` | `admin_svc` (launch status; `gate.reopened` raises the `launch.rule_broken` alarm when a switch is on) |
+| `killswitch.engaged` | `switch_key`, `reason_code`, `linked_alarm_id?` | `config_svc` | per 15.28.1 |
+| `killswitch.released` | `switch_key`, `approval_id` | `config_svc` | per 15.28.1 |
+| `preregistration.locked` | `prereg_id`, `content_hash`, `approval_id` | `config_svc` | `public_proj` |
+| `experiment.started`, `experiment.stopped` | `experiment_id`, `flag_key`, `seed_version` | `config_svc` | `analytics`, `identity_svc` (assignments) |
+| `calibration.recorded` | `calibration_id`, `service_id` | `admin_svc` | (audit only) |
+| `milestone.published` | `milestone_id`, `key` | `config_svc` | `public_proj` |
+| `sharecard.created`, `sharecard.revoked` | `share_card_id` (not the token) | `api` | `public_proj` |
+| `sharecard.viewed` | `share_card_id`, `date` | `public_proj` | `analytics` |
+| `alarm.raised` | `alarm_id`, `category`, `kind`, `severity` | any component | `admin_svc` |
+| `alarm.acknowledged` | `alarm_id`, `admin_id` | `admin_svc` | (audit only) |
+
+### 15.34.5 Catalog: admin and timers
+
+| Event | Payload (besides envelope) | Producer | Consumers |
+| --- | --- | --- | --- |
+| `admin.session_started`, `admin.session_ended` | `admin_id`, `session_id` | `admin_svc` | `analytics` (counts only) |
+| `admin.step_up_verified` | `admin_id`, `op` | `admin_svc` | (audit only) |
+| `admin.user_enrolled`, `admin.user_deactivated`, `admin.roles_changed`, `admin.credential_added`, `admin.credential_removed` | `admin_id`, `by_admin_id` | `admin_svc` | (audit only) |
+| `admin.approval_requested`, `admin.approval_granted`, `admin.approval_rejected`, `admin.approval_withdrawn`, `admin.approval_expired`, `admin.approval_failed` | `approval_id`, `action_name`, `admin_id?` | `admin_svc`, `scheduler` for `expired` | `inbox_proj` (the other admins) |
+
+Timers are produced by the `scheduler` and are events like any other: `quote_expired`, `waitlist_released`, `waitlist_expired`, `lease_expired`, `service.review_due`, `service.review_lapsed`, `parameter.activated`, `policy.version_activated` (for `loosen`), `admin.approval_expired`, the daily ledger checkpoint, the lot-expiry `expire` postings and `reserve` `retire` postings (S6.*). Names listed here that are not in S0 0.9 (`service.terms_copy_sealed`, `service.flags_recorded`, `policy.version_activated`, `policy.version_cancelled`, `parameter.activated`, `parameter.change_withdrawn`, `feature_flag.changed`, `launch.member_jobs_enabled_changed`, `launch.minting_enabled_changed`, `preregistration.locked`, `experiment.started`, `experiment.stopped`, `calibration.recorded`, `milestone.published`, `sharecard.*`, `alarm.*`, `admin.*`) are convention additions (`ISS-154`).
+
+## 15.35 Webhook-free by design [D]
+
+Hamyar sends nothing to its volunteers, requesters or any third party on its own initiative.
+
+- **No webhooks, no callbacks, no push, no e-mail or SMS to members, no server-sent streams.** Clients poll with `ETag` / `If-None-Match` (S0 0.11.7). The member inbox (part a) is a read model fed by `inbox_proj`; reading it is a pull.
+- **No outbound request to any address a user or admin typed.** A service's URL template, a milestone's `output_ref.url`, a terms copy's `source_ref` and every other address are stored text. The server does not fetch them, so there is no server-side request forgery surface and no way to make the platform scrape a provider.
+- **Why:** a volunteer's identity must not leak to a requester or provider through a callback URL (S0 0.7); a webhook sender is also an unbounded outbound-abuse surface for a tiny team. Operators are alerted through the Operator tools, which read `Alarm` (15.29.4) and the metrics of S4.*, not through messages the platform sends.
+- **Third-party consumers of public data** use the public endpoints (15.33), which are cacheable and need no registration.
+- If a later phase needs outbound notification, it is a new scope with its own threat model, not an extension of this file [A].
