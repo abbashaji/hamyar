@@ -602,3 +602,88 @@ Shares sum to 1.00 (0.60 + 0.25 + 0.08 + 0.02 + 0.01 + 0.02 + 0.01 + 0.01).
 | `cancel_abuser` | 0.05 | Creates jobs and cancels once donors have leased cells, to waste effort | cancels after 30 percent of cells are leased |
 
 Shares sum to 1.00 outside the scenario-specific `run_on_the_bank` class. Reviewer agents for the template and audit queues are `honest` (accept per ground truth with probability 0.95), `lazy` (accept without reading with probability 0.50) or `colluding` (always approve their ring's items). [D][A]
+
+### 18.12.7 Scenarios and how they are judged
+
+**Two kinds of result.** A *guard assertion* is deterministic: it holds for every agent model and every seed, because it is about what the mechanism permits (a forged lease is never accepted; the monthly cap is never exceeded). A failing guard assertion fails the run and blocks merge or release. A *mechanism observation* is a number that depends on the invented agent model (a simulated false-accept rate, a simulated claim ratio). It is reported, never gated against a real-world target, and is gated only for *regression*: a run of the same model at the same parameters on a new commit must stay within `sim.regression_tolerance` (`initial configurable default` 0.10, arbitrary) of the stored baseline of the same model, which detects a code change that alters behavior and says nothing about the world. Both kinds are listed per scenario. [D]
+
+Scenario `SIM-nn` is run by `T-sim-nn`. Defaults in scenario tables are the `sim.agent.*` values of `S18.12.6` and the product defaults of `S0.10.6` unless stated.
+
+| Scenario | Setup | Guard assertions | Mechanism observations (NOT evidence) |
+| --- | --- | --- | --- |
+| `SIM-04` Baseline steady state | Default population, default parameters, `sim.duration_days` | `T-sim-03` invariants; every accepted Commons cell minted once; every settled escrow closes at 0; no cell stuck in `leased` past `lease.timeout_s` + grace + reaper interval | Round-trip efficiency, v, claim ratio, mint utilization, Reserve trajectory, queue time, requeue ratio |
+| `SIM-05` Run on the bank | `run_on_the_bank` requesters, each holding credit near the cap, all request the largest job they can fund at one instant; `burst` and `normal` demand continues | Over-commit never occurs (`T-prop-17`); waitlist order preserved; no balance negative; Commons minting continues; arithmetic oracle below | Waitlist length and drain time, time to complete against quote, claim ratio, share of requesters who obtained a quote in the maximum window |
+| `SIM-06` Credit expiry arms | Same population run twice from the same seed: `credit.lifetime_days` = 60 and 14 (the experimental arm of FD§4.4, `S16.*`), with `hoarder` requesters | Conservation of every expiry (`T-prop-12`); Reserve inflow equals the sum of expired remainders; retirement only above the ceiling | Expired share of minted credit, Reserve trajectory, loss to hoarders, balance concentration, effect on claim ratio |
+| `SIM-07` Grant farming | `sybil_operator` population with shared devices and invite trees | Grants never exceed `grant.max_per_device`, `grant.max_per_invite_tree_per_day`, `grant.max_per_day`; Reserve never below `grant.reserve_floor_credits`; grants pause rather than print (`T-prop-16`) | Credit drained per operator against the oracle bound (permitted grants x grant amount), Reserve drain over time |
+| `SIM-08` Farmers and forgers | `farmer` in both timing arms, `forger` | No forged submission is ever accepted (wrong lease, wrong nonce, replay, copied output, below-threshold timing are all refused); farmers cannot exceed `ratelimit.member_leases_per_hour` | Credits farmers earned before restriction, virtual time to restriction, simulated false-accept rate on farmer output (ground truth known) |
+| `SIM-09` Collusion | `colluder` rings of 4 | The assignment rule never gives a cell's audit to a member of the same invite tree or device group when `S8.*` forbids it; a gold-cell miss restricts as specified | Simulated false-accept rate on ring output, share of ring cells that were audited by non-ring members |
+| `SIM-10` Patient bad actor | `patient_bad` population | Sampling rates never fall below `verify.audit_rate_floor` and `verify.gold_rate_floor` (`T-unit-16`); tier multipliers applied | Cells accepted after defection before restriction |
+| `SIM-11` Lazy donors and timeouts | `lazy` share raised to 0.30 | Every expired lease requeues exactly once with `attempt + 1`; `cell.attempts_exhausted` at `cell.max_attempts`; no cell stuck | Requeue ratio, completion-time inflation, share of jobs ending `failed` |
+| `SIM-12` Verification cost | Sweep of the gold and audit rates, `T-sim-12` | Closing identity of every job (`T-sim-02`) | v observed against the analytic expectation of `S8.*`, effect on round-trip efficiency |
+| `SIM-13` Mint cap and inflation gauges | Demand and supply tuned so that minting reaches the cap in the month | Cumulative mint in a UTC month never exceeds `mint.monthly_cap_credits`; `inflation.mint_utilization_alarm` fires at its threshold; `price.eta_alarm_threshold` fires when efficiency drops below it | Claim ratio path, time to cap, effect of cap on queue time |
+| `SIM-14` Capacity shock | Half of the donors leave at day 20 | No escrow is lost or double-spent; jobs overrunning `job.max_overrun_ratio` settle partial per `S6.*`; admission re-quotes new jobs lower | Jobs affected, completion times, waitlist growth |
+| `SIM-15` Reservation burst | `burst` requesters reserve the same day | Reserved share per day <= `reservation.capacity_share_cap`; reservation escrow conserved on expiry and on activation | Fill rate of the reserved day |
+| `SIM-16` Scenario fuzz | A generator draws random populations, parameters (within the validators) and shocks | `T-sim-03` on every run; any failing seed is stored under the regression set and replayed forever | None reported |
+
+**Arithmetic oracle for `SIM-05`** (illustrative inputs, not forecasts): with D = 40 active donors, c = 8 cells per donor per day, `admission.phi` = 0.5 the capacity per day is `floor(40 x 8 x 500,000 / 10^6)` = 160 cells. Each requester asks for N = 300 cells at v = 0.10, so each job commits 300 + `floor(300 x 100,000 / 10^6)` = 330 cells. With an illustrative maximum window of 14 days (`admission.max_window_days`) the capacity is 2,240 cells and `floor(2,240 / 330)` = 6 jobs can be committed; the other 4 of 10 simultaneous requesters are waitlisted (first-come order). The simulation must reproduce exactly 6 admitted and 4 waitlisted for these inputs, whatever else the agents do. [D][A]
+
+### 18.12.8 Parameter sweeps, outputs and labelling
+
+**Sweep specification.** A sweep file names the parameters to vary (any parameter of `S0.10.6`; the usual ones are the admission fraction `phi`, the levy `lambda`, the gold rate `g`, the audit rate `s`, `credit.lifetime_days` (`E`), the member cap `K`, the starter-grant size and limits, `mint.monthly_cap_credits`, `lease.timeout_s`), a design (full grid, or Latin hypercube with a seed), the scenario to run, and the replicates per point (`sim.replicates`). Points that violate `C1`..`C8` are skipped and listed in the report. A sweep may not exceed `sim.sweep.max_points`. [D]
+
+**Aggregation.** Per point, per metric: mean, median, minimum, maximum and the 5th and 95th percentile across replicates, with percentile-bootstrap intervals using `sim.bootstrap_resamples`. These intervals describe the variance of the simulated model across seeds only. They are not confidence intervals about the world and are labelled "across simulation seeds". [D]
+
+**Output directory** (one per run or sweep point; all files are deterministic):
+
+| File | Content |
+| --- | --- |
+| `manifest.json` | Run manifest (`S18.12.4`), plus `evidence_status` = `not_evidence` |
+| `metrics.csv` | One row per `sim.metrics_interval_s`: round-trip efficiency, v, claim ratio, mint utilization, Reserve balance, credit in existence, expired share, queue time p50 and p95, requeue ratio, waitlist length, grants issued, simulated false-accept, false-reject and rejection rates (against ground truth), active donors, balance concentration (share held by the top decile), invariant violations (always 0) |
+| `events.ndjson` | Sampled event log (every event of the first 1,000 virtual seconds and a 1 percent sample thereafter, seeded) |
+| `guards.json` | Pass or fail and counts for every guard assertion of the scenario |
+| `report.md` | Human-readable summary beginning with the banner below |
+
+**Mandatory banner**, the first lines of `report.md` and of every chart caption: `SIMULATION OUTPUT. NOT EVIDENCE about real human behavior. Agent models and parameters are invented stress values.` Every CSV starts with a comment row repeating it; every chart title ends with "(simulated)"; every number in `report.md` that depends on an agent parameter is followed by "(simulated)". `T-sim-19` fails if any output lacks the banner, the field or the label. [D]
+
+**Containment.** The harness writes only under its own run directory. Its metrics never enter `MetricSnapshot`, the public pages (`S12.*`) or the measurement tables (`S13.*`). The measurement pipeline refuses rows whose `source` is not `production`, and the data-source enumeration of `S0.10.4` has no value for simulation. A `ChangeLogEntry` whose cited source is a simulation run is refused by `T-unit-09`. [D]
+
+### 18.12.9 Sanity checks of the simulator itself (`T-sim-02`, `T-sim-17`, `T-sim-18`)
+
+A simulator can be wrong. These checks keep the harness honest; they test the harness and the SUT, not the world.
+
+| Check | Statement |
+| --- | --- |
+| Known-answer mini-world | One requester, one donor, one 10-cell job at v = 0.10, lambda = 0.05, all cells correct: pool = 10 x 100,000 = 1,000,000 ucr = 1 verification cell; escrow = 10 x 1,150,000 = 11,500,000 ucr; 11 accepted cells pay 11,000,000; levy 10 x 50,000 = 500,000; refund 0; escrow 0. Exact equality, hand-computed here |
+| Closing identity | For every settled job in every run: payouts + levy + refund = escrow, exactly |
+| Conservation | `T-prop-01`, `T-prop-02` hold at every sampling instant of every run |
+| Zero-adversary verification rate | With no adversaries and accuracy 1, the observed verification cells per primary cell equal the analytic expectation of `S8.*` within three standard errors (binomial) over at least 10,000 primary cells [V: formula owned by `S8.*`] |
+| Ground-truth labelling | The stub's label of every output matches its construction; a scored false-accept can only be an output the stub built as wrong |
+| Determinism | `T-sim-01` |
+| Estimator coverage (`T-sim-17`) | In `sim.estimator_replicates` (`initial configurable default` 200) replicates of one scenario, the interval that `S8.*` computes for the false-accept rate contains the simulated true rate in at least nominal coverage minus 0.05 of replicates. This checks the estimator's code, not the world |
+| Sweep engine (`T-sim-18`) | A sweep of known size produces exactly the expected number of runs; invalid points are skipped and reported; the same sweep twice gives identical output; replicate seeds are distinct and derived from the master seed |
+
+## 18.13 Test data, environments, gates and rules of conduct
+
+### 18.13.1 Test data and environments [D]
+
+- **Synthetic only.** Fixtures are generated from seeds; names, e-mails and text are synthetic; no production data is ever copied into a test environment (a data-inventory test, `T-e2e-19`, runs on each environment).
+- **Environments.** `dev` (a developer machine), `ci` (ephemeral per run), `load` (long-lived, isolated, production-like), `sim` (ephemeral), `staging` (production-like, synthetic data, the target of `T-e2e` and drills). Each database carries an `env` tag checked by the harnesses; production carries `env=prod` and no test tool will start against it.
+- **Secrets.** Test environments use their own secrets, never production secrets; a test that needs a provider credential does not exist (rule 3).
+- **Clock and ids.** Every environment can be run with the injected clock and generator; time-dependent tests never sleep.
+- **Database per test.** Each test gets a clean schema from the migrations (also checking forward migration on an empty database and on the previous milestone's database).
+
+### 18.13.2 Gates [D]
+
+| Gate | Rule |
+| --- | --- |
+| Merge | `ci.commit` and `ci.pr` green; no skipped test without an issue id and an expiry date; the regression ratchet holds |
+| Coverage | Branch coverage of the ledger, admission, policy and verification packages at least `test.coverage.branch_min`; transition coverage 100 percent (`T-fsm-11`); rule coverage 100 percent for `R1`..`R10`; every `copy.*` key used is in the catalogue |
+| Mutation | Mutation testing on the ledger and policy packages each release; a kill rate below `test.mutation.kill_target` opens a review item, not an automatic failure [H] |
+| Release | `ci.weekly` green; no open critical or major issue in `S19.*` against the milestone; the DoD of `S18.15` met; the pre-build checklist items for the milestone are signed |
+| Launch | `launch.*` switches change only by the procedure of `S14.*` and `S0.12`. A green test run is never evidence for `G0`..`G4` |
+
+### 18.13.3 Rules of conduct for tests [D]
+
+- A flaky test is a bug in the test or the system. It is fixed within `test.flaky_fix_days` (`initial configurable default` 7) or quarantined with an issue; invariant, policy and ledger tests are never quarantined (rule 7 of `S18.1`).
+- Test code that reads or prints a secret, a member id, a raw IP or a token fails review.
+- Parameter names in this part are quoted from `S0.10.6`; `C-001`'s name check (`S0.13`) verifies them against the table, and a mismatch is fixed here, not in `S0.10.6`. [V]
