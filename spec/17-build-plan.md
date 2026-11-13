@@ -692,6 +692,7 @@ A **work package** (`WP-BM<n>-<kk>`, `kk` = `01`..`09`; the same number `j` as i
 | `jobs/` | `Job` and `Cell` creation and machines, uploads, glossaries, screening, splitter | L2 | `platform`, `policy`, `registry`, `templates`, `identity` | `BM5`, completed `BM7` |
 | `execution/` | leases, submissions, verification, gold, audits, trust inputs, minting at acceptance, reports, appeals | L3 | `platform`, `ledger`, `jobs`, `policy`, `identity`, `templates` | `BM6` |
 | `economy/` | pricing, admission, escrow flow, payout, settlement, sweeps, grants, snapshots, reservations, deliverables, manifests | L3 | `platform`, `ledger`, `jobs`, `policy`, `identity` | `BM7` |
+| `community/` | teams, badges, referral rules, share cards, growth-mechanic assignment | L3 | `platform`, `identity`, `admin` (experiments); credit moves only through the `economy` grant port and events | `BM8` |
 | `metrics/` | event schema, rollups, Phase 1 measures, arm analysis | L4 | `platform` and read models | `BM9` |
 | `sim/` | simulation harness and agents | L4 | the public API only | `BM9` |
 | `api/` | route registration, `x-milestone` manifest, generated operation list, conformance suite | top | every server module | `BM0`, extended each milestone |
@@ -802,3 +803,74 @@ Columns: `After` lists the packages of the same milestone whose provided contrac
 | `WP-BM4-07` | `retention-and-privacy-tests` | `identity/retention`: retention jobs, canary scans for IP and e-mail | S10 (retention table) | `-01` | `AC-bm4-08`, `-09` |
 | `WP-BM4-08` | `identity-client-sdk` | `sdk/identity`, `web/shared/keystore` (keys stay on the device), test harness client | S10, S15 | contract of `-01` | SDK rows of the `BM4` DoD |
 | `WP-BM4-09` | `member-ledger-link` | `identity/accounts`: ledger account created in the member transaction, deferred foreign keys of 17.8.1, experiment assignment hook, opt-in defaults | S10, S6, 17.8.1 | `-01` | `AC-bm4-11`, `-13` |
+
+
+**BM5 `templates_and_commons_jobs`**
+
+| WP | Title | Owns | Needs | After | Accept |
+| --- | --- | --- | --- | --- | --- |
+| `WP-BM5-01` | `template-model-and-versions` | `templates/model`: `Template`, `TemplateVersion`, slots, output schema, content hash, immutability after approval, supersession | S8, S0.9.5 | none | `AC-bm5-02` |
+| `WP-BM5-02` | `template-review-machine` | `templates/review`: review machine, second-reviewer rule, author-cannot-approve, edit rule, review history | S8, S0.9.5, S0.10.6 `template.min_reviewers_*` | `-01` | `AC-bm5-01`, `-12` |
+| `WP-BM5-03` | `lint-and-wrapping` | `templates/lint`, `templates/wrap`: task lint (`R3`), delimiter wrapping and neutralization, round-trip parser, adversarial corpus `seed/adversarial/templates/` | S9, S0.8.4 | none (pure functions) | `AC-bm5-06`, `-07` |
+| `WP-BM5-04` | `seed-templates-and-harness` | `seed/templates/*`, `templates/harness`: the five required templates as `draft`, sample fixtures, check runner without any lease | S8 | `-01` | `AC-bm5-08` |
+| `WP-BM5-05` | `uploads-glossary-screening` | `jobs/uploads`, `jobs/screen`: `Upload`, `Glossary`, size limit, `screen.*` actions, reviewer screening queue data | S9, S0.10.6 `screen.*`, `job.max_upload_bytes` | none | `AC-bm5-05`, `-11` |
+| `WP-BM5-06` | `job-and-cell-machines` | `jobs/machines`: `Job` and `Cell` tables, transition tables from S0.9.2 and S0.9.3 up to `queued`, events, table-driven `T-fsm-*` | S5, S0.9.2, S0.9.3 | none | `AC-bm5-10` |
+| `WP-BM5-07` | `commons-jobs-and-splitter` | `jobs/commons`, `jobs/split`: operator-authored Commons backlog, template-specific splitter inside `cell.envelope.max_input_chars`, input hashes, reassembly order | S5, S8 | `-05`, `-06` | `AC-bm5-04` |
+| `WP-BM5-08` | `template-lookup-and-kill-binding` | `templates/lookup`: real `TemplateLookup` port binding (replaces the `BM3` stub), `kill.template.<tpl_id>` effect on jobs and queued cells, call of evaluator and gate library on job creation | S7, S14, S8 | `-01` | `AC-bm5-03`, `-09` |
+| `WP-BM5-09` | `review-screens-templates-jobs` | `web/console/review/templates`, `web/console/jobs`, `api/ops/templates.*`, `api/ops/commons-jobs.*` (`en`) | S11, S15 (mock API) | contracts of `-02`, `-05`, `-07` | DoD rows on screens; `GD5` for the added operations |
+
+**BM6 `execution_and_verification`**
+
+| WP | Title | Owns | Needs | After | Accept |
+| --- | --- | --- | --- | --- | --- |
+| `WP-BM6-01` | `lease-engine` | `execution/lease`: `Lease` machine, nonce, timeout, extension, decline, release, reaper job, race-safe single active lease | S5, S0.9.3, S0.10.6 `lease.*` | none | `AC-bm6-02`, `-03` |
+| `WP-BM6-02` | `submission-intake` | `execution/submission`: paste-back endpoint, size and schema checks, escaping, quarantine and release, duplicate-submission replay, nonce and holder check | S5, S9, S0.11.1 | `-01` | `AC-bm6-04`, `-05`, `-06`, `-07` |
+| `WP-BM6-03` | `cell-offer-and-visibility` | `execution/offer`: offer endpoint, `R8` predicate call, adapter capability from `BM3`, launch-gate check on lease | S5, S7, S14 | `-01` | `AC-bm6-01`, `-20` (`R8` half) |
+| `WP-BM6-04` | `verification-and-gold` | `execution/verify`, `execution/gold`: checks pipeline, `GoldCell` library and hidden insertion, role-restricted gold answers, timing and duplicate detectors | S8, S9, S0.8.4 | `-02` | `AC-bm6-08`, `-15` |
+| `WP-BM6-05` | `audits-sampling-reliability` | `execution/audit`, `execution/reliability`: `Audit` machine, comparator, third execution, adaptive sampling, blanket redundancy, Beta estimate, false-accept and false-reject estimators with limits | S8, S0.10.6 `verify.*` | `-04` | `AC-bm6-10`, `-11`, `-12`, `-13`, `-14` |
+| `WP-BM6-06` | `trust-and-review-cells` | `execution/trust`, `execution/review`, `seed/templates/human_review`: tier promotion, demotion, restriction; review cells and their gold; behind `ff.channel.human_review` | S8, S10, S0.9.4 | `-04`, `-05` | `AC-bm6-09`, `-16` |
+| `WP-BM6-07` | `acceptance-minting-overturn` | `execution/accept`: acceptance decision, `R9` re-check, mint call into the ledger (caps, `launch.minting_enabled`, `kill.all_minting`), expiry-arm resolver, overturn with `rework` cells | S5, S6, S0.8.5 | `-02` | `AC-bm6-17`, `-18`, `-19`, `-20` (`R9` half) |
+| `WP-BM6-08` | `reports-appeals-revocation-queues` | `execution/reports`, `execution/appeals`, `execution/revocation`, `web/console/queues`: reports, appeals and bans with reviewer-is-not-decider, template auto-pause, service-revocation effect, console queues (`en`) | S5, S7, S10, S0.9.7 | `-02` | `AC-bm6-21`, `-22`, `-23` |
+| `WP-BM6-09` | `test-donor-and-adversarial-suites` | `sdk/testdonor`, `ci/suites/adv`, `ci/suites/inj`: scripted donor (test code only), forgery, replay, race and injection suites | S9, S18 `T-adv-*`, `T-inj-*` | contracts of `-01`..`-08` | `AC-bm6-24`, `-25` |
+
+**BM7 `member_jobs_and_credit_economy`**
+
+| WP | Title | Owns | Needs | After | Accept |
+| --- | --- | --- | --- | --- | --- |
+| `WP-BM7-01` | `pricing-and-quotes` | `economy/pricing`: measured v with prior and cap, `p_ucr`, rounding, quote object and lifetime, versioned publication inputs | S6, S0.6.1 | none | `AC-bm7-03`, `-19` |
+| `WP-BM7-02` | `admission-and-waitlist` | `economy/admission`: forecast from the execution read model, `phi`, haircut, window quote, waitlist, fairness caps | S6, S0.10.6 `admission.*` | none | `AC-bm7-04`, `-05` |
+| `WP-BM7-03` | `member-job-flow-and-escrow` | `jobs/member`, `economy/escrow`: draft, declarations, evaluator call, confirmation with escrow hold, idempotent confirm, cap and balance checks, cooldown enforcement | S5, S6, S10 | `-01`, `-02` | `AC-bm7-01`, `-06`, `-18` |
+| `WP-BM7-04` | `payout-settlement-cancel` | `economy/settle`: payout per accepted cell, levy, refund, cancellation, overrun and partial settlement, serial-equivalence under concurrency | S6, S5 | `-03` | `AC-bm7-07`, `-08`, `-09`, `-10` |
+| `WP-BM7-05` | `expiry-reserve-sweeps` | `economy/sweeps`: expiry notices and sweep, Reserve inflow, retirement job, per-member cap K | S6, S0.10.6 `credit.*`, `reserve.*` | none | `AC-bm7-11`, `-12`, `-14` |
+| `WP-BM7-06` | `grants-and-referral-ledger` | `economy/grants`: starter grant with anti-farming limits, non-transferable lots, referral bonus ledger operation | S6, S10, `ISS-06` | none | `AC-bm7-13` |
+| `WP-BM7-07` | `snapshots-and-inflation-response` | `economy/snapshots`, `economy/inflation`: `MetricSnapshot` publication, claim ratio, eta alarm, automatic mint-cap tightening with change-log entry | S6, S16, S0.10.6 `inflation.*` | `-01` | `AC-bm7-15` |
+| `WP-BM7-08` | `reservations-deliverables-manifests` | `economy/reservations` (behind `ff.job.reservations`), `economy/deliver`: `Deliverable`, `Manifest` hash and immutability, results download, rating | S6, S12, FD§5.6 | `-03` | `AC-bm7-16`, `-17` |
+| `WP-BM7-09` | `economy-dashboards-and-flow-e2e` | `web/console/economy`, `ci/suites/flow-e2e`, `api/ops/economy.*`: dashboards from published snapshots, the whole-flow worked example | S6, S15 (mock API) | contracts of `-01`..`-08` | `AC-bm7-02`; dashboard DoD row |
+
+**BM8 `experiences_and_public`**
+
+| WP | Title | Owns | Needs | After | Accept |
+| --- | --- | --- | --- | --- | --- |
+| `WP-BM8-01` | `design-system-and-i18n` | `web/shared/ds`, `web/shared/i18n`: components, logical-property RTL, numerals and dual calendar, bidi isolation helper, bundled fonts, copy-registry lint | S11, S0.3 | none (may start after `BM2`, library-only, 17.2) | `AC-bm8-04`, `-06`, `-07` |
+| `WP-BM8-02` | `first-contribution-flow` | `web/member/contribute`: landing, consent, cell card, copy and open buttons through the adapter layer, paste-back, result feedback, timing events | S11, S9, S7 | `-01` | `AC-bm8-01`, `-02`, `-03`, `-17` |
+| `WP-BM8-03` | `member-account-screens` | `web/member/account`: balance and expiry, history, opt-ins, recovery-key handling, invites, appeals, help | S11, S10 | `-01` | `AC-bm8-05` |
+| `WP-BM8-04` | `requester-wizard` | `web/requester`: template choice, upload and screening, declarations, policy copy, quote and window, escrow confirmation, progress map, cancel, results, rating | S11, S5, S6 | `-01` | `AC-bm8-10` |
+| `WP-BM8-05` | `console-completion-fa-en` | `web/console/**` completion in `fa` and `en`, permission-gated views, minimal-identifier review | S11, S10 | `-01` | `AC-bm8-11` |
+| `WP-BM8-06` | `public-pages-and-capacity-map` | `web/public`, `api/ops/public-*.*`: counter, public ledger, parameters, change log, milestones, capacity and bottleneck map per PB-1 | S12, S15 | `-01` | `AC-bm8-12`, `-18` |
+| `WP-BM8-07` | `teams-badges-share` | `community/teams`, `community/badges`, `community/share`, `web/member/community` | S12, S10 | `-01` | `AC-bm8-13`, `-14` |
+| `WP-BM8-08` | `referral-and-growth-flags` | `community/referral`, `community/growth`: two-sided bonus rules calling the grant port, `V1`..`V6` behind `ff.growth.*`, logged assignment | S12, S13, S0.10.6 `growth.*` | `-01` | `AC-bm8-15`, `-16` |
+| `WP-BM8-09` | `a11y-perf-and-flow-e2e` | `ci/suites/a11y`, `ci/suites/perf-lowbw`, `ci/suites/e2e-ui`: accessibility, throttled-network and both-locale end-to-end suites | S11, S18 | `-02`, `-04`, `-05`, `-06` | `AC-bm8-08`, `-09` |
+
+**BM9 `measurement_simulation_hardening`**
+
+| WP | Title | Owns | Needs | After | Accept |
+| --- | --- | --- | --- | --- | --- |
+| `WP-BM9-01` | `event-schema-and-rollups` | `metrics/events`, `metrics/rollup`: client timing events, rollup job, cohort suppression, no-tracker rule | S13, S0.9 | none | `AC-bm9-11` |
+| `WP-BM9-02` | `phase1-measure-queries` | `metrics/phase1`: one query per row of the FD§9 table above | S13, FD§9 | `-01` | `AC-bm9-01` |
+| `WP-BM9-03` | `arm-analysis-and-prereg-check` | `metrics/arms`: accelerated-expiry arm analysis, pre-registration lock verification in the launch rule | S13, S14 | `-01` | `AC-bm9-10` |
+| `WP-BM9-04` | `simulation-core-and-agents` | `sim/core`, `sim/agents`: seedable harness on a simulated clock through the public API, honest, lazy, farming, forging, colluding and run-on-the-bank agents, the mandatory label | S18 | none | `AC-bm9-02`, `-05` |
+| `WP-BM9-05` | `scenarios-and-sweeps` | `sim/scenarios`: pilot-like, run-on-the-bank, credit-expiry, burst; parameter sweeps | S18 | `-04` | `AC-bm9-03`, `-04` |
+| `WP-BM9-06` | `load-and-chaos` | `ci/suites/load`, `ci/suites/chaos`: lease, submission, quote and settlement load; process kill, failover, duplicated outbox delivery | S18 | none | `AC-bm9-06`, `-07` |
+| `WP-BM9-07` | `drills-and-host-bindings` | `platform/bindings/*`, `docs/runbooks/*`: host-bound bindings or contract-tested candidates, restore and rotation drills, kill-switch and handle-rotation drills, production config validator extension | S4, S10, S19, 17.4.3 | none | `AC-bm9-08`, `-09`, `-15` |
+| `WP-BM9-08` | `threat-map-and-prebuild-closure` | `build/threat-map.*`, `ci/suites/threat-coverage`, `build/prebuild-checklist.*`: `THR-<nn>` to test mapping, `S19.*` checklist status | S10, S19 | none | `AC-bm9-12`, `-13` |
+| `WP-BM9-09` | `staging-e2e-and-metrics-console` | `ci/suites/e2e-staging`, `web/console/metrics`: rehearsal end-to-end in both locales, measures and simulation-report views | S13, S18 | `-02`, `-05` | `AC-bm9-14` |
