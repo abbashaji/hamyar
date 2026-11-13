@@ -384,3 +384,49 @@ FD section 8.3 G5 says 'a handful' of interviews. The tool invents no minimum; i
 | `g5.job_sizes` | What big jobs requesters really have | `credit.member_cap_credits`, `admission.max_job_cells` |
 | `g5.splittable_nonsensitive` | Whether those jobs split into independent cells and are public or non-sensitive (S0 or S1) | template set priorities |
 | `g5.windows` | What completion window they would accept | `admission.min_window_s`, `admission.max_window_days` |
+
+## 14.6 Evidence, sign-off and validity
+
+### 14.6.1 Attaching evidence
+
+Attaching evidence never asserts an outcome; it only makes sign-off possible. An item can receive evidence in state `open` (becoming `evidence_attached`) or `evidence_attached` (replacing the evidence set hash), following `EV-1`..`EV-6` and the state machine of S14.4.6. System-attached evidence (`terms_copy_ref`, `flag_answer_ref`, `calibration_ref`, `ci_artifact`) is written by the service identity `system` inside the same transaction as the event that produced it (saving a `TermsCopy`, saving a `FlagAnswer`, writing a `CalibrationRecord`, a CI run reporting its result), never by a later poll. [D]
+
+### 14.6.2 Sign-off guards `SO-1`..`SO-8`
+
+`gate.signed_off` succeeds only if all hold; a failure returns `FORBIDDEN` with `details.reasons` naming every failed guard, not only the first (fail-closed rule 1). [D]
+
+- `SO-1` The item is in `evidence_attached`. Signing from `open` is impossible by construction; there is no evidence yet to sign.
+- `SO-2` At least `launch.min_signoffs` (default 2) `GateSignoff` rows exist for `(item_id, item_generation)` whose `evidence_set_hash` equals the item's current evidence set hash, recomputed fresh at the moment of the check, never read from a cache.
+- `SO-3` Among those rows, at least one has `acted_as_role` equal to the item's `required_role`.
+- `SO-4` The qualifying rows come from at least two distinct `admin_user_id` values (R10's two-person rule; a single admin cannot sign the same item twice under two credentials to satisfy `SO-2`).
+- `SO-5` All qualifying rows carry the same `outcome`; signers who disagree record `not_satisfied` or a note, and the item stays `evidence_attached` until agreement, or an admin with `perm.launch.reopen` starts a fresh generation to reset the discussion. The tool does not arbitrate disagreement (ground rule 8).
+- `SO-6` The chosen `outcome` is one the item's `kind` allows: `attestation`, `evidence` and `measurement` items allow `satisfied`, `satisfied_with_conditions`, `not_satisfied`; `decision` items allow only `adopted`, `declined`; `machine_check` items are set by the system only, from the referenced check's own result, and never by a human `GateSignoff` (`SO-8`).
+- `SO-7` If the item is a G0 service flag item, the outcome rule of S14.5.1 holds: `satisfied` is refused by the server (not merely by convention) when any required gate flag is `no`, `unknown` or absent for the current `TermsCopy`; the check reads `FlagAnswer` rows directly rather than trusting the signers' evidence note.
+- `SO-8` `outcome = satisfied_with_conditions` requires non-empty `conditions_text` on every qualifying `GateSignoff`, and the qualifying rows' `conditions_text_hash` values are identical (the signers signed the same conditions, not merely the same outcome label).
+
+When all guards pass, the item moves to `signed_off`; `outcome`, `signed_off_at = now`, `valid_until` (S14.6.3) and `watch_digest` (S14.6.4) are set from the qualifying generation, and `reevaluate_dependents` runs in the same transaction (S14.7). [D]
+
+### 14.6.3 Validity: `valid_until`
+
+Every signed item gets a `valid_until`, computed at sign-off from the catalog's validity rule for that `catalog_key` and the evidence's `occurred_at` values. An item past its `valid_until` is evaluated as not valid everywhere this part reads 'signed and valid' (`GI-02`); a nightly sweep also reopens it with `reopen_reason = expired`, but the real-time predicates in S14.7 never rely on the sweep having already run — they compare `now` to `valid_until` directly. [D]
+
+| Validity class | Formula | Applies to |
+| --- | --- | --- |
+| Generic | `signed_off_at + param('launch.generic_validity_days') * 86400` | Items with no more specific rule |
+| Terms-bound | `min(generic, terms_copy.captured_at + param('service.review_max_age_days') * 86400)` | `g0.svc.*` |
+| Counsel | `signed_off_at + param('launch.counsel_validity_days') * 86400` | `g0.cns.*` |
+| Secret rotation | `rotation_record.occurred_at + param('security.secret_rotation_max_age_days') * 86400` | `g4.secret.*` |
+| Measurement | `max(occurred_at of evidence) + param('launch.measurement_validity_days') * 86400` | `g2.*`, `g3.*`, `g5.*` |
+| Non-expiring | `null` (never expires by time; still reopened by a watched change) | `g1.*` structural items, `decision` items |
+
+Parameter defaults (S16.* holds the authoritative table; these are the ones this part introduces): `launch.generic_validity_days` 180, `launch.counsel_validity_days` 365, `security.secret_rotation_max_age_days` 90, `launch.measurement_validity_days` 120. [A]
+
+### 14.6.4 Watch descriptors and automatic reopening
+
+A watch descriptor names a value; its digest is included in `watch_digest` at sign-off. A background check (and, for parameters, a synchronous check inside the same transaction that changes the watched value) compares the current digest to the stored one; a mismatch reopens the item with `reopen_reason = watched_change`, in the same transaction as the change when the change is itself a parameter write or a `TermsCopy`/`FlagAnswer` save, and otherwise within one run of the nightly sweep. [D]
+
+Descriptors used above: `terms_hash(svc)` hashes the latest `TermsCopy.content_hash` of the service; `flag_answers(svc)` hashes the sorted `{key, answer, terms_copy_id}` of its latest `FlagAnswer` rows; `parameters(prefix.*)` hashes the current values of every parameter matching the prefix; `copy_bundle(prefix.*)` hashes the deployed copy text for keys matching the prefix in both `fa` and `en`; `adapter(svc)` hashes the registry's adapter fields for the service; `secret_register` hashes the sorted `{secret_name, last_rotated_at}` of the S10.* register; `template_set` hashes the sorted list of service ids approved for the template. [A]
+
+### 14.6.5 Reopening a service item and its effect on the registry
+
+When any `g0.svc.*` item of a service is reopened for any reason, the service moves from `approved` to `review_due` in the same transaction (`RL-7`); it does not drop straight to `unreviewed`, because `review_due` preserves the grace period of S14.3's gate-obligations table and avoids silently aborting in-flight cells. If the grace period elapses without the item returning to `signed_off` and valid, a scheduled check moves the service to `suspended`, which has no grace period. [D]
