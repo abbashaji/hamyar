@@ -565,6 +565,9 @@ FD§9 Phase 1 measures and their sources (metric names and queries are owned by 
 - `AC-bm9-13` Given the pre-build checklist of `S19.*`, Then every item has a status and an evidence pointer; open items are `[V]` with a named owner.
 - `AC-bm9-14` Given the full end-to-end suite on `staging` (rehearsal), When a new member contributes, a requester posts a job, it settles and the manifest is downloaded, in both locales, Then every step passes and the recorded network log meets `BR8`.
 - `AC-bm9-15` Given production configuration validation, Then no stub is bound, the fixture profile and rehearsal sign-offs are refused, and `launch.*` are `false`.
+- `AC-bm9-16` Given the finished build on `staging` in rehearsal and the Phase 1 plan of 17.11.2 applied only through the parameter editor, the flag controls and operator data, When the changes are listed, Then every changed name is a row of 17.11.2, each change has one `ParameterVersion`, one `ChangeLogEntry` and one `AdminAction`, no code, schema or deployment change was needed, and a repository scan finds no branch on a phase, a pilot or a member-count constant (`BR7`).
+- `AC-bm9-17` Given the Phase 1 parameter values and the donor rate of the FD§3.3 example `[H]`, When the planning checks of 17.11.4 run, Then `C1`..`C8` hold, each check prints its inputs and its result, a failing check is reported as a warning to the founders, and the run changes no parameter.
+- `AC-bm9-18` Given the trace file `ci/trace/scope-coverage.yaml` (a mirror of 17.10 and 17.12), When the trace check runs in CI, Then every FD§10 item, every FD§9 Phase 1 setup element and every row of 17.12 names at least one milestone of S0.12 and at least one test id that exists in this part or in the owning part, and no prompt scope letter `A`..`K` has an empty milestone set.
 
 **Definition of Done (BM9)** adds to 17.5.3:
 
@@ -872,8 +875,8 @@ Columns: `After` lists the packages of the same milestone whose provided contrac
 | `WP-BM9-05` | `scenarios-and-sweeps` | `sim/scenarios`: pilot-like, run-on-the-bank, credit-expiry, burst; parameter sweeps | S18 | `-04` | `AC-bm9-03`, `-04` |
 | `WP-BM9-06` | `load-and-chaos` | `ci/suites/load`, `ci/suites/chaos`: lease, submission, quote and settlement load; process kill, failover, duplicated outbox delivery | S18 | none | `AC-bm9-06`, `-07` |
 | `WP-BM9-07` | `drills-and-host-bindings` | `platform/bindings/*`, `docs/runbooks/*`: host-bound bindings or contract-tested candidates, restore and rotation drills, kill-switch and handle-rotation drills, production config validator extension | S4, S10, S19, 17.4.3 | none | `AC-bm9-08`, `-09`, `-15` |
-| `WP-BM9-08` | `threat-map-and-prebuild-closure` | `build/threat-map.*`, `ci/suites/threat-coverage`, `build/prebuild-checklist.*`: `THR-<nn>` to test mapping, `S19.*` checklist status | S10, S19 | none | `AC-bm9-12`, `-13` |
-| `WP-BM9-09` | `staging-e2e-and-metrics-console` | `ci/suites/e2e-staging`, `web/console/metrics`: rehearsal end-to-end in both locales, measures and simulation-report views | S13, S18 | `-02`, `-05` | `AC-bm9-14` |
+| `WP-BM9-08` | `threat-map-and-prebuild-closure` | `build/threat-map.*`, `ci/suites/threat-coverage`, `build/prebuild-checklist.*`, `ci/trace/*`: `THR-<nn>` to test mapping, `S19.*` checklist status, the scope-coverage trace file of 17.12 | S10, S19, 17.10..17.12 | none | `AC-bm9-12`, `-13`, `-18` |
+| `WP-BM9-09` | `staging-e2e-and-metrics-console` | `ci/suites/e2e-staging`, `web/console/metrics`: rehearsal end-to-end in both locales, measures and simulation-report views | S13, S18, 17.11 | `-02`, `-05` | `AC-bm9-14`, `-16`, `-17` |
 
 ### 17.9.3 Waves, concurrency across milestones, conflict rules [A]
 
@@ -947,3 +950,48 @@ done_when: GD1..GD13 for the parts touched; DoD rows of BM6 on escaping and quar
 ```
 
 A package card is a Blueprint cell of the existing panel in shape (`id`, `after`, `allowed_paths`, acceptance command), which lets the panel's engine or an equivalent hand the packages to coding agents; whether the panel runtime is used for this is the PB-1 decision, and nothing in the product depends on it (17.4.1). [A]
+
+
+## 17.10 Mapping of FD§10 “What to add, in order” to milestones
+
+FD§10 rests on the panel README only [V]. Its eleven additions are a priority list for a rewrite of the panel; this plan is a dependency order for the whole product (17.2). This section maps every addition, every gap and every carried-over concept of FD§10 to the milestone that delivers it and to the tests that show it, and records where the order differs (`ISS-177`). [D]
+
+| FD§10 item | Asks for | Delivered in | Shown by | Order note |
+| --- | --- | --- | --- | --- |
+| 1 Review the repo | Review code, `docs/`, secrets handling and result return; decide keep versus rewrite; rotate existing secrets before public exposure | `PB-1`, `PB-3` (17.4) before any `BM0` platform code; evidence slots for gates `G4` and `G1` in `BM2` | `AC-bm0-17`, `AC-bm2-15`, `AC-bm9-09` | Same place (first). The verdict is per concept (keep, wrap, replace), not one keep-or-rewrite |
+| 2 Per-member pseudonymous identity | Per-member keys, hashes stored, rate limits, admin access kept separate | `BM2` (admin passkeys, separate origin), then `BM4` (member identity, rate limits, recovery) | `AC-bm2-03`, `AC-bm2-13`, `AC-bm4-01`..`-13` | Later than FD place 2: member creation is guarded by `launch.members_may_join` and creates a ledger account, so `BM1` and `BM2` come first (`ISS-177`) |
+| 3 Cell data model with server-side leases | queued, leased with expiry, submitted, accepted or rejected; automatic return on timeout; idempotent submissions | `BM5` (`Job`, `Cell` up to `queued`); `BM6` (`Lease`, `Submission`, reaper, requeue, replay) | `AC-bm5-10`, `AC-bm6-02`, `-03`, `-05` | After identity and policy: no cell exists before a job passes the evaluator |
+| 4 Result return with anti-forgery | Paste-back bound to cell id and lease nonce; schema validation and size limits; never execute; escape on display | `BM6` (intake, nonce, quarantine); `BM8` (paste-back screen, escaped display) | `AC-bm6-04`..`-07`, `-24`, `AC-bm8-04` | Sits with leases because a nonce needs a lease |
+| 5 Append-only ledger | Accounts for members, escrow and Reserve; double entry; automatic invariants; public counters read from it | `BM1` (ledger, escrow and Reserve rows, invariants); `BM4` (member account created with the member); `BM7` (escrow wired to jobs); `BM8` (counter and public ledger) | `AC-bm1-01`..`-15`, `AC-bm4-11`, `AC-bm7-02`, `AC-bm8-12` | Earlier than FD place 5: the one component whose errors a redeploy cannot undo (17.2) |
+| 6 Policy engine and template registry | Metadata fields, `R1`..`R10` as data, policy versioning, the Service Registry | `BM3` (policy, registry); `BM5` (templates) | `AC-bm3-06`..`-09`, `AC-bm5-01`..`-03` | Earlier than FD place 6: the registry with every service `unreviewed` must precede any job (S0.12 rule 2) |
+| 7 Verification pipeline | Per-template validators, gold-cell injection, audit scheduling, adaptive sampling with a floor | `BM5` (validators defined, run in the harness); `BM6` (pipeline, gold, audits, sampling) | `AC-bm5-08`, `AC-bm6-08`, `-10`..`-14` | Same order |
+| 8 Volunteer interface | No-install mobile-first flow: card, copy and open buttons through adapters, paste-back; Persian RTL; Jalali and Gregorian dates; launcher optional | `BM3` (adapter port); `BM8` (screens, both calendars); the launcher is retired and replaced by adapters (`ISS-178`) | `AC-bm3-10`, `AC-bm8-01`..`-09` | Last of the user-facing work: screens are built against finished behavior (17.2, edge `BM6, BM7 -> BM8`) |
+| 9 Admission control and quoting | Capacity estimator, φ, waitlist, reservations | `BM7` | `AC-bm7-02`, `-04`, `-05`, `-16` | Same order; reservations behind `ff.job.reservations` |
+| 10 Public surfaces | Live counter, public ledger and parameter page, change log, provenance export | `BM2` (public parameter and change-log data); `BM7` (`Manifest`, results download); `BM8` (counter and pages) | `AC-bm2-05`, `AC-bm7-17`, `AC-bm8-12` | Data early, pages late |
+| 11 Later: teams, share cards, referral, human-review channel | Listed as later | Human-review channel `BM6` (behind `ff.channel.human_review`); referral ledger operation `BM7` (`grant`); teams, share cards, referral rules and growth flags `BM8` | `AC-bm6-16`, `AC-bm7-13`, `AC-bm8-13`..`-16` | Built, not deferred: the brief forbids deferring components because the pilot is small. “Later” is honored as launch timing: all of them ship off (`ff.*`) and Phase 2 turns them on (17.11.5) (`ISS-177`) |
+
+**Gaps FD§10 names for a public commons** [D]
+
+| FD§10 gap | Closed by |
+| --- | --- |
+| Shared single-password auth | `BM2` admin passkeys (`AC-bm2-03`); `BM4` member keys (`AC-bm4-03`) |
+| No per-user identity | `BM4` (`AC-bm4-01`..`-13`) |
+| No redundancy or voting | `BM6`: blanket redundancy, audits with comparator, third execution on mismatch (`AC-bm6-10`..`-12`) |
+| No server-side lease timeouts | `BM6` reaper and requeue (`AC-bm6-03`) |
+| Windows-only, single-provider launcher | Registry-driven adapters (`BM3`, `BM8`); no launcher in the platform (`ISS-178`) |
+| Unclear result return path | `BM6` paste-back (`AC-bm6-04`..`-07`) with the `BM8` screen (`AC-bm8-04`) |
+| No user-facing project description | `BM8` landing, public pages and notices (`AC-bm8-12`, `-17`) |
+
+**Concepts that carry over** (FD§10; the keep, wrap or replace decisions are in 17.4.1) [D]
+
+| Concept | Where it lives in the product |
+| --- | --- |
+| Cell and lease | Re-implemented as `Cell`, `Lease` machines (`BM5`, `BM6`) |
+| Status graph | Capacity map (`BM8`, `AC-bm8-18`) |
+| Bottleneck view | Operator capacity dashboard (`BM7`), public capacity map (`BM8`) |
+| Human presses Send | A build rule: `BR9`, `AC-bm0-13`, `AC-bm8-03` |
+| Release and Hand over | Operator tools: kill switches (`BM2`, `AC-bm2-07`), `lease.revoked` and release of a leased cell (`BM6`) |
+
+**Two cautions of FD§10** [V]: reachability of the Worker host from Iran is measured with the probe (`BM0`, gate `G2`), and every host dependency sits behind a port (`BM0`; host bindings in `BM9`, `AC-bm9-15`); prefill support differs by provider, so the adapter capability object of `BM3` makes copy-only the safe default (`AC-bm3-10`, `AC-bm8-03`).
+
+**Traceability.** The tables of 17.10 and 17.12 are mirrored in `ci/trace/scope-coverage.yaml`; the check is `AC-bm9-18`. Each milestone's closer updates the file when a row's test id is added (`BR10`). [A]
