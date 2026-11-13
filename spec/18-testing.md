@@ -498,3 +498,107 @@ Every journey is run by a scripted client against a deployed build, using the st
 | `T-e2e-20` | Log scan | After all journeys, every log line, metric label and trace attribute is scanned: no personal data, no raw IP, no token, no submitted text; ids and hashes only | `BM9` |
 | `T-e2e-21` | Human-review channel (experimental arm `ff.channel.human_review`) | A review cell is executed by a member with no provider account; review cells have their own gold cells; accepted review cells mint like any Commons cell (`ISS-03`) | `BM6` |
 | `T-e2e-22` | Service adapter | An entry with `adapter.supports_prefill` shows an open-in-service button built from `adapter.prefill_url_template` and never exceeds `adapter.max_url_chars`; an entry with `adapter.copy_only` shows copy only; no provider name or URL pattern exists in source code (a grep test over the repository); changing the registry changes the buttons with no deploy | `BM8` |
+
+## 18.12 Simulation harness
+
+### 18.12.1 Purpose and the governing statement
+
+The harness runs the real ledger, admission control, policy engine and verification code against synthetic agents, on a virtual clock, to answer questions of the form: *given this agent model and these parameters, do the mechanisms stay consistent, and where do they break?* It exists to find design errors before real members exist and to show the owners which parameters a mechanism is sensitive to. [D]
+
+**Simulation output is NOT evidence about real human behavior.** The agent models are invented by this spec, their parameters are arbitrary stress values chosen to exercise mechanisms, and nothing in them is estimated from people. Results therefore:
+
+- never replace a Phase 1 measurement (`P1M`) or any calibration source of `S0.10.4`; there is no measurement code for simulation and a `calibration_source` may not cite a run (`S18.12.8`);
+- never support a statement on a public surface, in `MetricSnapshot`, in a grant, partner or press text, or in a launch-gate evidence file (`G0`..`G4` need `ENG`, `P1M`, `OPS`, `DEM`, `COUNSEL` evidence);
+- never justify a parameter change by themselves; the change-log reason must cite a measurement code and a simulation may only be cited as the stress case that prompted a measurement;
+- are reported with the banner of `S18.12.8` and the field `evidence_status` = `not_evidence`.
+
+The harness may show that a mechanism is internally consistent or that it fails under a stated scenario. A failure found by simulation is an issue against the owning part; a clean run is not a finding about the world. [D]
+
+### 18.12.2 What the harness can and cannot do
+
+| It can | It cannot |
+| --- | --- |
+| Check conservation, caps, escrow closure and the hash chain over millions of operations and long simulated periods (`T-sim-03`) | Say how many real people will join, return or stay |
+| Show that admission control bounds commitments when every holder asks at once (`SIM-05`) | Say that real holders will or will not do so |
+| Show how a farming strategy fares against a stated defense, given that the strategy is as modelled | Show that real adversaries use that strategy, or that no better one exists |
+| Show sensitivity of round-trip efficiency, claim ratio and Reserve trajectory to `g`, `s`, `E`, `K`, `phi` and the mint cap | Calibrate any of them: a value that maximizes a simulated gauge is not thereby right |
+| Show where throughput or queueing breaks (lease timeouts, requeue storms) | Estimate real latency or real donor effort per cell |
+| Reproduce a bug exactly from a seed | Check legality, provider terms or ethics |
+
+### 18.12.3 Architecture [D][A]
+
+- **System under test (SUT).** The domain services (ledger, admission, pricing, policy, verification, cell machines, jobs) run unmodified against a throwaway database, through the same internal service interface that the HTTP layer uses. The harness does not reimplement them. The HTTP layer is exercised by `T-e2e`, not here, for speed. [A: if `S4.*` makes the domain services callable only through HTTP, the harness drives a local in-process HTTP stack; the rules below are unchanged]
+- **Injected dependencies.** Clock, identifier generator, random source and e-mail sender are injected. In a simulation the clock is virtual, the generator is seeded, the random source is the harness's, and the e-mail sender is a recorder. A SUT module that reads the wall clock, the OS entropy pool or the network fails `T-sim-01` and `T-sim-20`. No provider adapter is loaded.
+- **Event loop.** A discrete-event simulator with a priority queue ordered by `(virtual_time_s, agent_id, sequence_number)`. Agents schedule their own next events. The loop advances the virtual clock to the next event and, between events, runs the SUT's scheduled background jobs at their configured intervals (`lease.reap_interval_s`, `credit.expiry_sweep_interval_s`, audit scheduling, `ledger.invariant_check_interval_s`, metric rollup).
+- **The stub service.** There is no AI service. When an agent "does the work", the stub returns an output whose correctness is drawn from the agent's accuracy parameter. The stub knows the ground truth (it created each cell's correct answer), so the harness can score every accepted or rejected cell as truly correct or not. That ground truth exists only inside the simulation; in the world it is unknowable and is what verification tries to approximate (FD§5.5).
+- **Agents act through the API surface** of the SUT's service interface with the same authentication objects, rate limits, leases and nonces as real clients. A forger agent has no access that a real member lacks.
+- **Observers.** Read-only components sample the SUT and the ground truth at `sim.metrics_interval_s` and write the outputs of `S18.12.8`. Observers never change state.
+- **Environment guard (`T-sim-20`).** The harness starts only if the database tag is `env=sim` or `env=load`, refuses any connection string that resolves to a host not on the local allowlist, and removes all provider-adapter configuration.
+
+### 18.12.4 Determinism [D]
+
+1. **One master seed**, `sim.seed`. Each agent derives its own stream from `HMAC(seed, "agent" \|\| agent_id)` (a counter-based generator), so adding or removing an agent does not change another agent's random draws. Scenario-level draws (arrivals, shocks) use named streams derived the same way.
+2. **No wall time, no OS entropy, no thread scheduling** inside a run. The loop is single-threaded; parallelism exists only across replicates (independent processes).
+3. **Total order of events** by `(virtual_time_s, agent_id, sequence_number)`; ties never depend on dictionary or hash-map iteration order (sorted iteration is enforced by a lint rule in the harness).
+4. **Identifiers** come from the seeded generator, so a replay produces the same `mem_`, `cel_`, `job_` ids.
+5. **Integers in the SUT; fixed-order summation and fixed rounding in the observers.** Reported ratios are rounded to a stated number of decimals and sorted.
+6. **Run manifest** (`manifest.json`) records: repository commit, harness version, scenario file hash, `ParameterVersion` snapshot, `PolicyVersion`, template set hashes, seed, replicate index, host architecture. Two runs with equal manifests produce byte-identical outputs; `T-sim-01` runs one scenario twice (and once in a different process order) and compares the output hashes.
+7. **Replay.** `sim replay <run_dir> --until <virtual_time>` re-executes a run and stops at a time, so a failure can be inspected in the SUT's state.
+
+### 18.12.5 Scenario file
+
+A scenario is a JSON document validated against a schema stored with the harness. Parameter overrides pass through the same validators as the parameter editor (`C1`..`C8`); an override that violates a constraint is reported and the run does not start, unless the scenario is marked `expect_invalid: true` (used by `T-unit-08` style negative tests). [D]
+
+```json
+{
+  "scenario_id": "SIM-05",
+  "title": "Run on the bank",
+  "seed": 1,
+  "duration_days": 90,
+  "parameter_overrides": { "admission.phi": "0.5" },
+  "policy_version": "v1",
+  "templates": ["translation_glossary", "classification_extraction"],
+  "population": {
+    "donors": { "honest_regular": 24, "casual": 10, "lazy": 3, "farmer": 1, "forger": 1, "colluder": 1 },
+    "requesters": { "normal": 6, "burst": 0, "run_on_the_bank": 10 }
+  },
+  "commons_backlog_cells": 5000,
+  "gold_library_cells": 400,
+  "shocks": [ { "at_day": 20, "kind": "all_holders_request", "job_cells": 300 } ],
+  "outputs": ["metrics", "events_sampled", "report"]
+}
+```
+
+The numbers are shapes, not claims. Population sizes are arbitrary and small enough to run quickly (`sim.max_agents` bounds large runs).
+
+### 18.12.6 Agent behavior models
+
+Every parameter is `sim.agent.<class>.<param>`, an `initial configurable default` that is arbitrary and chosen to stress the mechanism; none is an estimate of human behavior. [D]
+
+**Donor classes**
+
+| Class | Share of donors | Behavior model | Parameters (defaults) |
+| --- | --- | --- | --- |
+| `honest_regular` | 0.60 | Visits on a day with probability `p_visit_day`; on a visit does a geometric number of cells with mean `cells_per_visit`; each output is correct with probability `accuracy`; each lease is abandoned with probability `abandon` or declined with probability `decline`; time per cell is log-normal with median `median_time_s` and shape `sigma`; leaves with daily hazard `churn_daily` | `p_visit_day` 0.5; `cells_per_visit` 8; `accuracy` 0.97; `abandon` 0.03; `decline` 0.05; `median_time_s` 120 (the `cell.envelope.expected_time_s` default); `sigma` 0.5; `churn_daily` 0.01; paste error rate 0.02 |
+| `casual` | 0.25 | As above with fewer visits | `p_visit_day` 0.1; `cells_per_visit` 3; `accuracy` 0.95; `abandon` 0.08; `decline` 0.10; `churn_daily` 0.03 |
+| `lazy` | 0.08 | Leases cells and lets many expire; submits low-effort outputs (blank, refusal-like, truncated) with probability `low_effort` | `p_visit_day` 0.4; `abandon` 0.60; `low_effort` 0.30; `accuracy` 0.70 |
+| `farmer` | 0.02 | Credit farmer: leases as fast as the rate limits allow and submits plausible garbage at very short times | `cells_per_day` 100 until `ratelimit.member_leases_per_hour` stops it; `accuracy` 0.20; `time_s` 3 (below `verify.timing_min_s`) in one arm and 12 (above it) in another; creates a second account when restricted with probability 0.5 |
+| `forger` | 0.01 | Tries forgeries a real member could try: another member's lease, a stale nonce, a replay, a copy of another donor's output | attempts per lease 1; `p_copy` 0.5; `p_replay` 0.3; `p_forge_nonce` 0.2 |
+| `colluder` | 0.02 | Rings of `ring_size` members who, when assigned as the second executor of a ring member's cell, return the identical output; they also route their own cells to each other when the assignment rule allows | `ring_size` 4; `accuracy` 0.30 on ring cells; honest otherwise |
+| `patient_bad` | 0.01 | Behaves like `honest_regular` until it reaches `defect_after_cells` verified cells (past the `trust.*` thresholds that lower sampling), then defects | `defect_after_cells` = `trust.trusted_min_verified_cells` + 20; `accuracy` after defection 0.20 |
+| `sybil_operator` | 0.01 | One operator creating `accounts` identities to collect starter grants and referral bonuses; some share a device or an invite tree | `accounts` 20; `shared_device_fraction` 0.5; `shared_tree_fraction` 0.5 |
+
+Shares sum to 1.00 (0.60 + 0.25 + 0.08 + 0.02 + 0.01 + 0.02 + 0.01 + 0.01).
+
+**Requester classes**
+
+| Class | Share of requesters | Behavior | Parameters (defaults) |
+| --- | --- | --- | --- |
+| `normal` | 0.70 | Spends credit on jobs of log-normal size, window within the quote | median cells 60; `sigma` 0.8; accepts the quote or waits |
+| `burst` | 0.10 | Reserves capacity for one future day (exam-week shape) and activates it | reserves `reservation.max_active_per_member`; cells 120 |
+| `hoarder` | 0.10 | Earns, never spends | spends 0 |
+| `run_on_the_bank` | scenario | At a shock, all holders of credit near the cap each request the largest job they can fund at the same instant | job cells set by the shock; see `SIM-05` |
+| `malicious` | 0.05 | Submits jobs with false declarations (sensitivity `S2` marked `S1`), inputs with instruction patterns and links, free-form attempts | uses the corpus of `S18.8.2` |
+| `cancel_abuser` | 0.05 | Creates jobs and cancels once donors have leased cells, to waste effort | cancels after 30 percent of cells are leased |
+
+Shares sum to 1.00 outside the scenario-specific `run_on_the_bank` class. Reviewer agents for the template and audit queues are `honest` (accept per ground truth with probability 0.95), `lazy` (accept without reading with probability 0.50) or `colluding` (always approve their ring's items). [D][A]
