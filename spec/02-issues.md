@@ -43,7 +43,7 @@
 | `ISS-14` | major | FD§4.2, Principle 2 | “Every unit traces to a Commons cell” cannot be checked for fungible credit | proposed | 2.4 |
 | `ISS-15` | major | FD§4.2, FD§4.7, FD§4.8 | “Redeemable capacity” is undefined, circular with φ, and the cap has no exhaustion rule | proposed | 2.4 |
 | `ISS-16` | major | FD§4.3, FD§4.4 | v does not say who funds blanket redundancy or third executions, and the pool is fixed while the need is random | proposed | 2.4 |
-| `ISS-17` | major | FD§4.4, FD§5.7 | No rule for credit already paid when a result is overturned or a member is banned | proposed | 2.4 |
+| `ISS-17` | major | FD§4.4, prompt | No rule for credit already paid when a result is overturned or a member is banned | proposed | 2.4 |
 | `ISS-18` | major | FD§4.5 | K ignores escrow and has no rule when earning would exceed it | proposed | 2.4 |
 | `ISS-19` | major | FD§4.6, FD§9 | The Reserve cannot be seeded in Phase 0 under the launch gates | needs_owner | 2.4 |
 | `ISS-21` | major | FD§2, FD§3.1, FD§4.4, FD§6.4 | “Reviewer” means two roles, and review cells pay a credit though they use no allowance | proposed | 2.5 |
@@ -92,3 +92,159 @@ These nine were raised while fixing the shared vocabulary. Their resolutions are
 | Check | Given | When | Then |
 | --- | --- | --- | --- |
 | `ISS-07` reading, to be written as an `AC-ledger-nn` in S6.* | A lot of 10 credits expires in 5 days and is consumed into a reservation | The reservation is cancelled on day 10 | The refund restores the lot with the original expiry; the next sweep posts an `expire` entry of 10 credits to the Reserve; all `INV-L*` checks pass |
+
+## 2.4 Blocking and major issues, part A (`ISS-11`..`ISS-19`)
+
+Each entry has the same four parts: what the FD says and where it fails; why it matters; the resolution every part applies; the parts that apply it. [D]
+
+### ISS-11 · blocking · FD§4.2, FD§5.3, FD§5.4 R7, FD§8.3 · proposed
+
+**Finding.**
+
+- FD§4.2 mints credit only for accepted Commons cells, and FD§5.3 makes every Commons job purpose `P1` (open publication).
+- R7 requires the open-publication flag of the service to be `yes` for `P1`, and `unknown` counts as `no` (FD§5.3).
+- FD§5.3 lets a service reach `approved` on two flags alone (third-party task use, prohibited content), and the exit rule of FD§8.3 asks for one approved service or a documented fallback.
+- So one approved service can satisfy the exit rule while no Commons cell may run on it. Nothing can then be accepted, minted or spent.
+- R7 also maps `P1`, `L1` (public-domain dedication) and `L2` (open license with attribution) onto one flag, although dedicating rights is a different act from publishing.
+
+**Why it matters.** The G0 sign-off would not reveal this. The system would launch into a state where the first donors can do nothing that earns credit.
+
+**Resolution.** [D]
+
+1. The derived predicate `commons_capable(service)` is true when the entry is `approved` and the current dated answers for `open_publication_of_output` and `human_copy_paste_use` are `yes`. `unknown` is `no`.
+2. The count compared with `launch.min_approved_services` is the number of `commons_capable` services. The FD's alternative, a documented fallback, is a `LaunchGateItem` signed off with an evidence note, never an implicit pass.
+3. R7 becomes data. Each allowlist row (S7.*) lists the flags it requires. Initial rows: `P1` with `L1` and `P1` with `L2` both require `open_publication_of_output`; the `L1` row also carries a counsel note [V: whether a provider's terms let a requester dedicate output to the public domain; stored on the allowlist row and on the `FlagAnswer` note]. If counsel needs a separate flag for dedication, it is added by a convention edit (S0.8.3), not in code. [V]
+4. With `M0` the volunteer picks the service, so R7 is evaluated at lease time against the services in the volunteer's declared set, again at submission against the service the volunteer reports, and once more at acceptance (R9). A submission from a service that does not pass is refused with the new reason `reject.service_not_permitted` (2.8).
+
+| Check | Given | When | Then |
+| --- | --- | --- | --- |
+| Carry as `AC-gate-nn` in S14.* | One `approved` service whose open-publication answer is `unknown` | An operator tries to turn `launch.minting_enabled` on | 403 `LAUNCH_GATE_CLOSED`, the reason names `commons_capable` |
+
+**Applied in.** S7.*, S14.*, S9.*, S6.*.
+
+### ISS-12 · blocking · FD§2, FD§4.4, FD§5.5, FD§10 · proposed
+
+**Finding.**
+
+- FD§2 lists code changes with supplied tests as a likely-fit job type. FD§4.4 lists unit tests among the automatic checks and calls automatic checks the cheapest verification.
+- FD§10 requires that submitted content is never executed. FD§5.5 flags outputs containing code to run instead of showing them as results.
+- For a code-change cell the output is code. As written, the template's cheapest check requires running submitted code, which FD§10 forbids, and every output of the template trips the quarantine trigger.
+
+**Why it matters.** The template cannot be built as the FD describes it, and the first attempt to build it would either break the no-execution rule or quarantine every result.
+
+**Resolution.** [D]
+
+1. In Phases 1 and 2 the platform never executes submitted content: no sandbox, interpreter, test runner or build step touches a submission. Whether to allow a sandbox later is an owner decision in S3.2; the default is no.
+2. The automatic checks of `code_change_tests` execute nothing. The output must parse as a unified diff, apply cleanly to the supplied base text, touch only the declared paths, stay inside the size limits and pass the screening patterns of S9.*. The supplied tests are run by the requester on the downloaded result; the manifest says so.
+3. Verification of this template is therefore sampled: a second execution with a normalized-patch comparator, hidden gold cells with known-answer patches, and blanket redundancy because the template is marked high-risk (FD§4.4 allows blanket redundancy for high-risk templates). The job-fit test of FD§2 needs an automatic or a sampled check, so the template still qualifies. Its effectiveness is [H]; success means measured false-accept and false-reject rates inside `verify.false_accept_alarm` and `verify.false_reject_alarm`. [H]
+4. The quarantine trigger of FD§5.5 is defined on content addressed to the reader: links, instructions to run, open, install or visit, and requests for action. A template whose output schema declares `output_kind` = `code` expects code blocks. They are stored and delivered as inert text, escaped on display, offered only as a download with `Content-Disposition: attachment`, and never rendered or run. Links and reader-directed instructions inside such an output still quarantine.
+5. A platform-side sandbox that runs the supplied tests would be a new capability with its own threat-model entry; it is not specified here. [V]
+
+**Applied in.** S8.* (template format, first templates), S9.* (quarantine), S10.* (threat model), S18.*.
+
+### ISS-13 · major · FD§4.1, FD§4.3 · applied
+
+**Finding.** FD§4.1 makes one credit equal one standard cell and FD§4.2 pays one credit per accepted cell, but FD§4.3 prices a primary cell at p = 1 + v + λ, which is fractional (1.15 in the worked example). A job of 10 cells at 1.15 needs 11.5 credits, so an integer-credit ledger must round, and rounding moves value between requester, donors and Reserve. The FD example avoids this only because 240 × 1.15 = 276 is whole.
+
+**Resolution.** Integer micro-credits, as fixed in S0.6.1: one credit is 1,000,000 `ucr`, prices are in ppm, and rounding happens only where a ratio is measured. [D]
+
+**Consequence to record.** At the illustrative v = 0.10 and λ = 0.05 the default starter grant of 3 credits buys `floor(3,000,000 / 1,150,000)` = 2 primary cells, while FD§4.6 speaks of a taster job of a few cells. The size of the grant, `grant.starter_credits`, is a measurement (`P1M`), not a spec decision. [D]
+
+**Applied in.** S6.*, S5.*, S15.*, S11.* (display rounding).
+
+### ISS-14 · major · FD§4.2, Principle 2 · proposed
+
+**Finding.** FD§4.2 states the conservation identity (member balances plus escrow plus Reserve equal cumulative mint minus cumulative retired) and adds that every unit traces to an accepted Commons cell; Principle 2 repeats the claim. Credit is fungible. A transfer creates a new lot for the donor with no pointer to the mint that created the units, and levy, expiry, grant and refund mix units further. A per-unit trace is not defined, so no continuous check can test it.
+
+**Resolution.** Two exact integer checks replace the per-unit trace; S6.* assigns them `INV-L` ids. [D]
+
+1. Conservation: the sum of `member`, `escrow` and `reserve` balances equals cumulative mint minus cumulative retired; the `issuance` balance equals minus cumulative mint; the `retired` balance equals cumulative retired (S0.8.5).
+2. Mint provenance: every `mint` entry names exactly one `Cell` that is `accepted` and belongs to a Commons job; a cell has at most one non-reversed `mint`; no other entry type debits `issuance`.
+3. Credit is not traced unit by unit. Public text says that credit is created only by accepted Commons cells and that this is checked continuously. It does not say that each unit can be followed.
+
+**Applied in.** S6.*, S12.* (public ledger copy), S18.*.
+
+### ISS-15 · major · FD§4.2, FD§4.7, FD§4.8 · proposed
+
+**Finding.**
+
+- (a) FD§4.2 caps issuance at the forecast redeemable capacity and points to FD§4.7, but FD§4.7 defines the claim ratio and the cap utilization and never defines redeemable capacity; the glossary does not either.
+- (b) FD§4.8 gives member jobs a share φ of forecast capacity and leaves the rest, 1 − φ, with Commons work so that minting continues. Minting happens only on Commons work, which uses 1 − φ of capacity, while redeemable capacity is the φ share. The two are equal only at φ = 0.5. Below that a cap tied to φ falls under the Commons throughput; above it the cap does not bind.
+- (c) The S0 default of `mint.monthly_cap_credits` writes its factor as (1 − 0.5) without saying that 0.5 is φ. At φ = 0.5 both readings agree, so the FD example cannot tell them apart.
+- (d) The claim ratio of FD§4.7 divides unexpired credit by verified weekly throughput, yet that credit is redeemable only on the φ share.
+- (e) The FD is silent on a Commons cell accepted after the monthly cap is used up. It would earn nothing, against exactly one credit per accepted cell of any kind (FD§4.3).
+
+**Resolution.** [D]
+
+1. Definitions: `forecast_capacity_cells(period)` is the FD§3.3 formula (active donors × cells per active donor per day × days) × (1 − `admission.forecast_haircut`); `redeemable_capacity_cells(period)` = φ × `forecast_capacity_cells(period)`; `commons_capacity_cells(period)` = (1 − φ) × `forecast_capacity_cells(period)`.
+2. The cap stays the independent parameter `mint.monthly_cap_credits`. A new cross-parameter check `C9` (2.8) warns when it exceeds `redeemable_capacity_cells(30 days)` expressed in credits. Derivation of the S0 default with its own inputs: 40 × 8 × 30 × 0.5 = 4,800.
+3. The FD claim ratio is kept (unexpired credit ÷ weekly verified throughput, in weeks). A second published figure, `claim_ratio_redeemable` = unexpired credit ÷ (φ × weekly verified throughput), is added. The weeks actually needed are unexpired credit × (1 + v) ÷ p ÷ (φ × throughput), and (1 + v) ÷ p ≤ 1 because p = 1 + v + λ; the published figure is therefore never below the true weeks. The alarm `inflation.claim_ratio_threshold_weeks` compares against the redeemable figure. [A]
+4. Exhaustion: leasing a Commons cell reserves 1,000,000 `ucr` of cap headroom on the `Lease` (`credit_reserved_ucr`, 2.8). A Commons cell is not offered when headroom is below 1,000,000 `ucr`, and a lease request answers 422 `CAP_EXCEEDED`. Every accepted Commons cell therefore mints exactly one credit, and no donor does work that earns nothing. A released or expired lease frees its reservation.
+5. The cut of FD§4.7 (`inflation.mint_cap_cut_ratio`) is a `tighten` change of the cap. It takes effect for leases issued after it, and the headroom rule means no accepted cell is left unpaid.
+
+| Check | Given | When | Then |
+| --- | --- | --- | --- |
+| Carry as `AC-ledger-nn` | Cap headroom of exactly 1,000,000 `ucr`; two donors request different Commons cells together | Both lease requests run | One lease is issued, the other gets 422 `CAP_EXCEEDED`, and the period's minted total never exceeds the cap |
+
+**Applied in.** S6.*, S9.* (lease guard), S13.* (published figures), S16.*.
+
+### ISS-16 · major · FD§4.3, FD§4.4 · proposed
+
+**Finding.** FD§4.3 defines v as audit, gold and rework cells over accepted primary cells, measured per job type over a trailing window, and has each job's escrow pay a verification pool of N × v.
+
+- (a) Blanket triple redundancy (FD§4.4, for new donors' first cells and high-risk templates) adds two paid executions per cell, far above v = 0.10. The FD does not say whether they count in v or who pays.
+- (b) The third execution after an audit mismatch is not listed in the numerator.
+- (c) Gold cells are inserted at rate g into batches and belong to no requester; the FD does not say which job pays them.
+- (d) The pool is fixed at quote time, the need is random (mismatches, sampling that rises on anomaly), and the sampling floor of FD§4.4 may not be waived. The FD does not say what happens when the pool runs out.
+- (e) Rejected and expired attempts earn nothing but cost donor effort, so η, which is measured in credit, understates the work behind a requester's cell.
+
+**Resolution.** [D]
+
+1. The numerator of v counts every accepted non-primary cell attributed to a job: `audit`, `third`, `rework`, `review`, `gold`, and every replica of a `blanket_redundancy` execution beyond the first. Each non-primary cell has exactly one job (for a gold cell, the job whose batch it was inserted into) and is paid from that job's pool.
+2. The quote uses `v_quote` = max(measured v, v_floor) with v_floor = `verify.audit_rate_floor` + `verify.gold_rate_floor`; the initial value is 0.02 + 0.01 = 0.03, derived. The floors then fit in the pool in expectation.
+3. The pool is a hard budget. When it cannot pay another verification cell, and the floor or an anomaly still requires one, the job stops with closure reason `verification_budget_exhausted` (2.8) and settles partially (`job.settled_partial`); unspent escrow is refunded. The Reserve never subsidizes verification, because FD§4.2 gives it one outflow, starter grants. [A]
+4. Blanket redundancy for a new donor's first cells (`verify.new_donor_blanket_cells`) applies only to Commons cells, which are funded by mint under `ISS-03`; cells of member jobs are leased only to donors who are past that phase. High-risk templates keep blanket redundancy on every cell; their measured v reflects it and their quote is higher. [A]
+5. Next to η the platform publishes `attempt_yield` (accepted cells ÷ leased attempts over the trailing window), so the effort behind η is visible.
+
+**Applied in.** S6.*, S8.*, S13.*.
+
+### ISS-17 · major · FD§4.4, prompt scope I · proposed
+
+**Finding.** FD§4.4 pays at acceptance (`ISS-09`) and lets donors appeal rejections. The brief (scope I) adds takedown and bans. S0 adds the state `cell.overturned`. None of these says what happens to credit already paid when a cell is later overturned, when fraud is found after payment, or when a member is banned or closes. S0 forbids negative balances (`ledger.allow_negative_balance` = false), so a reversal that finds the credit spent cannot simply take it back.
+
+**Resolution.** [D][A]
+
+1. A reversal of a `mint` or `transfer` is posted only against the unspent part of the lots it created. Credit already spent stays valid.
+2. The shortfall, `unrecovered_ucr`, is recorded on the reversal's `LedgerTransaction` and published as a running total. It is bounded by the monthly mint cap (for mints) and by job size (for transfers).
+3. The conservation identity needs no repair: total credit in existence is cumulative mint minus cumulative retired, not credit that was deserved.
+4. A ban freezes spending (status `banned` forbids `escrow_hold`, `reserve_donation` and referral), revokes open leases, and settles the member's running jobs by the cancel path. The lots keep expiring to the Reserve on their dates, and nothing is seized into any person's account. An overturned ban restores spending; lots that expired stay expired. Closure (`member.closed`) leaves lots to expire in the same way.
+5. Reversals and ban appeals follow `ledger.reversal_min_approvers` and `appeal.ban_min_reviewers` (S0.10.6).
+
+**Applied in.** S6.*, S10.*, S5.*.
+
+### ISS-18 · major · FD§4.5 · proposed
+
+**Finding.** FD§4.5 caps unexpired credit per member at K so that no claimant holds an outsized share of future capacity. It does not say whether credit in escrow counts, nor what happens when an accepted cell would push a donor above K. Without a rule a member can hold K in balance and K more in escrow, a claim of 2K, and a donor at K either loses earned credit or is paid beyond K.
+
+**Resolution.** [D]
+
+1. K applies to the member's unexpired balance plus the member's own escrowed amounts for running jobs and held reservations, which are still the member's claim on capacity.
+2. Earning is prevented, not clipped. A cell is not offered to a donor, and a lease request answers 422 `CAP_EXCEEDED`, when holdings plus the `credit_reserved_ucr` of the donor's active leases plus this cell's 1,000,000 `ucr` would exceed the member's effective K, `credit.member_cap_credits` × `trust.cap_multiplier.<tier>`.
+3. `refund`, `reversal` and `grant` may take holdings above K; they are exempt from the check, and the member simply cannot earn more until holdings fall below K.
+4. Constraint C8 of S0.10.3 already warns when K is below the price of a maximum job.
+
+**Applied in.** S6.*, S9.* (lease guard).
+
+### ISS-19 · major · FD§4.6, FD§9 · needs_owner
+
+**Finding.** FD§4.6 says that in Phases 0 and 1 the Reserve is seeded by the founders' own verified Commons work. FD§9 describes Phase 0 as founders and a few testers running cells on their own accounts, with no members, and ends it on G0 and G1. Under the brief's launch gates `launch.minting_enabled` stays `false` until sign-off, and minting needs an approved service (G0). So no credit can be minted and the Reserve cannot be seeded during Phase 0. After launch the Reserve starts at zero, and grants pause when it is empty (FD§4.6, `grant.reserve_floor_credits` = 0), so early newcomers get no starter grant until founders have worked and donated.
+
+**Resolution.** [A]
+
+1. Phase 0 produces `CalibrationRecord`s only: no ledger entries and no member credit.
+2. The Reserve starts empty. Founders join through operator-issued root invites after sign-off. S10.* defines root invites, and they too are refused while `launch.members_may_join` is `false`, so the hard gate stays hard.
+3. Founders seed the Reserve with `reserve_donation` (`ISS-08`) after their first accepted Commons cells.
+4. The sign-off screen (S14.*) shows the Reserve balance and the number of starter grants it can fund (balance ÷ `grant.starter_credits`). Waiting until that number covers the planned pilot is guidance and a dashboard figure, not a technical block.
+5. The owner decides, in S3.2, whether founders run a seeding period before the pilot is invited or accept a start with paused grants.
+
+**Applied in.** S6.*, S10.*, S14.*, S17.* (`BM7` acceptance).
