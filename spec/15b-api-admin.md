@@ -701,3 +701,91 @@ A `Milestone` (`mls_`; convention addition, `ISS-154`) is a public marker tied t
 | `createMilestone` | `POST /v1/admin/milestones` | `admin` `perm.milestone.edit` | `{key, title, criterion, output_ref?}` | 201 `Milestone` (`draft`) | `ALREADY_EXISTS` | req | - | `A-W` |
 | `updateMilestone` | `PATCH /v1/admin/milestones/{mls_id}` | `admin` `perm.milestone.edit` | Merge Patch; `If-Match` | 200 `Milestone` | `STATE_CONFLICT` (`published`) | req | - | `A-W` |
 | `publishMilestone` | `POST /v1/admin/milestones/{mls_id}/publications` | `admin` `SU` `perm.milestone.edit` | `{reason}` | 200 `Milestone` (`published`); event `milestone.published` | `UNPROCESSABLE` (`output_ref_required`: no milestone is published without an output it points at; `criterion_not_reached` for `verified_cells_total` below its threshold) | req | - | `A-W` |
+
+## 15.33 Public endpoints
+
+Public endpoints are read-only except the verification `POST`. They are the code behind Principle 5 and Principle 11 of the FD: rules, parameters, changes, the ledger's totals and the provenance check are visible to anyone, and the visible record contains no personal data [D].
+
+### 15.33.1 Rules common to all public endpoints [D]
+
+1. **Auth:** `none`. No cookies are set or read, no identifier is issued, and responses carry no `Set-Cookie`. Requests are counted per IP hash only for rate limiting (S0 0.6.4); the hash is not stored with any response data.
+2. **Caching:** `Cache-Control: public, max-age=N` with `N` at most `public.counter_refresh_s` (initial configurable default 60), plus `ETag` and `If-None-Match` with `304` (S0 0.11.7). Every body has `as_of` (UTC).
+3. **CORS:** `GET` endpoints allow any origin without credentials, so a third party can embed or audit them. `POST` verification endpoints allow the same.
+4. **Ledger lag:** every ledger-derived number is computed from entries with `occurred_at <= now - public.ledger_lag_s` (initial configurable default 300). It never shows the current head, so a viewer cannot correlate a public figure with one specific live transaction.
+5. **Small-number suppression:** a count below `analytics.min_cohort_k` (initial configurable default 20) is `null` with `suppressed: true`.
+6. **Feature flags:** `ff.growth.v2_live_counter`, `ff.public.ledger_page`, `ff.growth.v3_share_card` and `ff.growth.v6_milestones` gate their endpoints; when off the answer is `404 NOT_FOUND`. Parameters, change log, metrics, pre-registrations and manifest verification are always on.
+7. **Language:** responses are language-neutral data and `copy.*` keys; texts the admin wrote carry `{fa, en}` and the client picks (S11.*).
+8. **Rate limits:** `PUB`, except verification (`PUB-V`).
+9. **Health** of the service itself (`/v1/health`) is defined in part a and BM0, not here.
+
+### 15.33.2 Endpoint table
+
+| op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `getPublicCounter` | `GET /v1/public/counter` | `none` | - | `{as_of, verified_cells_total, verified_cells_utc_day, members_active_today}`; `members_active_today` = members with at least one accepted cell in the current UTC day, `null` when below `analytics.min_cohort_k` | `NOT_FOUND` (flag off) | n/a | - | `PUB` |
+| `getPublicLedgerSummary` | `GET /v1/public/ledger/summary` | `none` | - | see 15.33.3 | `NOT_FOUND` (flag off) | n/a | - | `PUB` |
+| `listPublicLedgerCheckpoints` | `GET /v1/public/ledger/checkpoints` | `none` | `?from`, `?to` | list of `{date, seq, checkpoint_hash}` | `NOT_FOUND` (flag off) | n/a | cursor | `PUB` |
+| `listPublicLedgerDaily` | `GET /v1/public/ledger/daily` | `none` | `?from`, `?to` (at most 366 days) | list of `{date, by_entry_type: [{entry_type, count, amount_ucr}]}` ascending by date | `NOT_FOUND` (flag off) | n/a | cursor | `PUB` |
+| `listPublicParameters` | `GET /v1/public/parameters` | `none` | `?area` | list of `{name, area, unit, value, version, effective_from, scheduled: {value, effective_from} or null}` for every parameter with `is_public = true` | - | n/a | cursor | `PUB` |
+| `getPublicParameter` | `GET /v1/public/parameters/{name}` | `none` | - | same shape for one parameter | `NOT_FOUND` | n/a | - | `PUB` |
+| `listPublicParameterVersions` | `GET /v1/public/parameters/{name}/versions` | `none` | - | `{version, value, effective_from, change_class, changelog_entry_id}` newest first, withdrawn versions marked | `NOT_FOUND` | n/a | cursor | `PUB` |
+| `getPublicMetrics` | `GET /v1/public/metrics` | `none` | - | the latest published `MetricSnapshot`, see 15.33.4 | - | n/a | - | `PUB` |
+| `listPublicMetricSnapshots` | `GET /v1/public/metrics/snapshots` | `none` | `?from`, `?to` | list of `MetricSnapshot`, newest first | - | n/a | cursor | `PUB` |
+| `listPublicChangeLog` | `GET /v1/public/change-log` | `none` | `?kind`, `?area`, `?from`, `?to` | list of `ChangeLogEntry`, newest first | - | n/a | cursor | `PUB` |
+| `getPublicChangeLogEntry` | `GET /v1/public/change-log/{chg_id}` | `none` | - | `ChangeLogEntry` | `NOT_FOUND` | n/a | - | `PUB` |
+| `listPublicMilestones` | `GET /v1/public/milestones` | `none` | - | list of published `Milestone` (no admin fields) | `NOT_FOUND` (flag off) | n/a | cursor | `PUB` |
+| `getPublicShareCard` | `GET /v1/public/share-cards/{token}` | `none` | - | share card data, see 15.33.5 | `NOT_FOUND` (unknown, revoked or flag off; indistinguishable) | n/a | - | `PUB` |
+| `verifyManifest` | `POST /v1/public/manifest-verifications` | `none` | `{manifest, deliverable_sha256?}` | 200 verdict, see 15.33.6 | `PAYLOAD_TOO_LARGE`, `VALIDATION_FAILED` | opt | - | `PUB-V` |
+| `lookupManifestHash` | `GET /v1/public/manifest-hashes/{sha256_hex}` | `none` | - | verdict and a limited record, see 15.33.6 | `VALIDATION_FAILED` (not 64 hex characters) | n/a | - | `PUB-V` |
+| `listPublicPreRegistrations` | `GET /v1/public/pre-registrations` | `none` | `?scope` | list of locked `PreRegistration` with `content_hash`, `locked_at`, `post_launch` | - | n/a | cursor | `PUB` |
+| `getPublicPreRegistration` | `GET /v1/public/pre-registrations/{prr_id}` | `none` | - | one locked `PreRegistration` | `NOT_FOUND` (draft or unknown) | n/a | - | `PUB` |
+
+`ChangeLogEntry` (`chg_`, S0 0.6.3) = `{chg_id, kind (parameter, policy, template, service, kill_switch, launch_switch, feature_flag, preregistration_lock, milestone, note), change_class (tighten, loosen, neutral), subject {type, id_or_name}, summary_key, public_text {fa, en}, before, after, effective_from, notice_until, amends_id, explanation_due_at, published_at}`. `before` and `after` are present only for parameters and flags. Entries are immutable. Kinds `kill_switch` appear for the four published scopes only; a member-scoped switch never appears [D]. `kind` values `kill_switch`, `launch_switch`, `feature_flag`, `preregistration_lock`, `milestone`, `note` extend the list of S0 and are convention additions (`ISS-154`).
+
+### 15.33.3 Ledger summary [D]
+
+```
+{ "as_of": "2026-12-01T10:00:00Z",
+  "ledger_head": { "seq": "18422", "entry_hash": "sha256:..." },
+  "totals": { "minted_ucr": "...", "granted_ucr": "...", "levied_ucr": "...", "expired_ucr": "...", "retired_ucr": "..." },
+  "balances": { "reserve_ucr": "...", "escrow_open_ucr": "...", "members_total_ucr": "...", "issuance_ucr": "-...", "retired_ucr": "..." },
+  "reserve_ceiling_ucr": "...",
+  "identity_check": { "sum_of_all_balances_ucr": "0" },
+  "invariants": { "status": "ok", "last_full_recompute_at": "..." },
+  "last_checkpoint": { "date": "2026-11-30", "seq": "18100", "checkpoint_hash": "sha256:..." } }
+```
+
+`ledger_head.seq` is the head at `as_of` (after the lag), not the live head. `identity_check` exists because the ledger is double-entry: signed balances of all accounts sum to zero (issuance holds the negative of everything minted; S0 0.7). `invariants.status` is `ok`, `violated` or `unknown`. The page shows aggregates and the daily checkpoint hashes only; it does not list individual entries or any member account, because a public feed of member-account movements with timestamps would be linkable to the people behind them. This is a decision and a trade-off: third parties can verify checkpoints and totals but cannot recompute the hash chain of member entries themselves (`ISS-155`) [D].
+
+### 15.33.4 Metrics snapshot [D]
+
+`MetricSnapshot` (`mts_`) is published every `price.publish_period_days` (initial configurable default 7): `{mts_id, period_start, period_end, published_at, v_by_job_type: [{job_type, v_ppm, verification_cells, accepted_primary_cells}], eta_ppm, claim_ratio_ppm, price_by_job_type: [{job_type, credits_per_cell_ucr}], quality: {false_accept_estimate_ppm, false_reject_estimate_ppm, gold_cells, audited_cells}, parameter_versions: [{name, version}]}`. An estimate with fewer than `analytics.min_cohort_k` underlying cells is `null`. The public record shows how the verification overhead `v`, the haircut `eta` and the claim ratio actually behaved, so the price formula (S6.*) can be re-derived from published numbers [D].
+
+### 15.33.5 Share card [D]
+
+A share card is a frozen, anonymous, revocable summary a member can post anywhere (V3). The member operations are specified here because the public record is their output (`ISS-156`):
+
+| op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `createShareCard` | `POST /v1/share-cards` | `member` | `{include_badge: bool, locale (fa or en)}` | 201 `{shc_id, token, url_path, card}`; the `token` (128 bits, CSPRNG, base64url) is shown once and stored only as a SHA-256 hash; event `sharecard.created`; `403 FORBIDDEN` when `ff.growth.v3_share_card` is off or the member is not `active` | `RATE_LIMITED` (at most `growth.share_card_max_active` live cards per member [A]) | req | - | member class of part a |
+| `listMyShareCards` | `GET /v1/share-cards` | `member` | - | list of `{shc_id, created_month, status}` (never the token) | - | n/a | cursor | member class of part a |
+| `revokeShareCard` | `DELETE /v1/share-cards/{shc_id}` | `member` | - | 204; the public URL answers `404` from then on; event `sharecard.revoked` | `NOT_FOUND` | req | - | member class of part a |
+
+`getPublicShareCard` returns `{card: {cells_verified, badge_key, issued_month, locale}, as_of}`. `cells_verified` is the count at creation, `issued_month` is `YYYY-MM` (no day, no time), `badge_key` is a key of S0 0.8 or null. There is no name, handle, `mem_` id, service, topic, region or time of day in the card, and the card never changes after creation. No image is rendered on the server: the client draws the picture from this data, so there is no server-side rendering, no font fetching and no third-party request [D]. A view emits an analytics event `sharecard.viewed` carrying only the card's `shc_id` and a UTC date, so conversion from card to first cell (V3) can be counted per card without identifying a viewer or the member [A].
+
+### 15.33.6 Provenance manifest verification [D][P]
+
+The provenance manifest travels with every export (FD§5.6; S0 0.6.3 `mfs_`). It records, per output, the job, the template version, the policy version, the cell and verification outcomes, the volunteer-attested service and region (attested, not proven), and a license and no-training flag. The export form omits the volunteer handle (requesters never see it) [A]; verification works on the export form (`ISS-156`).
+
+- `verifyManifest` recomputes `manifest_hash = SHA-256(RFC 8785 canonical JSON of manifest)` and looks it up. Optionally `deliverable_sha256` is compared with the deliverable hash recorded in the manifest.
+- `lookupManifestHash` is the same lookup for someone who has only the hash.
+
+Response of both: `{verdict (match, mismatch, unknown), manifest_hash, recorded: {issued_on (UTC date), job_type, license, purpose, no_training, policy_version_number} or null, differences: [json_pointer], deliverable_check: {checked, matches} , limits_copy_key}`.
+
+| Verdict | Meaning | `recorded` | `differences` |
+| --- | --- | --- | --- |
+| `match` | The hash equals a stored manifest hash | present | empty |
+| `mismatch` | The submitted manifest names a stored `mfs_` id but its hash differs | `null` | JSON pointers of differing fields only, never the stored values |
+| `unknown` | No stored manifest has this hash and the manifest names none we hold | `null` | empty |
+
+`lookupManifestHash` can only answer `match` or `unknown`. `limits_copy_key` points at fixed text that MUST be shown next to any positive result (S11.*): a match proves that the document equals what the platform recorded; it does not prove which service or model produced the work (that is volunteer-attested), it is not a legal certificate, and the no-training flag is a contractual statement, not a technical lock (FD§5.6, Principle 3). Size is capped by `api.max_body_bytes`; the check never calls any other server [D].
