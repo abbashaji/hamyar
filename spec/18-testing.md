@@ -901,3 +901,92 @@ Every major feature of the prompt (scopes A to J) maps to criteria below, and ev
 | `AC-sim-03` | Every output | It is written | It carries the banner, `evidence_status`, and the "(simulated)" labels | `T-sim-19` |
 | `AC-sim-04` | The harness | It is started against a non-simulation database | It refuses | `T-sim-20` |
 | `AC-sim-05` | A sweep | It is run | Invalid points are skipped and reported, size is bounded, aggregation is labelled across seeds | `T-sim-18` |
+
+## 18.15 Definition of Done per milestone
+
+S17.* details the dependencies and work of each milestone; this section fixes which tests and criteria must be green for the milestone to be done. Milestone names follow `S0.12`. [D]
+
+**Done for every milestone** (all of these, in addition to the row):
+
+1. The system is deployable and every public or member surface reachable at the end of the milestone is wired (`S0.12` rule 1); no dead route.
+2. `ci.commit`, `ci.pr` and the latest `ci.weekly` are green, including every test of earlier milestones (regression ratchet) and the coverage gates of `S18.13.2`.
+3. `launch.members_may_join`, `launch.member_jobs_enabled` and `launch.minting_enabled` are `false` in the default build and in every migration (`AC-gate-01`).
+4. Forward migrations apply on an empty database and on the previous milestone's database, and never alter ledger rows (`AC-jobs-02`).
+5. Every new parameter appears in `S0.10.6` or `S16.*` with owner role, change class, unit and source code; every new event, state and error code appears in `S0.*`.
+6. Every new user-facing string has a `copy.*` key with `fa` and `en` text and the review marker (`T-rtl-11`).
+7. No open critical issue against the milestone in `S19.*`; every `[V]` introduced by the milestone is listed in `S19.*`.
+8. The invariant job (`ledger.invariant_check_interval_s`) runs in every environment that has a ledger and has never fired in `ci.nightly`.
+9. Finishing the milestone authorizes nothing: no launch, no real user, no claim (`S0.12` rule 6).
+
+| Milestone | Tests that must be green | Criteria that must pass | S17 reference |
+| --- | --- | --- | --- |
+| `BM0` `foundation` | `T-unit-03`, `T-unit-04`, `T-unit-05`, `T-unit-10`..`T-unit-13`, `T-prop-27`, `T-prop-28`, `T-fsm-09` (generic), `T-inj-02`, `T-inj-03` (API half), `T-inj-06`, `T-inj-13` | `AC-api-01`..`AC-api-05`, `AC-jobs-02`, `AC-gate-01` | `S17.*` BM0 |
+| `BM1` `ledger_and_invariants` | `T-unit-01`, `T-unit-06`, `T-unit-07`, `T-prop-01`..`T-prop-15`, `T-prop-24`, `T-fsm-01` and `T-fsm-11` for the ledger-side machines, `T-adv-12`, `T-adv-21`, `T-e2e-01` (ledger only), mutation run on the ledger | `AC-ledger-01`, `AC-ledger-02`, `AC-ledger-04`..`AC-ledger-06`, `AC-ledger-09`, `AC-ledger-11`, `AC-ledger-12`, `AC-fsm-01`, `AC-fsm-02`, `AC-fsm-06` | `S17.*` BM1 |
+| `BM2` `admin_gates_and_config` | `T-unit-08`, `T-unit-09`, `T-prop-26`, `T-fsm-08`, `T-adv-14`, `T-adv-15`, `T-inj-04`, `T-e2e-06`, `T-e2e-11` (admin parts) | `AC-admin-01`..`AC-admin-03`, `AC-price-03`, `AC-ops-05`, `AC-ops-07`, `AC-ops-08`, `AC-gate-01`..`AC-gate-04`, `AC-measure-02`, `AC-jobs-05` | `S17.*` BM2 |
+| `BM3` `registry_and_policy` | `T-policy-01`..`T-policy-13`, `T-prop-29`, `T-fsm-06`, `T-inj-01` (API half), `T-rtl-11` (policy keys) | `AC-policy-01`..`AC-policy-06`, `AC-registry-01`..`AC-registry-05`, `AC-ops-02` | `S17.*` BM3 |
+| `BM4` `identity_and_access` | `T-unit-14`, `T-unit-18`, `T-unit-23`..`T-unit-25`, `T-fsm-04`, `T-adv-15`..`T-adv-17`, `T-adv-19`, `T-adv-22`, `T-e2e-07`, `T-e2e-19` | `AC-ident-01`..`AC-ident-10`, `AC-sec-03` | `S17.*` BM4 |
+| `BM5` `templates_and_commons_jobs` | `T-unit-17`, `T-fsm-02` (Commons paths), `T-fsm-05`, `T-policy-09`, `T-policy-10`, `T-inj-07`, `T-inj-09`, `T-inj-10`, `T-inj-12`, `T-inj-14`, `T-adv-20`, `T-e2e-10` | `AC-tpl-01`..`AC-tpl-03`, `AC-inj-01`, `AC-inj-02`, `AC-inj-04`, `AC-ops-01` | `S17.*` BM5 |
+| `BM6` `execution_and_verification` | `T-unit-15`, `T-unit-16`, `T-unit-19`, `T-unit-20`, `T-unit-26`, `T-prop-08`, `T-prop-09`, `T-prop-25`, `T-fsm-03`, `T-fsm-07`, `T-fsm-10`, `T-adv-01`..`T-adv-09`, `T-adv-13`, `T-adv-18`, `T-inj-11`, `T-e2e-03`, `T-e2e-08`, `T-e2e-11`, `T-e2e-21` | `AC-verify-01`..`AC-verify-09`, `AC-return-01`..`AC-return-06`, `AC-inj-03`, `AC-fsm-03`, `AC-fsm-04`, `AC-ledger-03`, `AC-ops-03` | `S17.*` BM6 |
+| `BM7` `member_jobs_and_credit_economy` | `T-unit-02`, `T-unit-21`, `T-unit-22`, `T-unit-27`, `T-prop-07`, `T-prop-16`..`T-prop-23`, `T-fsm-02` (member-job paths), `T-adv-10`, `T-adv-11`, `T-adv-17`, `T-e2e-01`, `T-e2e-04`, `T-e2e-05`, `T-e2e-09`, `T-inj-05`, `T-sim-03` (ledger only) | `AC-admit-01`..`AC-admit-06`, `AC-price-01`, `AC-price-02`, `AC-ledger-07`, `AC-ledger-08`, `AC-ledger-10`, `AC-fsm-05`, `AC-registry-04`, `AC-public-07` | `S17.*` BM7 |
+| `BM8` `experiences_and_public` | `T-rtl-01`..`T-rtl-14`, `T-inj-01` (DOM), `T-inj-03` (front end), `T-inj-08`, `T-e2e-02`, `T-e2e-12`, `T-e2e-13`, `T-e2e-16`..`T-e2e-18`, `T-e2e-22`, `T-policy-12` | `AC-volx-01`..`AC-volx-09`, `AC-reqx-01`..`AC-reqx-05`, `AC-i18n-01`..`AC-i18n-08`, `AC-public-01`..`AC-public-06`, `AC-public-08`, `AC-growth-01`..`AC-growth-03`, `AC-adapter-01`..`AC-adapter-03`, `AC-ops-04`, `AC-ops-06` | `S17.*` BM8 |
+| `BM9` `measurement_simulation_hardening` | `T-load-01`..`T-load-09`, `T-sim-01`..`T-sim-20`, `T-e2e-14`, `T-e2e-15`, `T-e2e-19`, `T-e2e-20`, mutation run on ledger and policy | `AC-measure-01`, `AC-measure-03`..`AC-measure-05`, `AC-sec-01`, `AC-sec-02`, `AC-sec-04`..`AC-sec-06`, `AC-jobs-01`, `AC-jobs-03`, `AC-jobs-04`, `AC-sim-01`..`AC-sim-05`; pre-build checklist (`S19.*`) closed | `S17.*` BM9 |
+
+## 18.16 Traceability
+
+### 18.16.1 Threat classes to tests (`AC-sec-01`)
+
+`S10.*` owns the numbered threat table; this table maps its classes to tests so that none is left without one. A class with no automated test must carry an accepted residual risk in `S10.*` and `S19.*`. [D]
+
+| Threat class (FD§6) | Automated tests | Residual that tests cannot remove |
+| --- | --- | --- |
+| Forged or fabricated results | `T-adv-01`..`T-adv-07`, `T-sim-08`, `T-unit-18` | A human who pastes plausible wrong text is caught only statistically (`S8.*`) |
+| Credit farming | `T-adv-17`, `T-sim-07`, `T-sim-08`, `T-prop-09`, `T-prop-16` | Real farming strategies are unknown |
+| Fake accounts and invite-tree abuse | `T-unit-25`, `T-adv-17`, `T-adv-19`, `T-sim-07` | Determined operators with real devices |
+| Malicious requesters and inputs | `T-policy-01`..`T-policy-03`, `T-inj-09`, `T-inj-10`, `T-sim-04`..`T-sim-16` | False declarations that look valid |
+| Prompt injection against volunteers | `T-inj-09`..`T-inj-12`, `T-inj-14` | Screening reduces risk and does not remove it |
+| XSS and injection through stored text | `T-inj-01`..`T-inj-08`, `T-inj-13` | Browser or library flaws outside the code |
+| Ledger tampering | `T-prop-10`, `T-adv-21`, `T-e2e-15` | An attacker with database and application keys and the ability to rewrite history before the next checkpoint |
+| Insider and operator risk | `T-adv-14`, `T-adv-20`, `T-prop-14`, `T-e2e-18` | Collusion of two operators |
+| Account takeover | `T-adv-15`, `T-adv-16`, `T-unit-24` | A user who gives away their recovery key |
+| De-anonymization of members | `T-e2e-12`, `T-e2e-19`, `T-e2e-20`, `T-adv-22`, `T-unit-14` | Correlation by an observer outside the platform |
+| Compelled disclosure | `T-e2e-19` | The law of the hosting jurisdiction `[V]`, counsel |
+| Denial of service | `T-load-02`, `T-load-09`, `T-adv-23`, `T-unit-13` | Volumetric attacks that need upstream protection |
+| Reviewer capture | `T-fsm-05`, `T-adv-20`, `T-sim-04`..`T-sim-16` (colluding reviewer agents) | A reviewer pool too small to be independent |
+
+### 18.16.2 Rules, machines and invariants to tests
+
+| Item | Tests | Coverage rule |
+| --- | --- | --- |
+| Rules `R1`..`R10` | `R1`, `R2`, `R6`: `T-policy-01`; `R3`: `T-policy-10`, `T-policy-02`; `R4`: `T-policy-09`, `T-policy-02`; `R5`, `R7`: `T-policy-03`; `R8`: `T-policy-08`; `R9`: `T-policy-06`; `R10`: `T-policy-07` | 100 percent of rules, each with an accepting and a rejecting case |
+| State machines of `S0.9` | `T-fsm-01`..`T-fsm-11` | 100 percent of transitions (`T-fsm-11`) |
+| Ledger invariants (FD§4.2, `INV-L*` in `S6.*`) | `T-prop-01`..`T-prop-16`, `T-sim-03` | Every invariant has at least one property and one adversarial test |
+| Admission rule (FD§4.8) | `T-unit-02`, `T-prop-17`..`T-prop-23`, `T-sim-05`, `T-load-03` | Every parameter of `admission.*` is varied in a property |
+| Every parameter of `S0.10.6` | `T-unit-08` (constraints), `T-prop-26` (versions), plus the test that uses it | A parameter used in no test is listed by CI as uncovered |
+| Every error code of `S0.11.3` | `T-unit-10` and at least one API test that triggers it | 100 percent of codes |
+
+## 18.17 What this part cannot establish
+
+1. **Simulation output is NOT evidence about real human behavior.** The harness proves internal consistency under invented agents. It does not say that any hypothesis `[H]` of the Founding Document is true, that donors will arrive, that holders will not run on the bank, that farmers behave as modelled or that any parameter is right. Only the measurements of `S0.10.4` and `S13.*` can do that.
+2. **Tests do not decide legality or permission.** Whether a provider's terms permit a volunteer to run a task, whether a use is lawful in a jurisdiction, whether a payment or credit model is regulated and whether the data practices are lawful are `[V]` questions for counsel and the owners (`G0`, `S19.*`). No test result is evidence for them.
+3. **Tests do not authorize a launch.** A green suite, a clean simulation and a met Definition of Done leave `launch.*` at `false` and `G0`..`G5` unsigned (`S0.12` rule 6, `AC-gate-04`).
+4. **Tests of language quality are limited.** `T-rtl-11` checks that Persian text exists, carries the review marker and obeys the wording rules; a Persian-speaking human must review the language, and legal text needs legal review.
+5. **Corpora are not complete.** The injection corpus, the benign set and the forgery matrix are lists written by people; passing them shows the known cases are handled.
+6. **Targets are placeholders.** Load, bandwidth, coverage and mutation targets are `initial configurable default` values chosen to give headroom or to prompt review; none is an observation.
+
+## Issues raised
+
+Problems and gaps found while specifying the test strategy. Each resolution is already applied in this file; `C-001` consolidates them into S2.* and may record a different resolution. [D]
+
+| id | severity | fd_ref | issue | resolution | status |
+| --- | --- | --- | --- | --- | --- |
+| `ISS-181` | minor | prompt, 0.13 | `S0.13` proposes the file name `spec/18-tests-simulation.md`, while this cell's `allowed_paths` name `spec/18-testing.md` | The file is `spec/18-testing.md` (the `allowed_paths` are authoritative per `S0.13`); assembly orders by the heading number, so nothing else changes; `C-001` updates the `S0.13` row | applied |
+| `ISS-182` | minor | FD§5.4, 0.8.4 | A combination that passes `R1`..`R7` but is absent from the allowlist (for example `P2` with every flag `yes` while `P2` is locked, or `M2` with `P0`) has no rule slug of its own | Rejected with `policy.R1.metadata_missing_or_inconsistent` and detail `allowlist_miss`, evaluated last so that `R5`..`R7` stay reachable (`S18.6.1`); `S7.*` may choose a dedicated slug | proposed |
+| `ISS-183` | minor | prompt K, 0.10.5 | Test and simulation configuration (`test.*`, `sim.*`) has no area in the parameter table of `S0.10.5` | These keys live in `S18.2.3`, follow the name regex of `S0.10.1`, never exist in a production database or the parameter editor and never use the `S0.10.4` source codes | proposed |
+| `ISS-184` | minor | prompt K, 0.5 | `S0.5` makes the part that specifies a feature the owner of its `AC-<area>-<nn>` ids, but the prompt asks this part for the feature-to-criteria-to-milestone table, and no area list exists | `S18.14.1` fixes the area codes; owner parts may add criteria in an area without reusing ids; `C-001` checks uniqueness and that every `AC-*` quoted elsewhere has a row | proposed |
+| `ISS-185` | major | FD§4.5 | The cap on a member's unexpired credit does not say what happens when an accepted cell would take a donor above it: a payout cannot be refused after the work is done, and a refusal at lease time leaks capacity information | Proposed: accepted cells are always paid; the cap is enforced by not offering new earning cells to a member at or above the cap (like an opt-in filter) and by refusing transfers and grants that would exceed it, with refunds exempt (`ISS-07`); `S6.*` decides and `T-prop-16` is parameterized by its rule | proposed |
+| `ISS-186` | minor | FD§5.3, 0.8.1 | The pairing of output licenses with purposes is given for `P0`, `P1` and `P2` only; `P3` (training) has no stated license pairing | The oracle treats `P3` as consistent with `L0`, `L1` and `L2` and inconsistent with `L3` (`S18.6.1`); because `P3` is locked in Phases 1 and 2 every `P3` case is rejected either way; `S7.*` decides | proposed |
+| `ISS-187` | minor | FD§3.2, prompt F | The sub-60-second first contribution is a hypothesis `[H]` about humans and cannot be passed or failed by a test | `T-e2e-02` and `AC-volx-02` test the structure (screens, taps, no sign-up, no install); the real time is measured in Phase 1 (`ui.fast_contribution_threshold_s`, `P1M`) and never asserted | applied |
+| `ISS-188` | minor | FD§5.5, prompt I | Spreadsheet formula injection in CSV or spreadsheet exports of requester results and admin data is not covered by any part | `S15.*` defines the export escaping rule (cells beginning with `=`, `+`, `-`, `@` or a tab are prefixed so that they open as text) and `T-inj-05` tests it | proposed |
+| `ISS-189` | minor | prompt E, F | Persian and Arabic letter normalization and ZWNJ handling are needed by comparators, duplicate detection, search and screening, and no part is assigned to define them | `S8.*` owns one normalization function, used identically by all of them and never applied to stored bytes or hashes of stored text; `T-rtl-05` and `T-unit-19` test it | proposed |
+
+Convention additions made by this part (not issues, listed so `C-001` can fold them back): test ids `T-<layer>-<nn>` with the ten layer prefixes of `S18.2.1`; the area codes of `AC-<area>-<nn>` (`S18.14.1`); the CI tiers `ci.commit`, `ci.pr`, `ci.nightly`, `ci.weekly`; the keys `test.*` and `sim.*` of `S18.2.3`; scenario ids `SIM-nn` equal to the number of the `T-sim-nn` that runs them; the guarantee ids `X1`..`X8` of `S18.7.1`; the environment tags `env=prod`, `env=staging`, `env=load`, `env=sim`, `env=ci`, `env=dev`; the `evidence_status` field value `not_evidence` and the simulation banner of `S18.12.8`.
