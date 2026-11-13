@@ -248,3 +248,151 @@ Each entry has the same four parts: what the FD says and where it fails; why it 
 5. The owner decides, in S3.2, whether founders run a seeding period before the pilot is invited or accept a start with paused grants.
 
 **Applied in.** S6.*, S10.*, S14.*, S17.* (`BM7` acceptance).
+
+## 2.5 Major issues, part B (`ISS-21`..`ISS-29`)
+
+### ISS-21 · major · FD§2, FD§3.1, FD§4.4, FD§6.4 · proposed
+
+**Finding.**
+
+- “Reviewer” names two things: the admin-side role for templates, policy and appeals (FD§3.1), and the people who rate sampled outputs, a role that needs no provider account (FD§2, FD§4.4, FD§6.4 channel 2). The first needs the admin tools; the second needs to read one output at a time and nothing else.
+- FD§4.3 pays exactly one credit per accepted cell of any kind, so a review cell pays a credit. A credit is a claim on provider allowance (FD§4.1: a prompt-and-response unit inside the cell envelope), and a review cell consumes none.
+
+**Resolution.** [D][H]
+
+1. Two things get two names (S0.8.2). `reviewer` is the admin role. Executing a review cell is a member activity on `cell_kind` `review` and carries no permission beyond reading the one output shown.
+2. The FD rate is kept: a review cell pays 1,000,000 `ucr` at acceptance. In a Commons job it mints (`ISS-03`); in a member job it is paid from the pool (`ISS-16`).
+3. The risk that review becomes a cheap way to earn credit is a hypothesis [H]. It is measured by `review_share_of_mint` (published beside v) and by each member's accepted-review rate. The founders record, before Phase 1, the thresholds at which `ff.channel.human_review` is switched off (`FND` in a `PreRegistration`); this spec sets none.
+4. The monthly cap and `mint.per_member_daily_cap_credits` apply to review cells like any other cell. A member never reviews their own output, and review cells have their own gold cells (`verify.human_review_gold_rate`).
+5. The channel stays behind `ff.channel.human_review`, default off. Enabling it for the pilot is an owner decision (S3.2).
+
+**Applied in.** S5.*, S6.*, S8.*, S10.*, S11.*.
+
+### ISS-22 · major · FD§4.2, FD§5.2, FD§9 · needs_owner
+
+**Finding.** A Commons job is a public-benefit job from a standing backlog (FD§4.2 and the glossary). Every other job in the FD has a requester who declares purpose, license, sensitivity and service requirement and whose pseudonym enters the provenance (FD§5.2, FD§5.6). Nobody is named as the requester of a Commons job: who declares its metadata, who approves it, who receives or publishes its output, and what a sponsor is in Phase 2 (FD§9) are all open. Open publication (`P1`) also cannot carry private input.
+
+**Resolution.** [D][A]
+
+1. A Commons job has no `requester_member_id` and carries a public `sponsor_label` (default `Hamyar`). The label stands where the requester pseudonym would stand in the provenance (2.8).
+2. Authoring needs the permission `perm.job.create_commons`, held by operators. The author writes the declarations, and a second admin must approve the job (`commons.job_approve`, added to `security.two_person_actions`) before any cell is created.
+3. A Commons job is always `P1`, license `L1` or `L2`, sensitivity `S0` and requirement `M0` or `M1`. Sensitivity `S1` is excluded because publishing private material openly contradicts the definition of `S1` (FD§5.3).
+4. Outputs are published only to the `publication_target` recorded on the job. Until the owner has chosen an archive (S3.2), outputs stay in the deliverable and nothing is published.
+5. A sponsor label naming an outside party needs the same approval. No money moves in Phase 1 (FD§0.2) [P].
+
+**Applied in.** S5.*, S7.*, S10.*, S11.* (operator tools), S12.*.
+
+### ISS-23 · major · FD§5.3, FD§8.3 G0 · proposed
+
+**Finding.**
+
+- G0 asks 11 questions about each service, (a) to (k). FD§5.3 defines 7 registry flags: third-party task use, pooling or crediting, automation limits, regional availability, commercial use, training use and open publication.
+- Questions (h) (what the provider does with chats, memory and connectors), (i) (usage-policy requirements), (j) (what the free allowance means) and (k) (written permission) have no flag. Question (c) bundles automation, scraping, prefilled links and copy-paste, which one yes/no flag cannot hold.
+- The approval rule of FD§5.3 requires acceptable answers on prohibited content, which is not one of the 7 flags.
+- “Unknown is no” has a meaning only for yes/no flags; for a free-text answer it has none.
+- Regional availability is recorded per region, but none of `R1`..`R10` consumes it, and the platform cannot know where a member is (FD Principle 8).
+
+**Resolution.** [D][A]
+
+1. S0.8.3 already maps G0 to 9 gate flags and 4 info flags. This register adds the rules below and fixes the mapping, so no part reinvents it:
+
+| G0 question | Flag key | Kind |
+| --- | --- | --- |
+| (a) third-party task use | `third_party_task_use` | gate |
+| (b) pooling or crediting | `access_pooling_or_crediting` | gate |
+| (c) automation, copy-paste, prefilled links | `human_copy_paste_use`, `prefilled_link_use`; the automation part is the note, because Hamyar automates nothing on the volunteer's side | gate |
+| (d) regional availability | `regional_availability`, one answer per region | gate |
+| (e), (f), (g) commercial, training, publication | `commercial_use_of_output`, `training_use_of_output`, `open_publication_of_output` | gate |
+| (h) chats, memory, connectors | `info.provider_trains_on_chats`, `info.memory_or_connectors_risk` | info |
+| (i) usage policy | `prohibited_content_compatible` | gate |
+| (j), (k) allowance, written permission | `info.allowance_may_change`, `info.written_permission` | info |
+
+2. Every answer is structured (`yes`, `no`, `unknown`) plus a free-text note. Only the structured answer is evaluated; the note is for humans.
+3. An `info.*` answer of `unknown` is shown to volunteers as “not known” and never gates.
+4. The approval rule uses `prohibited_content_compatible`, so the gap in FD§5.3 is closed.
+5. Region answers are stored per region and shown on the cell card and in the opt-in screen as the reviewer's note. The platform neither tests nor infers a member's region. Eligibility is the member's own declaration at opt-in (“I may lawfully use this service from where I am”), declared and not checked [A][V: counsel on whether and how to ask]. Nothing here helps anyone bypass a restriction (brief ground rule 3).
+
+**Applied in.** S7.*, S11.*, S14.*.
+
+### ISS-24 · major · FD§5.3, FD§5.6 · proposed
+
+**Finding.** `M2` (FD§5.3) means an open-weight model with a checked license, hosted or local, and `P3` requires it unless a service permits training use in writing. The Service Registry records services and their terms, not models and their licenses, so an `M2` requirement has nothing to check. The provenance (FD§5.6) stores the model as reported by the volunteer, attested and not proven, so for `P3`, where the origin of the data is the point, the volunteer's word is all there is. `P3` is locked in Phases 1 and 2, and the Phase 1 profiles are `M0` and `M1` only (FD§5.7), so `M2` has no active use yet.
+
+**Resolution.** [D]
+
+1. `ServiceRegistryEntry` gets `service_kind` (`hosted_service`, `open_weight_model`; 2.8). A model entry stores the model's license as a `TermsCopy` and answers the same flag keys about that license, through the same review machine. A model reached through a third-party host is a `hosted_service` entry with its own terms.
+2. The service and model of a submission are labeled “reported by the volunteer, not proven” in every manifest. No `P3` deliverable is described as verified-origin.
+3. `P3` and `M2` rows are absent from the allowlist in Phases 1 and 2. They can be added only as an R10 loosen with a public change-log entry.
+4. Any local-model channel in FD§6.4 gets the data model and stays off.
+
+**Applied in.** S5.*, S7.*, S8.*, S11.*.
+
+### ISS-25 · major · FD§5.4 R3, FD§3.2 · proposed
+
+**Finding.** R3 rejects any task asking the volunteer to do more than copy, press Send and return text, with no links to open, files to download, installs or credentials. But FD§3.2 step 2 tells the volunteer to copy or open the prompt in the chosen service, and FD§10 describes an open-in-service button and a paste-back field. Opening a prefilled link is a link opened, and pasting into the service and pasting back are not on the list. R3 is also written as a rule evaluated on a job at admission, but what the volunteer is asked to do is written by the platform's card and the template, never by the requester; the requester's data can only carry text that tries to ask something. As worded, R3 cannot be tested.
+
+**Resolution.** [D]
+
+1. The permitted volunteer actions are a closed set, `volunteer_action_set`: copy the prompt; open the service through the platform's own button, only when the entry's `prefilled_link_use` is `yes` and the adapter supports prefill; paste into the service; press Send; copy the answer; paste it back. Nothing else.
+2. The only text addressed to the volunteer is platform-owned (the cell card). A template skeleton addresses the model, never the volunteer. Template review includes an automatic lint that rejects any skeleton telling the reader to do something outside the set (S8.*).
+3. R3 is evaluated as two checks under the one id `R3`: content (screening of input) and volunteer action (template lint at review, plus input screening for instruction-like text and links under `screen.*`). Reason codes stay `policy.R3.prohibited_content` (S0.8.4).
+4. Instructions inside requester data are never obeyed and never shown as instructions. An instruction in the model's output that is aimed at the reader is the case FD§5.5 quarantines (`submission.quarantined`).
+5. A link inside public input text, for example a page to translate, is data. It is governed by `screen.max_urls_per_input` and `screen.url_action`, not by R3.
+
+**Applied in.** S7.*, S8.*, S9.*, S11.*.
+
+### ISS-26 · major · FD§5.4 R8, FD§5.2 · proposed
+
+**Finding.** R8 shows a cell only to volunteers whose opt-ins cover its purpose, sensitivity, license, service and topic, and sensitive topic categories are opt-in. FD§5.2 lists four requester declarations and a set of system-added fields; topic is in neither list, and the FD defines no topic list. The last clause of R8 can never be evaluated.
+
+**Resolution.** [D][V]
+
+1. `topic_category_ids` is a mandatory field of every `TemplateVersion`, checked by the reviewer. It describes the kind of work.
+2. A requester may add categories from the list when declaring a job and can never remove the template's. Screening may add categories and never remove. The topics of a cell are the union.
+3. `TopicCategory` (S0.7) gets `is_sensitive` (2.8). The categories themselves are data entered by reviewers; this spec invents none. [V: who writes the list and with whom, and counsel or a safety adviser for the sensitive categories; stored as `TopicCategory` rows]. `optin.sensitive_topics_default` stays `false`.
+
+**Applied in.** S5.*, S7.*, S8.*, S11.*.
+
+### ISS-27 · major · FD§5.4 R9 · proposed
+
+**Finding.** R9 stamps the policy version at admission and re-checks it at acceptance; a change may stop work in flight but never retroactively legitimizes it. A re-check against the stamped version checks nothing. A re-check against the current version would let a loosening legitimize old work, which R9 forbids, and would let a tightening void a result a donor delivered in good faith. The FD does not say what happens to cells already submitted when a tightening lands, nor who pays for them.
+
+**Resolution.** [D][A]
+
+1. Acceptance requires a pass under the stamped version and under the current version, in that order. Loosening cannot rescue; tightening can stop.
+2. A cell that fails only because of a tightening that took effect after its lease was issued becomes `Cell.voided` with reason `reject.policy_changed`. When the change affects the whole job, the job stops with closure reason `policy_stopped`.
+3. Payment: a cell that reached `submitted` before the tightening's `effective_at` and passed all checks under the stamped version is paid at the `cell.voided` transition, from the escrow (member job) or by mint (Commons), because the donor followed the rules in force at lease time. It is excluded from the deliverable and flagged in the manifest. A cell not yet submitted is not paid, and the unexecuted part of the escrow is refunded. The cost of a paid but excluded cell falls on the job's escrow. The owner may prefer the Reserve to bear it (S3.2); that would be a new Reserve outflow, which FD§4.2 does not allow today.
+
+**Applied in.** S5.*, S6.*, S7.*, S9.*.
+
+### ISS-28 · major · FD§5.5, FD§4.4 · proposed
+
+**Finding.** The cell card carries a fixed provenance sentence (FD§5.5) that says a stranger asked for the work and that a reviewer checked the text on a date.
+
+- (a) Gold cells come from the platform's hidden library and Commons cells from the project's backlog. No stranger asked for them, and gold cells must look like any other cell (FD§4.4).
+- (b) The review the sentence claims covers the template. The data in the slots is screened automatically and by reviewer sampling (`screen.review_rate_new_requester`, `screen.review_rate_established_requester`), so a claim that the text below was reviewed is untrue for inputs that were not sampled. FD Principle 11 allows claiming only what can be shown.
+
+**Resolution.** [D]
+
+1. The “who asked” clause is the same for every cell kind and true for all of them: the work was requested by someone, a member or the project, without saying which. The cell kind is never visible to the volunteer.
+2. The review clause states what was reviewed: the instructions of this template were reviewed on a date; and separately whether the data between the markers was screened by a reviewer on a date or only automatically. The card derives this from the actual screening record.
+3. All of it is declared, never guaranteed, and its copy keys carry `needs_human_and_legal_review`.
+
+**Applied in.** S11.*, S8.*, S9.*.
+
+### ISS-29 · major · FD§5.6 · proposed
+
+**Finding.** FD§5.6 stores with each output a salted-hash volunteer ID that requesters never see, and says exports carry the provenance as a manifest.
+
+- (a) Whether the salt is global, per member or per job is not stated.
+- (b) If a published Commons manifest carries the handle, a handle that is stable across jobs lets anyone link all of one volunteer's published work.
+- (c) The S0.6.4 derivation, an HMAC of the member id under one key, is such a stable handle. It can be recomputed from any `mem_` id that remains in other tables after closure (S0.7: `member_bound` rows are reduced to opaque ids).
+- “Requesters never see it” and “exports carry this” conflict unless the export omits the handle.
+
+**Resolution.** Proposed change of S0.6.4; item 1 needs no change of S0. [D][A]
+
+1. Exported manifests, to requesters and to the public including Commons, omit the volunteer handle. They carry the hash of the internal provenance record, so a requester can show that the record exists without reading who made it.
+2. Internally the handle is `vol_` plus the first 128 bits of HMAC-SHA-256 with key `secret.volunteer_handle_key[version]` over `member_salt` followed by `job_id`. `member_salt` is a random 128-bit value stored in the `Member` row and deleted at closure. The handle differs per job, and after closure it cannot be recomputed from any `mem_` id that remains.
+3. Until the owner accepts the change to S0.6.4, parts use the S0.6.4 formula.
+
+**Applied in.** S10.*, S5.* (`Manifest`), S12.* (public ledger), S4.* (secrets).
