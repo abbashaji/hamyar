@@ -289,3 +289,106 @@ Each milestone has the same rows: scope (by reference), dependencies, stubbed, t
 - [ ] The reachability-probe result and the PB-1, PB-3 records can be attached to gate items `G2`, `G4`, `G1`.
 - [ ] Second human signature on the DoD record (`BR10`).
 
+### BM3 `registry_and_policy`
+
+| Row | Content |
+| --- | --- |
+| Scope | `S7.*` Service Registry: `ServiceRegistryEntry` with the review machine of S0.9.6 (every service starts `unreviewed`, counts as `no`), `TermsCopy` (bytes in the `objects` port plus `sha256:` hash, source reference, capture date), dated `FlagAnswer`s per `flag_key` of S0.8.3 with optional `region`, review screens (`SCR-rev`), approval guard (`third_party_task_use` and `prohibited_content_compatible` are `yes`, a saved `TermsCopy`, reviewer recorded, `service.min_approvers`), timers `service.review_max_age_days` and `service.review_grace_days`, link of `CalibrationRecord.service_key` to entries. Service-adapter port: capability object from the registry (`adapter.supports_prefill`, `adapter.prefill_url_template`, `adapter.max_url_chars`, `adapter.copy_only`, `adapter.clean_chat_hint_key`), a pure URL-builder with `{prompt}` substitution and length check, tested only with fictitious templates [V]. Policy engine: `Policy`, `PolicyVersion`, `Rule` rows `R1`..`R10` as data plus the evaluator, the metadata schema and validation (purpose `P0`..`P3`, license `L0`..`L3`, sensitivity `S0`..`S3`, service requirement `M0`..`M2`), the allowlist of permitted combinations as data, reason codes `policy.<rule>.<slug>`, stamping and the acceptance re-check library (`R9`), the tighten-at-once versus loosen-with-change-log workflow (`R10`, `policy.loosen_min_notice_days`), `TopicCategory` and the `OptIn` data model with defaults from `optin.*` and the `R8` visibility predicate. Admin dry-run endpoint that evaluates a job-shaped declaration and returns the decision and reasons [A] |
+| Entities | `ServiceRegistryEntry`, `TermsCopy`, `FlagAnswer`, `Policy`, `PolicyVersion`, `Rule`, `TopicCategory`, `OptIn` (data model only) |
+| Endpoints | `/v1/admin/*` families: services, terms-copies, flag-answers, service-reviews, policies, policy-versions, rules, topic-categories, policy-evaluations (dry run); the gate rule's service counter is now real (`S15.*` for paths) |
+| Depends on | `BM2` |
+| Stubbed | `TemplateLookup` port answers "not approved", so `R4` rejects every request in a production binding until `BM5`; `OptIn` rows have no member until `BM4`; in-flight cell handling on revocation is defined by the machine but has no cells until `BM6`; `kill.service.<svc_id>` is evaluated but has no cells to pause |
+| Working system | A job-shaped declaration is accepted or rejected with `policy.<rule>.<slug>` reasons; no service can reach `approved` without a saved terms copy; the gate rule counts real approved services |
+| Demo | A reviewer creates a fictitious service, saves a terms file, answers flags, approves it (second approver if configured), dry-runs declarations that pass and fail each rule, then revokes the service and shows the state |
+
+**Acceptance tests (BM3)**
+
+- `AC-bm3-01` Given a fresh database, When any service entry is listed, Then its state is `unreviewed`; When a declaration naming it is evaluated, Then the decision is reject with the service-state reason defined in `S7.*`.
+- `AC-bm3-02` Given a service in `in_review`, When approval is attempted without a `TermsCopy`, or with `third_party_task_use` or `prohibited_content_compatible` equal to `no` or `unknown`, Then `409 STATE_CONFLICT`; `unknown` is evaluated as `no` for every gating flag.
+- `AC-bm3-03` Given a stored `TermsCopy`, When its bytes are re-hashed, Then the hash equals the stored `sha256:` value; no operation edits or deletes it; a new capture is a new row.
+- `AC-bm3-04` Given a new `FlagAnswer`, Then the previous answer remains in history; a `region`-specific answer is stored apart from the global one; no region value is hardcoded anywhere.
+- `AC-bm3-05` Given an approved service older than `service.review_max_age_days`, When the timer runs, Then `service.review_due` is emitted and new declarations naming it are rejected at once; after `service.review_grace_days`, Then `service.review_lapsed` and the state `suspended`.
+- `AC-bm3-06` Given the table of allowed and rejected combinations in `S7.*` as oracle, When every row is evaluated, Then the decision and reason codes equal the table; a property test shows no declaration with `S2` or `S3` is accepted and `P3` is accepted only with `S0` and (`M2` or `training_use_of_output` = `yes`).
+- `AC-bm3-07` Given a test policy version without the `R5` row, When a `P2` declaration is evaluated, Then the `R5` check no longer applies (rules are data; the evaluator has no rule-specific branch outside registered handlers).
+- `AC-bm3-08` Given a loosening change without a published `ChangeLogEntry`, Then it is refused; a tightening change applies at once; a loosening change takes effect only after `policy.loosen_min_notice_days`.
+- `AC-bm3-09` Given a declaration stamped with policy version `n`, When version `n+1` tightens a rule and the acceptance re-check runs, Then the result carries `reject.policy_changed` (`R9`; fixture cell).
+- `AC-bm3-10` Given a fictitious prefill template and a prompt, When the builder runs, Then `{prompt}` is substituted URL-encoded; if the result exceeds `adapter.max_url_chars` or `prefilled_link_use` is not `yes`, Then `adapter.copy_only` is true and no URL is produced; for an `unreviewed` service no URL is ever produced.
+- `AC-bm3-11` Given the `optin.*` defaults, When the `R8` predicate is evaluated for a cell and a set of opt-ins, Then it returns visible only if purpose, sensitivity, license, service requirement and topic all match; sensitive topics default to not opted in.
+- `AC-bm3-12` Given the gate rule of `AC-bm2-01`, When an approved fictitious service exists and all required gates are signed by fixture admins in `ci`, Then the rule passes in `ci`, and still fails in a `production` binding.
+- `AC-bm3-13` Given the repository, Then no provider name, URL template or region claim appears outside the fictitious fixtures (`BR8`).
+
+**Definition of Done (BM3)** adds to 17.5.3:
+
+- [ ] The policy oracle table of `S7.*` is executable and complete for every combination of the four axes.
+- [ ] The seed policy version 1 is published with its genesis change-log entry and contains `R1`..`R10`.
+- [ ] Reviewer screens exist in `en` with copy keys; no screen can approve a service without showing the saved terms copy.
+- [ ] Every `FlagAnswer` shows who recorded it and when.
+
+### BM4 `identity_and_access`
+
+| Row | Content |
+| --- | --- |
+| Scope | `S10.*` identity: anonymous `Member` creation with no e-mail and no signup (`launch.members_may_join` guard), `MemberKey` (Ed25519 [A], S0.6.4), challenge-response sessions (member `Session`, tokens stored as hashes), `Device` (keyed hash), recovery key (generation on the client; the server stores only what `S10.*` specifies), recovery flow with `identity.recovery_cooldown_s` and `identity.recovery_max_per_90d`, key rotation with `identity.key_rotation_grace_s`, device linking with `identity.device_link_code_ttl_s`, optional e-mail (`identity.email_optional`, constant), `Invite` and invite trees (`invite.*`), rate limits per device, IP hash, invite tree and day (`ratelimit.*`), roles and the permission matrix as data (`perm.<area>.<action>`), the member trust-tier and status machines (S0.9.4) with their events, suspend, ban, close admin actions, retention jobs (`retention.*`), IP-hash handling with `retention.ip_hash_ttl_days`, creation of the member's `LedgerAccount` in the same transaction, experiment assignment hook (`BM2` library) on creation, foreign-key backfill from ledger accounts to members (17.8). The browser-compatible identity client SDK (no UI) and a test harness client. Member-side safety design: no location display, minimal collection, no raw IP or clear e-mail anywhere |
+| Entities | `Member`, `MemberKey`, `Device`, `Invite`, `Session` (member), `OptIn` rows created with defaults |
+| Endpoints | Member surface: members (anonymous create), sessions, keys, devices, recoveries, invites, opt-ins, settings, `GET` own profile (`S15.*`); admin: members (suspend, ban, close, restrict), invites tree view |
+| Depends on | `BM2` |
+| Stubbed | The `mail` port stays a no-op (optional e-mail verification is not delivered until a mail binding is chosen, `S3.*`); trust-tier promotion inputs (accepted cells, reliability) are empty until `BM6`, so tiers stay `new` except by admin action; the invites-issued counter port returns `0` until `BM6`, so only operator-issued root invites exist [A]; recovery cooldown is exposed as a queryable flag and enforced on spending in `BM7` |
+| Working system | A member can be created, recovered, rate-limited and moderated; the permission-matrix suite passes; no raw IP appears in storage or logs |
+| Demo | Using the client SDK in `ci`: create three members, issue an invite tree, link a device, rotate a key, recover an identity, trip each rate limit; an admin suspends one member |
+
+**Acceptance tests (BM4)**
+
+- `AC-bm4-01` Given a fresh database with default parameters, When anonymous member creation is called, Then `403 LAUNCH_GATE_CLOSED`; Given the gate satisfied through the real flow in `ci`, Then `201` with a `mem_` id and no e-mail field.
+- `AC-bm4-02` Given `ratelimit.device_new_members_per_day` creations from one device, When one more is attempted, Then `429 RATE_LIMITED`; the same holds for `ratelimit.ip_hash_new_members_per_day` and `ratelimit.invite_tree_new_members_per_day`.
+- `AC-bm4-03` Given a signed challenge, Then a session is issued; a wrong signature returns `AUTH_INVALID`; a database scan finds no raw session token, only hashes.
+- `AC-bm4-04` Given a member with a lost device, When the recovery key is used, Then a new `MemberKey` is registered, `member.recovered` is emitted, `recovery_cooldown_active` is true for `identity.recovery_cooldown_s`, and more than `ratelimit.recovery_attempts_per_day` attempts return `429`; a third recovery inside 90 days beyond `identity.recovery_max_per_90d` is refused.
+- `AC-bm4-05` Given a key rotation, Then the old key works until `identity.key_rotation_grace_s` has passed and `member.key_rotated` is emitted; a device link code is single use and expires after `identity.device_link_code_ttl_s`.
+- `AC-bm4-06` Given an invite tree at `invite.tree_max_depth` or `invite.tree_max_members`, When a further invite is accepted, Then it is refused; an invite older than `invite.ttl_days` cannot be accepted.
+- `AC-bm4-07` Given the permission-matrix table of `S10.*` (principal x operation), When each cell is exercised, Then the result is `401`, `403` or `404` exactly as tabled; a token of one scheme on an endpoint of another is `AUTH_INVALID`.
+- `AC-bm4-08` Given rows older than their `retention.*` limits, When the retention jobs run, Then they are purged; on closure `member_bound` rows are deleted or reduced to the opaque id.
+- `AC-bm4-09` Given canary values for an IP address and an e-mail address, When a full database dump, all logs and all metrics are scanned, Then neither canary appears in clear text.
+- `AC-bm4-10` Given a suspended or banned member, Then new sessions are refused and active sessions are revoked; `kill.member.<mem_id>` returns `503 KILL_SWITCH_ENGAGED`.
+- `AC-bm4-11` Given member creation, Then the `LedgerAccount` exists in the same transaction; a forced failure of either rolls back both; the foreign key from `ledger_accounts` to `members` is validated.
+- `AC-bm4-12` Given more than `ratelimit.member_api_rpm` calls in a minute, Then `429`.
+- `AC-bm4-13` Given an experiment assignment on creation, Then it is logged once and the arm is reproducible.
+
+**Definition of Done (BM4)** adds to 17.5.3:
+
+- [ ] The permission matrix in the repository is generated from the table in `S10.*`; a test fails if an operation has no row.
+- [ ] The client SDK has no dependency that reaches a third-party host and stores keys only on the device.
+- [ ] The retention table of `S10.*` is implemented for every entity class named `member_bound`, `short` or `moderation`.
+- [ ] The threat-model rows for fake accounts, account takeover and de-anonymization each point at at least one test of this milestone.
+
+### BM5 `templates_and_commons_jobs`
+
+| Row | Content |
+| --- | --- |
+| Scope | `S8.*`: `Template` and `TemplateVersion` (slots, prompt body, delimiters, output schema, automatic checks, comparator, cell envelope, review status), the review machine of S0.9.5 with the second-reviewer rule (`template.min_reviewers_new`, `template.min_reviewers_edit`) and a review queue with diff (`SCR-rev`), immutability after approval, versioning and supersession. The first template set seeded as `draft` (never `approved` by a seed, effectiveness `[H]`): `translation_glossary`, `classify_extract`, `summarize_schema`, `code_change_tests`, `format_convert_validator`, each with prompt skeleton, input and output schema and automatic checks; a template test harness where a reviewer runs the checks on supplied sample outputs without any lease. `S9.*` defenses at the template and input side: wrapping of untrusted input in delimiters, delimiter-collision handling, template lint (a task may only ask the volunteer to copy, press Send and return text, `R3`), `Upload` and `Glossary`, input screening (`screen.*`: URLs, PII patterns, instruction patterns) with a reviewer queue. `S5.*` `Job` machine for Commons jobs and the `Cell` machine up to `Cell.queued`; Commons backlog authoring by operators; the template-specific splitter that cuts an upload into cells inside `cell.envelope.max_input_chars`; hashes of inputs. Pause by `kill.template.<tpl_id>` |
+| Entities | `Template`, `TemplateVersion`, `Job`, `Cell`, `Upload`, `Glossary` |
+| Endpoints | Admin: templates, template-versions, template-reviews, commons-jobs, uploads, screening-queue; member job endpoints exist as operations only for `BM7` and are not registered yet (`S15.*`) |
+| Depends on | `BM3`, `BM4` |
+| Stubbed | No lease path: cells stay `queued`; the verification checks are defined and runnable in the harness but not in a pipeline; gold cells are not authored yet; the `human_review` template is added in `BM6`; `Job` states for member jobs (`quoted`, `waitlisted`, escrow) are present in the machine but unreachable until `BM7` |
+| Working system | A reviewer approves a template; an operator authors a Commons job which splits into queued cells; creation is refused for every `unreviewed` service |
+| Demo | Author a template version, run its harness on fixtures, have two reviewers approve it, upload a data file, watch screening flag a URL, create the Commons job, view the queued cells, then try to create a job for an `unreviewed` service |
+
+**Acceptance tests (BM5)**
+
+- `AC-bm5-01` Given a new template version by author A, When A requests review, B approves, Then `awaiting_second_review`; When B approves again, Then still `awaiting_second_review`; When C approves, Then `approved`; A cannot approve own work; an edit of an approved template needs `template.min_reviewers_edit` approvals.
+- `AC-bm5-02` Given an approved `TemplateVersion`, When any field is edited, Then `409 STATE_CONFLICT`; a change is a new version and its content hash differs.
+- `AC-bm5-03` Given a Commons job declaration, When the service is `unreviewed`, Then it is rejected by the evaluator; When the template version is not `approved`, Then `policy.R4.template_required`.
+- `AC-bm5-04` Given an upload of `N` records, When split, Then each cell input is at most `cell.envelope.max_input_chars`, ids are server-issued `cel_` ids, order is preserved for reassembly, and the sum of record counts over cells equals `N`.
+- `AC-bm5-05` Given an input with a URL and `screen.max_urls_per_input` equal to 0, Then it is handled per `screen.url_action`; given a PII pattern, Then `screen.pii_action`; flagged inputs wait in the reviewer queue and create no cells.
+- `AC-bm5-06` Given a set of adversarial template bodies (ask to visit a link, run code, send a message, reveal context), When linted, Then each is rejected under `policy.R3.prohibited_content` and none can reach `in_review`.
+- `AC-bm5-07` Given untrusted input containing the template delimiter, When the prompt is built, Then the delimiter is neutralized as `S9.*` specifies and the wrapped prompt parses back to exactly the original input.
+- `AC-bm5-08` Given the seed, Then the five required templates exist as `draft`, each with every field of the template format; none is `approved`; the harness reports pass or fail on fixture samples as expected.
+- `AC-bm5-09` Given `kill.template.<tpl_id>` engaged, Then the job becomes `suspended` and its queued cells `suspended` (`job.paused`, `cell.paused`); release requires two operators.
+- `AC-bm5-10` Given the `Job` and `Cell` machines, When every transition of S0.9.2 and S0.9.3 reachable in this milestone is driven (state-machine test `T-fsm-*`) and every invalid one is attempted, Then valid ones emit exactly their event and invalid ones return `409 STATE_CONFLICT` with no event.
+- `AC-bm5-11` Given an upload larger than `job.max_upload_bytes`, Then `413 PAYLOAD_TOO_LARGE`.
+- `AC-bm5-12` Given a template review, Then every action is an `AdminAction` and the review history is read-only.
+
+**Definition of Done (BM5)** adds to 17.5.3:
+
+- [ ] Every template field is covered by a schema test; the seeded templates carry the tag that their effectiveness is a hypothesis `[H]` and no copy claims otherwise.
+- [ ] The state-machine tests are table-driven from S0.9 so a change to the machine tables fails the build until tests follow.
+- [ ] No code path creates a job without calling the policy evaluator and the gate library.
+
