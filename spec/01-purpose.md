@@ -159,6 +159,4 @@ A part that departs from the FD MUST cite the `ISS-nn` that records and justifie
 
 ## Issues raised
 
-| id | severity | fd_ref | issue | resolution | status |
-| --- | --- | --- | --- | --- | --- |
-| `ISS-37` | minor | none | The cell instruction numbers new issues from `ISS-01` and reserves `ISS-50` onward, but S0.4 already uses `ISS-01`..`ISS-09` for part 0 and gives each part its own block, so following the instruction would put two different issues under one id | `ISS-01`..`ISS-09` are kept as the part-0 issues; this cell numbers its findings inside the blocks it inherits (`ISS-11`..`ISS-19`, `ISS-21`..`ISS-29`, `ISS-31`..`ISS-38`); later parts keep their S0.4 blocks. Recorded as a binding note on the cell | applied |
+none. The one finding made while writing this part, `ISS-37` (the instruction's issue numbering collides with S0.4), has its id in the block of S3 and is raised there; its detail is in S2.6.
