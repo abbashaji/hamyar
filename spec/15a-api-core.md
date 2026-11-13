@@ -581,3 +581,95 @@ createReferral 201 { referral: Referral, code: text<32> }                       
 - **Share card** (`ff.growth.v3_share_card`). `getShareCard` is computed on request and returns only a verified-cell total and badges; it contains no member id, no handle, no location, no date of joining and no time series (`contains_personal_data` is always `false`). The client renders the image locally; the server stores no image and no share link, so there is nothing to track or revoke. [D]
 - **Referral** (`ff.growth.v5_referral`). A referral is an invite with a bonus attached: `createReferral` also creates the `Invite` (same guards as `createInvite`) and counts toward `growth.referral.max_per_referrer_per_30d` (`CAP_EXCEEDED`, `referral_limit`). Redemption is the `invite_code` of `createMember`; the referral becomes `activated` when the newcomer has `growth.referral.min_newcomer_verified_cells` verified cells, and `paid` after `growth.referral.hold_s`, when both parties receive `growth.referral.bonus_credits` as a `grant` entry from the Reserve; if the Reserve is at `grant.reserve_floor_credits` the state stays `activated` with `pending_reason` `reserve_floor`. The referrer sees counts and states only, never who the newcomer is. Anti-farming limits (`ratelimit.invite_tree_new_members_per_day`, the invite tree caps, `grant.max_per_device`) apply unchanged. [D]
 - **Feature flags.** `getFeatures` lets the client render only what the server enabled; a client must not call an endpoint whose flag is off. A call to a disabled mechanic is `403 FORBIDDEN`, reason `feature_disabled`, `details.flag`. [D]
+
+## 15.9 Error model and error-code catalogue
+
+Every non-2xx response is `{ "error": { "code": string, "message": string, "details": object, "request_id": "req_<ulid>" } }` (0.11.3). The top-level `code` set is exactly the S0 table and is append-only inside `v1` (no code is removed, renamed or repurposed). Finer cases are `details.reason`, a stable `snake_case` string that is also append-only; `message` is English, for developers, and is not part of the contract. Every error carries `details.copy_key` = `copy.api_error.<code lowercase>[.<reason>]` so clients render `fa` or `en` text themselves (`S11.*`). A code or reason missing here is raised as a convention gap, never invented in code. [D]
+
+| Code | HTTP | Client action | `details` keys | `details.reason` values |
+| --- | --- | --- | --- | --- |
+| `MALFORMED_REQUEST` | 400 | fix, do not retry | - | `invalid_json`, `body_not_object`, `bad_header` |
+| `VALIDATION_FAILED` | 400 | fix, do not retry | `fields: [{path, code, message}]` | `field_invalid`, `unknown_field`, `missing_field`, `idempotency_key_missing`, `cursor_invalid`, `cursor_expired`, `limit_out_of_range`, `option_not_selectable` |
+| `AUTH_REQUIRED` | 401 | log in | - | `no_credentials` |
+| `AUTH_INVALID` | 401 | log in again | - | `credentials_invalid`, `wrong_scheme`, `challenge_invalid`, `key_pending` |
+| `AUTH_EXPIRED` | 401 | new challenge or session | - | `session_idle_expired`, `session_absolute_expired`, `challenge_expired` |
+| `FORBIDDEN` | 403 | show message | `until?`, `flag?` | `member_suspended`, `member_banned`, `recovery_cooldown`, `recovery_quota`, `tier_too_low`, `feature_disabled` |
+| `LAUNCH_GATE_CLOSED` | 403 | show "not open yet" | `switch` (`launch.members_may_join`, `launch.member_jobs_enabled`, `launch.minting_enabled`) | - |
+| `NOT_FOUND` | 404 | stop | - | `route_not_found` (others carry none: absent, not owned and not visible look the same) |
+| `STATE_CONFLICT` | 409 | reload, then decide | `state?` | `job_state_invalid`, `quote_expired`, `quote_changed`, `not_cancellable`, `upload_attached`, `max_extensions_reached`, `expansion_required`, `submission_exists`, `last_active_key`, `key_state_invalid`, `invite_state_invalid`, `reservation_state_invalid` |
+| `LEASE_CONFLICT` | 409 | reload offers | - | `cell_not_queued` |
+| `ALREADY_EXISTS` | 409 | treat as done or stop | - | `public_key_exists`, `starter_grant_claimed`, `membership_exists` |
+| `IDEMPOTENCY_IN_PROGRESS` | 409 | retry same key after `Retry-After` | - | - |
+| `LEASE_EXPIRED` | 410 | release and re-offer | `lease_id` | `lease_expired`, `nonce_invalid`, `lease_released`, `lease_revoked` |
+| `PRECONDITION_FAILED` | 412 | re-read, retry | - | `etag_mismatch` |
+| `PAYLOAD_TOO_LARGE` | 413 | shorten | `limit_bytes` | `body_too_large`, `submission_too_large`, `upload_too_large` |
+| `UNSUPPORTED_MEDIA_TYPE` | 415 | fix | - | - |
+| `POLICY_REJECTED` | 422 | edit declarations | `reasons: ["policy.<rule>.<slug>"]`, `job_id?`, `findings?` | - |
+| `INSUFFICIENT_CREDIT` | 422 | earn or reduce | `required_ucr`, `available_ucr`, `short_by_ucr` | - |
+| `CAP_EXCEEDED` | 422 | wait or reduce | `parameter`, `limit`, `current`, `resets_at?` | `active_lease_limit`, `member_credit_cap`, `daily_earn_cap`, `job_too_large`, `concurrent_jobs`, `waitlist_limit`, `reservation_limit`, `reservation_horizon`, `reservation_capacity_share`, `invite_limit`, `invite_tree_full`, `invite_tree_depth`, `grant_per_device`, `grant_per_tree_day`, `grant_daily_limit`, `referral_limit`, `team_full` |
+| `NO_CAPACITY` | 422 | choose another window | `requote?` | `capacity_changed`, `date_full` |
+| `IDEMPOTENCY_KEY_MISMATCH` | 422 | use a new key | - | - |
+| `UNPROCESSABLE` | 422 | fix | - | `invite_required`, `invite_unusable`, `invite_requirement_unmet`, `service_not_eligible`, `grant_requirement_unmet`, `reserve_floor`, `glossary_invalid` |
+| `RATE_LIMITED` | 429 | wait `Retry-After` | `class`, `limit`, `reset_s`, `scope?` | - |
+| `INTERNAL` | 500 | retry with same key, backoff | - | - |
+| `UNAVAILABLE` | 503 | retry with same key, backoff | - | - |
+| `KILL_SWITCH_ENGAGED` | 503 | show notice | `switch` (`kill.all_minting`, `kill.all_new_jobs`, `kill.template.<tpl_id>`, `kill.service.<svc_id>`) | - |
+
+Examples of the exact shape:
+
+```json
+{ "error": { "code": "LEASE_CONFLICT", "message": "The cell is no longer queued.",
+             "details": { "reason": "cell_not_queued", "copy_key": "copy.api_error.lease_conflict.cell_not_queued" },
+             "request_id": "req_01j9zam3c5d7f9h2k4n6q8s1vx" } }
+{ "error": { "code": "INSUFFICIENT_CREDIT", "message": "Escrow exceeds the available balance.",
+             "details": { "required_ucr": "276000000", "available_ucr": "250000000", "short_by_ucr": "26000000",
+                          "copy_key": "copy.api_error.insufficient_credit" },
+             "request_id": "req_01j9zam3c5d7f9h2k4n6q8s1vx" } }
+```
+
+Rules [D]: a deterministic `4xx` is stored under its `Idempotency-Key` and replays identically; `5xx` and `429` are never stored (0.11.5). `INTERNAL`, `UNAVAILABLE` and network failures are retried with the same key and exponential backoff with jitter; a client that cannot tell whether a write happened repeats it with the same key and gets the stored result or a fresh execution, never a double effect. No error message or `details` ever contains a secret, a token, another member's id, the matched text of a screening finding, or the content of a prompt or output. `LAUNCH_GATE_CLOSED` is for the three launch switches only; a disabled feature flag is `FORBIDDEN` with reason `feature_disabled`.
+
+## 15.10 Idempotency semantics per endpoint
+
+Scope of a stored record is (principal, method, path template with ids, key) for 24 hours (`api.idempotency_ttl_s`); for `none` endpoints the principal is the IP hash. The body hash is the SHA-256 of the canonical JSON of the request body. Records are written in the same transaction as the effect (`S15.4` step 12). [D]
+
+| Operations | Key | Natural idempotency underneath | Replay returns |
+| --- | --- | --- | --- |
+| `createMember` | R | unique `public_key` | stored `201`; a new key with a known `public_key`: `409 public_key_exists` |
+| `createIdentityChallenge`, `createSession` | X | the challenge is single-use | not replayable; the client gets a new challenge |
+| `rotateKey`, `revokeMemberKey`, `recoverMember`, `approveDeviceLink`, `redeemDeviceLink`, `revokeDevice` | R | key and device states are monotonic | stored result |
+| `createDeviceLink`, `createInvite`, `createTeam`, `createTeamJoinCode`, `createReferral` | R | one-time secret in the response (see below) | stored result with the same secret |
+| `createLease`, `issueLeaseNonce` | R | `cells` row update with `state = 'queued'` (exactly one winner) | stored `201` with the same `nonce`; a lost race stays `409 cell_not_queued` and is stored |
+| `extendLease`, `releaseLease` | R | lease state | stored result |
+| `submitResult` | R | **(lease_id, nonce)** and output hash; one `Submission` per lease | stored `201`; same lease and nonce with the same body and a new key returns the stored outcome with `Idempotent-Replayed: true` and posts nothing; a different body is `409 submission_exists` |
+| `claimStarterGrant` | R | one grant per member | stored `201`; later claims `409 starter_grant_claimed` |
+| `createUpload`, `createGlossary` | R | `content_hash` (a repeat of identical content returns the first upload) | stored `201` |
+| `createJob` | R | none | stored `201`; a double click never makes two drafts |
+| `submitJobForScreening` | R | job state `draft` -> `screening` once | stored result, including a stored `422 POLICY_REJECTED` |
+| `confirmJob` | R | job state `quoted` -> `admitted` once; one `Escrow` per job | stored `201`; **never a second escrow hold** |
+| `cancelJob`, `cancelReservation` | R | terminal states | stored result |
+| `createReservation` | R | none | stored `201` |
+| `createReport` | R | (subject, reporter, category) within one UTC day | stored `201`; a duplicate report is stored as the same `Report` |
+| `replaceOptIns`, `updateMe`, `updateJob`, `declareJobMetadata`, `rateJob`, `setEmail`, `confirmEmail`, `removeEmail`, `revokeSession`, `denyDeviceLink`, `revokeInvite`, `declineOffer`, `leaveTeam`, `joinTeam`, `updateTeam`, `revokeReferral` | O | the operation is a replacement or a monotonic change | stored result if a key was sent |
+
+**Secrets in replays** (`ISS-151`). A response that carries a one-time secret (`nonce`, invite code, device-link code, team join code) is stored in the idempotency record encrypted under an application key (`S10.*`), and the ciphertext is purged when the secret is consumed or expires, whichever comes first, and at the latest at `api.idempotency_ttl_s`. The domain table keeps only the SHA-256 (0.6.4). After the purge a replay returns the resource with the secret field omitted, and the client uses the re-issue operation (`issueLeaseNonce`) or creates a new one. A session token is never replayable (`createSession` is key-`X`). [D][A]
+
+## 15.11 Pagination
+
+Cursor pagination only (0.11.6): `?limit=` (default `api.page_size_default`, at most `api.page_size_max`; outside the range `400` reason `limit_out_of_range`) and `?cursor=` (opaque, signed, expires after `api.cursor_ttl_s`; bad or expired: `400` reasons `cursor_invalid` or `cursor_expired`). A cursor encodes the order key and the filters it was issued for; changing a filter with a cursor is `cursor_invalid`. No offsets, no total counts (a `count` field appears only where this part defines one). Default order is newest first by `created_at` then `id`; every other order is stated here. [D]
+
+| op | Order | Filters |
+| --- | --- | --- |
+| `listOfferedCells` | server priority (not creation time); a page may contain cells that were taken meanwhile | `service_id`, `template_id`, `job_type` (narrowing only) |
+| `listLeases` | newest first | `state` |
+| `listSubmissions` | newest first by `received_at` | `verdict`, `from`, `to` |
+| `listReports` | newest first | `state` |
+| `listLots` | `expires_at` ascending (oldest-first spending order) | `state` |
+| `listLedgerEntries` | newest first | `entry_type`, `from`, `to` |
+| `listJobs` | newest first | `state` |
+| `listJobCells`, `listJobResults` | `ordinal` ascending | `state` (`listJobCells` only) |
+| `listReservations` | `target_date` ascending | `state` |
+| `listTemplates` | `name` ascending | `job_type` |
+| `listSessions`, `listDevices`, `listMemberKeys`, `listInvites`, `listReferrals`, `listTeams`, `listTeamMembers`, `listBadges`, `listMyBadges`, `listServices`, `listTopicCategories` | newest first (`listTeamMembers`: alias ascending) | none |
+
+`listOfferedCells` pages are best-effort snapshots: the server never promises that two pages are disjoint from cells taken in between, and clients must tolerate a `LEASE_CONFLICT` on any cell they pick.
