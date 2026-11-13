@@ -330,3 +330,57 @@ FD section 8.3 G1 asks for a written threat model for Iranian participants. S10.
 | `g1.threat_table` | The S10.* threat table with every required threat, mitigation and residual risk | CI artifact: every `THR-nn` row has non-empty mitigation and residual-risk fields | none |
 | `g1.member_notice` | The member-facing notice, drafted with someone qualified to advise (FD section 8.3 G1) | Hash of the deployed `fa` and `en` text of the notice keys equals the evidence | `copy_bundle(copy.privacy., copy.risk.)` |
 | `g1.risk_ack` | Report showing that the first-contribution flow cannot complete without the explicit risk acknowledgement of FD section 9 Phase 1 | CI artifact of the end-to-end test | `copy_bundle(copy.risk.)` |
+
+### 14.5.5 G2, technical feasibility (role `operator`; measurements are `TEC`)
+
+All results are [V] until measured on real phones and desktops. Evidence is a measurement report with the device matrix; testers are never identified (`EV-6`). [D]
+
+| `catalog_key` | Scope | What must be attached | Machine check or watch |
+| --- | --- | --- | --- |
+| `g2.device_matrix` | global | The list of phones, desktops, browsers and networks used | none |
+| `g2.svc.prefill` | service | Prefill support and URL length limit measured on the matrix | Registry `adapter.supports_prefill`, `adapter.max_url_chars` equal the report; watch `adapter(svc)` |
+| `g2.clipboard` | global | The clipboard flow (copy, open, paste-back) on the matrix | none |
+| `g2.copy_error_rate` | global | Measured copy-and-paste error rate, with sample size | `calibration_ref` to the `CalibrationRecord` rows used |
+| `g2.result_return` | global | The paste-back path works end to end; replay, forgery and size-limit tests pass | CI artifact of the adversarial suite |
+| `g2.reachability` | global | Reachability of the host from Iran as an outcome `reachable`, `partial` or `blocked`, with the method and date. A `blocked` result is signed as `not_satisfied`, which blocks any launch that requires G2 and triggers the hosting decision in S4.* [V] | none |
+| `g2.rtl` | global | Persian right-to-left and mixed-direction rendering on the matrix | CI artifact of the RTL suite |
+
+### 14.5.6 G3, empirical calibration (role `operator`; measurements are `CAL`)
+
+| `catalog_key` | Scope | What must be attached | Machine check or watch |
+| --- | --- | --- | --- |
+| `g3.svc.throughput` | service | Cells per day a free account completes before limits bite | `CalibrationRecord` count for the service at least `calibration.min_samples_per_service`; `calibration_ref` auto-attached |
+| `g3.svc.seconds` | service | Seconds per cell | same |
+| `g3.svc.failures` | service | Refusal and failure rates | same |
+| `g3.tpl.consistency` | template | Consistency across services on this template | `template_set`; at least two services with the minimum samples |
+| `g3.envelope_defined` | global | Decision that fixes the cell envelope and timing: for each of `cell.envelope.max_input_chars`, `cell.envelope.max_output_chars`, `cell.envelope.max_submission_bytes`, `cell.envelope.expected_time_s`, `lease.timeout_s`, `lease.submit_grace_s`, `verify.timing_min_s`, either a `calibration_source` pointer to the evidence or an explicit decision to keep the default | `parameters(cell.envelope.*, lease.*, verify.timing_min_s)`; constraint `C3` holds |
+| `g3.mint_cap_decision` | global | Decision that fixes `mint.monthly_cap_credits` and `mint.per_member_daily_cap_credits` from `CAL` or a founders' decision (`FND`); never above forecast redeemable capacity (0.10.6) | `parameters(mint.*)` |
+
+Signing an item does not change any parameter. Replacing a default is still a parameter change: prospective, versioned and logged (0.10.3). [D]
+
+### 14.5.7 G4, repo review and secret rotation (role `operator`)
+
+The existing panel repo is unreviewed [V] (prompt J). The source review in `docs/source/panel-review.md` is facts from static reading by the owner's tooling; it ran nothing and lists what it could not determine. It is an input to these items, not a substitute for a human reading the code. [P]
+
+| `catalog_key` | What must be attached | Machine check or watch |
+| --- | --- | --- |
+| `g4.repo_review` | Report of a human review of the code and `docs/` of the panel repo | none |
+| `g4.panel_dispositions` | A disposition (keep, wrap, replace, not applicable, accepted risk) for each of the 15 numbered weaknesses in section 4.5 of the panel review | Evidence lists all 15 numbers |
+| `g4.panel_unknowns` | An owner and a status (verified, out of scope, accepted risk) for each item in section 9 of the panel review ('things I could not determine') | Evidence lists every item |
+| `g4.keep_wrap_replace` | Decision per concept (cells, leases, status graph, bottleneck view, Release and Hand over) feeding S4.* | none |
+| `g4.secret.panel_token`, `g4.secret.admin_token`, `g4.secret.github_token`, `g4.secret.mcp_auth_token` | The four secrets of FD section 10, one item each (see below) | Validity formula in S14.6.3 |
+| `g4.secret.ext_token` | The fifth secret found by static reading (`EXT_TOKEN`, panel review section 4); evidence may instead show it is unset and its route removed [V] | same |
+| `g4.secret.register` | Every secret in the S10.* register (the new ones) has a rotation record | Watch `secret_register` |
+
+Evidence of every `g4.secret.*` item: (1) `secret_audit_note` on where the secret is read, logged and stored; (2) `rotation_record` with the date (`occurred_at`) and an identifier fingerprint, never the value; (3) `history_scan_report` of version control and CI logs for old values [V]; (4) an attestation that the old value was revoked and a test with it fails. If the panel code is not reused, the evidence is revocation instead of rotation. `security.rotate_before_public_exposure` is a constant `true` (0.10.6), so all `g4.secret.*` items are required for every launch switch regardless of `launch.required_gate_ids` (S14.7, `ISS-141`). [D]
+
+### 14.5.8 G5, demand check (role `operator`; measurements are `DEM`)
+
+FD section 8.3 G5 says 'a handful' of interviews. The tool invents no minimum; it records the count and the signers attest that it is enough (`ISS-141` lists this as an owner decision). Evidence is anonymized summaries (`interview_summary`). [D]
+
+| `catalog_key` | What must be attached | Replaces defaults of |
+| --- | --- | --- |
+| `g5.interviews` | Interview summaries and their count | none |
+| `g5.job_sizes` | What big jobs requesters really have | `credit.member_cap_credits`, `admission.max_job_cells` |
+| `g5.splittable_nonsensitive` | Whether those jobs split into independent cells and are public or non-sensitive (S0 or S1) | template set priorities |
+| `g5.windows` | What completion window they would accept | `admission.min_window_s`, `admission.max_window_days` |
