@@ -392,3 +392,93 @@ Each milestone has the same rows: scope (by reference), dependencies, stubbed, t
 - [ ] The state-machine tests are table-driven from S0.9 so a change to the machine tables fails the build until tests follow.
 - [ ] No code path creates a job without calling the policy evaluator and the gate library.
 
+### BM6 `execution_and_verification`
+
+| Row | Content |
+| --- | --- |
+| Scope | `S5.*`, `S8.*`, `S9.*`: the full `Cell` machine and `Lease` and `Submission` machines (S0.9.3); cell offer endpoint that applies `R8` and the adapter capability of `BM3`; leasing with server-issued nonce (`lease.nonce_bytes`), timeout, extension, decline and release (`lease.*`), the reaper job (`lease.reap_interval_s`), paste-back with size limits (`cell.envelope.max_submission_bytes`), schema validation, escaping rules, never executing content, quarantine of outputs with links, code or requests for action, duplicate-submission replay returning the stored outcome. Verification: automatic checks in a pipeline, `GoldCell` library and insertion at `verify.gold_rate_g` (hidden: same shape as primary cells), `Audit` machine with sampling at `verify.audit_rate_s`, comparator and third execution, adaptive sampling with the floor, blanket redundancy for new donors (`verify.new_donor_blanket_cells`) and high-risk templates, donor reliability estimate (Beta prior `verify.reliability_prior_a`, `verify.reliability_prior_b`, window `verify.reliability_window_obs`) and the false-accept and false-reject estimators with their stated limits, timing and duplicate detection, human-review cells (`cell_kind` `review`, own gold cells, behind `ff.channel.human_review`), `rework` cells and `cell.overturned` with ledger reversal. Trust tiers: promotion, demotion, restriction (`trust.*`). Commons minting at acceptance: exactly 1,000,000 `ucr` per accepted cell of any `cell_kind` (`ISS-03`), under `mint.monthly_cap_credits`, `mint.per_member_daily_cap_credits`, `launch.minting_enabled` and `kill.all_minting`. Expiry-arm resolver for lot lifetimes (`ff.experiment.expiry_arm`). `Report`, `Appeal` (all `appeal_kind` values) and ban processes with the reviewer-is-not-the-decider rule; template auto-pause (`template.autopause_report_count`, `template.autopause_window_s`); service revocation effect on in-flight cells (`cell.voided`, `lease.revoked`); `R9` re-check at acceptance; queues for audits, abuse flags and appeals in the console; the `human_review` template; a scripted test donor built on the client SDK that supplies pre-written outputs and never touches any provider |
+| Entities | `Lease`, `Submission`, `VerificationRecord`, `GoldCell`, `Audit`, `Report`, `Appeal`; `Cell` completed; `Member` trust tier fed |
+| Endpoints | `POST /v1/cells/{cell_id}/leases`, `POST /v1/leases/{lease_id}/submission` (S0.11.1), cell-offer, my-leases, reports, appeals, decline and release; admin: audits, gold-cells, reports, appeals, bans, verification-records (`S15.*`) |
+| Depends on | `BM1`, `BM5` (and through them `BM0`..`BM4`) |
+| Stubbed | No UI for volunteers (scripted donor only); no member jobs, so no payout or settlement and no requester; starter grant, per-member cap K and expiry sweeps are `BM7`; notifications absent; share, teams and referral absent |
+| Working system | A test donor drives a Commons cell from `Cell.queued` to `Cell.accepted` and the ledger mints exactly 1,000,000 `ucr`; replay, forgery and leasing-race suites pass |
+| Demo | The scripted donor works a batch that includes a gold cell and an audited cell; a forged and a replayed submission are refused; a reviewer overturns a rejection on appeal; the ledger explorer shows the mints and the invariants stay green |
+
+**Acceptance tests (BM6)**
+
+- `AC-bm6-01` Given default parameters, When a lease is requested, Then `403 LAUNCH_GATE_CLOSED` while `launch.members_may_join` is false; and with minting off no `mint` entry is posted on acceptance (behavior per `S6.*`).
+- `AC-bm6-02` Given one `queued` cell and many concurrent lease requests, When run, Then exactly one `Lease` is `active`, the rest get `409 LEASE_CONFLICT`, and the cell is `leased` once.
+- `AC-bm6-03` Given an expired lease, When the reaper runs, Then `lease.expired` and `cell.lease_expired` are emitted and the cell is requeued with `attempt + 1`; at `cell.max_attempts` it becomes `exhausted`; a submission inside `lease.submit_grace_s` on a not-yet-re-leased cell is accepted.
+- `AC-bm6-04` Given a submission with a missing, wrong, or another lease's nonce, or from a member who does not hold the lease, Then `410 LEASE_EXPIRED` or `reject.nonce_invalid` and nothing is accepted; guessing is rate-limited (`ratelimit.member_submissions_per_hour`).
+- `AC-bm6-05` Given a repeated submission for the same lease and nonce, Then the stored outcome is returned and no event is emitted a second time.
+- `AC-bm6-06` Given a submission over `cell.envelope.max_submission_bytes`, Then `413 PAYLOAD_TOO_LARGE`; given invalid schema, Then `reject.schema_invalid` and the cell requeues.
+- `AC-bm6-07` Given an output containing a link, script-like text or an instruction to act, Then `submission.quarantined`, it is withheld from every result, and a reviewer can release it (`submission.released_from_quarantine`).
+- `AC-bm6-08` Given gold insertion, When a cell is offered, Then the response schema of a gold cell equals that of a primary cell (no `cell_kind` leak); with a seeded generator the observed insertion rate converges on `verify.gold_rate_g` within the test's stated tolerance; gold answers are unreadable by the application role outside the verifier.
+- `AC-bm6-09` Given `trust.restrict_after_gold_fails` consecutive gold failures, Then `member.restricted`, sampling rises per `trust.audit_multiplier.restricted` and caps fall per `trust.cap_multiplier.restricted`; after `trust.restriction_days`, `member.restriction_lifted` returns the recorded tier.
+- `AC-bm6-10` Given an audit, When the second output matches by the template comparator, Then `audit.matched`; When it mismatches, Then a third execution is requested (`verify.third_exec_on_mismatch`) and `audit.resolved` decides both cells.
+- `AC-bm6-11` Given adaptive sampling, When `verify.adapt.clean_streak` clean observations occur, Then the rate steps down by `verify.adapt.step_down_ratio` but never below `verify.audit_rate_floor`; on a failure it steps up by `verify.adapt.step_up_ratio` but never above `verify.audit_rate_max`.
+- `AC-bm6-12` Given a new donor, Then their first `verify.new_donor_blanket_cells` cells use `blanket_redundancy` with `verify.blanket_redundancy_n` executions; the same applies to a template marked high-risk.
+- `AC-bm6-13` Given a known sequence of gold and audit outcomes, Then the reliability estimate equals the Beta posterior computed by hand in the test, restricted to the last `verify.reliability_window_obs` observations.
+- `AC-bm6-14` Given synthetic observations, Then the false-accept and false-reject estimators return their values and carry the documented limits (sample size, bias of audit-only evidence); no estimate is displayed as a finding.
+- `AC-bm6-15` Given a submission faster than `verify.timing_min_s` or with similarity to another donor's output above `verify.duplicate_similarity_threshold`, Then `reject.timing_anomaly` or `reject.duplicate_of_other_output` and the cell is flagged for audit.
+- `AC-bm6-16` Given `ff.channel.human_review` on, Then review cells are offered with their own gold share (`verify.human_review_gold_rate`) and a review rate of `verify.human_review_rate`; with the flag off no review cell exists.
+- `AC-bm6-17` Given an accepted cell that is overturned, Then `cell.overturned`, a ledger `reversal` with two approvers, and a `rework` cell is created and counted toward v.
+- `AC-bm6-18` Given acceptance of a Commons cell of any `cell_kind`, Then one `mint` of exactly 1,000,000 `ucr` and one new lot; at `mint.monthly_cap_credits` or `mint.per_member_daily_cap_credits` no further mint is posted and `inflation.mint_utilization_alarm` raises an alarm at its threshold.
+- `AC-bm6-19` Given `ff.experiment.expiry_arm` on and a member assigned to the accelerated arm, Then new lots carry `credit.lifetime_days_accelerated`; otherwise `credit.lifetime_days`.
+- `AC-bm6-20` Given a property test over members, opt-ins and cells, Then a cell is never offered to a member whose opt-ins do not cover it (`R8`); Given a tightened policy at acceptance, Then `reject.policy_changed` (`R9`).
+- `AC-bm6-21` Given a service revoked while cells are in flight, Then leases are revoked, cells `voided`, nothing is minted for them, and events are emitted (`S7.*`).
+- `AC-bm6-22` Given an appeal, Then the assigned reviewer is not the original decider, filing after `appeal.window_days` is refused, a ban needs `appeal.ban_min_reviewers`, and an overturn triggers the appropriate reversal.
+- `AC-bm6-23` Given `template.autopause_report_count` reports on one template inside `template.autopause_window_s`, Then `template.paused` and its cells pause.
+- `AC-bm6-24` Given submitted text containing markup, script and control characters, Then it is stored as data, returned only as `application/json`, never executed or interpreted, and every console view escapes it (injection and XSS suite `T-inj-*`).
+- `AC-bm6-25` Given the adversarial suite `T-adv-*` (forgery, replay, double submission, race between lease, requeue and cancel), Then every case ends in a valid state, the ledger invariants hold and no credit is minted that is not backed by an accepted cell.
+
+**Definition of Done (BM6)** adds to 17.5.3:
+
+- [ ] The statement of exact guarantees for leasing, submission and idempotency in `S5.*` is verified one by one by a test.
+- [ ] Every rejection reason of S0.8.4 that this milestone can produce has a test.
+- [ ] The estimation limits of `S8.*` appear in the console help text and in the operator runbook.
+- [ ] The scripted donor and its fixtures are marked as test code and are excluded from production artifacts.
+- [ ] Second human signature on the DoD record (`BR10`).
+
+### BM7 `member_jobs_and_credit_economy`
+
+| Row | Content |
+| --- | --- |
+| Scope | `S6.*`: requester-side job creation (draft, upload, declarations, policy result), price quote `p_ucr = 1,000,000 + v_ppm + lambda_ppm` with v measured per job type over `price.v_window_days` (fallback to `price.v_prior` below `price.v_min_sample_cells`, capped by `price.v_cap`, rounded by `price.v_rounding`), quote lifetime `price.quote_ttl_s`, escrow hold at confirmation, admission control (capacity forecast from verified throughput and active donors over `admission.forecast_window_days` and `admission.active_donor_window_days`, `admission.phi`, `admission.forecast_haircut`, window quote within `admission.min_window_s`..`admission.max_window_days`, waitlist, fairness caps `admission.max_concurrent_jobs_per_member` and `admission.waitlist_*`), capacity reservations behind `ff.job.reservations` (`reservation.*`), the member `Job` machine in full (S0.9.2), payout per accepted cell (`transfer`, `payout` transaction), settlement (levy to the Reserve, refund of the remainder, escrow closed at zero), cancellation, overrun handling (`job.max_overrun_ratio`), `Deliverable` and `Manifest` (provenance, FD§5.6) with results download and requester rating, expiry sweeps (`credit.expiry_sweep_interval_s`, notices at `credit.expiry_notice_days`), Reserve inflow and retirement (`reserve.*`), starter grant (`grant.*`, non-transferable) with anti-farming limits, referral bonus ledger operation funded from the Reserve (`ISS-06`), per-member cap K (`credit.member_cap_credits` times `trust.cap_multiplier.*`), claim ratio and eta publication as `MetricSnapshot` every `price.publish_period_days`, inflation gauges and the automatic response of `inflation.*`, recovery-cooldown enforcement on spend and job start, capacity and economy dashboards (`SCR-ops`) |
+| Entities | `Escrow` and `Reserve` wired to jobs, `Reservation`, `Deliverable`, `Manifest`, `WaitlistEntry`, `MetricSnapshot`, `Referral` (data and ledger side) |
+| Endpoints | Member surface: jobs (create, upload, evaluate, quote, confirm, cancellation), quotes, results, ratings, balance, lots, reservations, waitlist; public read: counter inputs only; admin: capacity, economy, reserve, grants (`S15.*`) |
+| Depends on | `BM6` |
+| Stubbed | No requester wizard screens (SDK-driven requester); no public pages; referral and share mechanics have no UI; `deadline_class` and `size_class` have the single value `standard` (S0.8.6); notifications absent |
+| Working system | A member job runs from request to settlement; the closing identity holds; the FD§3.3 example passes end to end |
+| Demo | The scripted requester posts the 240-cell job, watches admission, payouts and settlement, cancels a second job midway, and the explorer shows levy, refund, expiry and retirement entries with invariants green |
+
+**Acceptance tests (BM7)**
+
+- `AC-bm7-01` Given default parameters, When a job is confirmed, Then `403 LAUNCH_GATE_CLOSED` while `launch.member_jobs_enabled` is false.
+- `AC-bm7-02` Given the inputs of S0.6.1 (`v_ppm` 100,000, `lambda_ppm` 50,000, N = 240, balance 300 credits, 40 donors, 8 cells a day, `admission.phi` 0.5, 2-day window), When the job runs end to end, Then price 1,150,000 `ucr`, escrow 276,000,000, verification pool 24,000,000 (24 cells), levy 12,000,000, donor payout 264,000,000, refund 0, `eta_ppm` 869,565, capacity 320 cells against 264 committed, and the requester keeps 24 credits (`AC-ledger-01` extended to the whole flow).
+- `AC-bm7-03` Given verification cells in the trailing window, When v is measured, Then it equals `ceil(10^6 * verification_cells / accepted_primary_cells)` ppm; below `price.v_min_sample_cells` the prior is used; the result never exceeds `price.v_cap`; the publication is versioned and the old value stays readable.
+- `AC-bm7-04` Given committed cells that would exceed `phi * forecast capacity` over the window, When a quote is requested, Then the job is `waitlisted` with a re-quote path, never over-admitted; a member at `admission.max_concurrent_jobs_per_member` is refused with `NO_CAPACITY` or `CAP_EXCEEDED` as `S6.*` specifies.
+- `AC-bm7-05` Given random capacities, jobs and arrivals (property test `T-prop-*`), Then at every instant committed cells never exceed the admitted share of forecast capacity and waitlist order is first come first served.
+- `AC-bm7-06` Given a balance below the escrow, Then `422 INSUFFICIENT_CREDIT`; given a hold that would break the cap, Then `422 CAP_EXCEEDED`; given two confirmations with different idempotency keys, Then exactly one `escrow_hold` exists for the job.
+- `AC-bm7-07` Given an accepted cell of a member job, Then one `transfer` of exactly 1,000,000 `ucr` is paid to the donor at acceptance (`ISS-09`) and creates a lot.
+- `AC-bm7-08` Given a cancel in `running`, Then unstarted cells are refunded, in-flight cells drain, accepted cells stay paid, the escrow is exactly zero and the job is `cancelled` with `job.cancel_settled`.
+- `AC-bm7-09` Given a job that cannot finish, When `job.max_overrun_ratio` of the quoted window passes or a stop is requested, Then `job.settled_partial` leaves state `failed` with payouts and refunds posted and a zero escrow.
+- `AC-bm7-10` Given concurrent cancel, settlement and acceptance on one job, Then the outcome equals some serial order, no cell is paid twice or not at all, and the invariants hold.
+- `AC-bm7-11` Given lots near expiry, Then the notice is created `credit.expiry_notice_days` before; the sweep posts `expire` to the Reserve; a restored lot already past expiry moves at the next sweep (`ISS-07`).
+- `AC-bm7-12` Given a Reserve above `reserve.ceiling_credits`, Then `retire` posts the excess only when it is at least `reserve.retire_min_credits`.
+- `AC-bm7-13` Given a newcomer with `grant.required_verified_cells` verified cells, Then one `grant` of `grant.starter_credits` with lifetime `grant.starter_lifetime_days`; a second grant to the same device, more than `grant.max_per_invite_tree_per_day` in one tree, more than `grant.max_per_day` overall, or a Reserve at or below `grant.reserve_floor_credits`, Then the grant is refused or paused; the credit cannot be transferred.
+- `AC-bm7-14` Given a member at `credit.member_cap_credits` times their tier multiplier, Then further credit is handled as `S6.*` specifies and never breaks an invariant.
+- `AC-bm7-15` Given the publication period, Then eta, v, lambda and the claim ratio are published as a `MetricSnapshot`; when the claim ratio passes `inflation.claim_ratio_threshold_weeks`, Then the mint cap is cut by `inflation.mint_cap_cut_ratio` as an immediate tightening with a public change-log entry; when `eta` falls below `price.eta_alarm_threshold`, Then an alarm is raised.
+- `AC-bm7-16` Given `ff.job.reservations` on, Then escrow is held at booking, activation posts `escrow_release`, cancellation inside `reservation.free_cancel_notice_s` is free, and one member's reservations never exceed `reservation.capacity_share_cap` of a day's capacity.
+- `AC-bm7-17` Given a manifest, Then it is hashed over canonical JSON, immutable after assembly, lists job, template version, policy version, service, verification summary and input and output hashes, and holds no `mem_` id and no volunteer handle except where `S9.*` and `S12.*` allow.
+- `AC-bm7-18` Given a recovered identity inside `identity.recovery_cooldown_s`, Then job start and spending return `403 FORBIDDEN` with the cooldown copy key.
+- `AC-bm7-19` Given an expired quote (`price.quote_ttl_s`), Then confirmation is refused and the job is `quote_expired`.
+
+**Definition of Done (BM7)** adds to 17.5.3:
+
+- [ ] The worked example of S0.6.1 is a permanent regression test at three levels: unit (`T-unit-01`), ledger (`AC-ledger-01`) and whole flow (`AC-bm7-02`).
+- [ ] Every ledger entry type of S0.8.5 has been produced by at least one acceptance test and checked by the invariants.
+- [ ] The admission-control property tests use the harness built in `BM1`.
+- [ ] Dashboards show v, eta, claim ratio, mint utilization and Reserve balance from the published snapshots, not from ad hoc queries.
+- [ ] Second human signature on the DoD record (`BR10`).
+
