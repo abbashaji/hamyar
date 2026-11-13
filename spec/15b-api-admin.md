@@ -943,3 +943,163 @@ Hamyar sends nothing to its volunteers, requesters or any third party on its own
 - **Why:** a volunteer's identity must not leak to a requester or provider through a callback URL (S0 0.7); a webhook sender is also an unbounded outbound-abuse surface for a tiny team. Operators are alerted through the Operator tools, which read `Alarm` (15.29.4) and the metrics of S4.*, not through messages the platform sends.
 - **Third-party consumers of public data** use the public endpoints (15.33), which are cacheable and need no registration.
 - If a later phase needs outbound notification, it is a new scope with its own threat model, not an extension of this file [A].
+
+## 15.36 Worked examples
+
+Illustrative values only: the service, the terms text, the counts and every flag answer below are placeholders about a hypothetical service and are not facts about any provider [V]. Ids use the format of S0 0.6.3. Headers other than `Idempotency-Key` are omitted.
+
+### 15.36.1 Record flags, seal a terms copy, approve a service
+
+```
+POST /v1/admin/services/svc_01j9z6x4k7q2m8v5t3r1w0c9ab/reviews
+Idempotency-Key: 7d5c1f0e-1a2b-4c3d-8e9f-0a1b2c3d4e5f
+{ "reason": "first review" }
+-> 201 { "svc_id": "svc_01j9z6x4k7q2m8v5t3r1w0c9ab", "state": "in_review", ... }
+
+POST /v1/admin/services/svc_01j9z6x4k7q2m8v5t3r1w0c9ab/terms-copies
+{ "source_ref": "terms page as read by reviewer on 2026-12-02 (placeholder)", "captured_on": "2026-12-02",
+  "media_type": "text/plain", "size_bytes": 48213,
+  "sha256": "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08" }
+-> 201 { "tcp_id": "tcp_01j9z6x5a2b3c4d5e6f7g8h9jk", "status": "uploading", "chunk_raw_max_bytes": 785408, "chunk_count": 1, ... }
+
+PUT  /v1/admin/terms-copies/tcp_01j9z6x5a2b3c4d5e6f7g8h9jk/chunks/0     { "data_base64": "..." }   -> 200 { "n": 0, "bytes": 48213, "received_count": 1 }
+POST /v1/admin/terms-copies/tcp_01j9z6x5a2b3c4d5e6f7g8h9jk/seal         {}                          -> 200 { ..., "status": "sealed" }
+
+POST /v1/admin/services/svc_01j9z6x4k7q2m8v5t3r1w0c9ab/flag-answers
+{ "terms_copy_id": "tcp_01j9z6x5a2b3c4d5e6f7g8h9jk", "reason": "read the saved copy",
+  "answers": [
+    { "flag_key": "third_party_task_use", "answer": "yes", "quote_ref": "saved copy, section 4, paragraph 2 (placeholder)" },
+    { "flag_key": "prohibited_content_compatible", "answer": "yes", "quote_ref": "saved copy, section 7 (placeholder)" },
+    { "flag_key": "prefilled_link_use", "answer": "unknown" } ] }
+-> 201 { "data": [ { "fla_id": "fla_...", "flag_key": "third_party_task_use", "answer": "yes", ... }, ... ] }
+
+GET /v1/admin/services/svc_01j9z6x4k7q2m8v5t3r1w0c9ab/flags
+-> 200 { "flags": [ ..., { "flag_key": "human_copy_paste_use", "answer": "unknown", "source": "default_unknown" } ],
+         "gates_ready": true, "missing": [] }
+```
+
+`gates_ready` is true because approval needs only the two gate flags of FD§5.3; `prefilled_link_use` stays `unknown`, so the adapter is `copy_only` (no link). Approving:
+
+```
+POST /v1/admin/services/svc_01j9z6x4k7q2m8v5t3r1w0c9ab/approvals
+{ "reviewed_terms_copy_id": "tcp_01j9z6x5a2b3c4d5e6f7g8h9jk", "reason": "gate flags recorded with quotes", "step_up": { "challenge_id": "...", "assertion": { ... } } }
+-> 200 { "state": "approved", "approved_at": "2026-12-02T09:14:03Z", "review_due_at": "2027-03-02T09:14:03Z", "adapter": { "copy_only": true, ... } }
+```
+
+The same call before the second gate answer was recorded fails and changes nothing:
+
+```
+-> 409 { "error": { "code": "STATE_CONFLICT", "message": "approval guard failed",
+         "details": { "reason": "approval_guard_failed", "missing": ["gate_flag_not_yes:prohibited_content_compatible"] },
+         "request_id": "req_01j9z6y0a1b2c3d4e5f6g7h8jk" } }
+```
+
+### 15.36.2 Tighten a policy at once; try to loosen with the wrong endpoint; loosen with notice
+
+```
+POST /v1/admin/policies/pol_01j9z2c3d4e5f6g7h8j9k0m1n2/tightenings
+{ "base_version_id": "plv_01j9z4a5b6c7d8e9f0g1h2j3k4", "reason": "sensitive-looking inputs slipped through; lock the S1 + M0 pairing for P1",
+  "allowlist": [ { "purpose": "P1", "license": "L2", "sensitivity": "S1", "service_requirement": "M0", "status": "locked" } ],
+  "step_up": { ... } }
+-> 201 { "policy_version": { "plv_id": "plv_01j9z8e9f0g1h2j3k4m5n6p7q8", "version": 5, "change_class": "tighten", "status": "active",
+                           "effective_from": "2026-12-02T10:00:00Z" },
+         "changelog_entry": { "chg_id": "chg_01j9z8f1g2h3j4k5m6n7p8q9r0", "explanation_due_at": "2026-12-03T10:00:00Z" },
+         "impact": { "jobs_in_flight_affected": 2, "cells_queued_affected": 61 } }     # counts are illustrative
+```
+
+The event `policy.version_activated` follows; the job service pauses what no longer passes (R9). The reviewer then posts the human explanation with `annotateChangeLog` before `explanation_due_at`.
+
+Sending a change that also unlocks a row to the same endpoint is refused:
+
+```
+-> 422 { "error": { "code": "UNPROCESSABLE", "message": "change contains loosening",
+         "details": { "reason": "contains_loosening", "loosening": ["allowlist:P1/L2/S0/M1 locked->allowed"] }, "request_id": "req_..." } }
+```
+
+The loosening goes to `POST .../loosenings` alone, with `public_text` in `fa` and `en`. The answer is `202` with an `AdminApproval` (`action_name: policy.loosen`). When a second reviewer approves with a step-up bound to the stored payload, the version is created as `scheduled` with `effective_from = approved_at + 7 days` and the change-log entry is published at that moment, so the public notice period starts at approval and not at the proposal.
+
+### 15.36.3 Engage a template kill switch, see the effect, release it with two admins
+
+```
+POST /v1/admin/kill-switches/kill.template.tpl_01j9z3k4m5n6p7q8r9s0t1v2w3/engagements
+{ "reason_code": "abuse", "reason": "5 reports in 20 minutes: outputs asking volunteers to open links",
+  "public_text": { "fa": "...", "en": "Template paused while we review reports." }, "linked_report_id": "rpt_01j9z6d7e8f9g0h1j2k3m4n5p6", "step_up": { ... } }
+-> 201 { "switch": { "switch_key": "kill.template.tpl_01j9z3k4m5n6p7q8r9s0t1v2w3", "state": "engaged" },
+         "effects": { "jobs_paused": 3, "cells_paused": 44, "leases_revoked": 7 } }          # counts are illustrative
+```
+
+From now on a member creating a job with that template gets:
+
+```
+-> 503 { "error": { "code": "KILL_SWITCH_ENGAGED", "message": "template paused", "details": { "copy_key": "copy.template.paused" }, "request_id": "req_..." } }
+```
+
+Release needs a second admin and a verification checklist:
+
+```
+POST /v1/admin/kill-switches/kill.template.tpl_01j9z3k4m5n6p7q8r9s0t1v2w3/releases
+{ "reason": "template text fixed in new version; reports closed", "verification": [ { "check": "active version still approved", "passed": true } ], "step_up": { ... } }
+-> 202 { "apv_id": "apv_01j9z7a1b2c3d4e5f6g7h8j9km", "action_name": "killswitch.release", "status": "pending", "required_approvals": 2, "expires_at": "2026-12-03T11:30:00Z" }
+
+POST /v1/admin/approvals/apv_01j9z7a1b2c3d4e5f6g7h8j9km/approvals          # a different admin, step-up bound to the stored payload
+-> 200 { "approval": { "status": "approved" }, "result": { "switch": { "state": "released" } } }
+```
+
+Events in order: `killswitch.engaged`, `template.paused`, `job.paused`, `cell.paused`, `lease.revoked`; later `killswitch.released`, `template.resumed`, `job.resumed`, `cell.resumed`.
+
+## 15.37 Acceptance criteria
+
+Ids follow `AC-<area>-<nn>` (S17.* may renumber). "Given" always includes a freshly migrated system with all `launch.*` switches false (S0 0.12 ordering rule 3).
+
+| id | Given | When | Then |
+| --- | --- | --- | --- |
+| `AC-admin-01` | A service `in_review` with no sealed terms copy | `approveService` is called | `409 STATE_CONFLICT`, `details.missing` contains `terms_copy_missing`; the state is unchanged; one failed attempt is not an event |
+| `AC-admin-02` | A service whose `prohibited_content_compatible` is `unknown` | `approveService` is called | `409`, `details.missing` contains `gate_flag_not_yes:prohibited_content_compatible` (unknown evaluates as no) |
+| `AC-admin-03` | An `in_review` service and a sealed copy | `recordFlagAnswers` sends a `yes` on a gate flag without `quote_ref` | `400 VALIDATION_FAILED`; no answer is stored |
+| `AC-admin-04` | A terms copy declared with a `sha256` that does not match the chunks | `sealTermsCopy` is called | `400 VALIDATION_FAILED` `hash_mismatch`; the copy stays `uploading`; nothing is sealed |
+| `AC-admin-05` | `service.terms_copy_max_bytes` = 5,242,880 and `api.max_body_bytes` = 1,048,576 | A 5,242,880-byte copy is created and uploaded | `chunk_count` = 7, `chunk_raw_max_bytes` = 785,408, every chunk request is under `api.max_body_bytes`, `seal` succeeds; a declared 5,242,881 bytes is `400` |
+| `AC-admin-06` | A template version authored by admin A | A calls `submitTemplateReview` with `approve` | `403 FORBIDDEN`; no review is stored |
+| `AC-admin-07` | A new template (`template.min_reviewers_new` = 2) | Two different non-author reviewers approve | After the first: `awaiting_second_review`, event `template.first_approved`; after the second: `approved`, `template.second_approved`; the same reviewer approving twice is `403` |
+| `AC-admin-08` | An active policy version | `tightenPolicy` with a tightening-only diff | `201`; the version is active before the response; `policy.version_published`, `policy.version_activated`, `changelog.entry_published` are emitted; `explanation_due_at` = now + `change.tighten_publish_within_s` |
+| `AC-admin-09` | A diff that tightens one row and loosens another | Sent to `tightenPolicy` or to `loosenPolicy` | `422 UNPROCESSABLE` (`contains_loosening` or `contains_tightening`); nothing is stored |
+| `AC-admin-10` | A loosening approved at time T | The version is read before and after `T + policy.loosen_min_notice_days` | Status `scheduled` with `effective_from` >= T + 7 days; the public change-log entry exists from T; the version becomes `active` only at `effective_from` |
+| `AC-admin-11` | The parameter `price.levy_lambda` raised | `proposeParameterChange` | Class `loosen` (per its declared direction), `202` approval; after approval `effective_from` >= approval time + 14 days (`change.notice_days_price`) |
+| `AC-admin-12` | A `constant` parameter, or a `launch.*` name | `proposeParameterChange` | `422 UNPROCESSABLE` with `immutable_constant` or `use_launch_endpoints` |
+| `AC-admin-13` | A parameter still at its initial configurable default | The first change is sent without `calibration_source` | `400 VALIDATION_FAILED`; with `code = CAL` and fewer than `calibration.min_samples_per_service` completed cells for an approved service in scope it is `400`; with enough it succeeds |
+| `AC-admin-14` | A credit lot earned under `credit.lifetime_days` = 60 | The parameter is changed to 90 and becomes effective | The existing lot keeps its original expiry; only lots created after `effective_from` use 90 |
+| `AC-admin-15` | A `2P` action initiated by admin A | A calls `approveApproval`; then B approves with a step-up bound to another payload | Both `403` or `401 AUTH_INVALID` (`step_up_invalid`); B with the correct step-up executes it; the action runs once |
+| `AC-admin-16` | A pending approval whose guard no longer holds at approval time | The approver approves | `409 STATE_CONFLICT`, `approval.status = failed`, nothing executed |
+| `AC-admin-17` | `launch.required_gate_ids` = G0, G1, with G1 not signed off | `changeLaunchSwitch` for `members_may_join` with `true` | `409`, `details.blockers` lists `gate_not_signed_off:G1`; the switch stays false; the same call with `false` is accepted at once |
+| `AC-admin-18` | A gate item with one sign-off and `launch.min_signoffs` = 2 | The same admin signs again; then new evidence is attached; then a second admin signs | `403`; the first sign-off is voided by the evidence; the second admin's sign-off leaves the item `evidence_attached` (1 of 2) |
+| `AC-admin-19` | An engaged `kill.service.<svc_id>` whose cause was a kill switch | `releaseKillSwitch` while a gate flag is no longer `yes` | `409 release_guard_failed`; a revoked service can never be released |
+| `AC-admin-20` | The ledger explorer | Any non-`GET` request to `/v1/admin/ledger/*` other than the runs, verifications and reversals | `404` or `405`; there is no endpoint that creates, edits or deletes an entry |
+| `AC-admin-21` | A posted entry E | `reverseLedgerEntry` by one admin, then approval by a second | After the first: `202` and no posting; after the second: mirror entries with `reverses_entry_id = E`, E itself unchanged, `ledger.entry_committed` per new entry |
+| `AC-admin-22` | A member with no linked report, alarm or audit | `banMember` | `400 VALIDATION_FAILED`; with a link it is `202` and needs a second admin |
+| `AC-admin-23` | Any admin write | The transaction that writes the `AdminAction` row is forced to fail | The state change is rolled back; no event is emitted |
+| `AC-admin-24` | An admin reads member detail, ledger lots of a member or audit content | The read completes | One `AdminAction` of kind `read` exists for it |
+| `AC-admin-25` | An experiment with no locked pre-registration that lists it | `startExperiment` | `422 prereg_not_locked`; after locking (two admins) it starts; a locked pre-registration cannot be updated (`409`) |
+| `AC-admin-26` | A milestone without `output_ref` | `publishMilestone` | `422 output_ref_required` |
+| `AC-admin-27` | A login with a wrong signature, an unknown credential and an expired challenge | Three `createAdminSession` calls | The same `401` body for all three; a replayed valid assertion fails because the challenge is burned |
+| `AC-admin-28` | The two sensitive calls `engageKillSwitch` and `proposeParameterChange` | Called with a bearer token and no `step_up` | `401 AUTH_INVALID`, `details.reason = step_up_required` |
+| `AC-public-01` | `ff.growth.v2_live_counter` off | `GET /v1/public/counter` | `404 NOT_FOUND`; with the flag on and fewer than `analytics.min_cohort_k` active members, `members_active_today` is `null` |
+| `AC-public-02` | Entries posted 100 s ago and `public.ledger_lag_s` = 300 | `GET /v1/public/ledger/summary` | Those entries are not in the figures; `identity_check.sum_of_all_balances_ucr` is `"0"`; no member account or entry list appears |
+| `AC-public-03` | Parameters with `public` false (for example `security.*`) | `GET /v1/public/parameters` | They are absent; scheduled values appear under `scheduled` with their `effective_from` |
+| `AC-public-04` | A published change-log entry | An admin wants to correct it | There is no edit; `annotateChangeLog` creates a new entry with `amends_id` |
+| `AC-public-05` | A share card revoked by its member | `GET /v1/public/share-cards/{token}` for it and for a random token | Both `404` with the same body; a live card shows only `cells_verified`, `badge_key`, `issued_month`, `locale` |
+| `AC-public-06` | A stored manifest | `verifyManifest` with the exact export, with one changed field, and with an unknown manifest | `match` with `recorded`; `mismatch` with JSON pointers only; `unknown`; every positive result carries `limits_copy_key`; the server makes no outbound request |
+| `AC-public-07` | Any public endpoint | A request is made | No `Set-Cookie`; `Cache-Control: public, max-age` <= `public.counter_refresh_s`; `ETag` and `304` work |
+| `AC-event-01` | A state change and a forced crash after the database commit | The relay restarts | The event is published exactly once or at least once, never lost; a consumer replay with the same `event_id` has no second effect |
+| `AC-event-02` | A request refused by a guard | Any of the above refusals | No event is stored; no state changes |
+| `AC-event-03` | Every event in 15.34 | Its payload is inspected | It contains only ids, enums, counts, hashes and parameter names; no personal data, prompt, output or terms text |
+
+## Issues raised
+
+Problems and gaps found while writing this part. Each resolution is already applied in this file; `C-001` consolidates them into S2.* and may record a different resolution. [D]
+
+| id | severity | fd_ref | issue | resolution | status |
+| --- | --- | --- | --- | --- | --- |
+| `ISS-154` | major | FD§5.4 R10, FD§5.7 failure mode 10, FD§9 | S0 lacks names this part needs: (1) entities `AdminApproval` (`apv_`), `ShareCard` (`shc_`) and `Milestone` (`mls_`); (2) fields `TermsCopy.status`, `ParameterVersion.withdrawn_at`, `PreRegistration.status` and `content_hash`, `Experiment.status` and `fraction_source`; (3) `ChangeLogEntry.kind` values `kill_switch`, `launch_switch`, `feature_flag`, `preregistration_lock`, `milestone`, `note` and the field `amends_id`; (4) parameters `ratelimit.admin_write_cost` (int, initial configurable default 2), `ratelimit.admin_auth_attempts_per_hour` (10), `ratelimit.public_verify_cost` (5), `session.admin_stepup_ttl_s` (300), `security.approval_ttl_s` (86,400), `launch.require_locked_preregistration` (bool, true), `growth.share_card_max_active` (3), all owned by the areas of 0.10.5; (5) names added to `security.two_person_actions`: `policy.loosen`, `launch.switch_on`, `admin.enroll`, `admin.role_change`, `member.ban`, `preregistration.lock` and, when `service.min_approvers` > 1, `service.approve`; (6) the events listed at the end of 15.34.5 and the envelope field `config_epoch`; (7) `ff.growth.v4_teams` and `ff.job.reservations` exist in S0 but not in part-a examples | All applied as written in 15.21 to 15.34. `C-027` or the next convention edit should fold them into 0.7 to 0.10 without renaming | proposed |
+| `ISS-155` | major | FD§5.3, FD§5.6, Principle 5 | Three transport and privacy decisions conflict with a literal reading of S0 or the FD: (1) the API is JSON only with `api.max_body_bytes` = 1,048,576, yet `service.terms_copy_max_bytes` = 5,242,880 and uploads "use `job.max_upload_bytes`" only for requester data; (2) S0 0.11.5 requires `Idempotency-Key` on every admin write, but replaying a stored login or credential response would store a session token or credential options; (3) Principle 5 makes the ledger public, but a per-entry public feed would let timing link a public movement to a member | (1) Terms copies are uploaded as base64 chunks of at most `floor(api.max_body_bytes * 3 / 4) - 1024` raw bytes and sealed by hash (15.23.2). (2) The three unauthenticated admin endpoints (`startAdminLogin`, `createAdminSession`, `createCredentialChallenge`) take the key as optional; every challenge is single use (15.21.3, 15.22). (3) The public ledger shows lagged aggregates, daily checkpoint hashes and an identity check, not per-entry data; third parties verify totals and checkpoints, and the full hash chain only by an auditor with admin read access (15.33.3) | proposed |
+| `ISS-156` | minor | FD§5.6, FD§8.3, FD§9 | Dependencies on parts this cell could not read: (1) part a (15a) section numbers, and whether it already defines share-card member operations; (2) S4.* component names and outbox row; (3) S10.* permission matrix, admin bootstrap and credential-loss procedure; (4) S6.* rule for deferred mint postings under `kill.all_minting` and for freezing on a critical invariant violation; (5) S13.* and S14.* placement of the "pre-registration locked" clause of the launch rule; (6) S5.*/S9.* export form of the manifest (volunteer handle omitted) and its hash; (7) S8.* template `definition` schema and S7.* rule `params` | Each is written as an [A] assumption with the smallest possible surface: section numbers start at 15.21; share-card operations are specified once, here (15.33.5), and part a should reference them; component names and `event_id` format are marked [A]; permission names are proposals; the freeze, the launch-rule clause and the manifest export form are isolated in 15.28.3, 15.27.3 and 15.33.6 so an owner can change them without touching any endpoint | proposed |
+
+Convention additions made by this part are listed in `ISS-154`; no other entity, enum or error code was invented. Error codes used are those of S0 0.11.3; `details.reason` values (for example `step_up_required`, `contains_loosening`, `notice_too_short`) are new vocabulary inside `details` and do not add a `code` [D].
