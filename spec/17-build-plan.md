@@ -482,3 +482,94 @@ Each milestone has the same rows: scope (by reference), dependencies, stubbed, t
 - [ ] Dashboards show v, eta, claim ratio, mint utilization and Reserve balance from the published snapshots, not from ad hoc queries.
 - [ ] Second human signature on the DoD record (`BR10`).
 
+### BM8 `experiences_and_public`
+
+| Row | Content |
+| --- | --- |
+| Scope | `S11.*` and `S12.*`. Volunteer web app, no install, mobile first: landing, first-contribution flow (the sub-60-second path is a hypothesis `[H]`, measured not asserted), cell card (purpose, license, sensitivity, service, template, expected time, one-sentence provenance line, expandable full prompt, mandatory expansion per `ui.card.expand_required_first_use`, decline and report), copy and open-in-service buttons through the service-adapter layer (prefill where the registry says supported and `prefilled_link_use` is `yes`, copy-only otherwise), paste-back, result feedback, balance and expiry view, history, opt-in settings, teams, share card, invite flow, recovery-key handling, appeals, help. Requester screens: wizard (template choice, upload and screening, declarations, policy result, quote and window, escrow confirmation), progress map per cell, cancellation, results download with manifest, rating. Reviewer and Operator screens completed in both locales (`ISS-174`). Persian first: full RTL, Persian numerals option (`i18n.digits_default_fa`), Jalali and Gregorian dates (`i18n.dual_calendar_detail`), bidi isolation of mixed-direction text in prompts and outputs, bundled fonts (no third-party font), accessibility, low-bandwidth behavior. Copy for every policy, privacy and risk notice in `fa` and `en`, each key marked `needs_human_and_legal_review`, every promise worded "declared". Informed, explicit opt-in of Phase 1 participants about the account risks of gate `G0` (FD§9) as a required screen. Public surfaces: live counter (verified cells only), public ledger and parameter pages, change log, milestone pages. Share cards without personal data or location, teams (opt-in only), referral with the two-sided bonus, growth mechanics `V1`..`V6` behind `ff.growth.*` with logged randomized assignment. Capacity map and bottleneck view wrapped from the panel concept per the PB-1 record (17.4.1) |
+| Entities | `Team`, `Badge`, `BadgeAward`, `Referral` (UI and rules), `MetricSnapshot` read models; no new money entity |
+| Endpoints | Member: teams, badges, referrals, share-cards, notices, feedback; public: counter, ledger, parameters, change-log, milestones, capacity (`S15.*`) |
+| Depends on | `BM6`, `BM7` |
+| Stubbed | Real prefill behavior for any named service stays registry data `[V]`; analytics dashboards are `BM9`; the legal and linguistic review of copy is a human step recorded as pending, never skipped silently |
+| Working system | A new member completes the first-contribution flow and a requester completes the wizard in both locales (rehearsal); accessibility and low-bandwidth checks pass |
+| Demo | Phone-sized walkthrough in `fa` and `en`: landing, consent, first contribution with copy-only and with a fictitious prefill service, balance and expiry in both calendars, requester wizard to a quote, public pages |
+
+**Acceptance tests (BM8)**
+
+- `AC-bm8-01` Given a new member in `ci` (gate opened by the real flow with fixtures) on a phone-sized viewport, When the first-contribution flow is completed, Then it passes only through the screens listed in `S11.*`, requires no field beyond the declared ones, and emits timing events; the share under `ui.fast_contribution_threshold_s` is reported as a measurement `[H]`, not asserted.
+- `AC-bm8-02` Given a cell card, Then it shows purpose, license, sensitivity, service, template, expected time, the provenance line and the collapsed full prompt; on first use the prompt must be expanded before copy is enabled; decline and report are present.
+- `AC-bm8-03` Given a service whose adapter has `supports_prefill` and `prefilled_link_use` = `yes`, Then an open-in-service control is shown; otherwise only copy; in both cases no control sends, submits or reads anything on the provider's side and no field accepts provider credentials or page content (`BR9`).
+- `AC-bm8-04` Given pasted text containing markup, right-to-left and left-to-right runs, code and control characters, Then it is escaped, bidi-isolated and displayed without reordering damage (`T-rtl-*`).
+- `AC-bm8-05` Given the recovery-key screen, Then the key is shown once, a confirmation is required, and a network log of the flow contains no recovery key.
+- `AC-bm8-06` Given the `fa` locale, Then the layout is mirrored with logical properties, numerals follow the member's setting, a table of known dates converts correctly between Gregorian and Jalali with the bundled fallback, and detail views show both calendars (platform calendar support `[V]`).
+- `AC-bm8-07` Given the copy registry, When linted, Then every `copy.*` key has `fa` and `en` text and the marker `needs_human_and_legal_review`, and no key promises with the words "guarantee" or its Persian equivalent; promises use "declared".
+- `AC-bm8-08` Given each screen, Then automated accessibility checks pass, every action is reachable by keyboard, text resizing and reduced motion are honored, and the manual checklist of `S18.*` is filed.
+- `AC-bm8-09` Given a throttled network profile and no third-party hosts, Then the first-contribution flow completes with only the project's own assets and bundled fonts (`BR8`); degradation follows `S11.*`.
+- `AC-bm8-10` Given the requester wizard, When a declaration is rejected, Then the plain-language copy for `policy.<rule>.<slug>` is shown; When accepted, Then the quote shows price, window and escrow; the progress map shows one status per cell; cancellation and download with manifest work; a rating can be submitted once.
+- `AC-bm8-11` Given each Reviewer and Operator screen, Then it is complete in `fa` and `en`, permission-gated by the matrix and shows no volunteer identifier beyond what its task needs.
+- `AC-bm8-12` Given pending, rejected and accepted cells, Then the public counter counts verified cells only and refreshes within `public.counter_refresh_s`; the public ledger page trails the ledger by `public.ledger_lag_s`; a scan of every public response finds no `mem_` id, IP address or location.
+- `AC-bm8-13` Given a share card, Then it holds no personal data and no location while `public.location_display` is `never`.
+- `AC-bm8-14` Given teams, Then they are opt-in, need `team.create_min_tier`, hold at most `team.max_members`, and are not shown publicly below `team.min_public_members`.
+- `AC-bm8-15` Given a referral, Then the bonus is posted as a `grant` from the Reserve only after the newcomer has `growth.referral.min_newcomer_verified_cells`, after `growth.referral.hold_s`, within `growth.referral.max_per_referrer_per_30d`, and never when the Reserve is at its floor; a scripted self-referral loop earns nothing.
+- `AC-bm8-16` Given each of `ff.growth.v1_fast_path` .. `ff.growth.v6_milestones`, Then it is off by default; when on, assignment is randomized, logged and instrumented; when off again no residue changes behavior.
+- `AC-bm8-17` Given the notices of `S11.*`, Then the policy, privacy and risk notices exist in both languages, and the Phase 1 opt-in screen must be accepted before the first contribution.
+- `AC-bm8-18` Given the capacity map, Then it renders from the Hamyar API without any external font or script and shows the bottleneck as the PB-1 record specifies.
+
+**Definition of Done (BM8)** adds to 17.5.3:
+
+- [ ] A Persian reader has reviewed all `fa` strings and a lawyer has the notice texts for review `[V]`; the status of both is recorded in `build/dod/BM8.md` and no string is presented as final.
+- [ ] The flows were tried on real phones and desktops for gate `G2` (clipboard flow, URL length, copy-and-paste error rate) with the results stored as gate evidence `[V]`.
+- [ ] The bundle contains no font or script request to a third party and Persian glyph coverage is verified.
+
+### BM9 `measurement_simulation_hardening`
+
+| Row | Content |
+| --- | --- |
+| Scope | `S13.*`: event schema and the metrics pipeline (outbox events and client timing events to `Event`, rollups every `metrics.rollup_interval_s`, `MetricSnapshot`), aggregate-only analytics (`analytics.min_cohort_k`, `analytics.third_party_trackers` and `analytics.cookies_enabled` constant `false`, `retention.event_raw_days`), a query for every FD§9 Phase 1 measure (table below), arm analysis for the accelerated-expiry experiment, the pre-registration lock verified before launch. `S18.*`: the simulation harness (synthetic honest, lazy, farming, forging, colluding and run-on-the-bank agents, bursts; driven through the real API on a simulated clock; seedable; scenario catalog; parameter sweeps), load suite, end-to-end suite, adversarial and chaos suites. Drills: restore from backup, secret rotation, kill switches, key-handle rotation. Hardening: threat-model coverage (each `THR-<nn>` has a test or a documented residual), dependency audit `[V]`, a human penetration test `[V]`, alert tuning, runbooks. Closure of the pre-build checklist of `S19.*`. Host-bound bindings for every port (`BR4`) once the owner has chosen them (`S3.*`) |
+| Entities | `Event`, `MetricSnapshot`, `ExperimentAssignment` (analysis), `InvariantCheck` history |
+| Endpoints | Admin: metrics, experiments (results), simulation reports (read), drills log; public: none new |
+| Depends on | `BM7`, `BM8` |
+| Stubbed | Nothing may remain bound in a production configuration. A port whose real provider the owner has not chosen (mail, alerting, host, object bytes) is reported as an open owner decision with a contract-tested candidate binding, never silently stubbed |
+| Working system | Every FD§9 Phase 1 measure has a query that returns a value on a simulated dataset; simulation reports carry the label "not evidence about human behavior"; the drills are logged |
+| Demo | Run the pilot-like simulation scenario and show the measures; run the run-on-the-bank scenario and show admission, the claim-ratio alarm and green invariants; restore a backup; rotate a key |
+
+FD§9 Phase 1 measures and their sources (metric names and queries are owned by `S13.*`; event names are those of S0.9) [D]:
+
+| FD§9 measure | Source events and tables |
+| --- | --- |
+| Deposit-to-withdrawal ratio, weekly (cells contributed ÷ cells requested) | `cell.checks_passed` / `audit.resolved` for Commons and member cells; `job.escrow_confirmed` cell counts |
+| Time to complete a large job versus quote | `job.escrow_confirmed`, `job.all_cells_accepted`, the stored quote window |
+| Rejection rate overall and by template; false-reject rate from gold; false-accept estimate from audits | `cell.checks_failed`, `VerificationRecord` (`gold`, `audit_second`, `audit_third`), template id |
+| v and the implied eta | `MetricSnapshot` from `BM7` |
+| Week-2 and week-4 return | `member.created`, `lease.issued` by cohort (suppressed below `analytics.min_cohort_k`) |
+| Median time per contribution, share under `ui.fast_contribution_threshold_s`, time to first verified cell | `lease.issued`, `submission.received`, `cell.checks_passed`, client timing events |
+| Active capacity per member per day; concentration (share of cells from the top 10% of donors) | `cell.checks_passed` per member, aggregated |
+| Decline and opt-out rates by category | `cell.declined`, `member.optin_changed` |
+| Incidents: policy violations, injection attempts, abuse flags, provider warnings or account problems | `submission.quarantined`, `report.filed`, screening queue, operator incident entries |
+| Qualitative interviews | Outside the system `[P]`; only their summary is attached to the decision record |
+
+**Acceptance tests (BM9)**
+
+- `AC-bm9-01` Given the pilot-like simulation scenario, When the rollup runs, Then every row of the table above returns a value, with cohorts smaller than `analytics.min_cohort_k` suppressed.
+- `AC-bm9-02` Given any simulation output (report, chart data, CSV, log), Then it carries the label "Simulation output is not evidence about real human behavior" and a seed; no simulated figure appears on any public page or in a `MetricSnapshot`.
+- `AC-bm9-03` Given the run-on-the-bank scenario (members try to redeem more than forecast capacity), Then admission waitlists or refuses, no escrow is under-funded, the claim-ratio gauge raises its alarm at `inflation.claim_ratio_threshold_weeks`, and all invariants hold throughout.
+- `AC-bm9-04` Given the credit-expiry scenario over simulated weeks, Then lots expire to the Reserve, the Reserve retires its excess, conservation holds, and the accelerated arm's lots expire after `credit.lifetime_days_accelerated`.
+- `AC-bm9-05` Given adversarial agents (forgers, replayers, farmers, colluders, malicious requesters), Then no credit is minted without an accepted cell, farming stays inside the `grant.*` and `invite.*` limits, and every attack ends in a valid state; detection rates are reported with the simulation label, never as a pass criterion about humans.
+- `AC-bm9-06` Given the load suite of `S18.*` at its recorded targets `[V]`, Then the lease, submission, quote and settlement paths meet them without invariant violations and without double payment.
+- `AC-bm9-07` Given the chaos suite (process kill during settlement, database failover, duplicated outbox delivery), Then every operation either completes or is safely retried with the same effect.
+- `AC-bm9-08` Given a backup, When restored into an empty environment, Then ledger invariants pass from the last checkpoint, public counters equal the ledger, and the measured recovery time and data-loss window are recorded against targets set by the owner `[V]`.
+- `AC-bm9-09` Given the rotation drill on `staging`, When each secret class is rotated, Then there is no outage, old values are refused, member sessions behave as `S10.*` specifies, rotating `secret.volunteer_handle_key` unlinks old handles by design, and the record (names, dates, performer, no values) is stored as gate evidence.
+- `AC-bm9-10` Given the pre-registration, Then it is locked, and the launch rule of `S14.*` refuses to turn on `launch.members_may_join` while it is unlocked.
+- `AC-bm9-11` Given analytics, Then no third-party tracker or cookie exists (network log and headers), and no aggregate query can return a cohort below `analytics.min_cohort_k`.
+- `AC-bm9-12` Given the threat-model table of `S10.*`, Then every `THR-<nn>` row maps to at least one test of `T-adv`, `T-inj` or `T-sim` or to a documented residual risk, and the mapping is a checked file.
+- `AC-bm9-13` Given the pre-build checklist of `S19.*`, Then every item has a status and an evidence pointer; open items are `[V]` with a named owner.
+- `AC-bm9-14` Given the full end-to-end suite on `staging` (rehearsal), When a new member contributes, a requester posts a job, it settles and the manifest is downloaded, in both locales, Then every step passes and the recorded network log meets `BR8`.
+- `AC-bm9-15` Given production configuration validation, Then no stub is bound, the fixture profile and rehearsal sign-offs are refused, and `launch.*` are `false`.
+
+**Definition of Done (BM9)** adds to 17.5.3:
+
+- [ ] All five drills are logged: restore, secret rotation, kill switches, key-handle rotation, and a full gate walk-through on `staging` with rehearsal sign-offs.
+- [ ] Every open `[V]` of this part and of `S19.*` has an owner and a place where its answer will be stored.
+- [ ] Completion of `BM9` is recorded as a build fact only; the statement "this authorizes no launch" is part of the record (`BR10`, S0.12 rule 6).
+- [ ] Second human signature on the DoD record (`BR10`).
+
