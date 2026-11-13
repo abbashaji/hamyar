@@ -824,3 +824,41 @@ HTTP/1.1 201 Created
 ```
 
 With a balance of 300 credits this leaves 24, as in FD§3.3; a balance below 276 credits returns the `INSUFFICIENT_CREDIT` body of `S15.9` and holds nothing.
+
+## 15.15 Acceptance criteria
+
+Given / When / Then, each testable against the generated contract suite (`BM0`). `AC-api-01` and `AC-api-03` are stated in `S15.5`.
+
+- `AC-api-02` Given an unauthenticated caller who sends an oversized, unknown-field body to a member route while over the IP-hash limit, When the request arrives, Then the response is `413` for the size, and with a valid size `429`, and with no limit hit `401 AUTH_REQUIRED`, never `400` before `401` (pipeline steps 1, 3, 4, 8).
+- `AC-api-04` Given a queued cell visible to two members, When both call `createLease` with different `Idempotency-Key` values at the same time, Then exactly one gets `201` and the other `409 LEASE_CONFLICT` reason `cell_not_queued`, and exactly one `cell.leased` event exists.
+- `AC-api-05` Given a successful `createLease`, When the same request is repeated with the same key and body, Then the response is `201`, identical including `nonce`, with `Idempotent-Replayed: true` and no second lease; with a different body it is `422 IDEMPOTENCY_KEY_MISMATCH`.
+- `AC-api-06` Given an accepted submission, When `submitResult` is repeated with the same lease, nonce and body under a new key, Then the stored outcome is returned, `Idempotent-Replayed: true`, and the member's balance is unchanged; with a different `output_text` it is `409 submission_exists`.
+- `AC-api-07` Given a lease that expired 30 seconds ago, `lease.submit_grace_s` is larger than 30 and the cell is not re-leased, When the member submits, Then `201` with `late: true`; after the cell is re-leased, `410 LEASE_EXPIRED` reason `lease_expired`.
+- `AC-api-08` Given gold, audit and primary cells in the queue, When a volunteer lists offers, leases and submits, Then no response body or header in `S15.6` contains `cell_kind` or any field that differs between those kinds (checked by comparing field sets across a seeded sample).
+- `AC-api-09` Given a member whose opt-ins exclude `P2` and a sensitive topic, When they call `listOfferedCells` and `createLease` on a cell with that purpose, Then no such cell is listed and the lease call is `404 NOT_FOUND`.
+- `AC-api-10` Given a draft job declaring `S2`, When `submitJobForScreening` is called, Then `422 POLICY_REJECTED` with `details.reasons` containing `policy.R2.sensitivity_not_accepted`, the job is `rejected`, and replaying the call returns the same `422`.
+- `AC-api-11` Given a quoted job needing 276 credits and a balance of 250, When `confirmJob` is called, Then `422 INSUFFICIENT_CREDIT` with `short_by_ucr` = `26000000` and no escrow, no cells and no ledger entry exist; a repeated call with the same key returns the same error.
+- `AC-api-12` Given a quote past `expires_at`, When `confirmJob` is called, Then `409 STATE_CONFLICT` reason `quote_expired` and the job is `quote_expired`; given a changed parameter version, Then `quote_changed`.
+- `AC-api-13` Given a confirmed job, When `confirmJob` is replayed twice concurrently, Then one `Escrow` of 276,000,000 ucr exists and the member balance fell once.
+- `AC-api-14` Given a `running` job, When `cancelJob` is called, Then `202`, state `cancelling`, and after settlement `cancelled` with `refund_ucr` equal to the escrow minus paid-out and retained amounts of `S6.*`; given a `completed` job, `409 not_cancellable`.
+- `AC-api-15` Given a member over `ratelimit.member_api_rpm`, When they send one more request, Then `429 RATE_LIMITED` with `details.class`, `Retry-After`, and `RateLimit-Remaining: 0`; the retry after the wait with the same `Idempotency-Key` executes once.
+- `AC-api-16` Given any non-2xx response, Then its body has exactly `error.code`, `error.message`, `error.details` and `error.request_id`, `error.code` is in the catalogue of `S15.9`, and `X-Request-Id` equals `error.request_id`.
+- `AC-api-17` Given any 2xx or error response in this part, Then it contains no other member's `mem_` id, no `vol_` handle, no IP address and no token except in the operations listed in `S15.10`.
+- `AC-api-18` Given `launch.member_jobs_enabled` is `false`, When `createJob` with `submit` or `confirmJob` is called, Then `403 LAUNCH_GATE_CLOSED` with `details.switch` = `launch.member_jobs_enabled`; given `launch.minting_enabled` is `false`, Then Commons cells are not offered and a direct lease is `403 LAUNCH_GATE_CLOSED`.
+- `AC-api-19` Given a request body with an unknown field, a duplicate key, or `amount_ucr` sent as a number, When any operation is called, Then `400 VALIDATION_FAILED` with every offending path in `details.fields`.
+
+## Issues raised
+
+| ID | Severity | Problem | Resolution used in this part | Decider |
+| --- | --- | --- | --- | --- |
+| `ISS-151` | major | 0.11.5 replays a stored response body, but 0.6.4 stores lease nonces, invite codes and similar one-time secrets only as hashes, so a lost `createLease` response could not be replayed with the same nonce. | One-time secrets in replayable responses are kept encrypted in the idempotency record and purged on use or expiry (`S15.10`); `issueLeaseNonce` re-issues a lost nonce; session tokens are never replayable. `S10.*` must name the application key. | `S10.*` owner |
+| `ISS-152` | minor | FD§4.4 hides gold cells and S0 0.8.4 lists `reject.gold_mismatch` as a volunteer-visible reason; the card in FD§5.5 has no field for cell kind. It is unstated whether the API may reveal kind. | The API never exposes `cell_kind` (`task` run or review only); `reject.gold_mismatch` appears only in a rejection after submission. Where the credit cap and the daily earn cap are enforced (lease time, using potential earnings) is also not stated in FD or S0; this part enforces at lease time and defers to `S6.*`. | `S8.*`, `S6.*` owners |
+| `ISS-153` | minor | 0.13 lists one file `spec/15-api.md` for S15, but the plan splits S15 into several files; heading numbers `S15.m` and the top-level heading could collide. | This file has the top heading `# 15. API specification (part a: ...)` and owns `S15.1`..`S15.19`; the sibling file starts at `S15.20` and states its own top heading. | `C-027` owner (conventions) |
+
+**Convention additions made by this part** (each is a convention gap to be folded into S0 0.8 and 0.10; the owning part is the one named)
+
+- Parameters: `invite.required_to_join` (bool, initial configurable default `true`, owner operator); `identity.challenge_ttl_s` (initial configurable default 120); `session.max_active_per_member` (initial configurable default 10); `ratelimit.write_weight` (initial configurable default 4); `ratelimit.member_uploads_per_hour` (initial configurable default 10); `api.deprecation_window_days` (initial configurable default 180). Parameters used here that S0 may name differently or lack are to be confirmed against 0.10: `identity.recovery_cooldown_s`, `identity.recovery_max_per_90d`, `identity.key_rotation_grace_s`, `api.idempotency_ttl_s`, `api.page_size_default`, `api.page_size_max`, `api.cursor_ttl_s`, `api.max_body_bytes`, `lease.submit_grace_s`.
+- Enums: `decline_reason` (`not_interested`, `too_long`, `service_problem`, `content_concern`, `other`); `report_category` (`prohibited_content`, `sensitive_data`, `injection_attempt`, `link_or_action_request`, `wrong_declaration`, `abusive_or_unsafe`, `other`); `ack` (`stranger_reads_input`, `downstream_use_uncontrolled`); key states (`pending`, `active`, `retiring`, `revoked`); device link states; invite states; referral states; report states; screening finding codes (`screen.pii_pattern`, `screen.credential_pattern`, `screen.url_present`, `screen.instruction_pattern`).
+- Events: `invite.created`, `invite.redeemed`, `invite.revoked`, `member.key_revoked`, `member.device_revoked`, `offer.declined`, `reservation.activated`, `job.rated`, `team.created`, `team.joined`, `team.left`, `referral.issued`, `referral.redeemed`, `referral.activated`, `referral.paid`, `referral.voided`.
+- Copy area `api_error` for `copy.api_error.<code>[.<reason>]` keys, and the `details.reason` registry of `S15.9`.
+- Secret: an application key for the encrypted idempotency record (`ISS-151`), owned by `S10.*`.
