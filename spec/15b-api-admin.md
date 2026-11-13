@@ -343,7 +343,7 @@ classify(base, proposed):
 
 ### 15.25.1 Tighten, loosen, changelog (R10) [D]
 
-- **Tighten.** `tightenPolicy` takes effect at once (`policy.tighten_immediate` is the constant `true`). The version is active when the call returns. In the same transaction a `ChangeLogEntry` is created with a machine-generated summary (which rules and allowlist rows changed) and `explanation_due_at = now + change.tighten_publish_within_s` (initial configurable default 86,400). The reviewer adds the human explanation as an `amends` note (`POST /v1/admin/changelog-entries`, below) within that time, otherwise the alarm `changelog.explanation_overdue` is raised (15.29.5). In-flight work is stopped by consumers of `policy.version_activated`: R9 re-checks at acceptance and the job service pauses what no longer passes; the change never makes earlier work legitimate retroactively.
+- **Tighten.** `tightenPolicy` takes effect at once (`policy.tighten_immediate` is the constant `true`). The version is active when the call returns. In the same transaction a `ChangeLogEntry` is created with a machine-generated summary (which rules and allowlist rows changed) and `explanation_due_at = now + change.tighten_publish_within_s` (initial configurable default 86,400). The reviewer adds the human explanation as an `amends` note (`POST /v1/admin/changelog-entries`, below) within that time, otherwise the alarm `changelog.explanation_overdue` is raised (15.29.4). In-flight work is stopped by consumers of `policy.version_activated`: R9 re-checks at acceptance and the job service pauses what no longer passes; the change never makes earlier work legitimate retroactively.
 - **Loosen.** `loosenPolicy` needs a stated `reason`, a public `public_text` in `fa` and `en`, and a second admin. At approval the entry is published (this is the "public change-log entry" of R10) and the new version is scheduled with `effective_from = approved_at + policy.loosen_min_notice_days * 86,400 s` (initial configurable default 7 days, never below `change.notice_days_default`). A requested `effective_from` earlier than that is refused at execution as `notice_too_short`; omitting it is the normal use. The version becomes active at `effective_from` through the scheduler (15.34).
 - **Why mixed changes are refused** [D]: a loosening that also contains a tightening would delay the tightening by the notice period. Submit the tightening first.
 
@@ -357,7 +357,7 @@ Change-log entries are immutable; an annotation is a new entry that points at th
 
 Every number in the system lives in the parameter table (S0 0.10); this is the only write path to it. Constants (S0 0.10.2, the set marked `constant`) and secrets (never parameters) have no write path at all.
 
-**Schemas** [D]: `Parameter` = `{name, area, owner, type, unit, value, tighten_direction (up, down, none), is_public, mutable, version, effective_from, pending: ParameterVersion or null}`. `ParameterVersion` (`pmv_`, immutable in `value` and `effective_from`) = `{pmv_id, parameter_name, version (int), value, effective_from, change_class (tighten, loosen, neutral), reason, calibration_basis, changelog_entry_id, created_by_admin_id, created_at, withdrawn_at}`. `withdrawn_at` is the single write-once column of that entity (`ISS-154`). A reader asks for the value at time `t` and gets the newest non-withdrawn version with `effective_from <= t`.
+**Schemas** [D]: `Parameter` = `{name, area, owner, type, unit, value, tighten_direction (up, down, none), public, mutable, version, effective_from, pending: ParameterVersion or null}`. `ParameterVersion` (`pmv_`, immutable in `value` and `effective_from`) = `{pmv_id, parameter_name, version (int), value, effective_from, change_class (tighten, loosen, neutral), reason, calibration_source, changelog_entry_id, created_by_admin_id, created_at, withdrawn_at}`. `withdrawn_at` is the single write-once column of that entity (`ISS-154`). A reader asks for the value at time `t` and gets the newest non-withdrawn version with `effective_from <= t`.
 
 **Classification** [D]. `tighten_direction` is declared per parameter. A change is `tighten` when it moves the value the way the declared direction says makes the system safer, `loosen` when it moves the other way, `neutral` when the direction is `none` (every enum, bool and text parameter that has no declared order; for an enum whose direction is `up` or `down`, the order of `validation.enum` is the tightening order) [A]. Notice rules:
 
@@ -376,17 +376,17 @@ effective_from(change) = now                                            if class
 | `listParameterVersions` | `GET /v1/admin/parameters/{name}/versions` | `admin` `perm.parameter.read` | - | list of `ParameterVersion`, newest first | `NOT_FOUND` | n/a | cursor | `A-R` |
 | `listParameterConstraints` | `GET /v1/admin/parameter-constraints` | `admin` `perm.parameter.read` | - | `{data: [{id: "C1", text_key, satisfied: bool, inputs: {name: value}}]}` for the cross-parameter constraints C1..C8 of S0 0.10.3 evaluated on current values | - | n/a | - | `A-R` |
 | `previewParameterChange` | `POST /v1/admin/parameter-changes/previews` | `admin` `perm.parameter.read` | `{name, value}` | 200 `{change_class, notice_days, earliest_effective_from, violations: [{constraint, detail}], warnings: [{code, detail}]}`; no state change | `VALIDATION_FAILED` | opt | - | `A-W` |
-| `proposeParameterChange` | `POST /v1/admin/parameter-changes` | `admin` `SU` `perm.parameter.edit.<owner>`; `2P` `parameter.loosen` when the class is `loosen` | `{name, value, expected_version, reason, public_text?: {fa, en}, requested_effective_from?, calibration_basis?}` | tighten: 201 `{parameter_version, changelog_entry}`. Loosen: 202 approval, then 201 at approval. Neutral: 201 with a prospective `effective_from`. Events `parameter.changed`, `changelog.entry_published`; at effective time `parameter.activated` | `UNPROCESSABLE` (`details.reason` = `immutable_constant`, `use_launch_endpoints` for `launch.*`, `not_a_parameter`), `VALIDATION_FAILED` (type, range, enum; `details.constraints` lists violated C-ids), `ALREADY_EXISTS` (a scheduled version for this name exists: withdraw it first), `PRECONDITION_FAILED` (`expected_version` is not the newest) | req | - | `A-W` |
+| `proposeParameterChange` | `POST /v1/admin/parameter-changes` | `admin` `SU` `perm.parameter.edit.<owner>`; `2P` `parameter.loosen` when the class is `loosen` | `{name, value, expected_version, reason, public_text?: {fa, en}, requested_effective_from?, calibration_source?}` | tighten: 201 `{parameter_version, changelog_entry}`. Loosen: 202 approval, then 201 at approval. Neutral: 201 with a prospective `effective_from`. Events `parameter.changed`, `changelog.entry_published`; at effective time `parameter.activated` | `UNPROCESSABLE` (`details.reason` = `immutable_constant`, `use_launch_endpoints` for `launch.*`, `not_a_parameter`), `VALIDATION_FAILED` (type, range, enum; `details.constraints` lists violated C-ids), `ALREADY_EXISTS` (a scheduled version for this name exists: withdraw it first), `PRECONDITION_FAILED` (`expected_version` is not the newest) | req | - | `A-W` |
 | `withdrawParameterChange` | `POST /v1/admin/parameter-versions/{pmv_id}/withdrawals` | `admin` `SU` `perm.parameter.edit.<owner>` | `{reason}` | 200 `ParameterVersion` with `withdrawn_at` set; event `parameter.change_withdrawn`; a change-log note. Single admin: withdrawing a scheduled loosening is tightening | `STATE_CONFLICT` (`effective_from` already passed) | req | - | `A-W` |
 
 **Rules** [D]
 
 1. **One pending change per parameter.** A scheduled version blocks a second proposal for the same name.
 2. **Validation at propose and again at activation.** The value must satisfy `validation` and every cross-parameter constraint C1..C8 against the values that will be in force at `effective_from` (current values plus other scheduled versions). The scheduler (`parameter.activate_due`) re-checks at activation; on a violation it does not activate, raises an alarm (category `ops`, kind `parameter.activation_blocked`) and the version stays scheduled until an operator withdraws or fixes it. C8 (fee against level) is a warning at propose time, because S0 defines it as a margin check [A].
-3. **Public by default.** A `loosen` or `neutral` acceptance publishes its `ChangeLogEntry` at acceptance; that publication is the notice. A `tighten` publishes at once with the machine summary and the same `explanation_due_at` as 15.25.1. `public_text` is required for every class where `is_public` is true.
+3. **Public by default.** A `loosen` or `neutral` acceptance publishes its `ChangeLogEntry` at acceptance; that publication is the notice. A `tighten` publishes at once with the machine summary and the same `explanation_due_at` as 15.25.1. `public_text` is required for every class where `public` is true.
 4. **Prospective only** (FD Principle 5): no change ever alters a transaction already posted, a lot already earned, an escrow already held, a quote already issued or a job's stamped values. Services read a value as of the time the thing was created.
 5. **`launch.*` parameters** (`launch.min_signoffs`, `launch.required_gate_ids`, `launch.min_approved_services`) and the three switches are changed only by the endpoints of 15.27. Attempting it here is `UNPROCESSABLE` (`use_launch_endpoints`).
-6. **Leaving an initial configurable default.** The first change of a parameter away from its `initial configurable default` MUST carry `calibration_basis = {code, ref}`, where `code` is the replacement measurement code of its S0 0.10.4 entry (`CAL`, `FND`, `OPS`, `LEG`) and `ref` points at the evidence: `CAL` needs `calibration_record_ids` (15.32.3) from at least `calibration.min_samples_per_service` accepted samples per approved service in scope; `FND` needs a locked `PreRegistration` id; `LEG` needs a reference text (a counsel sign-off id kept outside the system, never its content) [V]. This keeps a guess from being replaced by another guess.
+6. **Leaving an initial configurable default.** The first change of a parameter away from its `initial configurable default` MUST carry `calibration_source = {code, ref, calibration_record_ids?}`, where `code` is the measurement code of the parameter's own "Replaced by" entry in S0 0.10.6 (one of `CAL`, `P1M`, `DEM`, `FND`, `CNS`, `SEC`, `TEC`, `OPS`; `CON` parameters are not editable) and `ref` points at the evidence: `CAL` needs `calibration_record_ids` (15.32.3) with at least `calibration.min_samples_per_service` (initial configurable default 30) completed cells for each approved service in scope; `FND` needs the id of a locked `PreRegistration`; `CNS` needs a reference text (a counsel sign-off id kept outside the system, never its content) [V]; `P1M`, `DEM`, `SEC`, `TEC` and `OPS` need a reference to the measurement or decision record. This is the `calibration_source` field of S0 0.10.3 made mandatory on the first change. This keeps a guess from being replaced by another guess.
 7. **Owners.** `perm.parameter.edit.<owner>` follows the `owner` column of the parameter (S0 0.10.5). Thresholds owned by `founders` are the only ones an `operator` alone cannot change.
 
 ## 15.27 Launch gates, launch switches, feature flags
@@ -395,11 +395,11 @@ effective_from(change) = now                                            if class
 
 | Object | Fields |
 | --- | --- |
-| `LaunchGateItem` (`lgi_`, S0 0.6.3) | `lgi_id`, `gate_id` (`G0`..`G5`, S0 0.8.4), `key` (such as `G0.service_registry`), `title_key` (a `copy.*` key), `state` (`open`, `evidence_attached`, `signed_off`, `reopened`), `required_signoffs` (= `launch.min_signoffs`, copied when evidence is first attached), `evidence`, `signoffs`, `tags` (`V` when the item rests on a [V] item) |
+| `LaunchGateItem` (`lgi_`, S0 0.6.3) | `lgi_id`, `gate_id` (`G0`..`G5`, FD§8.3), `key` (such as `G0.service_registry`), `title_key` (a `copy.*` key), `state` (`open`, `evidence_attached`, `signed_off`, `reopened`), `required_signoffs` (= `launch.min_signoffs`, copied when evidence is first attached), `evidence`, `signoffs`, `tags` (`V` when the item rests on a [V] item) |
 | evidence entry | `{evidence_id, kind (service_review, terms_copy, counsel_ref, threat_model_ref, calibration_ref, measurement_ref, fallback_decision, other), ref (text, 1..500, where it is kept; the content itself is not stored here), sha256?, note, attached_by_admin_id, attached_at}` |
 | sign-off | `{admin_id, signed_at, comment}` |
 
-The item list per gate is seeded data (S14.*). Item states and the events `gate.evidence_attached`, `gate.signed_off`, `gate.reopened` are S0 0.9.9.
+The item list per gate is seeded data (S14.*). Item states and the events `gate.evidence_attached`, `gate.signed_off`, `gate.reopened` are S0 0.9.8.
 
 ### 15.27.2 Gate endpoints
 
@@ -416,12 +416,12 @@ The sign-off is the implementation of the `launch.signoff` two-person action: th
 
 ### 15.27.3 Switches [D]
 
-The three switches are `launch.members_may_join`, `launch.member_jobs_enabled` and `launch.minting_enabled` (S0 0.8.4, default `false`; the initial configurable default of a closed system).
+The three switches are `launch.members_may_join`, `launch.member_jobs_enabled` and `launch.minting_enabled` (parameters of S0 0.10.6 Table C, default `false`, "only settable when the gate rule in S14.* passes"). A switch change writes a `ParameterVersion` in the usual way, effective at once (the gate rule, not a notice period, is the safeguard for turning on) [A], one `AdminAction`, a public change-log entry of kind `launch_switch`, and the event named below. The generic parameter endpoint refuses these names (15.26 rule 5).
 
 ```
 switchBlockers(sw):                                   # [] means the switch may be turned on
   b = []
-  for g in launch.required_gate_ids:                  # initial configurable default [G0, G1, G2, G3]
+  for g in launch.required_gate_ids:                  # initial configurable default [G0, G1]
       if gate(g).state != signed_off: b += gate_not_signed_off:<g>
   if count(Service where state == approved) < launch.min_approved_services          # initial configurable default 1
      and no signed_off evidence of kind fallback_decision on G0:  b += not_enough_approved_services
@@ -444,7 +444,7 @@ The `preregistration_not_locked` clause carries FD§9 ("thresholds pre-registere
 
 ### 15.27.4 Feature flags
 
-Feature flags (`ff.*`, S0 0.8.5) change behavior, never rules or money. Flags the platform ships: `ff.channel.human_review`, `ff.growth.v1_fast_path`, `ff.growth.v2_live_counter`, `ff.growth.v3_share_card`, `ff.growth.v4_trial_job`, `ff.growth.v5_referral`, `ff.growth.v6_milestones`, `ff.public.ledger_page`, `ff.experiment.expiry_arm`.
+Feature flags (`ff.*`, entity `FeatureFlag`, `ffl_`, S0 0.10.6) change behavior, never rules or money. Flags the platform ships: `ff.channel.human_review`, `ff.growth.v1_fast_path`, `ff.growth.v2_live_counter`, `ff.growth.v3_share_card`, `ff.growth.v4_teams`, `ff.growth.v5_referral`, `ff.growth.v6_milestones`, `ff.job.reservations`, `ff.public.ledger_page`, `ff.experiment.expiry_arm`.
 
 | op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -506,7 +506,7 @@ Audits compare an independent re-execution with the first (S0 0.9.4). The compar
 | `listAudits` | `GET /v1/admin/audits` | `admin` `perm.audit.read` | `?state`, `?template_version_id`, `?stalled=true` | list of `{aud_id, cell_id, state, comparator_verdict, created_at}` | - | n/a | cursor | `A-R` |
 | `getAudit` | `GET /v1/admin/audits/{aud_id}` | `admin` `perm.audit.read` | - | `{aud_id, cell_id, state, comparator: {method, verdict, score_ppm}, executions: [{submission_id, output_hash, is_third}]}` (no content) | `NOT_FOUND` | n/a | - | `A-R` |
 | `getAuditContent` | `GET /v1/admin/audits/{aud_id}/content` | `admin` `perm.audit.resolve` | - | `{input, outputs: [string]}`; logged as a read action (15.21.3); strings are data, escaped by the client | `NOT_FOUND` | n/a | - | `A-W` |
-| `resolveAudit` | `POST /v1/admin/audits/{aud_id}/resolutions` | `admin` `SU` `perm.audit.resolve` | `{verdict (first_correct, second_correct, both_acceptable, neither), rationale}` | 200 `{audit}`; event `audit.resolved`, then the cell events of S0 0.9.3 | `STATE_CONFLICT` (the comparator or the third execution can still decide; a human decides only `mismatched` audits stalled longer than `audit.human_after_hours` [A]) | req | - | `A-W` |
+| `resolveAudit` | `POST /v1/admin/audits/{aud_id}/resolutions` | `admin` `SU` `perm.audit.resolve` | `{verdict (first_correct, second_correct, both_acceptable, neither), rationale}` | 200 `{audit}`; event `audit.resolved`, then the cell events of S0 0.9.3 | `STATE_CONFLICT` (the comparator or the third execution can still decide; a human decides only `mismatched` or `third_pending` audits that neither the comparator nor a third execution could settle, S8.* [A]) | req | - | `A-W` |
 | `cancelAudit` | `POST /v1/admin/audits/{aud_id}/cancellations` | `admin` `SU` `perm.audit.resolve` | `{reason}` | 200 `{audit}`; event `audit.cancelled` | `STATE_CONFLICT` | req | - | `A-W` |
 
 There is no endpoint that marks an audit passed without a verdict from the comparator, a third execution or `resolveAudit` with a rationale [D].
@@ -518,7 +518,7 @@ There is no endpoint that marks an audit passed without a verdict from the compa
 | op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `listAppeals` | `GET /v1/admin/appeals` | `admin` `perm.appeal.read` | `?state`, `?kind`, `?assigned_to=me`, `?overdue=true` | list of `{apl_id, kind, state, filed_at, due_at, assigned_admin_id}` | - | n/a | cursor | `A-R` |
-| `getAppeal` | `GET /v1/admin/appeals/{apl_id}` | `admin` `perm.appeal.read` | - | appeal with `subject_ref`, the member's text (at most `appeal.max_chars` [A]), prior decisions; logged as a read action | `NOT_FOUND` | n/a | - | `A-R` |
+| `getAppeal` | `GET /v1/admin/appeals/{apl_id}` | `admin` `perm.appeal.read` | - | appeal with `subject_ref`, the member's text (length bounded by S10.*), prior decisions; logged as a read action | `NOT_FOUND` | n/a | - | `A-R` |
 | `assignAppeal` | `POST /v1/admin/appeals/{apl_id}/assignments` | `admin` `perm.appeal.decide` | `{admin_id?}` (default: caller) | 200 appeal; event `appeal.assigned` (or `appeal.reassigned` when already assigned) | `FORBIDDEN` (the assignee made the decision under appeal) | req | - | `A-W` |
 | `startAppealReview` | `POST /v1/admin/appeals/{apl_id}/review-starts` | `admin` `perm.appeal.decide` | `{}` | 200 appeal (`in_review`); event `appeal.review_started` | `STATE_CONFLICT` | req | - | `A-W` |
 | `requestSecondAppealReview` | `POST /v1/admin/appeals/{apl_id}/second-review-requests` | `admin` `perm.appeal.decide` | `{reason}` | 200 appeal; event `appeal.second_review_requested` | `STATE_CONFLICT` | req | - | `A-W` |
@@ -548,7 +548,7 @@ An abuse flag is an `Alarm` (`alm_`) with `category = abuse`; there is one resou
 | `farming.device_limit` (abuse) | more accounts than allowed share one device attestation | `grant.max_per_device` |
 | `farming.invite_tree` (abuse) | an invite tree exceeds depth or size, or its members behave in lock-step | `invite.tree_max_depth`, `invite.tree_max_members` |
 | `farming.referral` (abuse) | referrals per referrer exceed the cap | `growth.referral.max_per_referrer_per_30d` |
-| `integrity.duplicate_output` (abuse) | identical or near-identical outputs across many cells of one member | `verify.duplicate_threshold_ppm` [A] |
+| `integrity.duplicate_output` (abuse) | identical or near-identical outputs across many cells of one member | `verify.duplicate_similarity_threshold` |
 | `integrity.timing_anomaly` (abuse) | many submissions faster than the minimum plausible time | `verify.timing_min_s` |
 | `injection.output_flagged` (abuse) | outputs carry instruction-like text that the input screens would reject | `screen.*` |
 | `template.report_burst` (abuse) | the autopause threshold of 15.28.3 was hit | `template.autopause_*` |
@@ -579,8 +579,8 @@ Statuses and events are S0 0.9.1. Each action is a separate noun so every one ha
 
 | op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `restrictMember` | `POST /v1/admin/members/{mem_id}/restrictions` | `admin` `SU` `perm.member.restrict` | `{reason_code, reason, reason_copy_key, linked_ids: [], ends_at?}` | 200 member (`restricted`); event `member.restricted` | `STATE_CONFLICT` | req | - | `A-W` |
-| `liftMemberRestriction` | `POST /v1/admin/members/{mem_id}/restriction-lifts` | `admin` `SU` `perm.member.restrict` | `{reason}` | 200 member (`active`); event `member.restriction_lifted` | `STATE_CONFLICT` | req | - | `A-W` |
+| `restrictMember` | `POST /v1/admin/members/{mem_id}/restrictions` | `admin` `SU` `perm.member.restrict` | `{reason_code, reason, reason_copy_key, linked_ids: [], ends_at?}` | 200 member (tier `restricted`); event `member.restricted` | `STATE_CONFLICT` | req | - | `A-W` |
+| `liftMemberRestriction` | `POST /v1/admin/members/{mem_id}/restriction-lifts` | `admin` `SU` `perm.member.restrict` | `{reason}` | 200 member (tier restored to `tier_before_restriction`); event `member.restriction_lifted` | `STATE_CONFLICT` | req | - | `A-W` |
 | `suspendMember` | `POST /v1/admin/members/{mem_id}/suspensions` | `admin` `SU` `perm.member.suspend` | `{reason_code, reason, reason_copy_key, linked_ids: [], ends_at?}` | 200 member (`suspended`); event `member.suspended`; active leases revoked | `STATE_CONFLICT` | req | - | `A-W` |
 | `reinstateMember` | `POST /v1/admin/members/{mem_id}/reinstatements` | `admin` `SU` `perm.member.suspend` | `{reason}` | 200 member (`active`); event `member.reinstated` | `STATE_CONFLICT` | req | - | `A-W` |
 | `banMember` | `POST /v1/admin/members/{mem_id}/bans` | `admin` `SU` `2P` `member.ban` `perm.member.ban` | `{reason_code, reason, reason_copy_key, linked_ids: [at least one report, alarm or audit id]}` | 202 approval; on approval 200 member (`banned`); event `member.banned`; sessions and leases revoked | `VALIDATION_FAILED` (no linked evidence), `STATE_CONFLICT` | req | - | `A-W` |
@@ -597,10 +597,10 @@ The explorer is read-only. The only write path from the admin API to the ledger 
 | op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `getLedgerHead` | `GET /v1/admin/ledger/head` | `admin` `perm.ledger.read` | - | `{seq, entry_hash, last_checkpoint: {date, seq, hash}, invariants_status}` | - | n/a | - | `A-R` |
-| `listLedgerAccounts` | `GET /v1/admin/ledger/accounts` | `admin` `perm.ledger.read`; `?member_id` needs `perm.ledger.read_member` and is logged | `?type` (the account types of S0 0.7), `?member_id` | list of `{lac_id, type, owner_ref, balance_ucr}` | - | n/a | cursor | `A-R` |
-| `getLedgerAccount` | `GET /v1/admin/ledger/accounts/{lac_id}` | `admin` `perm.ledger.read` | - | `{lac_id, type, owner_ref, balance_ucr, lots: {count, remaining_ucr, expiring_within_expiry_notice_days_ucr}}` | `NOT_FOUND` | n/a | - | `A-R` |
+| `listLedgerAccounts` | `GET /v1/admin/ledger/accounts` | `admin` `perm.ledger.read`; `?member_id` needs `perm.ledger.read_member` and is logged | `?type` (the account types of S0 0.8.5), `?member_id` | list of `{lac_id, type, owner_ref, balance_ucr}` | - | n/a | cursor | `A-R` |
+| `getLedgerAccount` | `GET /v1/admin/ledger/accounts/{lac_id}` | `admin` `perm.ledger.read` | - | `{lac_id, type, owner_ref, balance_ucr, lots: {count, remaining_ucr, expiring_soon_ucr (within `credit.expiry_notice_days`)}}` | `NOT_FOUND` | n/a | - | `A-R` |
 | `listAccountEntries` | `GET /v1/admin/ledger/accounts/{lac_id}/entries` | `admin` `perm.ledger.read` | `?from_seq`, `?to_seq`, `?entry_type`, `?order` (`desc` default, `asc`) | list of `LedgerEntry` | `NOT_FOUND` | n/a | cursor | `A-W` |
-| `listLedgerEntries` | `GET /v1/admin/ledger/entries` | `admin` `perm.ledger.read` | `?from_seq`, `?to_seq`, `?entry_type`, `?txn_kind`, `?from`, `?to`, `?order` | list of `LedgerEntry`; at most `api.max_page_size` per page, scan by `seq` cursor | `VALIDATION_FAILED` (range wider than 31 days or 1,000,000 seq values: narrow it) [A] | n/a | cursor | `A-W` |
+| `listLedgerEntries` | `GET /v1/admin/ledger/entries` | `admin` `perm.ledger.read` | `?from_seq`, `?to_seq`, `?entry_type`, `?txn_kind`, `?from`, `?to`, `?order` | list of `LedgerEntry`; at most `api.page_size_max` per page, scan by `seq` cursor | `VALIDATION_FAILED` (range wider than 31 days or 1,000,000 seq values: narrow it) [A] | n/a | cursor | `A-W` |
 | `getLedgerEntry` | `GET /v1/admin/ledger/entries/{lge_id}` | `admin` `perm.ledger.read` | - | `LedgerEntry` | `NOT_FOUND` | n/a | - | `A-R` |
 | `getLedgerTransaction` | `GET /v1/admin/ledger/transactions/{txn_id}` | `admin` `perm.ledger.read` | - | `{txn_id, txn_kind, entries: [LedgerEntry], balanced: bool, reverses_txn_id}` | `NOT_FOUND` | n/a | - | `A-R` |
 | `listLots` | `GET /v1/admin/ledger/lots` | `admin` `perm.ledger.read_member` | `?member_id`, `?expiring_before` | list of `{lot_id, member_id, original_ucr, remaining_ucr, earned_at, expires_at, source_entry_id}` | - | n/a | cursor | `A-R` |
@@ -689,7 +689,7 @@ Phase 0 replaces guessed defaults with measurements typed in by a human working 
 | `createCalibrationRecord` | `POST /v1/admin/calibration-records` | `admin` `perm.calibration.write` | `{service_id, template_version_id?, observed_on, cells_attempted, cells_completed, limit_reached, seconds_per_cell, refusals, failures, copy_paste_errors, check_passes, corrects_id?, note?}` | 201 `CalibrationRecord`; event `calibration.recorded` | `VALIDATION_FAILED` (`cells_completed` > `cells_attempted`; any count negative) | req | - | `A-W` |
 | `getCalibrationSummary` | `GET /v1/admin/calibration/summary` | `admin` `perm.calibration.read` | `?service_id` (default: all) | per service `{n_cells, days, cells_per_day: {min, median, max}, seconds_per_cell: {p50, p95}, refusal_ppm, failure_ppm, copy_paste_error_ppm, check_pass_ppm, meets_min_samples (n_cells >= calibration.min_samples_per_service), informs: [parameter names]}` | `VALIDATION_FAILED` | n/a | - | `A-R` |
 
-`informs` is a fixed mapping: `seconds_per_cell.p50` informs `cell.envelope.expected_time_s`; `p95` informs `lease.timeout_s`; the low end informs `verify.timing_min_s`; `cells_per_day` informs `lease.max_active_per_member` and `mint.monthly_cap_credits`; `copy_paste_error_ppm` and `check_pass_ppm` inform `verify.*` thresholds [A]. The summary suggests no number; a person decides and enters it through `proposeParameterChange` with `calibration_basis` (15.26 rule 6). Percentiles use the nearest-rank method on the pooled `seconds_per_cell` values [D].
+`informs` is a fixed mapping: `seconds_per_cell.p50` informs `cell.envelope.expected_time_s`; `p95` informs `lease.timeout_s`; the low end informs `verify.timing_min_s`; `cells_per_day` informs `lease.max_active_per_member` and `mint.monthly_cap_credits`; `copy_paste_error_ppm` and `check_pass_ppm` inform `verify.*` thresholds [A]. The summary suggests no number; a person decides and enters it through `proposeParameterChange` with `calibration_source` (15.26 rule 6). Percentiles use the nearest-rank method on the pooled `seconds_per_cell` values [D].
 
 ### 15.32.4 Milestones [D]
 
@@ -712,7 +712,7 @@ Public endpoints are read-only except the verification `POST`. They are the code
 2. **Caching:** `Cache-Control: public, max-age=N` with `N` at most `public.counter_refresh_s` (initial configurable default 60), plus `ETag` and `If-None-Match` with `304` (S0 0.11.7). Every body has `as_of` (UTC).
 3. **CORS:** `GET` endpoints allow any origin without credentials, so a third party can embed or audit them. `POST` verification endpoints allow the same.
 4. **Ledger lag:** every ledger-derived number is computed from entries with `occurred_at <= now - public.ledger_lag_s` (initial configurable default 300). It never shows the current head, so a viewer cannot correlate a public figure with one specific live transaction.
-5. **Small-number suppression:** a count below `analytics.min_cohort_k` (initial configurable default 20) is `null` with `suppressed: true`.
+5. **Small-number suppression:** a count below `analytics.min_cohort_k` (initial configurable default 10) is `null` with `suppressed: true`.
 6. **Feature flags:** `ff.growth.v2_live_counter`, `ff.public.ledger_page`, `ff.growth.v3_share_card` and `ff.growth.v6_milestones` gate their endpoints; when off the answer is `404 NOT_FOUND`. Parameters, change log, metrics, pre-registrations and manifest verification are always on.
 7. **Language:** responses are language-neutral data and `copy.*` keys; texts the admin wrote carry `{fa, en}` and the client picks (S11.*).
 8. **Rate limits:** `PUB`, except verification (`PUB-V`).
@@ -755,11 +755,11 @@ Public endpoints are read-only except the verification `POST`. They are the code
   "last_checkpoint": { "date": "2026-11-30", "seq": "18100", "checkpoint_hash": "sha256:..." } }
 ```
 
-`ledger_head.seq` is the head at `as_of` (after the lag), not the live head. `identity_check` exists because the ledger is double-entry: signed balances of all accounts sum to zero (issuance holds the negative of everything minted; S0 0.7). `invariants.status` is `ok`, `violated` or `unknown`. The page shows aggregates and the daily checkpoint hashes only; it does not list individual entries or any member account, because a public feed of member-account movements with timestamps would be linkable to the people behind them. This is a decision and a trade-off: third parties can verify checkpoints and totals but cannot recompute the hash chain of member entries themselves (`ISS-155`) [D].
+`ledger_head.seq` is the head at `as_of` (after the lag), not the live head. `identity_check` exists because the ledger is double-entry: signed balances of all accounts sum to zero (issuance holds the negative of everything minted; S0 0.8.5). `invariants.status` is `ok`, `violated` or `unknown`. The page shows aggregates and the daily checkpoint hashes only; it does not list individual entries or any member account, because a public feed of member-account movements with timestamps would be linkable to the people behind them. This is a decision and a trade-off: third parties can verify checkpoints and totals but cannot recompute the hash chain of member entries themselves (`ISS-155`) [D].
 
 ### 15.33.4 Metrics snapshot [D]
 
-`MetricSnapshot` (`mts_`) is published every `price.publish_period_days` (initial configurable default 7): `{mts_id, period_start, period_end, published_at, v_by_job_type: [{job_type, v_ppm, verification_cells, accepted_primary_cells}], eta_ppm, claim_ratio_ppm, price_by_job_type: [{job_type, credits_per_cell_ucr}], quality: {false_accept_estimate_ppm, false_reject_estimate_ppm, gold_cells, audited_cells}, parameter_versions: [{name, version}]}`. An estimate with fewer than `analytics.min_cohort_k` underlying cells is `null`. The public record shows how the verification overhead `v`, the haircut `eta` and the claim ratio actually behaved, so the price formula (S6.*) can be re-derived from published numbers [D].
+`MetricSnapshot` (`mts_`) is published every `price.publish_period_days` (initial configurable default 30): `{mts_id, period_start, period_end, published_at, v_by_job_type: [{job_type, v_ppm, verification_cells, accepted_primary_cells}], eta_ppm, claim_ratio_ppm, price_by_job_type: [{job_type, credits_per_cell_ucr}], quality: {false_accept_estimate_ppm, false_reject_estimate_ppm, gold_cells, audited_cells}, parameter_versions: [{name, version}]}`. An estimate with fewer than `analytics.min_cohort_k` underlying cells is `null`. The public record shows how the verification overhead `v`, the haircut `eta` and the claim ratio actually behaved, so the price formula (S6.*) can be re-derived from published numbers [D].
 
 ### 15.33.5 Share card [D]
 
