@@ -965,7 +965,6 @@ Testable statements for S18.* to turn into tests (S18.* assigns `T-*` ids). Area
 | Id | Given | When | Then |
 | --- | --- | --- | --- |
 | `AC-meas-01` | The outbox holds `cell.leased` with `actor` = a `mem_` id | The projector runs | The `events` row has `actor_kind = member`, no member id anywhere in `refs`, `dims`, `measures`; a schema test shows no column or JSON path can hold a `mem_`, `vol_` or `dev_` value (`AN-04`) |
-| `AN-meas-02` placeholder removed | | | |
 | `AC-meas-02` | An event with an unknown `dims` key or a free-text value | It is projected or posted | It is rejected, `hamyar_metrics_events_rejected_total` increases by 1, nothing is stored |
 | `AC-meas-03` | Member A posts `ui.card_opened` for a lease owned by member B, and a valid one for A's own lease | The batch is processed | B's event is dropped with a `200` response indistinguishable from success; A's is stored with `occurred_at` = server time, and `leases.last_card_opened_at` is set |
 | `AC-meas-04` | Events older than `retention.event_raw_days`, and snapshots of the same age | `metrics.retention_purge` runs | The events are deleted, the snapshots remain, and `MET-08` recomputed afterwards gives the same values as before the purge |
@@ -996,7 +995,7 @@ Testable statements for S18.* to turn into tests (S18.* assigns `T-*` ids). Area
 
 **Existing parameters read by this part** (S0.10.6; defaults there): `analytics.min_cohort_k`, `analytics.third_party_trackers`, `analytics.cookies_enabled`, `retention.event_raw_days`, `retention.moderation_days`, `metrics.rollup_interval_s`, `calibration.min_samples_per_service`, `experiment.expiry_arm.fraction`, `experiment.assignment_seed_version`, `experiment.assignment_log_enabled`, `ui.fast_contribution_threshold_s`, `price.v_window_days`, `price.v_min_sample_cells`, `price.v_prior`, `price.levy_lambda`, `price.eta_alarm_threshold`, `verify.false_accept_alarm`, `verify.false_reject_alarm`, `verify.gold_rate_g`, `verify.audit_rate_s`, `verify.timing_min_s`, `credit.lifetime_days`, `credit.lifetime_days_accelerated`, `security.two_person_actions`, `launch.members_may_join`, `admission.max_job_cells`, `admission.phi`, `lease.timeout_s`, `lease.submit_grace_s`, `cell.envelope.*`, `mint.monthly_cap_credits`, `ratelimit.member_api_rpm`, `api.max_body_bytes`.
 
-**New parameters** (a convention gap; area table 0.10.5 already lists `metrics` and `calibration` for this part; each default is an `initial configurable default` and `C-022` adds them to the table without renaming) [A]:
+**New parameters** (a convention gap; area table 0.10.5 already lists `metrics` and `calibration` for this part; each default is an `initial configurable default`; the owner of the parameter table adds them without renaming) [A]:
 
 | Name | Type | Initial configurable default | Validation | Replaced by |
 | --- | --- | --- | --- | --- |
