@@ -508,7 +508,7 @@ The harness runs the real ledger, admission control, policy engine and verificat
 **Simulation output is NOT evidence about real human behavior.** The agent models are invented by this spec, their parameters are arbitrary stress values chosen to exercise mechanisms, and nothing in them is estimated from people. Results therefore:
 
 - never replace a Phase 1 measurement (`P1M`) or any calibration source of `S0.10.4`; there is no measurement code for simulation and a `calibration_source` may not cite a run (`S18.12.8`);
-- never support a statement on a public surface, in `MetricSnapshot`, in a grant, partner or press text, or in a launch-gate evidence file (`G0`..`G4` need `ENG`, `P1M`, `OPS`, `DEM`, `COUNSEL` evidence);
+- never support a statement on a public surface, in `MetricSnapshot`, in a grant, partner or press text, or in a launch-gate evidence file (`G0`..`G5` need `ENG`, `P1M`, `OPS`, `DEM`, `COUNSEL` evidence);
 - never justify a parameter change by themselves; the change-log reason must cite a measurement code and a simulation may only be cited as the stress case that prompted a measurement;
 - are reported with the banner of `S18.12.8` and the field `evidence_status` = `not_evidence`.
 
@@ -643,7 +643,7 @@ Scenario `SIM-nn` is run by `T-sim-nn`. Defaults in scenario tables are the `sim
 | `guards.json` | Pass or fail and counts for every guard assertion of the scenario |
 | `report.md` | Human-readable summary beginning with the banner below |
 
-**Mandatory banner**, the first lines of `report.md` and of every chart caption: `SIMULATION OUTPUT. NOT EVIDENCE about real human behavior. Agent models and parameters are invented stress values.` Every CSV starts with a comment row repeating it; every chart title ends with "(simulated)"; every number in `report.md` that depends on an agent parameter is followed by "(simulated)". `T-sim-19` fails if any output lacks the banner, the field or the label. [D]
+**Mandatory banner**, the first lines of `report.md` and of every chart caption: `SIMULATION OUTPUT: not evidence about human behavior. Agent models and parameters are invented stress values.` Every CSV starts with a comment row repeating it; every chart title ends with "(simulated)"; every number in `report.md` that depends on an agent parameter is followed by "(simulated)". `T-sim-19` fails if any output lacks the banner, the field or the label. [D]
 
 **Containment.** The harness writes only under its own run directory. Its metrics never enter `MetricSnapshot`, the public pages (`S12.*`) or the measurement tables (`S13.*`). The measurement pipeline refuses rows whose `source` is not `production`, and the data-source enumeration of `S0.10.4` has no value for simulation. A `ChangeLogEntry` whose cited source is a simulation run is refused by `T-unit-09`. [D]
 
@@ -693,7 +693,7 @@ A simulator can be wrong. These checks keep the harness honest; they test the ha
 | Coverage | Branch coverage of the ledger, admission, policy and verification packages at least `test.coverage.branch_min`; transition coverage 100 percent (`T-fsm-11`); rule coverage 100 percent for `R1`..`R10`; every `copy.*` key used is in the catalogue |
 | Mutation | Mutation testing on the ledger and policy packages each release; a kill rate below `test.mutation.kill_target` opens a review item, not an automatic failure [H] |
 | Release | `ci.weekly` green; no open critical or major issue in `S19.*` against the milestone; the DoD of `S18.15` met; the pre-build checklist items for the milestone are signed |
-| Launch | `launch.*` switches change only by the procedure of `S14.*` and `S0.12`. A green test run is never evidence for `G0`..`G4` |
+| Launch | `launch.*` switches change only by the procedure of `S14.*` and `S0.12`. A green test run is never evidence for `G0`..`G5` |
 
 ### 18.13.3 Rules of conduct for tests [D]
 
@@ -842,7 +842,7 @@ Every major feature of the prompt (scopes A to J) maps to criteria below, and ev
 | `AC-ops-04` | An operator | They open the ledger explorer | They can search any entry, verify the chain, and see no personal data | `T-prop-10`, `T-e2e-12` |
 | `AC-ops-05` | An operator | They edit a parameter | Validators, class, owner role, notice and change log apply (`AC-price-03`) | `T-unit-08`, `T-unit-09` |
 | `AC-ops-06` | An operator | They open the capacity dashboard | Active donors, throughput, committed cells, waitlist and gauges are shown from production data only | `T-e2e-14`, `T-sim-19` |
-| `AC-ops-07` | Operators | They open the launch-gate checklist | Items `G0`..`G4` show evidence, owners and sign-offs | `T-e2e-06` |
+| `AC-ops-07` | Operators | They open the launch-gate checklist | Items `G0`..`G5` show evidence, owners and sign-offs | `T-e2e-06` |
 | `AC-ops-08` | A kill switch | It is engaged and released | `kill.all_minting`, `kill.all_new_jobs`, `kill.template.<id>`, `kill.service.<id>`, `kill.member.<id>` each act at once and exactly, are logged with a reason, and release needs a second operator | `T-e2e-11`, `T-adv-13` |
 | `AC-i18n-01` | Persian locale | Any screen is shown | The page is `lang="fa"`, `dir="rtl"`, uses logical properties, and mirrors directional icons | `T-rtl-01`, `T-rtl-07` |
 | `AC-i18n-02` | Digit choice | The member switches digits | Persian or Latin digits show everywhere and input accepts both | `T-rtl-02` |
@@ -895,7 +895,7 @@ Every major feature of the prompt (scopes A to J) maps to criteria below, and ev
 | `AC-gate-01` | A new environment | It starts | `launch.members_may_join`, `launch.member_jobs_enabled` and `launch.minting_enabled` are false | `T-e2e-06` |
 | `AC-gate-02` | A switch flip | It is attempted before the gate | It is refused unless `G0`, `G1` and the required service entries are signed by `launch.min_signoffs` distinct admins with evidence | `T-e2e-06`, `T-adv-14` |
 | `AC-gate-03` | A signed gate item | New adverse evidence arrives | The item can be reopened and the guard turns red | `T-e2e-06` |
-| `AC-gate-04` | A passing test run | It is offered as gate evidence | It is refused as evidence for `G0`..`G4` | `S18.1` |
+| `AC-gate-04` | A passing test run | It is offered as gate evidence | It is refused as evidence for `G0`..`G5` | `S18.1` |
 | `AC-sim-01` | One scenario run twice | The outputs are compared | They are byte-identical | `T-sim-01` |
 | `AC-sim-02` | Every simulation run | It ends | Invariants hold at every sample and the sanity checks of `S18.12.9` pass | `T-sim-02`, `T-sim-03` |
 | `AC-sim-03` | Every output | It is written | It carries the banner, `evidence_status`, and the "(simulated)" labels | `T-sim-19` |
