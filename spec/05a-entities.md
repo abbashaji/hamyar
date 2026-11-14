@@ -40,7 +40,7 @@ Every table has `id` (PK) and `created_at` (`ts`, NN, server default `now()`). A
 
 | Class | Meaning | Enforcement |
 | --- | --- | --- |
-| `IMM` | Immutable: insert only. A correction is a new row that points at the old one (`supersedes_id` or a reversal) | `INSERT`/`SELECT` privileges only; a `BEFORE UPDATE OR DELETE` trigger raises `immutable_row` as defense in depth |
+| `IMM` | Immutable: insert only. A correction is a new row that points at the old one (`supersedes_id` or a reversal) | `INSERT`/`SELECT` privileges only; a `BEFORE UPDATE OR DELETE` trigger raises `immutable_row` as defense in depth, except for the deletions that `retention_svc` performs on the rows named in S5.15.4 and S5.6.1 |
 | `CHN` | `IMM` plus a hash chain (`prev_hash`, `entry_hash`) and a gap-free `seq` | as `IMM`, plus the sole writer function of S5.14 and the daily checkpoint |
 | `IMS` | Immutable content, mutable state: content columns are frozen by a trigger from a named point; only the state and timestamp columns named in the table change, and only through the state machine | column-level trigger lists them; any other column change raises `frozen_column` |
 | `MUT` | Mutable with optimistic concurrency (`row_version`, S0.11.7). Every change also emits its state event (S0.9.1) | |
@@ -50,8 +50,8 @@ Every table has `id` (PK) and `created_at` (`ts`, NN, server default `now()`). A
 
 | Role | May do | May not |
 | --- | --- | --- |
-| `app_rw` | `INSERT`/`UPDATE` on `MUT` and `IMS` tables; `INSERT` on `IMM` tables except ledger tables | any change to `CHN` tables; `DELETE` anywhere; `SELECT` on `gold_cells.answer_*` |
-| `ledger_svc` | calls `ledger_post()` (S5.14), the only function that inserts into `ledger_transactions` and `ledger_entries` and updates `ledger_accounts.balance_ucr` and `credit_lots.remaining_ucr` | anything else |
+| `app_rw` | `INSERT`/`UPDATE` on `MUT` and `IMS` tables; `INSERT` on `IMM` tables except ledger tables; `INSERT` on `ledger_accounts` (its `balance_ucr` and `last_entry_seq` are written only by `ledger_svc`) | any change to `CHN` tables; `DELETE` anywhere; `SELECT` on `gold_cells.answer_*` |
+| `ledger_svc` | calls `ledger_post()` (S5.14), the only function that inserts into `ledger_transactions` and `ledger_entries` and updates `ledger_accounts.balance_ucr` and `credit_lots.remaining_ucr`; it also inserts `credit_lots` rows for `lot_effect = 'create'`, updates `ledger_accounts.last_entry_seq`, and locks and updates `ledger_heads` | anything else |
 | `verifier_svc` | `SELECT` on `gold_cells.answer_*`; `INSERT` on `verification_records` | writing ledger tables |
 | `retention_svc` | `DELETE`/`UPDATE ... SET col = NULL` only on the columns and tables named in the retention rules; nothing on `CHN` or `permanent` tables | |
 | `readonly` | `SELECT` through views that exclude secret and answer columns | |
@@ -96,7 +96,7 @@ Values S0.8 does not list but the model needs. They are stored exactly as writte
 
 ### 5.2.6 Foreign keys [D]
 
-All foreign keys are `ON DELETE RESTRICT ON UPDATE RESTRICT`; no cascade exists. Circular references (`escrows` and `ledger_accounts`, `cells` and `leases`, `cells` and `submissions`) are `DEFERRABLE INITIALLY DEFERRED`. A foreign key may point at a row whose payload columns were purged by retention; purging nulls payload columns and never removes the row, except where the retention rule of an entity says rows are reduced to counts. A reference to a `members` row stays valid after closure because that row is reduced, not deleted (S5.6.1).
+All foreign keys are `ON DELETE RESTRICT ON UPDATE RESTRICT`; no cascade exists. Circular references (`escrows` and `ledger_accounts`, `cells` and `leases`, `cells` and `submissions`, `cells` and `audits`, `jobs` and `escrows`, `reservations` and `escrows`, `ledger_entries` and `credit_lots`, `ledger_entries` and `ledger_transactions` (entries are inserted before their transaction row, S5.14.6), `templates` and `template_versions`, `policies` and `policy_versions`, `parameters` and `parameter_versions`, `members` and `invites`, `members` and `teams`) are `DEFERRABLE INITIALLY DEFERRED`. A foreign key may point at a row whose payload columns were purged by retention; purging nulls payload columns and never removes the row, except where the retention rule of an entity says rows are reduced to counts. A reference to a `members` row stays valid after closure because that row is reduced, not deleted (S5.6.1).
 
 ## 5.3 Data minimization: stored versus deliberately not stored
 
@@ -231,7 +231,7 @@ EXECUTION AND VERIFICATION
   Cell 1--* Lease (one active)     Lease *--1 Member                Lease 1--0..1 Submission
   Cell 1--* Submission             Submission 1--* VerificationRecord   Cell *--0..1 Audit
   Audit 1--1 Cell (primary_cell)   Audit 0..1--1 Cell (second) / (third)
-  Job 1--0..1 Deliverable          Deliverable 1--1 Manifest
+  Job 1--* Deliverable (one row per `version`)          Deliverable 1--1 Manifest
 
 CREDIT
   Member 1--1 LedgerAccount(member)    Escrow 1--1 LedgerAccount(escrow)    Reserve 1--1 LedgerAccount(reserve)
@@ -275,7 +275,7 @@ A pseudonymous identity. Holds the `donor` and `requester` capabilities (S0.8.2)
 | `trust_tier` | enum | NN, default `new` | `new`, `established`, `trusted`, `restricted` |
 | `tier_before_restriction` | enum | set iff `trust_tier = 'restricted'` | one of the three non-restricted tiers |
 | `restricted_until` | ts | null | `trust.restriction_days` after the restriction |
-| `locale`, `digits`, `calendar` | enum | NN | defaults from `i18n.*`; member can change |
+| `locale`, `digits`, `calendar` | enum | NN while `status <> 'closed'`; NULL on a closed tombstone (DDL `CHECK`) | defaults from `i18n.*`; member can change |
 | `time_zone` | text | null | IANA name chosen by the member; never inferred from an IP |
 | `creating_device_id` | id `dev_` | null, FK | the device that created the identity; used for `ratelimit.device_new_members_per_day` |
 | `invite_id` | id `inv_` | null, FK (deferred) | the invite redeemed, if any |
@@ -292,7 +292,7 @@ A pseudonymous identity. Holds the `donor` and `requester` capabilities (S0.8.2)
 
 **Keys** PK `id`; FKs as above. **Unique** `email_lookup_hash` (where not null). **Indexes** `(status, trust_tier)`; `(team_id)`; `(invite_root_member_id)`; `(creating_device_id, created_at)`; `(last_active_day)`.
 **Stored** status, tier, display preferences, tree position, counters, optional e-mail ciphertext. **Not stored** name, nickname, IP, country, user-agent, provider identifiers, recovery key (only the public key derived from it, in `member_keys`), password.
-**Closure.** On `closed` the retention job deletes the rows of `member_keys`, `sessions`, `invites` (issued), `opt_ins`, `badge_awards`, `referrals`, and sets every nullable column above to NULL, keeping `id`, `created_at`, `status`, `closed_at` and `row_version`. The row is a tombstone so permanent rows that hold the opaque `mem_` id stay valid and point at nothing personal. Credit left on a closed member's lots moves to the Reserve through `expire` entries (S6.* owns the rule) [A]. [D]
+**Closure.** On `closed` the retention job deletes the rows of `member_keys`, `sessions`, `invites` (issued), `opt_ins`, `badge_awards`, `referrals`, and sets every nullable column above to NULL and every other column to its default (`trust_tier` = `new` with `tier_before_restriction` NULL, counters and `invite_depth` = 0, `locale`, `digits` and `calendar` NULL), keeping `id`, `created_at`, `status`, `closed_at` and `row_version`; `status_changed_at` and `updated_at` keep their closure-time values. The row is a tombstone so permanent rows that hold the opaque `mem_` id stay valid and point at nothing personal. Credit left on a closed member's lots moves to the Reserve through `expire` entries (S6.* owns the rule) [A]. [D]
 
 ### 5.6.2 `MemberKey` · `member_keys` · `mky_` · `MUT` · `member_bound`
 
@@ -317,7 +317,7 @@ A keyed-hash record of a client installation for rate limits, anti-farming and l
 
 | Field | Type | Null / constraint | Note |
 | --- | --- | --- | --- |
-| `device_token_hash` | bytes32 | NN | S5.3.3; set to NULL by purge |
+| `device_token_hash` | bytes32 | NN until purge, then NULL (the DDL column is nullable) | S5.3.3; set to NULL by purge |
 | `hash_key_version` | int | NN | |
 | `status` | enum(`device_status`) | NN, default `active` | `blocked` after a farming finding (S10.*) |
 | `first_seen_day`, `last_seen_day` | day | NN | |
@@ -538,7 +538,7 @@ A requester's request, or a Commons job. Machine S0.9.2. The declarations, the p
 | `submitted_at`, `admitted_at`, `started_at`, `assembled_at`, `settled_at` | ts | null | |
 | `requester_rating` | int | null, 1..5 | rating of the outcome (prompt F); no free text, because free text can hold personal data |
 
-**Keys** PK; FKs. **Indexes** `(requester_member_id, state)` (concurrency cap `admission.max_concurrent_jobs_per_member`); `(state, deadline_at)`; `(template_version_id)`; `(policy_version_id)`. **Checks** `is_commons = (requester_member_id IS NULL)`; every declared combination is in the stamped `PolicyVersion.allowlist` (verified by the writer, recorded by `policy_version_id`). **Defense in depth** a trigger refuses `state` to `quoted` or `admitted` unless every service the job could run on is `approved` with a current `TermsCopy` (S5.14.8). **Stored** declarations, quote, hashes. **Not stored** the uploaded content (that is `Upload`, purged), the requester's identity beyond the pseudonymous id, any rating text.
+**Keys** PK; FKs. **Indexes** `(requester_member_id, state)` (concurrency cap `admission.max_concurrent_jobs_per_member`); `(state, deadline_at)`; `(template_version_id)`; `(policy_version_id)`; `(quote_expires_at) WHERE state = 'quoted'` (timer `quote_expirer`); `(admitted_at) WHERE state IN ('admitted','running','suspended')` (overrun scan). **Checks** `is_commons = (requester_member_id IS NULL)`; every declared combination is in the stamped `PolicyVersion.allowlist` (verified by the writer, recorded by `policy_version_id`). **Defense in depth** a trigger refuses `state` to `quoted` or `admitted` unless every service the job could run on is `approved` with a current `TermsCopy` (S5.14.8). **Stored** declarations, quote, hashes. **Not stored** the uploaded content (that is `Upload`, purged), the requester's identity beyond the pseudonymous id, any rating text.
 
 ### 5.7.6 `Reservation` · `reservations` · `rsn_` · `MUT` · `job_bound`
 
@@ -557,7 +557,7 @@ Capacity booking for a future date with escrow at booking (FD§4.8). Machine S0.
 | `free_cancel_until` | ts | NN | `target_day` minus `reservation.free_cancel_notice_s` |
 | `expires_at` | ts | NN | |
 
-**Indexes** `(member_id, state)` (`reservation.max_active_per_member`); `(target_day, state)` (`reservation.capacity_share_cap`). Cancellation inside the notice window is a ledger fee policy owned by S6.*; this table stores only the state.
+**Indexes** `(member_id, state)` (`reservation.max_active_per_member`); `(target_day, state)` (`reservation.capacity_share_cap`); `(expires_at) WHERE state = 'held'` (expiry timer). Cancellation inside the notice window is a ledger fee policy owned by S6.*; this table stores only the state.
 
 ### 5.7.7 `WaitlistEntry` · `waitlist_entries` · `wlt_` · `MUT` · `job_bound`
 
@@ -570,7 +570,7 @@ Capacity booking for a future date with escrow at booking (FD§4.8). Machine S0.
 | `requested_window_s` | int | NN | |
 | `expires_at` | ts | NN | `admission.waitlist_ttl_days` |
 
-**Indexes** `(state, position_key)`; `(member_id, state)` (`admission.waitlist_max_per_member`).
+**Indexes** `(state, position_key)`; `(member_id, state)` (`admission.waitlist_max_per_member`); `(expires_at) WHERE state = 'waiting'` (timer `waitlist_expirer`).
 
 ## 5.8 Cells, leases, submissions and verification
 
@@ -607,7 +607,7 @@ One prompt-and-response unit inside the envelope; the unit of credit. The row pe
 | `credit_txn_id` | id `txn_` | null, unique | the `payout` (member job) or `mint` (Commons) transaction; set once, which makes double payment structurally impossible |
 | `payload_purged_at` | ts | null | |
 
-**Keys** PK; FKs to `jobs`, `template_versions`, `gold_cells`, `audits`, `cells` (self), `submissions`, `leases`, `ledger_transactions`. **Unique** `(job_id, ordinal) WHERE cell_kind = 'primary'`; `credit_txn_id`; `accepted_submission_id`. **Indexes** the queue `(priority_key) WHERE state = 'queued' AND (earliest_lease_at IS NULL OR earliest_lease_at <= now())`; `(job_id, state)`; `(subject_cell_id)`; GIN on `pinned_service_ids`. **Stored** envelope-bounded inputs and the rendered prompt until purge, hashes forever. **Not stored** the volunteer's identity on the cell (it is on the `Lease` and `Submission`), the cell's gold status in any column a volunteer API selects.
+**Keys** PK; FKs to `jobs`, `template_versions`, `gold_cells`, `audits`, `cells` (self), `submissions`, `leases`, `ledger_transactions`. **Unique** `(job_id, ordinal) WHERE cell_kind = 'primary'`; `credit_txn_id`; `accepted_submission_id`. **Indexes** the queue `(priority_key) WHERE state = 'queued'` (a partial-index predicate cannot call `now()`, so the lease query applies `earliest_lease_at IS NULL OR earliest_lease_at <= now()` as a filter; the DDL of S5.14.2 is normative); `(job_id, state)`; `(subject_cell_id)`; GIN on `pinned_service_ids`. **Stored** envelope-bounded inputs and the rendered prompt until purge, hashes forever. **Not stored** the volunteer's identity on the cell (it is on the `Lease` and `Submission`), the cell's gold status in any column a volunteer API selects.
 
 ### 5.8.2 `Lease` · `leases` · `lse_` · `MUT` · `job_bound`
 
@@ -655,7 +655,7 @@ One pasted-back result for one lease. Content columns are frozen at insert; only
 | `decided_at` | ts | null | |
 | `accept_policy_version_id` | id `plv_` | null | the R9 re-check |
 
-**Unique** `lease_id`. **Indexes** `(cell_id)`; `(member_id, submitted_at)`; `(normalized_output_hash)`; `(output_simhash)`; `(state) WHERE state IN ('received','checks_passed','quarantined')`. **Frozen** every column except `state`, `reject_code`, `quarantine_reason`, `decided_at`, `accept_policy_version_id` and `output_text` (set NULL by purge). **Stored** the paste-back, hashes, attested labels. **Not stored** the chat URL, any page content beyond the pasted text, clipboard history, client timing claims, raw IP.
+**Unique** `lease_id`. **Indexes** `(cell_id)`; `(member_id, submitted_at)`; `(normalized_output_hash)`; `(output_simhash)`; `(state) WHERE state IN ('received','checks_passed','quarantined')`. **Frozen** every column except `state`, `reject_code`, `quarantine_reason`, `checks_report` (written once by the checks), `decided_at`, `accept_policy_version_id`, `updated_at`, `row_version` and `output_text` (set NULL by purge). **Stored** the paste-back, hashes, attested labels. **Not stored** the chat URL, any page content beyond the pasted text, clipboard history, client timing claims, raw IP.
 
 ### 5.8.4 `VerificationRecord` · `verification_records` · `vrf_` · `IMS` · `job_bound`
 
@@ -771,7 +771,7 @@ The ledger is one double-entry book, `ledger_id = 'main'` [A]. Amounts are integ
 | `balance_ucr` | ucr | NN, default 0 | cache, updated only by `ledger_post()`; sign rule below |
 | `last_entry_seq` | int64 | NN, default 0 | the highest `seq` that touched this account |
 
-**Sign rule (CHECK)** `member`, `escrow`, `reserve`, `retired`: `balance_ucr >= 0`; `issuance`: `balance_ucr <= 0`. This is `ledger.allow_negative_balance` = false enforced by the database. **Singletons** a unique index allows exactly one `reserve`, one `issuance` and one `retired` account. **Indexes** `(account_type)`. **Public view.** The public ledger (S12.*) shows `vol_` handles computed on read from `member_id`; no `mem_` id and no handle is stored here. **Not stored** any personal datum; the table is the same shape for a member and for a Reserve.
+**Sign rule (CHECK)** `member`, `escrow`, `reserve`, `retired`: `balance_ucr >= 0`; `issuance`: `balance_ucr <= 0`. This is `ledger.allow_negative_balance` = false enforced by the database. **Singletons** a unique index allows exactly one `reserve`, one `issuance` and one `retired` account. **Indexes** `(account_type)`. **Public view.** The public ledger (S12.*) shows `vol_` handles computed on read from `member_id`; no `mem_` id and no handle is stored here. The public view MUST NOT show `job_id`, `cell_id` or a `natural_key` that embeds them beside a handle, because the provenance handle of S5.3.2 is the same value: a requester who knows the `job_id` could otherwise read the handles of that job's donors from the public ledger. Either those columns are withheld from the public view, or S10.* gives the public ledger a domain-separated handle (`data = 'pub' || member_id`) that differs from the provenance handle (audit A05, finding 4). **Not stored** any personal datum; the table is the same shape for a member and for a Reserve.
 
 ### 5.9.2 `LedgerEntry` · `ledger_entries` · `lge_` · `CHN` · `permanent`
 
@@ -926,7 +926,7 @@ A service with review state, adapter capabilities and dated flags. Every row sta
 | `adapter_max_url_chars` | int | NN when supports prefill | reviewer-entered [V] |
 | `adapter_copy_only` | bool | NN, default true | true unless prefill is supported and `prefilled_link_use` is `yes`; a guard keeps it consistent with the flags |
 | `adapter_clean_chat_hint_key` | text | null | copy key |
-| `open_weight_license_ref` | text | NN when `service_kind` is `open_weight_*` and status `approved` | pointer to the `TermsCopy` holding the checked model license (`M2`) |
+| `open_weight_license_ref` | text | NN when `service_kind` is `open_weight_*` and status `approved` | the `tcp_` id of the `TermsCopy` of this service holding the checked model license (`M2`); a foreign key to `terms_copies` (deferred) |
 
 **Keys** FK `current_terms_copy_id` (deferred). **Indexes** `(review_status)`; `(review_due_at) WHERE review_status = 'approved'`. **Approval guard (trigger, S5.14.8)** a row may enter `approved` only if the effective `third_party_task_use` and `prohibited_content_compatible` answers are `yes`, `current_terms_copy_id` is set and at least `service.min_approvers` distinct admins recorded `service.approve` for that `TermsCopy` hash. **Not stored** an account, key, cookie, login or any credential of any provider or volunteer; no scraped page; no pricing or quota number except as a reviewer's dated flag note.
 
@@ -1166,7 +1166,7 @@ One checklist line of `G0`..`G5` with its evidence and sign-offs (FD§8.3). A li
 | `supersedes_id` | id `lgi_` | null, FK | previous revision |
 | `created_by_admin_id` | id `adm_` | NN, FK | |
 
-**Checks (trigger)** `evidence_attached` requires non-empty `evidence`; `signed_off` requires at least `launch.min_signoffs` distinct `admin_user_id` values in `signoffs`, each signing the current `evidence_hash`, and none of them the `created_by_admin_id` of the evidence unless the parameter allows it [A]. **View** `launch_gate_items_current` returns the highest revision per `item_key`; the rule that decides whether `launch.members_may_join` may be set reads it (S14.*). **Indexes** `(gate_id, item_key, revision DESC)`. Counsel answers and provider answers are [V] data entered by humans; the system never fills them.
+**Checks (trigger)** `evidence_attached` requires non-empty `evidence`; `signed_off` requires at least `launch.min_signoffs` distinct `admin_user_id` values in `signoffs`, each signing the current `evidence_hash`, and none of them the `created_by_admin_id` of the evidence (no parameter allows an exception; a team too small for this raises a convention gap) [A]. **View** `launch_gate_items_current` returns the highest revision per `item_key`; the rule that decides whether `launch.members_may_join` may be set reads it (S14.*). **Indexes** `(gate_id, item_key, revision DESC)`. Counsel answers and provider answers are [V] data entered by humans; the system never fills them.
 
 ## 5.13 Measurement and operations entities
 
@@ -1552,7 +1552,7 @@ CREATE TABLE ledger_entries (
   created_at timestamptz NOT NULL,
   ledger_id text NOT NULL CHECK (ledger_id = 'main'),
   seq bigint NOT NULL,
-  txn_id text NOT NULL REFERENCES ledger_transactions(id),
+  txn_id text NOT NULL REFERENCES ledger_transactions(id) DEFERRABLE INITIALLY DEFERRED,  -- entries are inserted before the transaction row (5.14.6)
   entry_type text NOT NULL CHECK (entry_type IN ('mint','grant','escrow_hold','transfer','escrow_release',
     'levy','refund','expire','retire','reserve_donation','reversal')),
   debit_account_id text NOT NULL REFERENCES ledger_accounts(id),
@@ -1691,7 +1691,7 @@ CREATE TABLE service_registry_entries (
   adapter_max_url_chars int CHECK (adapter_max_url_chars > 0),
   adapter_copy_only bool NOT NULL DEFAULT true,
   adapter_clean_chat_hint_key text,
-  open_weight_license_ref text,
+  open_weight_license_ref text REFERENCES terms_copies(id) DEFERRABLE INITIALLY DEFERRED,
   CHECK ((review_status = 'suspended') = (suspension_cause IS NOT NULL)),
   CHECK (review_status NOT IN ('approved','review_due') OR current_terms_copy_id IS NOT NULL),
   CHECK (NOT adapter_supports_prefill OR (adapter_prefill_url_template LIKE '%{prompt}%' AND adapter_max_url_chars IS NOT NULL)),
@@ -1835,7 +1835,7 @@ The guard that sets `launch.members_may_join`, `launch.member_jobs_enabled` or `
 | `AO-5` | A correction is always a new row that references the old one; nothing that was once visible to a member, requester or the public is silently altered | the correction models of S5.4 |
 | `AO-6` | Approvals are bound to content: an approval stored in `admin_actions` carries `subject_hash`, and a changed subject no longer matches it | `subject_hash` comparison in the guards |
 | `AO-7` | Parameter, policy, template, terms-copy and flag history is never lost: a value in force at any past time can be reproduced from the stamped version ids | `ParameterVersion`, `PolicyVersion`, `TemplateVersion`, `TermsCopy`, `FlagAnswer` are `IMM` or `IMS` |
-| `AO-8` | Retention removes payload and personal columns only, never an `IMM`/`CHN` row, except the `moderation` and `ops` rows listed in S5.15.4 | `retention_svc` column and table grants |
+| `AO-8` | Retention removes payload and personal columns only, never an `IMM`/`CHN` row, except the `moderation` and `ops` rows listed in S5.15.4 and the `BadgeAward` rows deleted on member closure (S5.6.1) | `retention_svc` column and table grants |
 
 `AO-1` to `AO-8` are guarantees of the data layer. They do not protect against an actor who controls the database superuser, the secrets and the backups together; that residual risk (insider and operator risk) is carried by the threat model in S10.* and is not claimed away here. [D]
 
@@ -1902,7 +1902,7 @@ Given / When / Then, to be implemented as tests by S18.* (`T-unit`, `T-prop`, `T
 - **`AC-data-09`** Given a `LaunchGateItem` revision with `status = 'signed_off'` and one distinct signer while `launch.min_signoffs` is 2, when it is inserted, then the trigger rejects it.
 - **`AC-data-10`** Given a database dump, when it is searched for IPv4 and IPv6 patterns, clear e-mail patterns and the bytes of any test provider credential, then there are no matches (S5.3.1).
 - **`AC-data-11`** Given the FD§3.3 example posted through `ledger_post()`, when the escrow of 276,000,000 `ucr` is settled, then `paid_ucr` = 264,000,000, `levy_ucr` = 12,000,000, `refunded_ucr` = 0, the escrow account balance is 0, and the sum of all account balances is 0.
-- **`AC-data-12`** Given a closed member, when the retention job has run, then the `members` row holds only `id`, `created_at`, `status`, `closed_at` and `row_version`, and every permanent row that referenced the member still resolves.
+- **`AC-data-12`** Given a closed member, when the retention job has run, then every nullable column of the `members` row is NULL, `trust_tier` is `new`, the counters and `invite_depth` are 0, only `id`, `created_at`, `status`, `closed_at` and `row_version` carry data (plus the closure-time `status_changed_at` and `updated_at`), and every permanent row that referenced the member still resolves.
 
 ## Issues raised
 
