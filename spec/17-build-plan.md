@@ -39,7 +39,7 @@ BM0 foundation
                 |                                  +--> BM5 templates_and_commons_jobs
                 +--> BM4 identity_and_access -----+
    BM1 ------------------------------------------+
-   BM5 -------------------------------------------> BM6 execution_and_verification   (also needs BM1)
+   BM5 -------------------------------------------> BM6 execution_and_verification   (S0.12: BM6 depends directly on BM1; the `BM1` line above feeds `BM6`, not `BM5`)
    BM6 --> BM7 member_jobs_and_credit_economy
    BM6, BM7 --> BM8 experiences_and_public
    BM7, BM8 --> BM9 measurement_simulation_hardening
@@ -845,7 +845,7 @@ Columns: `After` lists the packages of the same milestone whose provided contrac
 | `WP-BM6-01` | `lease-engine` | `execution/lease`: `Lease` machine, nonce, timeout, extension, decline, release, reaper job, race-safe single active lease | S5, S0.9.3, S0.10.6 `lease.*` | none | `AC-bm6-02`, `-03` |
 | `WP-BM6-02` | `submission-intake` | `execution/submission`: paste-back endpoint, size and schema checks, escaping, quarantine and release, duplicate-submission replay, nonce and holder check | S5, S9, S0.11.1 | `-01` | `AC-bm6-04`, `-05`, `-06`, `-07` |
 | `WP-BM6-03` | `cell-offer-and-visibility` | `execution/offer`: offer endpoint, `R8` predicate call, adapter capability from `BM3`, launch-gate check on lease | S5, S7, S14 | `-01` | `AC-bm6-01`, `-20` (`R8` half) |
-| `WP-BM6-04` | `verification-and-gold` | `execution/verify`, `execution/gold`: checks pipeline, `GoldCell` library and hidden insertion, role-restricted gold answers, timing and duplicate detectors | S8, S9, S0.8.4 | `-02` | `AC-bm6-08`, `-15` |
+| `WP-BM6-04` | `verification-and-gold` | `execution/verify`, `execution/gold`, `execution/checkrunner` (`CheckRunner` port bound to `Unavailable`): checks pipeline, `GoldCell` library and hidden insertion, role-restricted gold answers, timing and duplicate detectors | S8, S9, S0.8.4 | `-02` | `AC-bm6-08`, `-15`, `-26` |
 | `WP-BM6-05` | `audits-sampling-reliability` | `execution/audit`, `execution/reliability`: `Audit` machine, comparator, third execution, adaptive sampling, blanket redundancy, Beta estimate, false-accept and false-reject estimators with limits | S8, S0.10.6 `verify.*` | `-04` | `AC-bm6-10`, `-11`, `-12`, `-13`, `-14` |
 | `WP-BM6-06` | `trust-and-review-cells` | `execution/trust`, `execution/review`, `seed/templates/human_review`: tier promotion, demotion, restriction; review cells and their gold; behind `ff.channel.human_review` | S8, S10, S0.9.4 | `-04`, `-05` | `AC-bm6-09`, `-16` |
 | `WP-BM6-07` | `acceptance-minting-overturn` | `execution/accept`: acceptance decision, `R9` re-check, mint call into the ledger (caps, `launch.minting_enabled`, `kill.all_minting`), expiry-arm resolver, overturn with `rework` cells | S5, S6, S0.8.5 | `-02` | `AC-bm6-17`, `-18`, `-19`, `-20` (`R9` half) |
@@ -1076,7 +1076,7 @@ Scripted in the staging suite (`AC-bm9-17`); the figures are for the initial con
 
 ## 17.12 Scope coverage matrix
 
-Every bullet of the prompt's product scope `A`..`K` and of the build-order requirements maps to the milestone that builds it and the tests that verify it. Nothing is deferred or shrunk: a row that depends on a human (counsel, interviews, a Persian reader, a penetration test, reachability measurements, host choice) is built as machinery with an evidence slot, and the human step is tagged `[V]`. The feature specification stays in the owning part. [D]
+Every bullet of the prompt's product scope `A`..`K` and of the build-order requirements maps to the milestone that builds it and the tests that verify it. Row ids are scope-item ids of the prompt: `C1`..`C8` here are not the constraints `C1`..`C8` of S0.10.3, and `G1`..`G4` are not the gates `G0`..`G5`. Nothing is deferred or shrunk: a row that depends on a human (counsel, interviews, a Persian reader, a penetration test, reachability measurements, host choice) is built as machinery with an evidence slot, and the human step is tagged `[V]`. The feature specification stays in the owning part. [D]
 
 | Row | Scope item (prompt) | Built in | Verified by |
 | --- | --- | --- | --- |
