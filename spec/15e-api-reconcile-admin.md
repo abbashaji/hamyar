@@ -185,3 +185,67 @@ Rules [D]:
 | `AC-recon-06` | Two accepted cells and admin A | A calls `overturnCells`, then B approves with a step-up bound to the stored payload; before B approves, one cell is overturned by another path | After A: `202`, no posting. At B's approval: `409 guard_failed`, approval `failed`, no `cell.overturned` for either cell |
 | `AC-recon-07` | An `active` lease | `releaseLease`, then the member submits late | `lease.revoked` is emitted, the cell is `queued`, the member's reliability is untouched, and the late submission is `reject.lease_expired` |
 
+### 15.D.4.4 Work claims
+
+A claim tells two reviewers they are not about to open the same item. It is a coordination hint, not a lock and not an authorization [D]. `WorkClaim` (`clm_`; the id prefix is used by part 11c and, if S0 0.7 lacks it, the S0 owner adds it) = `{clm_id, subject_type (template_version, service, audit, quarantined_submission, appeal, report, alarm, approval, launch_gate_item), subject_id, claimed_by_admin_id, claimed_at, last_write_at, expires_at, state (active, released, expired, taken_over)}`, with `expires_at = last_write_at + ui.admin_claim_ttl_s`; a write by the holder on the subject moves `last_write_at`.
+
+| op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `listWorkClaims` | `GET /v1/admin/work-claims` | `admin` `perm.claim.write` | `?mine=true`, `?subject_type`, `?active=true` | list of `WorkClaim` | - | n/a | cursor | `A-R` |
+| `createWorkClaim` | `POST /v1/admin/work-claims` | `admin` `perm.claim.write`; the caller must also hold the read permission of the subject's queue | `{subject_type, subject_id}` | 201 `WorkClaim` (`active`) | `FORBIDDEN`, `NOT_FOUND`, `STATE_CONFLICT` (`held_by_other`: an unexpired claim by another admin exists) | req | - | `A-W` |
+| `releaseWorkClaim` | `POST /v1/admin/work-claims/{clm_id}/releases` | `admin` (holder only) | `{}` | 200 `WorkClaim` (`released`) | `FORBIDDEN`, `STATE_CONFLICT` (not `active`) | req | - | `A-W` |
+| `takeoverWorkClaim` | `POST /v1/admin/work-claims/{clm_id}/takeovers` | `admin` `SU` `perm.claim.write` and the operator role | `{reason}` | 201 new `WorkClaim` for the caller; the old one becomes `taken_over` | `STATE_CONFLICT` (already expired or released: use `createWorkClaim`) | req | - | `A-W` |
+
+Rules [D]: (1) at most one `active` claim per `(subject_type, subject_id)`, enforced by a uniqueness constraint, so two simultaneous `createWorkClaim` calls give exactly one `201` and one `409`. (2) An unexpired claim never makes a decision endpoint of 15.23 to 15.29 refuse a different admin: a decision is refused only by its own guards (distinct reviewers, author exclusion, state). A claim that could block a decision would let one captured reviewer account freeze a queue. Part 11c's "`409 STATE_CONFLICT` if another admin holds the claim" on template approval is removed. (3) A claim expires without any call when `ui.admin_claim_ttl_s` passes with no write; the scheduler emits `workclaim.expired` (convention addition) and the item sorts first in its queue (11c `AC-claim-02`). (4) `handovers` is removed: a handover is a release followed by the other admin's `createWorkClaim`, and a named-recipient handover adds a state for no gain. (5) A claim holds a subject id and an admin id only; no content.
+
+| id | Given | When | Then |
+| --- | --- | --- | --- |
+| `AC-recon-08` | Two reviewers claim one item at the same instant | Both `createWorkClaim` calls run | Exactly one `201`, the other `409 STATE_CONFLICT`; a decision call by the loser is still judged only by its own guards |
+
+### 15.D.4.5 Parameter change set
+
+S15 `proposeParameterChange` changes one parameter and validates cross-parameter constraints C1..C8 against current values plus scheduled versions (15.26 rule 2). Two parameters that satisfy a constraint only together cannot be changed one at a time, because the first proposal alone violates it. That is a real gap, so the set exists; it is all-or-nothing [D].
+
+| op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `createParameterChangeSet` | `POST /v1/admin/parameter-change-sets` | `admin` `SU`; the caller must hold `perm.parameter.edit.<owner>` for the owner of EVERY item; `2P` `parameter.loosen` when the set class is `loosen` | `{items: [{name, value, expected_version, public_text?: {fa, en}, calibration_source?}] (2 to `api.page_size_max`; one item is `proposeParameterChange`), reason, requested_effective_from?}` | `tighten` or `neutral`: 201 `{parameter_versions: [ParameterVersion], changelog_entries: [ChangeLogEntry]}`. `loosen`: 202 approval, then 201 with the same body at approval. Events `parameter.changed` and `changelog.entry_published` per item, `parameter.activated` per item at the effective time | `UNPROCESSABLE` (`details.reason` = `immutable_constant`, `use_launch_endpoints`, `not_a_parameter`, `mixed_change`, `duplicate_name`), `VALIDATION_FAILED` (type, range, enum; `details.constraints` lists violated C-ids evaluated on the values of the whole set), `ALREADY_EXISTS` (a scheduled version exists for one name), `PRECONDITION_FAILED` (any `expected_version` is stale; nothing is applied) | req | - | `A-W` |
+
+Set class [D]: `tighten` when every item is `tighten`; `loosen` when at least one item is `loosen` and the others are `loosen` or `neutral`; `neutral` when all are `neutral`; a set that mixes `tighten` with any other class is `UNPROCESSABLE` `mixed_change`, for the reason 15.25.1 gives (a loosening would delay the tightening by its notice period). One `effective_from` serves the whole set: now for `tighten`, else `max(requested, accepted_at + max_i notice_days(item_i) * 86,400 s)` (15.26), so the set activates in one `config_epoch`. Each item still obeys 15.26 rules 1 to 7 (one pending change per name, `launch.*` refused, `calibration_source` on the first change away from an initial configurable default, prospective only). One `AdminAction` names every item. Withdrawal stays per version (`withdrawParameterChange`); withdrawing one member of a set can leave the others violating a constraint, in which case the scheduler's activation re-check blocks activation and raises `parameter.activation_blocked` (15.26 rule 2) [A].
+
+| id | Given | When | Then |
+| --- | --- | --- | --- |
+| `AC-recon-09` | Constraint C-x requires parameter a <= parameter b, current a = 5 and b = 5 (fixture) | A set raises b to 9 and a to 8, then a single proposal raises a to 8 | The set is accepted (the constraint holds on the combined values); the single proposal alone is `400 VALIDATION_FAILED` with the violated constraint |
+
+### 15.D.4.6 Metrics, bottleneck and operations snapshot
+
+| op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `listAdminMetricSnapshots` | `GET /v1/admin/metric-snapshots` | `admin` `perm.metrics.view` | `?kind` (a kind of the S13.* catalogue), `?from`, `?to` (UTC, at most 366 days), `?dimension` | list of `MetricSnapshot` as S13.5 defines it (`kind`, window, dimensions, value, `suppressed`); a suppressed row has `value: null` | `VALIDATION_FAILED` (unknown kind; range) | n/a | cursor | `A-R` |
+| `getBottleneck` | `GET /v1/admin/bottleneck` | `admin` `perm.capacity.read` | - | `{as_of, bottleneck: {kind (template_version, service, approval, launch_gate_item), id, blocked_count, open_age_s}/null, candidates: [same shape, those with blocked_count > 0, at most `api.page_size_max`]}` | - | n/a | - | `A-R` |
+| `getOperationsSnapshot` | `GET /v1/admin/capacity/operations` | `admin` `perm.capacity.read` | - | `{as_of, queue_depth: [{template_id, service_requirement, purpose, sensitivity, queued_cells, oldest_age_s}], lease_health: {active, expiry_rate_ppm, decline_rate_ppm, submission_lag_p50_s, submission_lag_p95_s, reaper_lag_s}, verification: {v_ppm/null, false_accept_estimate_ppm/null, false_reject_estimate_ppm/null, oldest_open_age_s: {audit, quarantine, appeal, report}}, alarms_open: {info, warning, critical}, kill_switches_engaged: [switch_key]}` | - | n/a | - | `A-R` |
+
+Rules [D]:
+
+1. **No small-cell override.** `listAdminMetricSnapshots` never returns a value that S13 `AN-06` and `AN-07` suppressed, and the permission `perm.metrics.view_small_cells` of 13:921 does not exist. The 15b dashboards (supply gauges, experiment summary) already return `null` below `analytics.min_cohort_k` to admins; an operator who could read small cells would be a differencing oracle against S13 `AN-08` and against every cohort the public sees. If S13.* needs a small-cell view for a stated purpose, that is a separate decision with its own threat model, not a permission flag.
+2. **Same table, two records.** 15.33.4 defines the public `MetricSnapshot` (`mts_`) published every `price.publish_period_days`; S13 defines a wider family of snapshots with the same id prefix. The public record is the snapshot of kind `price_publication`; the admin list returns it and the others. `S13.*` and `C-041` reconcile the two field lists; this file fixes only the path and the suppression rule [A].
+3. **No row-level export.** There is still no endpoint that returns rows about one member (S13 `AN-03`); `getBottleneck` and `getOperationsSnapshot` return counts, ages and ids of admin work items only.
+4. **Bottleneck.** `blocked(c)` is computed on the server with the rule of 11c 11.52.3: the number of waitlisted or draft jobs, Commons backlog entries and launch switches that cannot move only because candidate `c` is open; candidates are open `TemplateVersion`s (`in_review`, `awaiting_second_review`, `changes_requested`), `Service`s (`unreviewed`, `in_review`, `review_due`), pending `AdminApproval`s and `LaunchGateItem`s required by `launch.required_gate_ids` that are not `signed_off`; the bottleneck is the candidate with the largest `blocked_count`, ties broken by the oldest `open_age_s`. The response never names a member or a requester.
+5. **Operations snapshot.** All ratios are ppm integers, all ages are seconds, `v_ppm` is `null` below `price.v_min_sample_cells` cells, and an estimate built on fewer than `analytics.min_cohort_k` cells is `null`. The dashboard changes nothing; each tile's link to its parameter or kill switch is a client concern.
+
+| id | Given | When | Then |
+| --- | --- | --- | --- |
+| `AC-recon-10` | A snapshot suppressed under `analytics.min_cohort_k` | An operator lists it with `perm.metrics.view` | `suppressed: true`, `value: null`; no permission turns the value on |
+| `AC-recon-11` | Candidate A blocks 4 waitlisted jobs, candidate B blocks 4 and is older | `getBottleneck` | `bottleneck` is B; both appear in `candidates`; no member id appears |
+
+### 15.D.4.7 Template machine checks
+
+| op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `runTemplateChecks` | `POST /v1/admin/template-versions/{tpv_id}/check-runs` | `admin` `perm.template.read` | `{}` | 200 `{tpv_id, content_hash, findings: [{key, severity (blocking, advisory), field_path, copy_key}], blocking_count, check_hash}`; no state change, no event | `NOT_FOUND` | opt | - | `A-W` |
+
+`findings` are produced by the S8.* checker (schema compiles, deterministic checks, comparator present, expected output within `cell.envelope.max_output_chars`, `lease.timeout_s >= cell.envelope.expected_time_s`) and the S9.* injection and scope lint (links, instruction-like phrases, URL-capable slots, steps beyond copy, press Send, return text). `check_hash = SHA-256(RFC 8785 canonical JSON of {content_hash, findings, checker_version})`, so the same version and checker give the same hash. The call is deterministic and has no side effects, which is why it is a `POST` with an optional `Idempotency-Key` and not a write. Because a client-side "Approve is disabled" is not a guard, `submitTemplateReview` with `approve` re-runs the same checks and answers `422 UNPROCESSABLE` (`details.reason = blocking_finding`, `details.fields` the finding keys) when `blocking_count > 0`; the hash of the run it used is stored in the stored `review` row. A blocking finding has no override [D][A].
+
+| id | Given | When | Then |
+| --- | --- | --- | --- |
+| `AC-recon-12` | A version whose lint reports a blocking finding | A reviewer calls `submitTemplateReview` with `approve` | `422 UNPROCESSABLE`, `details.reason = blocking_finding`; no review is stored; `runTemplateChecks` returns the same finding and a stable `check_hash` |
+
