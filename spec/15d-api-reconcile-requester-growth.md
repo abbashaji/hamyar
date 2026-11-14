@@ -53,3 +53,75 @@ Column `Cited at` is `part:line` where the cell gave a line; `12.9.2 table` is t
 | 27 | `/v1/teams/{team_id}/reports` | 12.9.2 table | ALIAS (extends `createReport`) | `createReport` `POST /v1/reports` with `subject_kind` = `team`, `subject_id` = `id<tem>` | S15a's `subject_kind` list has no `team`. Adding it is additive in `v1` (S15a 15.13) once the S0 enum is edited (15.C.7, edit S1). The reporter must belong to the team or see it in the public list; category `abusive_or_unsafe` or `prohibited_content`; the reported party never sees the reporter. |
 | 28 | `/v1/uploads/{upload_id}/review-requests` | 11b:128 | REMOVE | none | S15a 15.7.1: a `flagged` upload, and a share of all inputs, go to a reviewer automatically after `submitJobForScreening` (job `screening`, `202`). Screen 04 shows the finding codes and counts of `Upload.screening` and offers `deleteUpload` or 'submit for screening'. There is no requester note to a reviewer: no such channel exists, and requester free text in the reviewer UI is an injection surface [A]. |
 | 29 | `/v1/waitlist-entries/{waitlist_entry_id}` | 11b:134, 11b:135 | ALIAS | `getJob`; `cancelJob` | `getJob` returns `waitlist` `{position, expires_at}`; the `waitlist_entry_id` in S15b events is internal. Leaving the waitlist is `cancelJob` `POST /v1/jobs/{job_id}/cancellation` in state `waitlisted`: `200`, job `cancelled` at once, terminal, nothing held. To try again the requester uses `copy_from_job_id`. |
+
+## 15.C.3 Rules shared by every new operation [D]
+
+1. **Member and admin stay apart.** Every new member operation has `auth_scheme` `member`; the two public operations are `none` under `/v1/public/*`; none touches `/v1/admin/*`, and an admin token on a member route stays `401 AUTH_INVALID`, reason `wrong_scheme` (S15a 15.4).
+2. **No provider page, no credential.** No new operation accepts or returns a provider credential, cookie, session, chat link or chat-page content, and none reads a volunteer's page. `previewCells` shows only the text a requester supplied, wrapped by the template; it never shows a service, an `open_url`, a lease or a nonce.
+3. **Writes are idempotent.** Every new write has `Idempotency-Key` `R` and names its natural idempotency underneath (S15a 15.10 rules apply: a deterministic `4xx` is stored, `5xx` and `429` are not).
+4. **Minimal data.** A response carries only what its screen reads. No new response carries another member's `mem_` id, a `vol_` handle toward a requester, an IP address or an e-mail address (S15a 15.1). Public responses follow S15b 15.33.1 (no cookies, `PUB` rate class, `ETag`, `as_of`, small-number suppression below `analytics.min_cohort_k`).
+5. **Errors.** Only codes of the S15a 15.9 catalogue. New `details.reason` values (additive in `v1`, S15a 15.13): `appeal_exists`, `appeal_window_closed`, `not_appealable`, `appeal_decided`, `job_incomplete`. No new `code`.
+6. **Table format** is that of S15a: `Idem` is `R` required, `O` optional, `-` safe read; `RL` is a class of S15a 15.12 or S15b 15.21.2; `+name` in `Events` is an event proposed here (not in S0 0.9 or the S15b catalogue).
+7. **Declared, not guaranteed.** A figure that is an estimate (cancellation refund, availability) is named an estimate and carries a copy key that says so; no field name promises an outcome (FD Principle 11).
+
+## 15.C.4 New operations
+
+### 15.C.4.1 Member appeals (rows 1 and 2)
+
+S15b already has the admin queue (15.29.2), the events `appeal.filed`, `appeal.withdrawn`, `appeal.upheld`, `appeal.overturned` and the id prefix `apl_`. What is missing is the member side. A `suspended` or `banned` member may use all four operations (S15a 15.4: they can still file appeals). They are not marked active only. [D]
+
+| op | Method and path | Auth | Idem | RL | OK | Events |
+| --- | --- | --- | --- | --- | --- | --- |
+| `createAppeal` | `POST /v1/appeals` | member | R | `RL-WRITE` | 201 | `appeal.filed` |
+| `listAppeals` | `GET /v1/appeals` | member | - | `RL-READ` | 200 | - |
+| `getAppeal` | `GET /v1/appeals/{appeal_id}` | member | - | `RL-READ` | 200 | - |
+| `withdrawAppeal` | `POST /v1/appeals/{appeal_id}/withdrawals` | member | R | `RL-WRITE` | 200 | `appeal.withdrawn` |
+
+```
+Appeal        { id: id<apl>, kind: enum<appeal_kind>, subject: { kind: "submission"/"job"/"member", id: id<sub>/id<job>/null },
+                state: "filed"/"in_review"/"decided"/"withdrawn", outcome: "upheld"/"overturned"/null,
+                outcome_copy_key: copy_key/null, statement: text<500>/null, filed_at: ts, decided_at: ts/null }
+createAppeal  req { kind: "submission_rejection"/"job_rejection"/"member_ban", subject_id: id<sub>/id<job>/null, statement: text<500>? }
+              201 { appeal: Appeal }       Location: /v1/appeals/{appeal_id}
+listAppeals   Page<Appeal>, newest first, filters state, kind (S15a 15.11 order rule)
+withdrawAppeal req {}   200 { appeal: Appeal }
+```
+
+| `kind` | `subject_id` | Guard at filing | Window |
+| --- | --- | --- | --- |
+| `submission_rejection` | `id<sub>` of the caller's own submission | `verdict` is `rejected` | now at most `Submission.appealable_until` (= `decided_at` + `appeal.window_days` x 86,400 s, S15a 15.6.4) |
+| `job_rejection` | `id<job>` of the caller's own job | job `state` is `rejected` | `appeal.window_days` x 86,400 s after `Job.updated_at`, which no longer changes in a terminal state [A] |
+| `member_ban` | null | the caller's `status` is `banned` | none while banned (S15b 15.29.6: a ban stays appealable) |
+
+- **Mapping to the admin queue.** `state`: `filed` covers `appeal.filed`, `appeal.assigned` and `appeal.reassigned`; `in_review` covers `appeal.review_started` and `appeal.second_review_requested`; `decided` carries `outcome` from `appeal.upheld` or `appeal.overturned`, issued only when the final-decision rule of S15b 15.29.2 is met (two matching reviewers for `member_ban`); `withdrawn` from `withdrawAppeal`. `outcome_copy_key` is the `member_message_copy_key` the reviewer chose, so no free text reaches the member (S15b 15.29.6). [D]
+- **No deadline is returned.** The reviewer `due_at` (`appeal.reviewer_sla_days`) is an internal target; returning it would be a promise (FD Principle 11). Copy says a reviewer will look at it. [D][A]
+- **Statement.** `statement` is plain text, stored verbatim and shown to reviewers only as an escaped string (S9.*). It never contains a prompt or output unless the member pastes one; the platform does not add any. [D]
+- **Visibility.** A subject that is not the caller's own is `404 NOT_FOUND` (S15a 15.3 rule 2). `template_rejection` is not fileable here: template authors are admin users (S15b 15.24) (15.C.7). [D]
+- **Withdraw.** Only in `filed` or `in_review`; otherwise `409 STATE_CONFLICT` reason `appeal_decided`. A withdrawn appeal frees the subject for one new appeal inside the window. [A]
+- **Errors.** `createAppeal`: `404 NOT_FOUND`; `409 ALREADY_EXISTS` reason `appeal_exists` (one non-withdrawn appeal per subject; also the natural idempotency, so a double click never files two); `409 STATE_CONFLICT` reason `appeal_window_closed` or `not_appealable`; `400 VALIDATION_FAILED` when `kind` and `subject_id` do not fit (`subject_id` required except for `member_ban`). Reads: `404 NOT_FOUND`.
+
+Given / When / Then
+
+- `AC-api-C01` Given a submission rejected two days ago whose `appealable_until` is in the future, When its owner calls `createAppeal` with `kind` `submission_rejection` and its `subject_id`, Then `201`, `state` `filed`, one `appeal.filed` event; the same call with the same key replays the stored body; a new key gives `409 ALREADY_EXISTS` reason `appeal_exists`; after `appealable_until` a new subject of the same kind gives `409 STATE_CONFLICT` reason `appeal_window_closed`.
+- `AC-api-C02` Given a banned member, When they call `createAppeal` with `kind` `member_ban` and `subject_id` null, Then `201`, and every other operation of S15a that is active only still answers `403 FORBIDDEN`.
+
+### 15.C.4.2 Experiment exposure (row 4)
+
+12.11.5 needs the client to say that a member reached the decision point of a variant. The server finds the member's own assignment; the client never names an assignment or an arm. [D]
+
+| op | Method and path | Auth | Idem | RL | OK | Events |
+| --- | --- | --- | --- | --- | --- | --- |
+| `recordExperimentExposure` | `POST /v1/experiment-exposures` | member | R | `RL-WRITE` | 204 | `+experiment.exposed` |
+
+```
+recordExperimentExposure  req { surface_key: text<40> }        204, no body
+```
+
+- **Behavior.** The server maps `surface_key` to the flag of the mechanic (the surface keys are listed per mechanic in 12.12) and looks for the caller's assignment to the `running` experiment bound to that flag. If it exists the exposure is recorded once per (assignment, `surface_key`) and `experiment.exposed` is emitted; if it does not exist (flag off, no running experiment, member ineligible) nothing is recorded and the answer is the same `204`, so the endpoint cannot be used to learn whether an experiment runs or which arm the member holds. An unknown `surface_key` is `400 VALIDATION_FAILED` reason `field_invalid`, `details.fields[0].path` = `surface_key`; the keys are client constants, not secrets. [D]
+- **Identical for every arm.** The call is made by the client for the control arm exactly as for the treatment arm (12.11.5). The event payload holds `experiment_id`, `surface_key` and the assignment id, never a member id beyond the envelope `actor`. [D]
+- **Natural idempotency.** UNIQUE (assignment, `surface_key`); a repeat with a new key is `204` with no second event. [D]
+- **Not active only.** A restricted member is eligible per 12.11; a `suspended` or `banned` member is ineligible, so nothing is recorded. [A]
+
+Given / When / Then
+
+- `AC-api-C03` Given a member assigned to the control arm of a running experiment, When the client posts the exposure twice with different keys, Then both answers are `204` and exactly one `experiment.exposed` exists; for a member with no assignment the answer is the same `204` and no row or event exists.
