@@ -158,6 +158,8 @@ No name is a canonical row in two of the three tables (checked: 16.B has 26 cano
 
 **Used but defined in no table** [V]: the four S10a names `identity.code_max_attempts`, `identity.registration_mode`, `invite.strikes_to_revoke_issuing`, `invite.tree_freeze_ban_threshold` (named as out of scope in 16.B.2 note 3) and the S14 and S15b names above; `ISS-16018` also lists `ui.*` names that 11d adds. `AC-param-01` makes each a failure of CI where code reads it. The value 5 of `identity.code_max_attempts` is implied by the 16.B.8 arithmetic (5 / 2^40) but is not confirmed here. The owner of S10.* supplies the rows; CR-13 lists them. `abuse.admin_lookup_rate` has no type, unit or default: until supplied it is treated like an alias, not seeded and refused on write, otherwise `AC-param-02` (every row satisfies its range) fails at seed time (CR-13). [A][V]
 
+**Not a parameter, name found after 16.C was written** [V]: `admission.redeemable_capacity_cells_per_day` is used in 06b, which this cell did not read. By its shape and by the pattern of `admission.commons_capacity_cells_per_day` (16.C.8, a `MetricSnapshot` key of the forecast) it is a published snapshot key, not a configured value; it is not seeded, and the parameter store refuses it as an unknown name (`AC-param-01`). It is the quantity that `ISS-16108` and `F-02` are about: whether the mint cap is bounded by the Commons share or the redeemable share. The owner of S6.* confirms the meaning and that no parameter is meant (CR-25). [A][V]
+
 ## 16.D.6 Defaults that conflict with an earlier part
 
 Where two tables disagreed, the earlier source was read: the FD, then S0. [D]
@@ -284,3 +286,4 @@ Exact edits to other files, none made by this cell. `S` = `spec/00-conventions.m
 | CR-22 | C 16.C.2 `ui.draft.ttl_s` | append: `the draft lives from its last write on the device; 3,600 s satisfies S16C-C4 on either reading` | `F-15` |
 | CR-23 | P 16.16 `security.two_person_actions` | validation appends `; always contains parameter.loosen (S16D-C20)` | `S16D-C20` |
 | CR-24 | P 16.3 | `S16D-C3` is recorded as a warning until S6 confirms whether escrowed credit keeps its lot expiry; if it does, `reservation.max_horizon_days` and the arm are an owner decision before the `PreRegistration` lock | `F-03` |
+| CR-25 | C 16.C.8 (Not parameters) | add `admission.redeemable_capacity_cells_per_day` as a third entry, a `MetricSnapshot` key of 06b, with the cross-reference to `F-02` [V S6] | 16.D.5 |
