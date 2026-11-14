@@ -116,3 +116,72 @@ Each row: the cited path (and method), the S15 operation it means, and the diffe
 | `GET /v1/admin/capacity-dashboard` | `getCapacitySnapshot` (`GET /v1/admin/capacity`), `listCapacityDays` (`.../capacity/days`), `listSupplyGauges` (`.../capacity/supply-gauges`) | Tiles that S15 does not carry (queue depth, lease health, verification estimates, open alarms and engaged switches in one call) come from the NEW `getOperationsSnapshot` (15.D.4.6) and from `listAlarms`, `listKillSwitches`, `getLaunchStatus`. 11c's "fewer than k" rule is the same as S15's `suppressed: true` with `donors: null`. |
 | `POST /v1/admin/member-views` with `{member_id, context:{kind, id}, reason_code, reason_text}` | `getMemberAdmin`: `GET /v1/admin/members/{mem_id}` | S15 makes it a `GET` (logged as an `AdminAction` of kind `read`, 15.21.3 rule 3, so "a POST because it writes a log row" is not needed). The `context` link and the reason are not part of S15; see the open point on member reads. 11c's "no `GET` list or search of members" (`AC-lookup-01`) contradicts S15's `listMembersAdmin` (`GET /v1/admin/members`, filters by status, tier, open report; no search by name, e-mail or handle). S15 is canonical: the list exists and 11c's acceptance criterion is rewritten to "no search by name, e-mail, handle or free text". |
 
+## 15.D.4 NEW operations [D]
+
+Columns as 15.21.1: `op`, `Method path`, `Auth`, `Request`, `Response`, `Errors` (beyond the universal ones), `Idem`, `Page`, `RL`. Events are named per row in the paragraph under each table; every event is a convention addition when its name is not in 15.34.
+
+### 15.D.4.1 Action preview and action-log verification
+
+Part 11c drives every confirm dialog by one dry run so a screen never computes consequences itself. S15 has only per-domain previews (`previewPolicyChange`, `previewParameterChange`, `evaluatePolicyDryRun`) and `effects` counts that are known only at commit. The generic preview is kept because the alternative, each client reimplementing guards and counts, is exactly how a screen and a server end up disagreeing [D].
+
+| op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `previewAdminAction` | `POST /v1/admin/action-previews` | `admin`; the caller must hold the permission of the previewed op; no `SU`, because nothing is written | `{op, path_params?: {name: id}, body?: json}` where `op` is an operation id of S15 that is a write (a read or an unknown op is refused) | 200 `{op, requires_step_up: bool, two_person: bool, action_name: string/null, required_approvals: int, eligible_approvers: int, fail_closed: bool, guards: [{guard, passed, detail?}], effects: json/null, diff: json/null, would_emit: [event name]}` | `VALIDATION_FAILED` (`op_not_previewable`, or the body fails the op's own schema), `FORBIDDEN` (no permission for that op), `NOT_FOUND` (a named subject does not exist) | opt | - | `A-W` |
+
+`two_person`, `action_name` and `required_approvals` come from `security.two_person_actions` and the op's own rule (15.22.4); `eligible_approvers` is the number of active admins, other than the caller, who hold the approve-side permission; `fail_closed = two_person and eligible_approvers < required_approvals - 1` (the initiator is the first approver). `guards` are the guards of the op evaluated against current state (`approvalGuard`, `switchBlockers`, `releaseGuard`, `classify`); `effects` is the count block the op itself would return (`jobs_paused`, `cells_paused`, `leases_revoked`, `impact`); `diff` is the rendered diff of `getApproval`. A preview creates no `AdminApproval`, burns no step-up challenge, emits no event and writes no `AdminAction`, except that a preview whose op would expose member-scoped data is a logged `read` (15.21.3 rule 3). A preview is advisory: execution re-runs every guard (15.22.4) [D].
+
+| id | Given | When | Then |
+| --- | --- | --- | --- |
+| `AC-recon-01` | Exactly one active admin holds `perm.killswitch.release` and that admin is the caller | `previewAdminAction` with `op = releaseKillSwitch` | 200, `two_person` true, `required_approvals` 2, `eligible_approvers` 0, `fail_closed` true; no approval row exists afterwards |
+
+| op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `startAdminActionVerification` | `POST /v1/admin/admin-action-verifications` | `admin` `perm.admin_action.read` | `{from_date, to_date}` (UTC dates, at most 31 days apart) | 200 `{ok: bool, rows_checked: int, first_bad_act_id?: act_id}`; a failure raises a critical alarm of category `security`, kind `admin_action.chain_broken`, and emits `alarm.raised` | `VALIDATION_FAILED` (range), `STATE_CONFLICT` (`already_running`: one verification at a time) | req | - | `A-W` |
+
+11c requires the verification to "name the first row whose `entry_hash` no longer matches" (`AC-trail-02`). S15 states that the action log is append-only and inside the daily checkpoint scope of S6.* (15.22.6) but its `AdminAction` schema carries no hash fields, so the claim is not checkable. This file therefore adds two fields to `AdminAction`, `prev_hash` and `entry_hash` (`entry_hash = SHA-256(RFC 8785 canonical JSON of the row without `entry_hash`, || prev_hash)`, S0 0.6.4), written in the insert transaction of 15.21.3 rule 1 [A]. The edit to 15b is listed under the open points. Without the fields this operation is `REMOVE`; with them it is the only way an operator can detect a tampered log, so it stays [D].
+
+| id | Given | When | Then |
+| --- | --- | --- | --- |
+| `AC-recon-02` | An `AdminAction` row edited directly in the database | `startAdminActionVerification` runs over its day | `ok` false and `first_bad_act_id` names that row (or the next row whose `prev_hash` no longer matches); the critical alarm exists |
+
+### 15.D.4.2 Quarantined submissions
+
+S0 has the submission state `quarantined` and the event `submission.released_from_quarantine`, but S15 (15.29.1) gives an admin no way to release or reject one; `resolveAudit` covers audits only. Part 11c folds both into one `audit-queue-items` list; S15 keeps audits and adds quarantine as its own resource, because they have different ids (`aud_`, `sub_`) and different outcomes [D]. A `QuarantinedSubmission` is `{sub_id, cell_id, template_version_id, reason_code, quarantined_at, age_s, state (quarantined, released, rejected)}`: no member id, no content.
+
+| op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `listQuarantinedSubmissions` | `GET /v1/admin/quarantined-submissions` | `admin` `perm.audit.read` | `?state`, `?template_version_id`, `?reason_code`, `?oldest_first=true` | list of `QuarantinedSubmission` | - | n/a | cursor | `A-R` |
+| `getQuarantinedSubmissionContent` | `GET /v1/admin/quarantined-submissions/{sub_id}/content` | `admin` `perm.audit.resolve` | - | `{input, output}` strings; logged `read` (15.21.3); strings are data, escaped by the client | `NOT_FOUND` | n/a | - | `A-W` |
+| `releaseQuarantinedSubmission` | `POST /v1/admin/quarantined-submissions/{sub_id}/releases` | `admin` `SU` `perm.audit.resolve` | `{rationale}` | 200 `QuarantinedSubmission` (`released`); event `submission.released_from_quarantine` | `STATE_CONFLICT` (not `quarantined`) | req | - | `A-W` |
+| `rejectQuarantinedSubmission` | `POST /v1/admin/quarantined-submissions/{sub_id}/rejections` | `admin` `SU` `perm.audit.resolve` | `{reason_code, rationale}` | 200 `QuarantinedSubmission` (`rejected`); event `submission.rejected`, then the cell events of S0 0.9.3 | `STATE_CONFLICT` | req | - | `A-W` |
+
+A release does not accept the cell: the submission re-enters `verify_svc` at the check that quarantined it, with the human release recorded, so a release cannot create credit by itself [A]. One admin with step-up decides, the same rule as `resolveAudit`; part 11c's "audit accept and quarantine release are two-person" (`CT3`, `ISS-117`) is NOT adopted here, because S15 is canonical and the decision belongs to `security.two_person_actions`, which S10.* and `C-041` own (open point) [A].
+
+| id | Given | When | Then |
+| --- | --- | --- | --- |
+| `AC-recon-03` | A submission in `quarantined` | `releaseQuarantinedSubmission`, then the same call again | First: 200 and `submission.released_from_quarantine`; second: `409 STATE_CONFLICT`; the cell is not accepted by the release itself |
+
+### 15.D.4.3 Interventions: stop a job, void a cell, overturn cells, release a lease
+
+| op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `stopJob` | `POST /v1/admin/jobs/{job_id}/stop-requests` | `admin` `SU` `perm.job.stop` | `{reason_code (safety_incident, integrity_violation, policy_defect, abuse, other), reason, linked_ids?: []}` | 200 `{job_id, state, effects: {cells_in_flight, cells_cancelled}}`; the job leaves its current state for the stopping path of S0 0.9.2; event `job.stop_requested` with `closure_reason = operator_killed`; settlement events as for any stopped job (`job.settled_partial`, S6.*) | `NOT_FOUND`, `STATE_CONFLICT` (`job_terminal`, `already_stopping`) | req | - | `A-W` |
+| `voidCell` | `POST /v1/admin/cells/{cel_id}/voidings` | `admin` `SU` `perm.cell.void` | `{reason_code (integrity_finding), reason, linked_ids: [at least one report, alarm or audit id]}` | 200 `{cel_id, state}`; event `cell.voided` with `cause = integrity_finding` | `VALIDATION_FAILED` (no linked evidence), `NOT_FOUND`, `STATE_CONFLICT` (`use_overturn`: the cell is `accepted`, which is `overturnCells`; or already terminal) | req | - | `A-W` |
+| `overturnCells` | `POST /v1/admin/cell-overturns` | `admin` `SU` `2P` `cell.overturn` `perm.cell.overturn` | `{cell_ids: [cel_id] (1 to `api.page_size_max`), reason_code (fraud_finding), reason, linked_ids: [at least one report, alarm or audit id]}` | 202 approval (`required_approvals` 2); on approval 200 `{overturned: [{cell_id, rework_cell_id}]}`; events `cell.overturned` with `via = fraud_finding` per cell, `ledger.entry_committed` for each posting S6.* makes | `VALIDATION_FAILED` (no linked evidence; duplicate ids), `STATE_CONFLICT` (`guard_failed` at execution: any cell is no longer `accepted`; nothing is overturned, the approval is `failed`) | req | - | `A-W` |
+| `listLeases` | `GET /v1/admin/leases` | `admin` `perm.lease.read` | `?template_id`, `?job_id`, `?service_id` (the volunteer-attested service) | list of `{lse_id, cell_id, template_version_id, service_id, state, age_s, time_left_s}`; no member id | - | n/a | cursor | `A-R` |
+| `releaseLease` | `POST /v1/admin/leases/{lse_id}/releases` | `admin` `SU` `perm.cell.release` | `{reason_code (operator_release), reason}` | 200 `{lse_id, cell_state}`; event `lease.revoked`; the cell returns to `queued` through `leased --cell.declined--> queued` recorded with actor `admin` and reason `operator_release`, so the member bears no penalty (FD§5.5, `ISS-118`) | `NOT_FOUND`, `STATE_CONFLICT` (lease not `active`; a `submitted` lease is never released) | req | - | `A-W` |
+
+Rules [D]:
+
+1. `stopJob` and `voidCell` stop work and create no credit: one admin (R10). Stopping all jobs of a template or service is a kill switch (15.28), not a loop of `stopJob`. The response names no requester and no member.
+2. `overturnCells` takes credit back from members and is bulk, so it is two-person like `banMember`: capture of one reviewer account must not be enough to strip many members (FD§5.7 failure mode 10). It is for fraud findings only; an appeal outcome reaches `cell.overturned` through `decideAppeal` (15.29.2, `via = appeal`), never through this endpoint. The ledger side is the reversal mechanics of 15.30.3 (new entries, nothing edited). Overturned cells are appealable.
+3. `releaseLease` has no `requeue_at_front`: part 11c offered it, but moving one cell to the head of its template queue is an operator choice of whose work is served first, with no fairness rule in S7.* or S8.* to bound it. A released cell rejoins the queue under the normal order. A revoked lease gets no `lease.submit_grace_s`; a late paste-back is `reject.lease_expired` [D].
+4. A lease listing never shows a member id; the operator sees leases by `cel_` id, template, attested service, age and time left (11c `SCR-ops-16`). Attested service is the volunteer's declaration, not a proof [P].
+
+| id | Given | When | Then |
+| --- | --- | --- | --- |
+| `AC-recon-04` | A running job | `stopJob` with a reason | 200; `job.stop_requested` has `closure_reason = operator_killed`; one `AdminAction`; the response contains no requester or member id |
+| `AC-recon-05` | An `accepted` cell | `voidCell` | `409 STATE_CONFLICT` with `details.reason = use_overturn`; nothing changes |
+| `AC-recon-06` | Two accepted cells and admin A | A calls `overturnCells`, then B approves with a step-up bound to the stored payload; before B approves, one cell is overturned by another path | After A: `202`, no posting. At B's approval: `409 guard_failed`, approval `failed`, no `cell.overturned` for either cell |
+| `AC-recon-07` | An `active` lease | `releaseLease`, then the member submits late | `lease.revoked` is emitted, the cell is `queued`, the member's reliability is untouched, and the late submission is `reject.lease_expired` |
+
