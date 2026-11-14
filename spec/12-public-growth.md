@@ -64,7 +64,7 @@ FD§6.3 lists the counter and basic teams under Phase 1 while FD§6.2 says V2 an
 - **Split by job family:** `commons_output_cells_total` (Commons jobs) and `member_job_output_cells_total`.
 - **Active members:** `active_members_today` = distinct members with at least one accepted cell of any kind whose `accepted_at` falls in the current UTC day; `active_members_window` = the same over the last `admission.active_donor_window_days` UTC days including today.
 - **Corrections:** `overturned_cells_total` = cells that were `accepted` and became `overturned`. The headline is a current count and can fall when a cell is overturned; it is not monotone, and the correction figure is shown beside it. Reason: a counter that never falls would overstate (FD Principle 11).
-- **Freshness:** “live” means recomputed at most every `public.counter_refresh_s`, not real time. Member-count figures use the same lag as the ledger (`public.ledger_lag_s`) so one member's action is not visible as a +1 within seconds. Residual: an observer who can trigger a contribution and watch the counter can see a +1; that reveals activity, not identity [H: acceptable; reviewed in the G1 threat model].
+- **Freshness:** “live” means recomputed at most every `public.counter_refresh_s`, not real time. Member-count figures use the same lag as the ledger (`public.ledger_lag_s`) so one member's action is not visible as a +1 within seconds. Residual: an observer who can trigger a contribution and watch the counter can see a +1; that reveals activity, not identity [H: acceptable; reviewed in the G1 threat model]. The same observer can also tell a hidden `gold` or audit cell from a `primary` one when the headline stays flat after her own cell is accepted while the verification figure moves, which rule 6 of 12.1.1 forbids for scores; a mitigation or a change to `ISS-122` is an owner decision [V: G1 threat model; logged in `docs/audit/A11.md`].
 
 ### 12.2.2 Query (source of truth) [D]
 
@@ -143,7 +143,7 @@ LedgerCheckpoint (public projection)
 
 ### 12.3.3 Grouped flows: emit-when-k algorithm [D]
 
-A flow row covers an interval and is emitted only when at least `analytics.min_cohort_k` distinct non-system accounts took part, so no row describes a small group and published rows partition time (no complementary-suppression leak).
+A flow row covers an interval and is emitted only when at least `analytics.min_cohort_k` distinct non-system accounts took part, so no row describes a small group and published rows partition time (no complementary-suppression leak). This protects the flow rows only: differencing the daily cumulative totals of consecutive checkpoints (`cumulative_mint_ucr`, `reserve_ucr`) can still reveal one day's flow of a small group [V: owner decision, logged in `docs/audit/A11.md`].
 
 ```
 for each ledger_entry_type T:
@@ -204,7 +204,7 @@ The change log is the public projection of `ChangeLogEntry` (`chg_`, `permanent`
 | Public field | Rule |
 | --- | --- |
 | `id`, `published_at`, `effective_from` | `effective_from` is the instant the change binds |
-| `subject_kind`, `subject_ref` | `parameter`: the name; `policy_version`: `plv_` id and the changed `R1`..`R10` ids; `template_version`: `tpv_` id and transition; `service`: `svc_` id and transition (see label rule); `feature_flag`: `flag_key` and on or off; `pre_registration`: `exp_` id and the locked hash; `kill_switch`: scope; `milestone`: `milestone_key`; `correction`: the corrected checkpoint or entry |
+| `subject_kind`, `subject_ref` | `parameter`: the name; `policy_version`: `plv_` id and the changed `R1`..`R10` ids; `template_version`: `tpv_` id and transition; `service`: `svc_` id and transition (see label rule); `feature_flag`: `flag_key` and on or off; `pre_registration`: `prr_` id and the locked hash (an experiment start also names its `exp_` id); `kill_switch`: scope; `milestone`: `milestone_key`; `correction`: the corrected checkpoint or entry |
 | `change_class` | `tighten`, `loosen` or `neutral` (S0.8.6) |
 | `old_value`, `new_value`, `old_version`, `new_version` | Only for public parameters |
 | `reason` and `reason_lang` | Required and non-empty for `loosen`; recommended otherwise |
@@ -341,7 +341,7 @@ Events: `team.created`, `team.joined`, `team.left`, `team.locked`, `team.unlocke
 - **Opt-in only.** Creating or joining is an explicit act. No auto-assignment, no suggestion from inferred attributes, no import of contacts. Leaving is one action and removes the member from future scores.
 - **Scoring on verified cells.** `score(team, period)` = accepted cells of every `cell_kind` whose acceptance time lies in the period and inside the member's membership interval `[joined_at, left_at)`. A cell counts for the team the member was in at acceptance; history is not imported on joining. Periods: the current UTC calendar week (Monday 00:00 UTC) and all time. A later overturn lowers the score.
 - **Teams see only totals.** A team page shows member count, weekly and all-time score. It shows no member list, no per-member contribution, no alias in Phase 1 (basic teams). Reason: pseudonymity inside a group is not guaranteed by the platform, so the platform shows nothing to correlate.
-- **Public listing:** only teams with `join_mode` = `listed`, `state` = `active` and at least `team.min_public_members` active members; a team falls out of the list the moment it drops below that size.
+- **Public listing:** only teams with `join_mode` = `listed`, `state` = `active` and at least `team.min_public_members` active members; a team falls out of the list the moment it drops below that size. [V: with the initial defaults `team.min_public_members` (5) is below `analytics.min_cohort_k` (10), so a listed team publishes a total over fewer than k members, which rule 1 of 12.1.1 otherwise withholds; the team's opt-in is the only basis, and the owner decision is logged in `docs/audit/A11.md`.]
 - **Location by default: never.** With `public.location_display` = `never` no team carries any place or affiliation label. With `opt_in`: the creator may type a `group_label` (city, school); the platform never infers or verifies it; `copy.growth.team_group_label_warning` is shown before anyone joins; the label is public only for listed teams of at least `team.min_public_members`; no per-member place is ever shown. Iran-based members are not shown by place by default (FD§6.1 rank 5) because the default is `never` and nothing is inferred.
 - **Phase 2 “full” teams** (FD§6.1): optional in-team aliases, default off per member, only after the G1 threat model covers them [V].
 - **Randomization:** only the in-app offer is randomized (S12.12 `V4`); joining by a code stays possible for everyone while the flag is on.
@@ -376,7 +376,7 @@ joined    --referral.qualified-->   qualified     newcomer has >= growth.referra
 joined    --referral.expired-->     expired (T)   growth.referral.qualify_window_days elapsed after joining
 qualified --referral.paid-->        paid          payout guards pass; one atomic grant transaction
 qualified --referral.blocked-->     blocked (T)   a hard guard fails (see block_reason)
-qualified --referral.expired-->     expired (T)   not payable within growth.referral.qualify_window_days of qualified_at (budget paused)
+qualified --referral.expired-->     expired (T)   not payable within growth.referral.qualify_window_days of qualified_at (budget paused); never applied when bonus_enabled is false
 paid      --referral.clawed_back--> clawed_back (T)  clawback triggers below, within growth.referral.clawback_window_days
 issued|joined --referral.blocked--> blocked (T)  device match, member status, flag disabled with kill
 ```
@@ -426,7 +426,7 @@ Copy: `copy.growth.referral_terms` (S12.14): bonuses are declared, may be delaye
 
 ## 12.11 Experiment framework for V1-V6
 
-Owned here: how growth flags are evaluated and how members are randomized. Owned by `S13.*`: the event schema, metric definitions, analysis, and the `PreRegistration` store and lock. The expiry arm (`ff.experiment.expiry_arm`) uses the same assignment mechanism and is specified in `S13.*`.
+Owned here: how growth flags are evaluated and how members are randomized. Owned by `S13.*`: the event schema, metric definitions, analysis, and the `PreRegistration` store and lock. The expiry arm (`ff.experiment.expiry_arm`) uses the same assignment mechanism and is specified in `S13.*`. **Precedence (A11 #1):** where this section and `S13.8` differ on lifecycle states (`locked` here is `registered` there), event names (`experiment.assigned` is `experiment.member_assigned`; `experiment.exposed` is `ui.variant_exposed`, also written server-side with `source` `server`; `experiment.locked` is `experiment.registered`), the block algorithm (the permuted blocks of `S13.8.4` apply to `hash_blocked`) or the pre-registration fields, `S13.8` governs. Two things of this section stay in force: lazy assignment on the first `GET /v1/flags` for members who already exist when an experiment starts, and the stratifiers of 12.11.4 (13.8.1 lists them too).
 
 ### 12.11.1 Experiment record [D][A]
 
@@ -552,7 +552,7 @@ Each mechanic below is a flag, an instrumented surface and, in Phase 2, a random
 | Exposure surface key | `onboarding.first_card` |
 | Events | `member.created`, `experiment.assigned`, `experiment.exposed`, `lease.issued`, `lease.submission_received`, `submission.accepted` |
 | Primary metric | `hamyar_growth_v1_created_to_first_verified_cell_ratio`: new members with a first accepted cell divided by new members |
-| Secondary | `hamyar_growth_v1_time_to_first_verified_cell_seconds`; `hamyar_growth_v1_contribution_under_threshold_ratio` (share of contributions up to `ui.fast_contribution_threshold_s`). Contribution time is server time from `lease.issued` to `lease.submission_received`; the platform never reads the volunteer's chat page |
+| Secondary | `hamyar_growth_v1_time_to_first_verified_cell_seconds`; `hamyar_growth_v1_contribution_under_threshold_ratio` (share of contributions strictly under `ui.fast_contribution_threshold_s`; exactly the threshold is not under it). Contribution time is defined by `MET-08` (S13.6.8): from `ui.card_opened` when received, else from `lease.issued`, to `lease.submission_received`, reported per `time_source`; the platform never reads the volunteer's chat page |
 | Guardrails | Rate of `reject.timing_anomaly` and `reject.schema_invalid` among a member's first cells; decline rate; copy-paste failures reported (a faster path must not buy errors) |
 | Landing-to-created | Reported as a separate non-unique figure from `hamyar_growth_landing_requests_total`; no cookies or visitor ids exist, so it is not a conversion rate (`ISS-124`) |
 | Success / kill criteria | `success_rule`, `kill_rule`: unset until locked |

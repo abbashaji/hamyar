@@ -154,6 +154,9 @@ A third class that contains a member identifier does not exist; member-linked co
 | `experiment.member_assigned` | One assignment row written | refs: `experiment_id`; dims: `experiment_code`, `arm_key`; measures: `block_index` | `entity_ref` | ev; `experiment_assignments` permanent |
 | `calibration.recorded` | Calibration row written | dims: `result`, `copy_paste_error_kind`; refs: `service_id` | `entity_ref` | ev; `calibration_records` permanent |
 | `metric.snapshot_created` | Rollup wrote a snapshot | dims: none; measures: `metric_no` | `none` | ev; `metric_snapshots` permanent |
+| `team.created`, `team.joined`, `team.left`, `team.locked`, `team.unlocked`, `team.disbanded`, `badge.awarded`, `badge.revoked`, `milestone.reached`, `milestone.published`, `milestone.withdrawn`, `sharecard.rendered`, `sharecard.shared`, `changelog.entry_published` | Public-surface and growth state changes (S12.13.1) | dims: none; the S12 payload keys `team_id`, `badge_key`, `milestone_key`, `card_version` are not allowed dimensions and are not copied (counts come from operational tables) | `none` | ev; `teams`, `badge_awards`, `milestones` |
+| `referral.created`, `referral.joined`, `referral.qualified`, `referral.paid`, `referral.blocked`, `referral.expired`, `referral.clawed_back` | Referral machine (S12.10) | dims: `experiment_code`, `arm_key`; `block_reason` stays in `referrals` | `none` | ev; `referrals` |
+| `ui.variant_exposed` (server-side form) | A server effect applies a variant, for example a referral created with a bonus (S12.12.5) | dims: `experiment_code`, `arm_key` | `none` | ev |
 
 **Client events (UI interaction; sent in batches; see 13.3.5).**
 
@@ -249,7 +252,7 @@ Table `metric_snapshots` (prefix `mts_`, `permanent`, append-only). [D]
 | Column | Type | Rule |
 | --- | --- | --- |
 | `id`, `created_at` | S0.7 | |
-| `metric_no` | text | `MET-nn`, `CAL-nn` or `EXP-nn.<outcome>` |
+| `metric_no` | text | `MET-nn`, `CAL-nn`, `EXP-nn.<outcome>` or `PRR.<prr_id>.<TH-nn or DR-nn>` (13.7.7) |
 | `metric_name` | text | `hamyar_<area>_<name>_<unit>` (S0.5) |
 | `definition_version` | int | Per metric, starts at 1; bumped when the definition in this part changes; a pre-registration pins it (13.7) |
 | `dims` | json | Allowed keys of 13.3.3 plus `population`, `window` |
@@ -672,7 +675,7 @@ The JSON Schema is stored with the code as `schemas/pre_registration.v1.json` [A
 | `thresholds[]` | `{ id: "TH-nn", metric_id, stat, comparator: gte \| gt \| lte \| lt, value, unit, min_sample, parameter_ref? , fixed_m? }`; `value` is in the metric's scale (ppm, seconds, count); `fixed_m` is the `m` of `first_m_large(m)` |
 | `decision_rules[]` | `{ id: "DR-nn", expr, on_pass, on_fail, on_inconclusive }` |
 | `analysis_plan` | `{ interval: "wilson95", missing_data, exclusions[], estimator_notes }`; `exclusions[]` entries are `{ code, description }` fixed before day 1 |
-| `experiments[]` | `{ experiment_code: "EXP-nn", primary_outcome: "MET-..", analysis: "itt" }` |
+| `experiments[]` | `{ experiment_code: "EXP-nn", primary_outcome: "MET-..", analysis: "itt", min_exposed_per_arm?, analysis_window_s?, guardrail_metrics?, success_rule?, kill_rule?, decision_if_success?, decision_if_neither? }` (for growth mechanics the optional fields are those of S12.11.7; `success_rule` and `kill_rule` are `DR-nn` ids) |
 | `qualitative_plan` | `{ min_interviews: 8, max_interviews: 10, required_segments: ["active_donor","stopped_donor"] }` |
 | `amendment_reason` | Only for `post_launch_amendment` |
 
@@ -736,7 +739,7 @@ Table `experiments` (`Experiment`, `exp_`, `permanent`). [D]
 | `flag_key` | text | The kill flag, for `EXP-01` `ff.experiment.expiry_arm` (S0.10.7). The flag off means no new assignment and no new application (13.8.4) |
 | `unit` | enum `member`, `invite_tree` | `invite_tree` assigns every member of one invite tree the arm of the tree's root, for mechanisms that spill between members; Phase 1 uses `member` [A] |
 | `eligibility` | json | `{ created_at_gte, population: "external"\|"all", include_existing: false }` |
-| `strata` | json array | Allowed entries: `pilot_week`, `locale`. Default `["pilot_week"]` |
+| `strata` | json array | Allowed entries: `pilot_week`, `locale`, `trust_tier`, `join_source` (the last two for growth mechanics, S12.11.4). Default `["pilot_week"]` |
 | `arms` | json array | `{ arm_key, weight_ppm, parameter_overrides, flag_overrides }` (13.8.3) |
 | `block_size` | int | Derived and stored at `registered` (13.8.3) |
 | `salt` | bytea (32) | Generated at `draft` by a CSPRNG; never shown until `stopped`; stored encrypted like other S10.* secrets |
