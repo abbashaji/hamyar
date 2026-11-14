@@ -623,7 +623,7 @@ def settle(job_id, mode):                    # mode in ('complete', 'cancel')
         if exists(Cell where job_id == job_id and state not in TERMINAL_CELL_STATES):
             return 'not_yet'                                             # an acceptance may still be in flight; retry later
         if job.origin == 'commons':
-            transition(job, 'job.settled' if all_primary_accepted(job) else 'job.settled_partial'); return 'ok'
+            transition(job, ('job.settled' if all_primary_accepted(job) else 'job.settled_partial') if mode == 'complete' else 'job.cancel_settled'); return 'ok'
         esc = lock_exclusive(Escrow, job.escrow_id)                      # order 7
         require(esc.state == 'settling')
         acc_n   = count(Cell where job_id == job_id and cell_kind == 'primary' and state == 'accepted')
