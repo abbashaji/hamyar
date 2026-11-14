@@ -133,3 +133,65 @@ Each finding: what fails, the arithmetic, the corrected default or validation, a
 | `F-20` | major | `price.v_cap` = 0.50 caps the price at 1.55 per cell, but donors are paid 1 credit per executed cell of any kind (FD§4.3). If true overhead exceeds 0.50 the escrow cannot pay all verification cells and the ledger cannot create the difference (FD§4.2 invariant) | no default change [V]: S6 states that verification cells beyond the priced v are not run (or the job stops with partial settlement), never paid from the Reserve |
 | `F-21` | minor | `inflation.mint_cap_cut_ratio` = 0.25 (range `0 < x <= 1`, `T↑`) does not say whether the new cap is cap x 0.25 or cap x 0.75; `T↑` only fits the second | the row states: new cap = floor(cap x (1 - ratio)) [A] (CR-09) |
 | `F-22` | minor | S16 16.18 gives "FD§3.2 estimate [H]" as the basis of 4,000, 6,000 and 32,768. FD§3.2 holds only a time (about 2 minutes); FD§4.1 says the envelope numbers are measured in Phase 0, not guessed | the basis of the three size defaults is "[A] initial safe default without derivation, replaced by `CAL`" (CR-10) |
+
+## 16.D.5 Duplicates and aliases, one canonical name each
+
+No name is a canonical row in two of the three tables (checked: 16.B has 26 canonical rows, 16.C 30, S16 the rest of S0 0.10.6 plus its additions). Nine alias rows exist (1 in S16, 5 in 16.B, 3 in 16.C); an alias is never seeded and a write to it is refused as unknown (`AC-param-14`, `AC-paramc-01`). [D]
+
+| Quantity | Names in use | Canonical | Status |
+| --- | --- | --- | --- |
+| forecast refresh | `admission.forecast_refresh_s`, `admission.reforecast_interval_s` | `admission.reforecast_interval_s` | alias confirmed (`ISS-162`) |
+| device-link code lifetime | `identity.link_code_ttl_s`, `identity.device_link_code_ttl_s` | `identity.device_link_code_ttl_s` | alias confirmed (`ISS-16002`) |
+| referral bonus | `growth.referral.bonus_credits`, the pair `growth.referral.bonus_referrer_credits` and `growth.referral.bonus_newcomer_credits` | the pair | alias confirmed; S15a must carry two amounts (`ISS-16003`) |
+| backup retention | `retention.backup_days`, `ops.backup_retention_days` | `ops.backup_retention_days` | alias confirmed (`ISS-16005`) |
+| purge sweep | `retention.sweep_interval_s`, `ops.purge_interval_s` | `ops.purge_interval_s` | alias kept [V]: S4 confirms one job. Public flag: `ops.purge_interval_s` is the latency of the deletion promise, so it joins `ops.rpo_s`, `ops.rto_s`, `ops.backup_retention_days` as public (CR-12) |
+| admin step-up | `session.admin_stepup_s`, `session.step_up_max_age_s`, `session.admin_stepup_ttl_s` | the second and third are two different quantities (how long a completed step-up counts; how long an unused challenge may be answered); the first is an alias of the second | [V] unresolved: its source (S11 console file) is outside this cell's reading (`ISS-16004`, `ISS-16015`) |
+| first-load budget | `ui.first_load_budget_bytes`, `ui.budget.first_load_bytes` | `ui.budget.first_load_bytes` (204,096, not the 204,800 printed in 10b and 11a) | alias confirmed (`ISS-16101`) |
+| lease warning | `ui.lease_warning_ratio`, `ui.lease.warn_remaining_s` | `ui.lease.warn_remaining_s` | alias confirmed; range keeps 0 only as "warning off", which `F-23` below flags |
+| waitlist quote lifetime | `admission.waitlist_claim_ttl_s`, `admission.waitlist_quote_ttl_s` | `admission.waitlist_quote_ttl_s`, calibration `OPS` | alias confirmed (`ISS-16103`) |
+| two-person approval lifetime | a name in S10a, a name in S15b (`ISS-154`) and `launch.approval_window_s`, all 86,400 s | the S10a name is the generic canonical (first definer); the S15b name is its alias; `launch.approval_window_s` stays separate because the launch flow stores its own proposal (14.8.1) and must not exceed the generic value by default (both 86,400) | decided here (`ISS-16017`); the generic row is added by CR-13 [V S10, S14, S15b] |
+| secret rotation age | a name in S14 (14:600) and `security.secret_rotation_days` | `security.secret_rotation_days` | decided here: the S14 name is an alias (both 90, `ISS-16018`) |
+| calibration sample | 20 (S14 14:603) and 30 (`calibration.min_samples_per_service`) | 30, as S0 0.10.6 and S16 16.16 | decided: S14 text corrected (CR-20) |
+| status wait and retry cap | `ui.status_poll_max_s`, `ui.retry.max_delay_s` (both 60) | both stay | confirmed separate (asked in `ISS-16105`): a poll repeats after success, a retry follows a failure; the equal default is a coincidence. `S16D-C22` orders the poll base below the poll cap |
+| draft lifetime | `ui.draft.ttl_s` (device, seconds) and `job.draft_ttl_days` (server, days) | both stay | confirmed separate: different objects and units |
+| appeal text | `ui.requester.appeal_note_max_chars`, `appeal.reason_max_chars` | the server limit is canonical; the UI cap is bounded by it | `S16D-C22`, `F-11` |
+
+**Used but defined in no table** [V]: the four S10a names `identity.code_max_attempts`, `identity.registration_mode`, `invite.strikes_to_revoke_issuing`, `invite.tree_freeze_ban_threshold` (named as out of scope in 16.B.2 note 3) and the S14 and S15b names above; `ISS-16018` also lists `ui.*` names that 11d adds. `AC-param-01` makes each a failure of CI where code reads it. The value 5 of `identity.code_max_attempts` is implied by the 16.B.8 arithmetic (5 / 2^40) but is not confirmed here. The owner of S10.* supplies the rows; CR-13 lists them. `abuse.admin_lookup_rate` has no type, unit or default: until supplied it is treated like an alias, not seeded and refused on write, otherwise `AC-param-02` (every row satisfies its range) fails at seed time (CR-13). [A][V]
+
+## 16.D.6 Defaults that conflict with an earlier part
+
+Where two tables disagreed, the earlier source was read: the FD, then S0. [D]
+
+| Item | Conflict | Resolution |
+| --- | --- | --- |
+| Mint cap derivation | S0: x (1 - 0.5); S16 and `ISS-166`: x phi; FD§4.8 and FD§4.2 give both bounds | `F-02`, CR-02: min(phi, 1 - phi); default 4,800 unchanged |
+| eta label | S16 16.15: Reserve inflow versus spend; FD§4.3: 1/(1+v+lambda) | FD wins, `F-01`, CR-01 |
+| Notice for `reservation.*` | S16 16.2.2 and 16.7: 14 days (`change.notice_days_price`); S16 16.13 and S0 Table A row: "for `price.*`, `admission.*`, `credit.*`" only | 16.2.2 and 16.7 stand; the rows add `reservation.*` (CR-07). `grant.*`, `reserve.*`, `mint.*`, `inflation.*` keep 7 days |
+| `tighten_direction` | S0 0.10.3: enum `up`, `down`, `none`; S16 16.17.1: `lower`, `higher`, `toward:<value>`, `none`, and codes `T↓ T↑ T→x N C` | S16 stands (it needs enums and lists); S0 gains the same four values (CR-11) |
+| `public` default | S0 0.10.3: true except `security.*`; S16 16.17.5 hides about 30 more rows; S10a says all its parameters are public (16.B.10) | S16 16.17.5 stands; S0 text refers to it; the 16.B and 16.C proposals are folded (CR-12) |
+| Owner of exception rows | S0 0.10.5: area `policy`, `screen`, `service`, `template` are `reviewer`; S16 16.12 makes 12 rows `operator`; `abuse` has no area row (`ISS-16014`) | S16 16.12 stands; S0 0.10.5 regenerated at assembly with the exceptions and the `abuse` area (CR-11) |
+| Envelope basis | S16 16.18: FD§3.2 estimate for 4,000, 6,000, 32,768 | FD§4.1: measured in Phase 0; `F-22`, CR-10 |
+| `ui.first_load_budget_bytes` range | 10,240..5,242,880 (10b) against 20,000..5,000,000 (11a) | 16.C picked 5,000,000 as the upper bound; confirmed |
+| `identity.challenge_ttl_s` | 60 (S10a) against 120 (S15a) | 60; S15a text corrected at assembly (`ISS-16001`) |
+| `lease.max_job_share_ratio` public flag | 16.C hides it; 16.17.5 does not list it | add to the hidden list (CR-12) |
+| Anti-farming rows with mixed flags | hidden: `grant.max_per_device`, `ratelimit.*new_members_per_day`, `growth.referral.max_per_referrer_per_30d`; public: `grant.max_per_invite_tree_per_day`, `grant.max_per_day`, `invite.tree_max_members`, `invite.tree_max_depth` | recommendation [A]: hide `grant.max_per_invite_tree_per_day`, `growth.referral.max_per_day`, `growth.referral.max_per_invite_tree_per_30d` (`ISS-16011`); leave `invite.max_active_per_member` and `invite.ttl_days` public because a member needs them; owner decision under `SEC` |
+| `F-23` | `ui.lease.warn_remaining_s` may be 0, which switches off the warning that carries the extension offer (`ISS-16102`) | range `1 .. lease.timeout_s` (CR-14b); default 300 unchanged. Reason: the warning protects a volunteer's paste-back |
+
+## 16.D.7 Cross-check against FD§4.9
+
+The FD§4.9 table was read line by line for this cell (it has 10 rows: cell envelope, E, K, v, lambda, g and s, phi, G, mint cap, lease timeout). Each row maps to one canonical name, or to one group where the FD row is itself a group. [D]
+
+| FD§4.9 row | FD initial value | Canonical name(s) | Check |
+| --- | --- | --- | --- |
+| Cell envelope: max input and output size | TBD from Phase 0 | the group `cell.envelope.*`; the FD sizes are `cell.envelope.max_input_chars` and `cell.envelope.max_output_chars`; `max_submission_bytes`, `expected_time_s`, `max_json_depth`, `max_model_label_chars` are additions, and `cell.max_attempts` is outside the group on purpose | one group prefix, no second; defaults 4,000 and 6,000 have no FD derivation (`F-22`) |
+| E | 60 days; 14-day arm | `credit.lifetime_days`; the arm value `credit.lifetime_days_accelerated` is not a second E | 60 and 14 match FD§4.5; arm relations `F-03`, `F-17` |
+| K | TBD from a typical large job | `credit.member_cap_credits` | 350 = round to 50 of 1.25 x 240 x 1.15 = 345 matches FD§3.3; tier scaling by `trust.cap_multiplier.*` is an addition (FD§6.1); `F-04` |
+| v | measured in Phase 1 | measured value published as a `MetricSnapshot`; prior `price.v_prior`; estimator rows `price.v_window_days`, `price.v_min_sample_cells`; safety cap `price.v_cap` | the FD has no cap on v; `price.v_cap` is an addition with a conservation question (`F-20`) |
+| lambda | TBD; 0.05 in the example | `price.levy_lambda` | 0.05; FD§3.3 settlement 12 = 0.05 x 240 recomputes |
+| g, s | TBD; adaptive with a floor | `verify.gold_rate_g` and `verify.audit_rate_s`, each with `_floor` and `_max` | FD§4.4 floor needs both floors positive (`F-09`) |
+| phi | TBD; 0.5 in the example | `admission.phi` (modifiers `admission.forecast_haircut`, `admission.horizon_discount_per_day`) | 0.5; FD§3.3: 40 x 8 x 2 x 0.5 = 320 >= 264 recomputes |
+| G | a few cells; TBD | `grant.starter_credits` (lifetime in `grant.starter_lifetime_days`) | 3 credits buy floor(3 / 1.15) = 2 cells alone; with the 1 credit of the verified first cell (FD§4.6), floor(4 / 1.15) = 3 cells, so "a few cells" holds only after that first credit |
+| Mint cap | TBD from measured throughput | `mint.monthly_cap_credits` (one canonical name; `mint.per_member_daily_cap_credits` is an addition, not an FD row) | 4,800 = 40 x 8 x 30 x 0.5 recomputes; `F-02` |
+| Lease timeout | TBD from measured time per cell | `lease.timeout_s` (`lease.extend_s`, `lease.submit_grace_s` are additions) | 1,200 = 10 x 120 |
+
+Two rows of S16 16.18 are not in FD§4.9: the Reserve ceiling (`reserve.ceiling_credits`, from FD§4.2: "a published ceiling") and the daily per-member mint cap; the table should say so (CR-10). Parameters that the FD body requires and FD§4.9 omits all have a canonical row: eta threshold (`price.eta_alarm_threshold`, FD§4.3), claim ratio threshold (`inflation.claim_ratio_threshold_weeks`) and mint-cap utilization (`inflation.mint_utilization_alarm`, FD§4.7), per-device, per-invite-tree and per-day grant limits (`grant.max_per_device`, `grant.max_per_invite_tree_per_day`, `grant.max_per_day`, FD§4.6), concurrent jobs (`admission.max_concurrent_jobs_per_member`, FD§4.8), deadline multiplier (`admission.deadline_multiplier_standard`, FD§4.8). No FD parameter maps to two canonical names. [D]
