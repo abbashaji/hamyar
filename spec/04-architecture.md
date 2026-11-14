@@ -342,7 +342,7 @@ Capacity requirement [D]. All ledger writes pass one serialization point (`ISS-4
 
 | Data class | Required | Notes |
 | --- | --- | --- |
-| Ledger, lots, escrow, Reserve, mint-cap counters, grant counters | LC-1 to LC-9 | Per-device, per-day and per-tree grant limits that guard credit are enforced inside the ledger transaction, not in the ephemeral store (PR§4.5 item 3 shows a read-then-write counter exceeded under concurrency) |
+| Ledger, lots, escrow, Reserve, mint-cap counters, grant counters | LC-1 to LC-9 | Per-device, per-day and per-tree grant limits that guard credit are enforced inside the ledger transaction, not in the ephemeral store (PR§4.5 item 3: by code reading, a read-then-write counter can be exceeded under concurrency; not run) |
 | Cell, lease, submission, job state | Atomic compare-and-set on `row_version`; one winner per transition | Replaces the panel's git ref create and advisory KV reservation (PR§3.3, PR§3.4) |
 | Idempotency records | Unique-key insert atomic with the effect | S0.11.5 |
 | Parameters, policy, registry, template versions | Immutable versions; read committed is enough; changes bump `config_epoch` in the same commit | 4.9 |
@@ -450,6 +450,30 @@ CI rule [D]: for every transition in S0.9 there is exactly one event schema, and
 | `scheduler_watchdog` | Detects overdue jobs, clock skew, stale checkpoints, stale backups | `ops.ttl_sweep_interval_s` | 4.11 |
 
 Template auto-pause on reports (`template.autopause_report_count` within `template.autopause_window_s`) is not a job: it is evaluated inline when a report is filed, so a tightening is not delayed by a sweep [D].
+
+### 4.8.3 Idempotency by job [D][A]
+
+The runner rule of 4.8.1 (state-based, compare-and-set, safe to run twice at once) is made concrete per job. A second or concurrent run must find nothing left to do or return the stored result.
+
+| Job | Idempotency mechanism | Second run |
+| --- | --- | --- |
+| `lease_reaper` | Compare-and-set `Lease` `active` to `expired` on `row_version`; the cell requeue and `attempt` increment are in the same commit as the winning compare-and-set (`AC-arch-12`) | Loser of the race changes nothing |
+| `ttl_sweeper` | Each transition is a compare-and-set from its pending state | Finds no row in that state |
+| `escrow_settler` | `settle` posting keyed by (`settle`, escrow id) under LC-7; escrow closed at exactly zero | Returns the stored result; no entry added |
+| `assembler` | At most one `Deliverable` per job (unique key on job id) | Finds it and stops |
+| `credit_expirer` | `expire` posting keyed by (`expire`, lot id); the lot remainder is read inside the transaction | Remainder is zero; nothing posted |
+| `reserve_retirer` | The excess over `reserve.ceiling_credits` is recomputed inside the posting transaction; `retire` keyed by (`retire`, run window) | Excess below `reserve.retire_min_credits`; nothing posted |
+| `audit_sweeper` | Compare-and-set on the `Audit` machine; at most one open audit per cell and round | No due audit |
+| `metric_rollup`, `capacity_forecaster` | Output rows keyed by (metric or forecast, window end) and recomputed from source tables, so a rerun writes the same values | Same row, same values |
+| `inflation_governor` | One automatic cut per rollup window, keyed by the window id in the `ParameterVersion` reason | Finds the version for that window; no second cut |
+| `ledger_invariant_checker`, `ledger_full_recompute` | Read-only; `Alarm` deduplicated by `alarm_key`; engaging a kill switch that is already engaged changes nothing | Same alarm row |
+| `ledger_checkpointer` | Checkpoint row unique by `seq` | Same row |
+| `retention_purger` | Deletes by age and class | Nothing left past age |
+| `backup_runner` | Each run writes a new named artifact with a checksum; no shared state | Extra artifact, harmless |
+| `outbox_relay` | Store-level claim plus consumer dedupe table (4.7.3) | Consumer ignores a repeated `event_id` |
+| `scheduler_watchdog` | Read-only; `Alarm` deduplicated by `alarm_key` | Same alarm row |
+
+The keys named here are assumptions of this part [A] that S5.* and S6.* may refine without changing the rule that every job is safe to repeat.
 
 ## 4.9 Configuration management, feature flags, kill switches, launch switches
 
@@ -814,12 +838,12 @@ Fact base: `docs/source/panel-review.md` (PR§n), a static reading of `github.co
 
 | Item | Decision | Reason | [V] condition |
 | --- | --- | --- | --- |
-| Cell concept (independent unit of work with attempts and a needs-split outcome) | keep the concept, replace the implementation | PR§3.1 derives status lazily from git per request and stores nothing; Hamyar needs stored state in a transactional store (4.6). Panel statuses map: `done` to `accepted`, `running` to `leased`, `ready` and `expired` to `queued`, `needs_split` to `exhausted`; `waiting` has no counterpart because Hamyar cells inside a job are independent (FD§2) | Mapping holds only if PR§3.1 matches the code; confirmed in the G4 review |
+| Cell concept (independent unit of work with attempts and a needs-split outcome) | keep the concept, replace the implementation | PR§3.1 derives status lazily from git per request and stores nothing; Hamyar needs stored state in a transactional store (4.6). Panel statuses map: `done` to `accepted`, `running` to `leased`, `ready` and `expired` to `queued`, `needs_split` to `exhausted`; `waiting` has no counterpart because Hamyar cells inside a job are independent (FD§2); `needs_human` (a cell whose last commit is a feedback request, PR§3.1) has no counterpart either: Hamyar escalates through `flagged_for_audit`, reports and operator actions | Mapping holds only if PR§3.1 matches the code; confirmed in the G4 review |
 | Lease with a time box and attempt counter | keep the concept, replace the implementation | PR§3.2 and PR§3.3: expiry is evaluated only when someone calls and comes from the commit date of a branch tip; there is no scheduler. Hamyar uses a server-side lease with a nonce, store-clock `expires_at` and a reaper (4.8). Lease length is seconds to minutes, not the panel's 60 minutes | G4 review of how expiry was meant to be enforced |
 | Fencing (a write must carry the current tip, stale writers get CONFLICT) | keep the concept, replace the implementation | PR§3.3: fast-forward-only updates with `base`. Hamyar's equivalent is compare-and-set on `row_version` plus the lease nonce (F1, F2) | None beyond G4 |
 | Claim race resolved by creating a git ref; advisory reservation in key-value storage | replace | PR§3.3 and PR§2.2: the lock is a git ref, the reservation is advisory and eventually consistent. Hamyar needs an atomic transition in the system of record (LC-1, 4.6.3) | None |
-| Hand-out order (expired critical first, then priority and chain depth) | keep the idea, replace the rules | PR§3.2: a deterministic, tested ordering function is the right shape. Hamyar's order is eligibility by opt-in (R8) then first-come within a deadline class (FD§4.8), as a pure function | None |
-| Status graph UI (left-to-right dependency graph, status colors and labels) | wrap | PR§1: `web/src/graph` and the status mapping take a `PanelState` built by a pure function. Reuse behind a new data adapter for the requester's per-cell map and the operator's capacity view; Hamyar cells are independent, so the dependency layout is optional; the member flow is new | Review of Persian right-to-left rendering, accessibility, bundle size and absence of third-party loads; PR§4.5 item 12 records web fonts loaded from third-party hosts, which are removed. If the review fails, replace |
+| Hand-out order (expired critical first, then priority and chain depth) | keep the idea, replace the rules | PR§3.2: a deterministic ordering function is the right shape (whether its tests pass is not known, PR§9). Hamyar's order is eligibility by opt-in (R8) then first-come within a deadline class (FD§4.8), as a pure function | None |
+| Status graph UI (left-to-right dependency graph, status colors and labels) | wrap | PR§1: `web/src/graph` and the status mapping exist; that `PanelState` is built by a pure function over a snapshot is PR§8 opinion, not fact [V]. Reuse behind a new data adapter for the requester's per-cell map and the operator's capacity view; Hamyar cells are independent, so the dependency layout is optional; the member flow is new | Review of Persian right-to-left rendering, accessibility, bundle size and absence of third-party loads; PR§4.5 item 12 records web fonts loaded from third-party hosts, which are removed. If the review fails, replace |
 | Bottleneck view (cell with most transitive dependents) | keep the concept, replace the computation | PR§3.5. Hamyar's bottleneck is a capacity one: which template, service class or opt-out category is limiting quotes (FD§5.7 item 8), computed from rollups (4.8, S13.*) | None |
 | Release / Hand over (owner revokes a stuck cell, success text, refusal while CI runs, feedback gate) | keep the concept as operator tools, replace the implementation | PR§3.4: an owner action that returns a cell to the queue, fenced and logged. Hamyar: operator revokes a lease (`lease.revoked`), requeues or voids a cell, with a reason, `AdminAction` and two-person rules where configured; a volunteer can decline without penalty (FD§5.5). The CI guard has no counterpart | Panel behavior is read, not run (PR§9) |
 | Launcher (`blueprint://` protocol, Windows-only, browser profile selection, fixed prompt template) | replace | PR§6: Windows-only and tied to one provider's prefill URL; FD§10 and Principle 7 require a no-install web flow and Service-adapters (4.14). Its URL validator and fixed-template discipline are a good pattern and are reflected in the descriptor validation of 4.14.2 | Whether the provider prefill behavior it assumes is real is unverified in PR§9 and is irrelevant to Hamyar |
@@ -852,7 +876,7 @@ Owner role `operator`. Every default is an `initial configurable default` replac
 | `ops.outbox_retention_days` | days | 7 | 1..90 | `OPS` |
 | `ops.outbox_lag_alarm_s` | duration_s | 60 | 1..86400 | `OPS` |
 | `ops.job_lock_ttl_s` | duration_s | 120 = 4 x `lease.reap_interval_s` | 10..3600 | `OPS` |
-| `ops.job_max_runtime_s` | duration_s | 300 | 10..3600; below which the lock is renewed | `OPS` |
+| `ops.job_max_runtime_s` | duration_s | 300 | 10..3600; the lock is renewed during a run, so a run may outlast `ops.job_lock_ttl_s` | `OPS` |
 | `ops.job_overdue_factor` | ratio | 3.0 | >= 1 | `OPS` |
 | `ops.ttl_sweep_interval_s` | duration_s | 60 | 5..3600 | `OPS` |
 | `ops.purge_interval_s` | duration_s | 3600 | 60..86400 | `OPS` |
@@ -923,7 +947,7 @@ Given / When / Then; each is also a test (ids assigned by S18.*).
 | `AC-adapter-01` | Given a service that is not `approved`, when its descriptor is requested, then `mode_allowed` is `[copy_only]` and `open_url` is absent |
 | `AC-adapter-02` | Given `supports_prefill` true and `prefilled_link_use` `unknown`, when the descriptor is computed, then `mode_allowed` is `[copy_only]` |
 | `AC-adapter-03` | Given the built member bundle, when scanned, then it contains no provider name or provider URL |
-| `AC-adapter-04` | Given any prompt, when `plan` returns a prefill action, then the URL is at most `adapter.max_url_chars` long and percent-decodes to exactly the prompt; otherwise it returns copy-only with reason `url_too_long` |
+| `AC-adapter-04` | Given any prompt, when `plan` returns a prefill action, then the URL is at most `adapter.max_url_chars` long and its `{prompt}` part percent-decodes to exactly the prompt; otherwise it returns copy-only with reason `url_too_long` |
 | `AC-adapter-05` | Given the member bundle, when statically analyzed, then it contains no clipboard-read call, no frame embedding a service, no retained handle to an opened window and no message posted to one |
 | `AC-adapter-06` | Given a template with two placeholders, a non-HTTPS scheme, or the placeholder in the host, when a reviewer saves it, then validation rejects it |
 
@@ -937,7 +961,7 @@ Each resolution is already applied in this file. C-001 consolidates them into S2
 | `ISS-42` | minor | prompt | Prompt J says the panel repository's code and docs were not read, but `docs/source/panel-review.md` now exists | The review is the fact base for 4.18; every panel decision keeps a [V] condition and G4 stays open until a human review | applied |
 | `ISS-43` | major | FD§4.2 | The FD§4.2 invariants are global (total credit in existence), and the hash chain serializes appends, so the ledger has one serialization point; the FD gives no scale | One ledger, one chain; a capacity formula and load test decide the store (4.6.2); partitioning is allowed only after S6.* redefines the global invariants | needs_owner |
 | `ISS-44` | minor | FD§4.5, FD§3.2 | `credit.expiry_notice_days` and optional e-mail exist, but nothing says through which channel a member is told | In-app notices only; the public site is notification-free; the platform sends only a message a member explicitly requests, such as recovery (4.4.1) [A] | needs_owner |
-| `ISS-45` | minor | none | Convention gaps: parameter area `ops` and the 22 names in 4.19.1; `admission.forecast_refresh_s`; flag `ff.verify.sandboxed_tests`; field `adapter.open_url`; log events `http.request_served`, `sched.run_finished`, `outbox.relayed`, `alarm.raised`; infrastructure tables exempt from the entity rules (4.7.3); `config_epoch`; alarm keys | Added here; C-001 folds them into S0 and S16.* | proposed |
+| `ISS-45` | minor | none | Convention gaps: parameter area `ops` and the 21 `ops` names in 4.19.1; `admission.forecast_refresh_s`; flag `ff.verify.sandboxed_tests`; field `adapter.open_url`; log events `http.request_served`, `sched.run_finished`, `outbox.relayed`, `alarm.raised`; infrastructure tables exempt from the entity rules (4.7.3); `config_epoch`; alarm keys | Added here; C-001 folds them into S0 and S16.* | proposed |
 | `ISS-46` | minor | FD§10 | FD§10 keeps the launcher optional but does not say that its opt-in auto-send userscript and chat-link record (PR§6.4, PR§6.5) must not carry over, while Principle 3 forbids submitting on a volunteer's behalf | Both are excluded from Hamyar (4.2.2, 4.18) | proposed |
 | `ISS-47` | major | FD§8.2 risk 5 | The FD does not address backups, which copy pseudonymous data beyond the `retention.*` windows and are a compelled-disclosure surface | Backups encrypted with a key the sink does not hold, at least two locations, retention `ops.backup_retention_days`, purge reaches backups by aging out; legal sufficiency is [V] for counsel (4.12.1) | needs_owner |
 | `ISS-48` | minor | FD§10 | FD§10 and prompt I count four secrets; PR§4 finds a fifth, `EXT_TOKEN` (off when unset) | All five are rotated before exposure and never reused (4.13.3) | proposed |
