@@ -208,3 +208,116 @@ S15a returns a quote from `submitJobForScreening` and reads it with `getJobQuote
 | Rate-limit class | `RL-WRITE` |
 | Events | none while the job stays `quoted` (a new `Quote` version is not a state change); `job.waitlisted` when it becomes `waitlisted`. The superseded quote can no longer be confirmed: `confirmJob` with its hash is `409 STATE_CONFLICT`, reason `quote_changed` |
 | Given/When/Then | Given a `quoted` job with a 172,800 s window, When the requester calls `requestJobQuote` with `requested_window_s` 345,600, Then `200` with a new quote whose `window_s` is at least 345,600 and whose `quote_hash` differs, and `confirmJob` with the old hash is `409 quote_changed` |
+
+## 15.B.7 New admin operations: the human screening queue
+
+07 (7.12.4, 7.15.4) names `listScreeningQueue` and `decideScreening`; S15a says a `flagged` upload, and a share `screen.review_rate_new_requester` or `screen.review_rate_established_requester` of all inputs, wait for a reviewer after `submitJobForScreening` (job state `screening`, `202`), but S15b has no queue to drain it. Without it a job in `screening` can never leave that state, so the operations are NEW and belong to S15b's admin surface [D].
+
+```
+ScreeningItem { job_id: id<job>, state: "pending"/"decided", held_at: ts, due_at: ts,
+                hold_reasons: [ "flagged_input"/"sampled_review" ],
+                template: { id: id<tpl>, version_id: id<tpv>, name: text<80>, job_type: enum<job_type> },
+                cell_count: int, declarations: Declarations,
+                findings: [ { code: string, count: int, lines: [int] } ],      codes of S15.7.1; counts and line numbers, never matched text
+                decision: { decision: "pass"/"reject", decided_at: ts }/null }
+```
+
+`due_at = held_at + screen.review_sla_s` (the parameter 07 already uses for its queue alarm). No item carries a `mem_` id, a handle or any requester attribute: the reviewer judges the content and the declarations, not the person (FD§5.7 failure mode 10). Permissions are proposals for S10 [A]: `perm.screening.read` (list, item) and `perm.screening.decide` (content, decision); default holder: reviewer.
+
+| op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `listScreeningQueue` | `GET /v1/admin/screening` | `admin` `perm.screening.read` | `?state` (default `pending`), `?job_type`, `?overdue=true` | list of `ScreeningItem` without `declarations` and `findings`, oldest `held_at` first | - | n/a | cursor | `A-R` |
+| `getScreeningItem` | `GET /v1/admin/screening/{job_id}` | `admin` `perm.screening.read` | - | `ScreeningItem` | `NOT_FOUND` | n/a | - | `A-R` |
+| `getScreeningContent` | `GET /v1/admin/screening/{job_id}/content` | `admin` `perm.screening.decide` | - | `{ inputs: object, uploads: [{ upload_id, content: string }], glossary: { entries: [{source, target}] }/null }`; strings are data, escaped by the client (S9.* rule); logged as a read `AdminAction` (S15b 15.21.3 rule 3) | `NOT_FOUND` | n/a | - | `A-W` |
+| `decideScreening` | `POST /v1/admin/screening/{job_id}/decision` | `admin` `perm.screening.decide` | `{ decision: "pass"/"reject", prohibited_category?: text<40>, reason: text<2000> }`; `prohibited_category` only with `reject` | 200 `{ item: ScreeningItem, job_state: "quoted"/"waitlisted"/"draft"/"rejected" }` | `STATE_CONFLICT` (`not_pending`), `NOT_FOUND`, `VALIDATION_FAILED` | req | - | `A-W` |
+
+**Behavior of `decideScreening`** [D]. `pass`: the job continues exactly as after an automatic pass: price, admission, then `quoted` or `waitlisted` (events `job.policy_passed`, `job.waitlisted`). If the pass would waitlist the job while the member is at `admission.waitlist_max_per_member`, the decision is recorded, the job returns to `draft`, nothing is stamped and the inbox shows `copy.job.waitlist_limit` (the same outcome as `CAP_EXCEEDED` `waitlist_limit` in S15.7.2). `reject`: the job is `rejected` (terminal) with reason `policy.R3.reviewer_rejected`, or `policy.R3.prohibited_category` when `prohibited_category` is given (event `job.policy_rejected`); a rejection tightens, so one reviewer suffices. `reason` is stored, never shown to the member; the member sees only the `copy_key` of the reason code. One `AdminAction` is written in the same transaction, and a failed insert fails the decision (S15b 15.21.3 rule 1). A decision is final for the job; a mistaken `pass` is corrected by the kill switches and policy tools of S15b, not by editing a decision. Idempotency: `req`; a repeat with the same body returns the stored result, a second decision with another body is `409 not_pending`.
+
+**Given/When/Then** [D]. Given a job in `screening` held 100 s ago with a flagged upload, When a reviewer with `perm.screening.decide` reads the content and calls `decideScreening` with `reject` and `prohibited_category` `"malware"`, Then the job is `rejected` with `policy.R3.prohibited_category`, `job.policy_rejected` is emitted once, two `AdminAction` rows exist (one `read`, one `write`), and a reviewer who holds only `perm.screening.read` gets `403 FORBIDDEN` on the content call and no `read` row.
+
+## 15.B.8 New public operations
+
+Public means `auth` `none`, no cookies, no identifier, class `PUB`, the rules of S15b 15.33.1 (`ETag`, `If-None-Match`, `Cache-Control: public, max-age` at most `public.counter_refresh_s`, CORS without credentials, small-number suppression as `null` with `suppressed: true`), and no feature flag: policy, capacity and health are always on [D].
+
+### 15.B.8.1 `getPublicPolicy`
+
+| Field | Definition |
+| --- | --- |
+| Method and path | `GET /v1/public/policy` (cited as `GET /v1/policy` in 07 and `GET /v1/policy-versions/current` in 11b; public endpoints live under `/v1/public/*`, S0 0.11.2) |
+| Auth | `none` |
+| Request | none |
+| Response | `200 { as_of: ts, data: [ { policy: { id: id<pol>, name: text<80> }, active: PolicyVersionPublic, scheduled: [PolicyVersionPublic] } ] }` |
+| Errors | universal only |
+| Idempotency-Key | `-` |
+| Pagination | none (a handful of policy profiles) |
+| Rate-limit class | `PUB` |
+| Events | none |
+| Given/When/Then | Given an active version 5 and a scheduled loosening version 6 whose notice period has not ended, When anyone calls the endpoint, Then `active.version` is 5, `scheduled` holds version 6 with its `effective_from`, the allowlist rows carry `allowed` or `locked`, no rule carries its `params`, and there is no `Set-Cookie` |
+
+```
+PolicyVersionPublic { id: id<plv>, version: int, change_class: "tighten"/"loosen"/"neutral", effective_from: ts, content_hash: hash,
+                      changelog_entry_id: id<chg>/null,
+                      rules: [ { policy_rule_id: "R1".."R10", slug: text<40>, enabled: bool, summary_key: copy_key } ],
+                      allowlist: [ { purpose, license, sensitivity, service_requirement: enums of S0 0.8.1, status: "allowed"/"locked" } ] }
+```
+
+Rule `params` are not published here: several are screening thresholds that help an attacker tune an input just under a limit, and every parameter S0 marks public is already served by `listPublicParameters`. The allowlist is what the requester wizard needs (it replaces `getPolicyProfile` of 11b), and the history of versions is the public change log, not this endpoint [D].
+
+### 15.B.8.2 `getPublicCapacity`
+
+| Field | Definition |
+| --- | --- |
+| Method and path | `GET /v1/public/capacity` |
+| Auth | `none` |
+| Request | none |
+| Response | `200 { as_of: ts, categories: [ { category_key: text<40>, eligible_donors: int/null, forecast_cells_per_day: int/null, committed_share_ppm: ppm/null, suppressed: bool } ] }`; one entry per `category_key` of S6 (6.25) and one with `category_key` = `ALL` |
+| Errors | universal only |
+| Idempotency-Key | `-` |
+| Pagination | none |
+| Rate-limit class | `PUB` |
+| Events | none |
+| Suppression | With `n` eligible donors and `k` = `analytics.min_cohort_k`: `n >= k` gives `eligible_donors = floor(n / k) x k` (a bucket, never the exact count) and the two other figures; `n < k` gives all three `null` and `suppressed` `true`. No member id, handle or location appears. 06b's string `"<k"` is replaced by `null` with `suppressed: true`, the one suppression form of S15b, so clients parse one shape [D] |
+| Given/When/Then | Given a category with 7 eligible donors and `analytics.min_cohort_k` 10, When anyone calls the endpoint, Then that category has `eligible_donors` `null`, `forecast_cells_per_day` `null`, `committed_share_ppm` `null` and `suppressed` `true`; with 23 donors `eligible_donors` is 20 |
+
+The exact figures, the history and the forecast error stay in the admin `getCapacitySnapshot` and `listCapacityDays`; the category forecast itself is S6's [A].
+
+### 15.B.8.3 `getPublicHealth`
+
+| Field | Definition |
+| --- | --- |
+| Method and path | `GET /v1/public/health` |
+| Auth | `none` |
+| Request | none |
+| Response | `200 { status: "ok", build_id: text<64>, api_revision: int, as_of: ts }`; `build_id` is an opaque release identifier chosen by the build (04.11) [A]; `api_revision` equals the `Api-Revision` header (S15.13) |
+| Errors | none from the application; an unreachable host is the edge's failure, outside the API |
+| Idempotency-Key | `-` |
+| Pagination | none |
+| Rate-limit class | `PUB` |
+| Events | none |
+| Semantics | Liveness only: answering means the process serves requests. It does not touch the transactional store (readiness is read from `getLedgerHead`, `getCapacitySnapshot` and `listAlarms` of S15b, see Edit 24). `Cache-Control: no-store` (a probe must not be answered by a cache); CORS allows any origin without credentials so the static front end and the G2 reachability measurement (04.15.2) can call it from another origin |
+| Given/When/Then | Given a healthy deployment, When a client without credentials calls it, Then `200` with exactly the four keys above, no `Set-Cookie`, `Cache-Control: no-store`, and no IP address appears in any log line it produced (`AC-privacy-01`) |
+
+S15b 15.33.1 rule 9 says `/v1/health` "is defined in part a and BM0"; part a defines no health endpoint and BM0 serves `/v1/public/health` (S0 0.12). This section is the definition; the path `/v1/health` does not exist (Edit 25) [D].
+
+## 15.B.9 Additive overlay of S15a and S15b objects
+
+Each item is additive in the sense of S15.13 and is needed by an alias or a new operation above; this file is authoritative until the owner of S15a or S15b merges it. None renames anything [D].
+
+| Object or operation | Addition | Needed by |
+| --- | --- | --- |
+| `createIdentityChallenge.purpose` | two more values: `step_up`, `confirm_recovery` | 15.B.4, `confirmRecoveryKey` |
+| `Key` | `authorized_by_key_id: id<mky>/null`, `authorization_signature: b64u<64>/null`, `alg: "ed25519"` (the first two keys are self-signed, keys added by recovery are signed by the recovery key, 10a 10.7) | key chain on `listMemberKeys` |
+| `Member.recovery` | `confirmed_at: ts/null` | `confirmRecoveryKey` |
+| `rotateKey` request | optional `recovery_signature: b64u<64>`, by the current active recovery key over the same message as `signature` (same challenge, subject `new_public_key`); required when `kind` = `recovery` and `recovery.confirmed_at` is not null (`400 VALIDATION_FAILED`, reason `missing_field`); wrong: `401 AUTH_INVALID`, `credentials_invalid` | recovery-key rotation |
+| `recoverMember` request and response | request adds required `new_recovery_public_key: b64u<32>` and `new_recovery_proof: b64u<64>`; response adds `recovery_key: Key`; the recovery key that was just typed is revoked in the same transaction. Found while reading 10a:228: S15a leaves the typed recovery key `active` after a recovery, although it was entered on a device that may be hostile; 10a 10.4.4 already requires the replacement and the cost is one more field [D] | recovery safety |
+| `createMember`, `redeemDeviceLink`, `recoverMember` requests | optional `platform_class: text<24>`, `key_storage: text<24>` (values owned by S10; they become S0 enums when S10 fixes them); `Device` gains `platform_class: text<24>/null`, shown only to the approving device | 10a registration and linking |
+| Field-name map, 10a to S15a | `device_pub` to `public_key` (`createMember`) or `new_public_key` (`rotateKey`, `redeemDeviceLink`, `recoverMember`); `recovery_pub` to `recovery_public_key`; `device_signature` to `proof`; `recovery_signature` of `createMember` to `recovery_proof`; `new_device_pub` to `new_public_key`; `challenge_id` to `challenge`; `link_secret` to `code`; `offer_id` to `device_id` | every 10a pseudocode block |
+| `listSupplyGauges` | optional filter `topic_category_id` and bucket field `topic_category_id: id<top>/null` (07's optin axis) | 07 gauge |
+| S15.4 pipeline step 7 | first gate: `Step-Up` check of 15.B.4 for the operations listed there | member step-up |
+| Error reasons (append-only, `details.reason`) | `STATE_CONFLICT`: `open_work`, `balance_changed`; `AUTH_INVALID`: `step_up_required`, `step_up_invalid` on member routes | 15.B.4, `closeMember` |
+| Events | `+member.recovery_confirmed` (producer `identity_svc`, consumer `analytics`) | `confirmRecoveryKey` |
+| Permissions (S10 owns the matrix) | `perm.screening.read`, `perm.screening.decide` | 15.B.7 |
+| Copy keys | `copy.identity.close_forfeit_notice`, `copy.job.waitlist_limit` (text owned by S11) | `closeMember`, `decideScreening` |
+| S15b 15.33.1 rule 6 | the always-on public endpoints now include policy, capacity and health | 15.B.8 |
+
+No new parameter name is introduced by this file; every limit named above (`screen.review_sla_s`, `analytics.min_cohort_k`, `public.counter_refresh_s`, `ratelimit.write_weight`, `admission.waitlist_max_per_member`, `admission.min_window_s`, `admission.max_window_days`, `price.quote_ttl_s`, `identity.challenge_ttl_s`, `identity.key_rotation_grace_s`, `retention.job_payload_days`) is already used by S15a, S15b, 06b or 07 and is to be confirmed against S0 0.10 and S16* by `check_params` [A].
