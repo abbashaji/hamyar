@@ -1,0 +1,20 @@
+id: C-031
+title: 'Issue register: parts 08-11a'
+type: normal
+priority: 5
+goal: 'Consolidate the issues that other spec parts raised into the central register. The register (spec/02-issues.md) promises that assembly lists every issue raised by later parts and that every ISS-nn cited anywhere appears in it; this was never done. Write spec/02c-issues-parts-b.md. Start with ''# 2.C Issues raised by later parts (S8-S11a)''. For EVERY row of the ''Issues raised'' (and ''Convention gaps'') tables at the end of each listed part, add one row to a table with columns: id | severity | part | fd_ref | issue (one line, faithful, not weakened) | resolution applied (one line) | status. Keep ids exactly (ISS-nn). Group by severity (blocking, major, minor). Verify each issue against the Founding Document text where the fd_ref is given: if a row misstates the FD, add a note column value ''recheck:'' with the correct quote location instead of silently dropping it. Do not invent issues. Do not edit the part files. End with a short ''## Observations'' list (at most 8 bullets): duplicates across parts, contradictory resolutions, issues that need_owner. Parts to read (only their last sections, find them by reading the tail of the file): spec/08a-templates.md, spec/08b-verification.md, spec/09-result-return.md, spec/10a-identity.md, spec/10b-safety.md, spec/11a-volunteer-ux.md
+
+  '
+read:
+- docs/decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- spec/02-issues.md
+allowed_paths:
+- spec/02c-issues-parts-b.md
+outputs:
+- spec/02c-issues-parts-b.md
+acceptance:
+- cmd: python scripts/check_spec.py spec/02c-issues-parts-b.md --min-lines 40 --min-tags 0
+- cmd: python scripts/check_issues.py spec/08a-templates.md spec/08b-verification.md spec/09-result-return.md spec/10a-identity.md spec/10b-safety.md spec/11a-volunteer-ux.md
+notes: 'Audit/reconcile cell. You did not write these spec parts: be a critical reader, not a polite one. Read large files in chunks of at most 600 lines with read_files; do not paste file contents into chat. Ground rules of docs/decisions.md bind you: no invented provider facts, no automation of volunteer accounts, human presses Send, ''declared'' not ''guaranteed'', numbers are formulas or labeled initial configurable defaults, mark [V]/[H]/[A]/[D]/[P]. Never rename existing IDs, parameter names, endpoints or states; if a rename is truly needed, log it (cell_signal feedback is for impossible contracts). Make minimal in-place edits, never rewrite or shorten sections. Acceptance checks are structural only; completeness is defined by the goal.'

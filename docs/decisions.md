@@ -33,3 +33,6 @@ Heading format: top-level heading of each file is `# <section number>. <title>` 
 `spec/00-conventions.md` (950 lines) and `spec/00-decisions.md` were drafted on branch `cell/C-000` and copied to main so the work is not lost. The cell that owns them is C-027. Its job: check them against its goal and the ground rules above, fix gaps with small edits (do not rewrite, do not pad `00-decisions.md`, which stays a short list), then submit. Milestone IDs are `BM0`..`BM9` (see conventions 0.12); other parts use these, not `M0..Mn`.
 ## Checker notes
 `scripts/check_spec.py --require` is case-insensitive. Acceptance commands only prove structure; the cell's goal defines completeness.
+
+## Audit round (owner note)
+Cells C-030..C-057 audit and reconcile the merged spec. Objective checks run in CI: `scripts/check_params.py` (every parameter name used is defined in S0 or S16*), `scripts/check_issues.py` (every issue raised in a part is in the register spec/02*), `scripts/check_refs.py api` (every /v1 path cited is defined in S15*), `scripts/check_audit.py` (audit log structure). Audit logs live in `docs/audit/`. Audit cells fix defects in place with minimal edits; they never rename IDs, parameters, endpoints or states.

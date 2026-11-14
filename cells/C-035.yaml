@@ -1,0 +1,95 @@
+id: C-035
+title: 'Parameters: ui, job, ledger, metrics, lease, price, admission, verify'
+type: normal
+priority: 5
+lease_minutes: 90
+goal: 'Complete the configuration parameter table. spec/16-parameters.md is meant to list EVERY parameter, but these names are used in other parts and are defined nowhere (S0 and S16). Write spec/16c-parameters-b.md (''# 16.C Parameter additions (ui job ledger metrics lease price admission verify and others)''): a table with columns name | type | unit | validation (range, relations to other parameters) | initial default (labeled ''initial configurable default'', or a formula; NEVER an invented statistic; if the default is a safety limit say why that value is safe) | owner role | change policy (tighten-immediately or loosen-with-notice) | prospective-only | calibration (which Phase 0/1 measurement replaces it) | used in (part and line). For each name read the passage that uses it (cited below as part:line, read about 15 lines around it) so the meaning, unit and default match the usage; where two names clearly denote the same thing, define ONE canonical name and give the others as alias rows (''alias of X'', same value) and record an issue row at the end (''## Issues raised'', columns of S0.4, ids ISS-16101..16199). Where a name is really an event or state name, not a parameter, list it under ''Not parameters'' with the reason. Keep the S0.10 naming scheme. Names (part:line):
+
+  admission.commons_capacity_cells_per_day  [06b:162]
+
+  admission.waitlist_claim_ttl_s  [11b:470, 11b:477]
+
+  job.draft_ttl_days  [11b:232, 11b:275]
+
+  job.manifest_time_granularity_s  [11b:722, 11b:862]
+
+  lease.max_job_share_ratio  [10b:696]
+
+  ledger.member_timestamp_granularity_s  [10b:103, 10b:636]
+
+  metrics.daily_rollup_offset_s  [13:291, 13:902]
+
+  metrics.large_job_min_cells  [13:1003]
+
+  price.v_prior_ppm  [06a:852]
+
+  ui.admin_claim_ttl_s  [11c:280, 11c:785]
+
+  ui.budget.cell_card_bytes  [11d:360, 11d:760]
+
+  ui.budget.css_bytes  [11d:357, 11d:757]
+
+  ui.budget.first_interactive_s  [11d:363, 11d:727]
+
+  ui.budget.first_load_bytes  [11d:359, 11d:759]
+
+  ui.budget.fonts_bytes  [11d:291, 11d:358]
+
+  ui.budget.js_bytes  [11d:211, 11d:356]
+
+  ui.budget.repeat_view_bytes  [11d:361, 11d:761]
+
+  ui.capacity_dashboard_refresh_s  [11c:581, 11c:850]
+
+  ui.draft.ttl_s  [11d:406, 11d:588]
+
+  ui.first_load_budget_bytes  [10b:452, 10b:470]
+
+  ui.lease.warn_remaining_s  [11d:320, 11d:332]
+
+  ui.lease_warning_ratio  [11a:205, 11a:652]
+
+  ui.requester.appeal_note_max_chars  [11b:921, 11b:1057]
+
+  ui.requester.preview_chars  [11b:665, 11b:1053]
+
+  ui.requester.progress_poll_s  [11b:323, 11b:598]
+
+  ui.requester.rating_comment_max_chars  [11b:683, 11b:1055]
+
+  ui.requester.rating_flag_cells_max  [11b:683, 11b:704]
+
+  ui.requester.rating_window_days  [11b:682, 11b:1054]
+
+  ui.retry.base_delay_s  [11d:768, 11d:769]
+
+  ui.retry.max_delay_s  [11d:769]
+
+  ui.status_poll_max_s  [11a:202, 11a:334]
+
+  verify.comparator_calibration_rate  [08b:471, 08b:597]
+
+  verify.gold_adjudication_rate  [08b:454, 08b:596]
+
+  verify.review_channel_daily_cap_cells  [08b:569, 08b:599]
+
+  verify.reviewer_recheck_rate  [11c:359, 11c:377]
+
+  '
+read:
+- docs/decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- spec/16-parameters.md
+- spec/11a-volunteer-ux.md
+- spec/11b-requester-ux.md
+- spec/11d-i18n-copy.md
+- spec/06a-ledger.md
+allowed_paths:
+- spec/16c-parameters-b.md
+outputs:
+- spec/16c-parameters-b.md
+acceptance:
+- cmd: python scripts/check_spec.py spec/16c-parameters-b.md --min-lines 40 --min-tags 3
+- cmd: python scripts/check_params.py ui. job. ledger. metrics. lease. price. admission. verify. analytics. privacy. rate. credit. calibration. experiment. referral. policy. review. cell.
+notes: 'Audit/reconcile cell. You did not write these spec parts: be a critical reader, not a polite one. Read large files in chunks of at most 600 lines with read_files; do not paste file contents into chat. Ground rules of docs/decisions.md bind you: no invented provider facts, no automation of volunteer accounts, human presses Send, ''declared'' not ''guaranteed'', numbers are formulas or labeled initial configurable defaults, mark [V]/[H]/[A]/[D]/[P]. Never rename existing IDs, parameter names, endpoints or states; if a rename is truly needed, log it (cell_signal feedback is for impossible contracts). Make minimal in-place edits, never rewrite or shorten sections. Acceptance checks are structural only; completeness is defined by the goal.'

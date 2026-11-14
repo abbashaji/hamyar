@@ -1,0 +1,39 @@
+id: C-055
+title: 'Audit A14: 18-testing, 02-issues'
+type: normal
+priority: 5
+goal: 'You are an INDEPENDENT adversarial reviewer of the files listed below (spec parts of the Hamyar Product Specification, written by other agents). Task statement: docs/source/prompt.md; source of truth: the Founding Document (FD); shared names: spec/00-conventions.md (S0). Method: read your files completely in chunks; for each checklist item below look for concrete defects (wrong arithmetic, contradiction inside the file or with S0/FD, missing required content from the prompt scope named, ground-rule violation, untestable criterion, unlabeled number, invented provider/legal fact, name that S0 does not define). FIX each defect you can with a minimal edit in place (apply_changes edits, never whole-file rewrites; keep every ID, endpoint, parameter and state name). Defects that need a change in another file, or a decision only the owner can make, are LOGGED, not worked around. Write the log docs/audit/A14.md with: ''## Checked'' (bullets: what you examined and found correct, so the reader knows coverage), ''## Findings'' (table columns exactly: # | severity (blocking/major/minor) | file:line | defect | action (fixed / logged-cross-part / logged-needs-owner) ), ''## Not verified'' (what you could not check), and a last line ''Verdict: READY'' or ''Verdict: READY WITH LOGGED ITEMS'' or ''Verdict: NOT READY'' (NOT READY if any blocking finding is unfixed). Do not praise; do not pad; if you find nothing in an area say what you checked. Cap: fix at most the 25 most severe defects; log the rest as a count with the top 5.
+
+  FILES UNDER AUDIT: spec/18-testing.md, spec/02-issues.md
+
+  CHECKLIST:
+
+  - Testing: every layer in prompt scope K is present (unit, property-based for ledger and admission with concrete properties, state-machine tests, policy table, adversarial forgery/replay/double submission/races, injection and XSS, RTL and Persian rendering, load, end-to-end simulation); the simulation harness specifies synthetic donors and requesters including adversarial ones, run-on-the-bank and credit expiry, seeded determinism, and says repeatedly that simulation output is NOT evidence about real human behaviour; the feature-to-acceptance-criteria table has no feature of the prompt without criteria.
+
+  - FD 3.3 worked example appears as an automated test with exact expected values (276, 264, 12, 24; 320 vs 264).
+
+  - Issue register (spec/02-issues.md): for at least 15 issues, open the FD text at the cited reference (docs/source/Hamyar - Founding Document.md) and verify the issue is real and correctly stated; an issue that misreads the FD is fixed or marked withdrawn with the reason. Check the register''s claims ''examined and found consistent'' (2.7) the same way for at least 5 items.
+
+  '
+after:
+- C-001
+- C-024
+- C-028
+read:
+- docs/decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- spec/00-conventions.md
+- spec/18-testing.md
+- spec/02-issues.md
+allowed_paths:
+- docs/audit/A14.md
+- spec/18-testing.md
+- spec/02-issues.md
+outputs:
+- docs/audit/A14.md
+acceptance:
+- cmd: python scripts/check_spec.py spec/18-testing.md --min-lines 892 --min-tags 1
+- cmd: python scripts/check_spec.py spec/02-issues.md --min-lines 470 --min-tags 1
+- cmd: python scripts/check_audit.py docs/audit/A14.md
+notes: 'Audit/reconcile cell. You did not write these spec parts: be a critical reader, not a polite one. Read large files in chunks of at most 600 lines with read_files; do not paste file contents into chat. Ground rules of docs/decisions.md bind you: no invented provider facts, no automation of volunteer accounts, human presses Send, ''declared'' not ''guaranteed'', numbers are formulas or labeled initial configurable defaults, mark [V]/[H]/[A]/[D]/[P]. Never rename existing IDs, parameter names, endpoints or states; if a rename is truly needed, log it (cell_signal feedback is for impossible contracts). Make minimal in-place edits, never rewrite or shorten sections. Acceptance checks are structural only; completeness is defined by the goal.'

@@ -1,0 +1,48 @@
+id: C-040
+title: 'API reconcile: measurement and remaining parts'
+type: normal
+priority: 5
+lease_minutes: 90
+goal: 'Reconcile API paths. The parts listed in --from cite /v1 endpoints that the API specification (S15, spec/15a-api-core.md and spec/15b-api-admin.md) does not define; either the part invented the endpoint or S15 uses another path. S15 is canonical. Write spec/15f-api-reconcile-measurement.md (''# 15.E API reconciliation (measurement and remaining parts)''). For EACH path below (cited as part:line; read about 12 lines around each citation to learn what the screen or process needs, and search the S15 endpoint tables by reading them in chunks to find the nearest existing endpoint): decide (a) ALIAS: the cited path means existing S15 endpoint X; give a row ''cited path | S15 endpoint | difference, if any''; or (b) NEW endpoint: define it fully in the S15 table format (method, path under /v1, auth scheme, request schema, response schema, error codes from the S15 catalogue or new codes listed, Idempotency-Key behaviour, pagination, rate-limit class, events emitted, one Given/When/Then); or (c) REMOVE: the cited use should not exist (ground rule violation, duplicate, or no such capability); say what the citing part must do instead. New endpoints must respect: member vs admin auth separation, no endpoint that reads a volunteer''s provider page or stores provider credentials, idempotent writes, minimal data. Do not edit other files; list at the end ''## Edits required in citing parts'' (part:line, old text, new text) so a later cell can apply them. Paths:
+
+  /v1/admin/calibration-reports  [13:870, 13:932]
+
+  /v1/admin/calibration-statistics  [13:931]
+
+  /v1/admin/decision-reports  [13:926]
+
+  /v1/admin/experiments/{}/balance  []
+
+  /v1/admin/experiments/{}/registrations  []
+
+  /v1/admin/incidents  [13:933]
+
+  /v1/admin/interview-coverage  [13:934]
+
+  /v1/admin/interviews  [13:934]
+
+  /v1/admin/metric-snapshots  [11c:615, 13:51, 13:921]
+
+  /v1/admin/pre-registrations/{}/evaluations  []
+
+  /v1/admin/pre-registrations/{}/lock-approvals  []
+
+  /v1/events  [13:920]
+
+  /v1/public/pre-registrations/{}/proof  []
+
+  '
+read:
+- docs/decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- spec/15a-api-core.md
+- spec/15b-api-admin.md
+allowed_paths:
+- spec/15f-api-reconcile-measurement.md
+outputs:
+- spec/15f-api-reconcile-measurement.md
+acceptance:
+- cmd: python scripts/check_spec.py spec/15f-api-reconcile-measurement.md --min-lines 40 --min-tags 3 --require 'Edits required in citing parts'
+- cmd: python scripts/check_refs.py api 13 11a 15 16 18 19 20 14 08 03 01
+notes: 'Audit/reconcile cell. You did not write these spec parts: be a critical reader, not a polite one. Read large files in chunks of at most 600 lines with read_files; do not paste file contents into chat. Ground rules of docs/decisions.md bind you: no invented provider facts, no automation of volunteer accounts, human presses Send, ''declared'' not ''guaranteed'', numbers are formulas or labeled initial configurable defaults, mark [V]/[H]/[A]/[D]/[P]. Never rename existing IDs, parameter names, endpoints or states; if a rename is truly needed, log it (cell_signal feedback is for impossible contracts). Make minimal in-place edits, never rewrite or shorten sections. Acceptance checks are structural only; completeness is defined by the goal.'

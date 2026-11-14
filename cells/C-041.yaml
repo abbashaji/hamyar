@@ -1,0 +1,28 @@
+id: C-041
+title: 'API reconcile: whole-API consistency'
+type: normal
+priority: 5
+lease_minutes: 90
+goal: 'Read spec/15a-api-core.md, spec/15b-api-admin.md and the reconciliation files spec/15c-*.md, spec/15d-*.md, spec/15e-*.md, spec/15f-*.md (read the endpoint tables only, in chunks). Write spec/15g-api-consistency.md (''# 15.G API consistency''): (1) one table of the same path or same capability defined twice with different method, schema, auth or error codes (id both places, which wins, the correction); (2) every endpoint''s auth scheme: member endpoints never accept admin sessions and admin endpoints never accept member keys; list violations; (3) every write endpoint has Idempotency-Key semantics; list gaps; (4) error codes used in any endpoint table but missing from the S15 catalogue; (5) events emitted by new endpoints missing from the S15 event model; (6) endpoints that can create a job, admit a member, mint, or lease a cell: each must name the launch-gate or kill-switch check it performs (cross-check spec/14-launch-gates.md enforcement points; list any enforcement point with no endpoint and any endpoint with no enforcement point). Do not edit other files; end with ''## Corrections required''.
+
+  '
+after:
+- C-037
+- C-038
+- C-039
+- C-040
+read:
+- docs/decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- spec/15a-api-core.md
+- spec/15b-api-admin.md
+- spec/14-launch-gates.md
+allowed_paths:
+- spec/15g-api-consistency.md
+outputs:
+- spec/15g-api-consistency.md
+acceptance:
+- cmd: python scripts/check_spec.py spec/15g-api-consistency.md --min-lines 60 --min-tags 3 --require 'Corrections required'
+- cmd: python scripts/check_refs.py api
+notes: 'Audit/reconcile cell. You did not write these spec parts: be a critical reader, not a polite one. Read large files in chunks of at most 600 lines with read_files; do not paste file contents into chat. Ground rules of docs/decisions.md bind you: no invented provider facts, no automation of volunteer accounts, human presses Send, ''declared'' not ''guaranteed'', numbers are formulas or labeled initial configurable defaults, mark [V]/[H]/[A]/[D]/[P]. Never rename existing IDs, parameter names, endpoints or states; if a rename is truly needed, log it (cell_signal feedback is for impossible contracts). Make minimal in-place edits, never rewrite or shorten sections. Acceptance checks are structural only; completeness is defined by the goal.'

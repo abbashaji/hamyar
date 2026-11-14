@@ -1,0 +1,28 @@
+id: C-033
+title: 'Issue register: cross-check and owner decisions'
+type: normal
+priority: 5
+goal: 'Read spec/02-issues.md, spec/02b-issues-parts-a.md, spec/02c-issues-parts-b.md, spec/02d-issues-parts-c.md (the full register) and spec/03-assumptions.md. Write spec/02e-issues-summary.md (''# 2.E Register summary and owner decisions''): (1) counts by severity and status; (2) a table of issues that contradict each other or resolve the same FD point differently (id, id, the conflict, which resolution the spec applies, why; per spec/02-issues.md 2.9 rule 3 the central register wins) - read carefully, this is the point of the cell; (3) every issue with status needs_owner, with the default the spec uses meanwhile and whether S3 (spec/03-assumptions.md) already lists it; add the missing ones as a table ''to add to S3''; (4) the issues whose resolution changes a requirement of the prompt (list them: the owner must see these first). Do not edit other files.
+
+  '
+after:
+- C-030
+- C-031
+- C-032
+read:
+- docs/decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- spec/02-issues.md
+- spec/02b-issues-parts-a.md
+- spec/02c-issues-parts-b.md
+- spec/02d-issues-parts-c.md
+- spec/03-assumptions.md
+allowed_paths:
+- spec/02e-issues-summary.md
+outputs:
+- spec/02e-issues-summary.md
+acceptance:
+- cmd: python scripts/check_spec.py spec/02e-issues-summary.md --min-lines 50 --min-tags 0
+- cmd: python scripts/check_issues.py
+notes: 'Audit/reconcile cell. You did not write these spec parts: be a critical reader, not a polite one. Read large files in chunks of at most 600 lines with read_files; do not paste file contents into chat. Ground rules of docs/decisions.md bind you: no invented provider facts, no automation of volunteer accounts, human presses Send, ''declared'' not ''guaranteed'', numbers are formulas or labeled initial configurable defaults, mark [V]/[H]/[A]/[D]/[P]. Never rename existing IDs, parameter names, endpoints or states; if a rename is truly needed, log it (cell_signal feedback is for impossible contracts). Make minimal in-place edits, never rewrite or shorten sections. Acceptance checks are structural only; completeness is defined by the goal.'

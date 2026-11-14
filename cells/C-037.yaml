@@ -1,0 +1,80 @@
+id: C-037
+title: 'API reconcile: core: identity, leases, jobs, policy, result return'
+type: normal
+priority: 5
+lease_minutes: 90
+goal: 'Reconcile API paths. The parts listed in --from cite /v1 endpoints that the API specification (S15, spec/15a-api-core.md and spec/15b-api-admin.md) does not define; either the part invented the endpoint or S15 uses another path. S15 is canonical. Write spec/15c-api-reconcile-core.md (''# 15.B API reconciliation (core: identity, leases, jobs, policy, result return)''). For EACH path below (cited as part:line; read about 12 lines around each citation to learn what the screen or process needs, and search the S15 endpoint tables by reading them in chunks to find the nearest existing endpoint): decide (a) ALIAS: the cited path means existing S15 endpoint X; give a row ''cited path | S15 endpoint | difference, if any''; or (b) NEW endpoint: define it fully in the S15 table format (method, path under /v1, auth scheme, request schema, response schema, error codes from the S15 catalogue or new codes listed, Idempotency-Key behaviour, pagination, rate-limit class, events emitted, one Given/When/Then); or (c) REMOVE: the cited use should not exist (ground rule violation, duplicate, or no such capability); say what the citing part must do instead. New endpoints must respect: member vs admin auth separation, no endpoint that reads a volunteer''s provider page or stores provider credentials, idempotent writes, minimal data. Do not edit other files; list at the end ''## Edits required in citing parts'' (part:line, old text, new text) so a later cell can apply them. Paths:
+
+  /v1/admin/actions/{}/approvals  []
+
+  /v1/admin/auth-challenges  [10a:479, 10a:727]
+
+  /v1/admin/screening  [07:1069]
+
+  /v1/admin/screening/{}/decision  []
+
+  /v1/admin/supply-gauge  [07:1070]
+
+  /v1/auth-challenges  [10a:69, 10a:79, 10a:228]
+
+  /v1/device-link-offers  [10a:194, 10a:199, 10a:205]
+
+  /v1/device-link-offers/{}/approval  []
+
+  /v1/device-link-offers/{}/claims  []
+
+  /v1/iphash  [10a:578]
+
+  /v1/jobs/{}/confirmation  []
+
+  /v1/jobs/{}/quotes  []
+
+  /v1/leases/{}/extension  []
+
+  /v1/leases/{}/nonce-rotations  []
+
+  /v1/leases/{}/validations  []
+
+  /v1/me/opt-ins  [07:1065]
+
+  /v1/members/me/closure  [10a:725]
+
+  /v1/members/me/export  [10a:592, 10a:717]
+
+  /v1/members/me/keys  [10a:167, 10a:222, 10a:718]
+
+  /v1/members/me/keys/{}/revocation  []
+
+  /v1/members/me/recovery-confirmations  [10a:720]
+
+  /v1/members/me/recovery-keys  [10a:720]
+
+  /v1/members/me/session-revocations  [10a:529, 10a:716]
+
+  /v1/policy  [07:1062, 07:1063, 11b:120]
+
+  /v1/policy-previews  [07:1062]
+
+  /v1/public/capacity  [06b:173, 06b:529]
+
+  /v1/public/health  [00:884, 04:583, 04:731]
+
+  /v1/recovery  [10a:78, 10a:110, 10a:114]
+
+  /v1/recovery-checksum  [10a:110]
+
+  '
+read:
+- docs/decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- spec/15a-api-core.md
+- spec/15b-api-admin.md
+allowed_paths:
+- spec/15c-api-reconcile-core.md
+outputs:
+- spec/15c-api-reconcile-core.md
+acceptance:
+- cmd: python scripts/check_spec.py spec/15c-api-reconcile-core.md --min-lines 40 --min-tags 3 --require 'Edits required in citing parts'
+- cmd: python scripts/check_refs.py api 10a 05b 06b 07 09 00 04 17
+notes: 'Audit/reconcile cell. You did not write these spec parts: be a critical reader, not a polite one. Read large files in chunks of at most 600 lines with read_files; do not paste file contents into chat. Ground rules of docs/decisions.md bind you: no invented provider facts, no automation of volunteer accounts, human presses Send, ''declared'' not ''guaranteed'', numbers are formulas or labeled initial configurable defaults, mark [V]/[H]/[A]/[D]/[P]. Never rename existing IDs, parameter names, endpoints or states; if a rename is truly needed, log it (cell_signal feedback is for impossible contracts). Make minimal in-place edits, never rewrite or shorten sections. Acceptance checks are structural only; completeness is defined by the goal.'

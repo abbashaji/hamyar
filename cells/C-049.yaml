@@ -1,0 +1,40 @@
+id: C-049
+title: 'Audit A08: 08a-templates, 08b-verification'
+type: normal
+priority: 5
+goal: 'You are an INDEPENDENT adversarial reviewer of the files listed below (spec parts of the Hamyar Product Specification, written by other agents). Task statement: docs/source/prompt.md; source of truth: the Founding Document (FD); shared names: spec/00-conventions.md (S0). Method: read your files completely in chunks; for each checklist item below look for concrete defects (wrong arithmetic, contradiction inside the file or with S0/FD, missing required content from the prompt scope named, ground-rule violation, untestable criterion, unlabeled number, invented provider/legal fact, name that S0 does not define). FIX each defect you can with a minimal edit in place (apply_changes edits, never whole-file rewrites; keep every ID, endpoint, parameter and state name). Defects that need a change in another file, or a decision only the owner can make, are LOGGED, not worked around. Write the log docs/audit/A08.md with: ''## Checked'' (bullets: what you examined and found correct, so the reader knows coverage), ''## Findings'' (table columns exactly: # | severity (blocking/major/minor) | file:line | defect | action (fixed / logged-cross-part / logged-needs-owner) ), ''## Not verified'' (what you could not check), and a last line ''Verdict: READY'' or ''Verdict: READY WITH LOGGED ITEMS'' or ''Verdict: NOT READY'' (NOT READY if any blocking finding is unfixed). Do not praise; do not pad; if you find nothing in an area say what you checked. Cap: fix at most the 25 most severe defects; log the rest as a count with the top 5.
+
+  FILES UNDER AUDIT: spec/08a-templates.md, spec/08b-verification.md
+
+  CHECKLIST:
+
+  - Every template (translation with glossary, classification/extraction, summarization, code change with supplied tests, format conversion with validator) has prompt skeleton, input and output schema, automatic checks, comparator, gold construction, risks, and is marked [H] not claimed to work; each passes rule R3 (the volunteer only copies, presses Send, returns text; the code-change template must not ask anyone to run code).
+
+  - Delimiters and data wrapping resist breaking out (a payload that contains the closing delimiter is handled); prompts contain no links to open.
+
+  - Verification: the reliability estimator and false-accept and false-reject estimators are mathematically correct as written (check the formulas, priors, interval method, and the worked numbers by recomputation); their limits (selection bias, detectable gold, small samples, collusion) are stated; adaptive sampling has a floor and a formula; v counting matches spec/06a-ledger.md; donors paid 1 credit per accepted cell incl. audit and gold; no model-based judging mints credit.
+
+  - Human review channel: credit rules, own gold cells, experimental arm.
+
+  '
+after:
+- C-008
+- C-009
+read:
+- docs/decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- spec/00-conventions.md
+- spec/08a-templates.md
+- spec/08b-verification.md
+allowed_paths:
+- docs/audit/A08.md
+- spec/08a-templates.md
+- spec/08b-verification.md
+outputs:
+- docs/audit/A08.md
+acceptance:
+- cmd: python scripts/check_spec.py spec/08a-templates.md --min-lines 1054 --min-tags 1
+- cmd: python scripts/check_spec.py spec/08b-verification.md --min-lines 618 --min-tags 1
+- cmd: python scripts/check_audit.py docs/audit/A08.md
+notes: 'Audit/reconcile cell. You did not write these spec parts: be a critical reader, not a polite one. Read large files in chunks of at most 600 lines with read_files; do not paste file contents into chat. Ground rules of docs/decisions.md bind you: no invented provider facts, no automation of volunteer accounts, human presses Send, ''declared'' not ''guaranteed'', numbers are formulas or labeled initial configurable defaults, mark [V]/[H]/[A]/[D]/[P]. Never rename existing IDs, parameter names, endpoints or states; if a rename is truly needed, log it (cell_signal feedback is for impossible contracts). Make minimal in-place edits, never rewrite or shorten sections. Acceptance checks are structural only; completeness is defined by the goal.'

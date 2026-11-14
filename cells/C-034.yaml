@@ -1,0 +1,87 @@
+id: C-034
+title: 'Parameters: identity, growth, safety, launch'
+type: normal
+priority: 5
+lease_minutes: 90
+goal: 'Complete the configuration parameter table. spec/16-parameters.md is meant to list EVERY parameter, but these names are used in other parts and are defined nowhere (S0 and S16). Write spec/16b-parameters-a.md (''# 16.B Parameter additions (growth identity invite session retention report abuse launch team appeal)''): a table with columns name | type | unit | validation (range, relations to other parameters) | initial default (labeled ''initial configurable default'', or a formula; NEVER an invented statistic; if the default is a safety limit say why that value is safe) | owner role | change policy (tighten-immediately or loosen-with-notice) | prospective-only | calibration (which Phase 0/1 measurement replaces it) | used in (part and line). For each name read the passage that uses it (cited below as part:line, read about 15 lines around it) so the meaning, unit and default match the usage; where two names clearly denote the same thing, define ONE canonical name and give the others as alias rows (''alias of X'', same value) and record an issue row at the end (''## Issues raised'', columns of S0.4, ids ISS-16001..16099). Where a name is really an event or state name, not a parameter, list it under ''Not parameters'' with the reason. Keep the S0.10 naming scheme. Names (part:line):
+
+  abuse.admin_lookup_rate  [11c:729]
+
+  appeal.reason_max_chars  [11a:203, 11a:1384]
+
+  growth.referral.bonus_credits  [15a:582]
+
+  growth.referral.clawback_window_days  [12:415, 12:665]
+
+  growth.referral.max_per_day  [12:411, 12:661]
+
+  growth.referral.max_per_invite_tree_per_30d  [12:410, 12:662]
+
+  growth.referral.qualify_window_days  [12:664, 12:758]
+
+  growth.referral.reserve_draw_cap_ratio  [12:411, 12:614]
+
+  identity.challenge_ttl_s  [10a:69, 10a:743]
+
+  identity.email_code_ttl_s  [10a:149, 10a:746]
+
+  identity.link_code_ttl_s  [18:746]
+
+  identity.max_devices_per_member  [10a:182, 10a:218]
+
+  invite.accountability_days  [10a:335, 10a:563]
+
+  invite.strike_window_days  [10a:342, 10a:343]
+
+  launch.approval_window_s  [14:595]
+
+  launch.counsel_validity_days  [14:422, 14:597]
+
+  launch.evidence_max_bytes  [14:157, 14:599]
+
+  launch.generic_validity_days  [14:422, 14:596]
+
+  launch.measurement_validity_days  [14:422, 14:598]
+
+  report.decision_sample_rate  [10b:594, 10b:642]
+
+  report.max_text_chars  [10b:503, 10b:641]
+
+  report.transparency_publish_days  [10b:598, 10b:643]
+
+  report.urgent_triage_sla_s  [10b:640]
+
+  retention.backup_days  [10b:146, 10b:169]
+
+  retention.sweep_interval_s  [10a:529, 10a:757]
+
+  session.admin_stepup_s  [11c:67, 11c:126]
+
+  session.admin_stepup_ttl_s  [15b:87, 15b:1101]
+
+  session.max_active_per_member  [15a:108, 15a:860]
+
+  session.step_up_max_age_s  [10a:439, 10a:442]
+
+  session.touch_min_interval_s  [10a:516, 10a:754]
+
+  team.label_max_chars  [12:331, 12:667]
+
+  '
+read:
+- docs/decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- spec/16-parameters.md
+- spec/10a-identity.md
+- spec/10b-safety.md
+- spec/12-public-growth.md
+- spec/14-launch-gates.md
+allowed_paths:
+- spec/16b-parameters-a.md
+outputs:
+- spec/16b-parameters-a.md
+acceptance:
+- cmd: python scripts/check_spec.py spec/16b-parameters-a.md --min-lines 40 --min-tags 3
+- cmd: python scripts/check_params.py growth. identity. invite. session. retention. report. abuse. launch. team. appeal.
+notes: 'Audit/reconcile cell. You did not write these spec parts: be a critical reader, not a polite one. Read large files in chunks of at most 600 lines with read_files; do not paste file contents into chat. Ground rules of docs/decisions.md bind you: no invented provider facts, no automation of volunteer accounts, human presses Send, ''declared'' not ''guaranteed'', numbers are formulas or labeled initial configurable defaults, mark [V]/[H]/[A]/[D]/[P]. Never rename existing IDs, parameter names, endpoints or states; if a rename is truly needed, log it (cell_signal feedback is for impossible contracts). Make minimal in-place edits, never rewrite or shorten sections. Acceptance checks are structural only; completeness is defined by the goal.'

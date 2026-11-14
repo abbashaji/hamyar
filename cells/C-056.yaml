@@ -1,0 +1,39 @@
+id: C-056
+title: 'Audit A15: 00-conventions, 00-decisions'
+type: normal
+priority: 5
+goal: 'You are an INDEPENDENT adversarial reviewer of the files listed below (spec parts of the Hamyar Product Specification, written by other agents). Task statement: docs/source/prompt.md; source of truth: the Founding Document (FD); shared names: spec/00-conventions.md (S0). Method: read your files completely in chunks; for each checklist item below look for concrete defects (wrong arithmetic, contradiction inside the file or with S0/FD, missing required content from the prompt scope named, ground-rule violation, untestable criterion, unlabeled number, invented provider/legal fact, name that S0 does not define). FIX each defect you can with a minimal edit in place (apply_changes edits, never whole-file rewrites; keep every ID, endpoint, parameter and state name). Defects that need a change in another file, or a decision only the owner can make, are LOGGED, not worked around. Write the log docs/audit/A15.md with: ''## Checked'' (bullets: what you examined and found correct, so the reader knows coverage), ''## Findings'' (table columns exactly: # | severity (blocking/major/minor) | file:line | defect | action (fixed / logged-cross-part / logged-needs-owner) ), ''## Not verified'' (what you could not check), and a last line ''Verdict: READY'' or ''Verdict: READY WITH LOGGED ITEMS'' or ''Verdict: NOT READY'' (NOT READY if any blocking finding is unfixed). Do not praise; do not pad; if you find nothing in an area say what you checked. Cap: fix at most the 25 most severe defects; log the rest as a count with the top 5.
+
+  FILES UNDER AUDIT: spec/00-conventions.md, spec/00-decisions.md
+
+  CHECKLIST:
+
+  - Enumerations equal the FD taxonomy: P0-P3, L0-L3, S0-S3, M0-M2 meanings, pairings and statuses (FD 5.3); roles; flag answers yes/no/unknown; every FD parameter named; entity list equals the prompt scope B list; state names equal FD 3.4 plus the stated extensions.
+
+  - Numeric representation: the integer micro-credit and ppm decisions make FD 3.3 exact (recompute); time and hashing decisions are sound; ID format collision and ordering properties are right.
+
+  - The ''ten decisions'' list is honest about challenges to the owner''s instructions; no claim without basis.
+
+  - The file list and owner cells table in 0.13 matches the files that exist in spec/ (the repo has also spec/02b..02e, 15c..15g, 16b..16d added by reconciliation cells: add them to 0.13 only if the table has an obvious place; otherwise log it).
+
+  '
+after:
+- C-000
+- C-027
+read:
+- docs/decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- spec/00-conventions.md
+- spec/00-decisions.md
+allowed_paths:
+- docs/audit/A15.md
+- spec/00-conventions.md
+- spec/00-decisions.md
+outputs:
+- docs/audit/A15.md
+acceptance:
+- cmd: python scripts/check_spec.py spec/00-conventions.md --min-lines 855 --min-tags 1
+- cmd: python scripts/check_spec.py spec/00-decisions.md --min-lines 21 --min-tags 1
+- cmd: python scripts/check_audit.py docs/audit/A15.md
+notes: 'Audit/reconcile cell. You did not write these spec parts: be a critical reader, not a polite one. Read large files in chunks of at most 600 lines with read_files; do not paste file contents into chat. Ground rules of docs/decisions.md bind you: no invented provider facts, no automation of volunteer accounts, human presses Send, ''declared'' not ''guaranteed'', numbers are formulas or labeled initial configurable defaults, mark [V]/[H]/[A]/[D]/[P]. Never rename existing IDs, parameter names, endpoints or states; if a rename is truly needed, log it (cell_signal feedback is for impossible contracts). Make minimal in-place edits, never rewrite or shorten sections. Acceptance checks are structural only; completeness is defined by the goal.'

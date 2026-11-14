@@ -1,0 +1,98 @@
+id: C-039
+title: 'API reconcile: admin tools'
+type: normal
+priority: 5
+lease_minutes: 90
+goal: 'Reconcile API paths. The parts listed in --from cite /v1 endpoints that the API specification (S15, spec/15a-api-core.md and spec/15b-api-admin.md) does not define; either the part invented the endpoint or S15 uses another path. S15 is canonical. Write spec/15e-api-reconcile-admin.md (''# 15.D API reconciliation (admin tools)''). For EACH path below (cited as part:line; read about 12 lines around each citation to learn what the screen or process needs, and search the S15 endpoint tables by reading them in chunks to find the nearest existing endpoint): decide (a) ALIAS: the cited path means existing S15 endpoint X; give a row ''cited path | S15 endpoint | difference, if any''; or (b) NEW endpoint: define it fully in the S15 table format (method, path under /v1, auth scheme, request schema, response schema, error codes from the S15 catalogue or new codes listed, Idempotency-Key behaviour, pagination, rate-limit class, events emitted, one Given/When/Then); or (c) REMOVE: the cited use should not exist (ground rule violation, duplicate, or no such capability); say what the citing part must do instead. New endpoints must respect: member vs admin auth separation, no endpoint that reads a volunteer''s provider page or stores provider credentials, idempotent writes, minimal data. Do not edit other files; list at the end ''## Edits required in citing parts'' (part:line, old text, new text) so a later cell can apply them. Paths:
+
+  /v1/admin/abuse-items  [11c:456]
+
+  /v1/admin/action-previews  [11c:205]
+
+  /v1/admin/admin-action-verifications  [11c:210]
+
+  /v1/admin/admin-actions  [11c:209]
+
+  /v1/admin/approval-requests  [11c:206, 11c:207]
+
+  /v1/admin/approval-requests/{}/approvals  []
+
+  /v1/admin/audit-queue-items  [11c:365]
+
+  /v1/admin/bottleneck  [11c:615]
+
+  /v1/admin/capacity-dashboard  [11c:615]
+
+  /v1/admin/cell-overturns  [11c:461]
+
+  /v1/admin/cells/{}/voidings  []
+
+  /v1/admin/change-log-entries  [11c:557]
+
+  /v1/admin/handle-resolutions  [11c:752]
+
+  /v1/admin/invariant-checks  [11c:506]
+
+  /v1/admin/jobs/{}/stop-requests  []
+
+  /v1/admin/kill-switch-engagements  [11c:700]
+
+  /v1/admin/kill-switch-releases  [11c:701]
+
+  /v1/admin/launch-gate-items/{}  []
+
+  /v1/admin/launch-gate-items/{}/evidence  []
+
+  /v1/admin/launch-gates  [11c:647]
+
+  /v1/admin/launch-signoffs  [11c:650]
+
+  /v1/admin/launch-status  [11c:652]
+
+  /v1/admin/launch-switch-offs  [11c:651]
+
+  /v1/admin/leases  [11c:800, 11c:801]
+
+  /v1/admin/leases/{}/releases  []
+
+  /v1/admin/ledger-accounts  [11c:502, 11c:505]
+
+  /v1/admin/ledger-accounts/{}/credit-lots  []
+
+  /v1/admin/ledger-checkpoints  [11c:508]
+
+  /v1/admin/ledger-entries  [11c:503]
+
+  /v1/admin/ledger-reversals  [11c:509]
+
+  /v1/admin/ledger-transactions  [11c:504]
+
+  /v1/admin/ledger-verifications  [11c:507]
+
+  /v1/admin/member-views  [11c:751]
+
+  /v1/admin/metric-snapshots  [11c:615, 13:51, 13:921]
+
+  /v1/admin/parameter-change-sets  [11c:555]
+
+  /v1/admin/template-versions/{}/check-runs  []
+
+  /v1/admin/work-claims  [11c:797, 11c:798, 11c:799]
+
+  /v1/admin/work-claims/{}/releases  []
+
+  '
+read:
+- docs/decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- spec/15a-api-core.md
+- spec/15b-api-admin.md
+allowed_paths:
+- spec/15e-api-reconcile-admin.md
+outputs:
+- spec/15e-api-reconcile-admin.md
+acceptance:
+- cmd: python scripts/check_spec.py spec/15e-api-reconcile-admin.md --min-lines 40 --min-tags 3 --require 'Edits required in citing parts'
+- cmd: python scripts/check_refs.py api 11c
+notes: 'Audit/reconcile cell. You did not write these spec parts: be a critical reader, not a polite one. Read large files in chunks of at most 600 lines with read_files; do not paste file contents into chat. Ground rules of docs/decisions.md bind you: no invented provider facts, no automation of volunteer accounts, human presses Send, ''declared'' not ''guaranteed'', numbers are formulas or labeled initial configurable defaults, mark [V]/[H]/[A]/[D]/[P]. Never rename existing IDs, parameter names, endpoints or states; if a rename is truly needed, log it (cell_signal feedback is for impossible contracts). Make minimal in-place edits, never rewrite or shorten sections. Acceptance checks are structural only; completeness is defined by the goal.'

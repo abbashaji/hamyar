@@ -1,0 +1,59 @@
+id: C-057
+title: Final readiness report
+type: normal
+priority: 5
+lease_minutes: 90
+goal: 'Read the 15 audit logs docs/audit/A01.md .. A15.md (all of them, completely), spec/02e-issues-summary.md, spec/16d-parameter-consistency.md and spec/15g-api-consistency.md. Write docs/audit/FINAL.md: (1) a table, one row per audit log: files, verdict, count of fixed / logged-cross-part / logged-needs-owner findings; (2) the list of ALL blocking or major findings that are not fixed, with the cell that logged them and the exact file:line; (3) the consolidated list of ''Edits required in citing parts'' and ''Corrections required'' from spec/15c..15g and spec/16d that are NOT yet applied in the part files (check by reading the cited lines of the part files: applied or not); (4) the owner-only decisions in one list; (5) an honest overall verdict: READY / READY WITH LOGGED ITEMS / NOT READY, with the reasons and what the next fix round must contain (a list of fix tasks, each small enough for one cell: files, edit, acceptance). Do not edit other files and do not soften the logs.
+
+  '
+after:
+- C-033
+- C-036
+- C-041
+- C-042
+- C-043
+- C-044
+- C-045
+- C-046
+- C-047
+- C-048
+- C-049
+- C-050
+- C-051
+- C-052
+- C-053
+- C-054
+- C-055
+- C-056
+read:
+- docs/decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- docs/audit/A01.md
+- docs/audit/A02.md
+- docs/audit/A03.md
+- docs/audit/A04.md
+- docs/audit/A05.md
+- docs/audit/A06.md
+- docs/audit/A07.md
+- docs/audit/A08.md
+- docs/audit/A09.md
+- docs/audit/A10.md
+- docs/audit/A11.md
+- docs/audit/A12.md
+- docs/audit/A13.md
+- docs/audit/A14.md
+- docs/audit/A15.md
+- spec/02e-issues-summary.md
+- spec/16d-parameter-consistency.md
+- spec/15g-api-consistency.md
+allowed_paths:
+- docs/audit/FINAL.md
+outputs:
+- docs/audit/FINAL.md
+acceptance:
+- cmd: python scripts/check_audit.py docs/audit/FINAL.md
+- cmd: python scripts/check_params.py
+- cmd: python scripts/check_issues.py
+- cmd: python scripts/check_refs.py api
+notes: 'Audit/reconcile cell. You did not write these spec parts: be a critical reader, not a polite one. Read large files in chunks of at most 600 lines with read_files; do not paste file contents into chat. Ground rules of docs/decisions.md bind you: no invented provider facts, no automation of volunteer accounts, human presses Send, ''declared'' not ''guaranteed'', numbers are formulas or labeled initial configurable defaults, mark [V]/[H]/[A]/[D]/[P]. Never rename existing IDs, parameter names, endpoints or states; if a rename is truly needed, log it (cell_signal feedback is for impossible contracts). Make minimal in-place edits, never rewrite or shorten sections. Acceptance checks are structural only; completeness is defined by the goal.'
