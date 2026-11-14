@@ -73,17 +73,17 @@ An evaluation on a window that is not closed is reported as `inconclusive` (13.7
 
 | op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `registerExperiment` | `POST /v1/admin/experiments/{exp_id}/registrations` | `admin` `SU` `perm.experiment.run` | `{reason}` | 200 `Experiment` (`status: registered`, arms and `fraction_source` value frozen, `block_size`, `warnings: [string]`); event `experiment.registered` | `NOT_FOUND`, `STATE_CONFLICT` (not `draft`), `UNPROCESSABLE` (`prereg_not_locked`: `prereg_id` must name a locked `PreRegistration` that lists this experiment), `VALIDATION_FAILED` (`details.reason`: `weights_sum`, `block_size_over_limit`, `override_invalid`) | req | - | `A-W` |
+| `registerExperiment` | `POST /v1/admin/experiments/{exp_id}/registrations` | `admin` `SU` `perm.experiment.run` | `{reason}` | 200 `Experiment` (`status: registered`, arms and `fraction_source` value frozen, `block_size`, `warnings: [string]`); event `experiment.registered` | `NOT_FOUND`, `STATE_CONFLICT` (not `draft`), `UNPROCESSABLE` (`prereg_not_locked`: `prereg_id` must name a locked `PreRegistration` that lists this experiment), `VALIDATION_FAILED` (`details.reason`: `fractions_sum`, `block_size_over_limit`, `override_invalid`) | req | - | `A-W` |
 
-`block_size = sum(weight_ppm_i / g)` with `g` the greatest common divisor of the weights (13.8.3); it is refused above 100 (hard cap [A]) and a `warnings` entry `block_size_exceeds_smallest_stratum` is returned when it exceeds the expected size of the smallest stratum. Every override is validated against the target parameter, including the cross-checks of S0 10.5 (for example C4); only parameters with `experiment_overridable = true` may be overridden. Idempotency: key required; registering a registered experiment with a new key is `409 STATE_CONFLICT` (`details.state = registered`); the stored response replays for the same key. No endpoint lists which member is in which arm (15.32.2). [D]
+`block_size = sum(fraction_ppm_i / g)` with `g` the greatest common divisor of the arm `fraction_ppm` values (13.8.3, where part 13 calls it `weight_ppm`; the S15 name wins); it is refused above 100 (hard cap [A]) and a `warnings` entry `block_size_exceeds_smallest_stratum` is returned when it exceeds the expected size of the smallest stratum. Every override is validated against the target parameter, including the cross-checks of S0 10.5 (for example C4); only parameters with `experiment_overridable = true` may be overridden. Idempotency: key required; registering a registered experiment with a new key is `409 STATE_CONFLICT` (`details.state = registered`); the stored response replays for the same key. No endpoint lists which member is in which arm (15.32.2). [D]
 
 **Balance.** `getExperimentBalance` exposes the daily balance check of 13.8.4 step 6 as counts only.
 
 | op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `getExperimentBalance` | `GET /v1/admin/experiments/{exp_id}/balance` | `admin` `perm.metrics.view` (`perm.metrics.view_small_cells` for suppressed cells; each such use is logged as a read action) | - | 200 `{experiment_id, as_of, block_size, balanced: bool/null, strata: [{stratum, n_total: int/null, arms: [{arm_key, weight_ppm, n: int/null}], balanced: bool/null, suppressed: bool}], covariates: [{dim (locale, pilot_week, invite_depth), by_arm: [{arm_key, buckets: [{value, n: int/null}]}]}]}` | `NOT_FOUND`, `STATE_CONFLICT` (`not_registered`: no assignments exist before `running`) | n/a | - | `A-R` |
+| `getExperimentBalance` | `GET /v1/admin/experiments/{exp_id}/balance` | `admin` `perm.metrics.view` (`perm.metrics.view_small_cells` for suppressed cells; each such use is logged as a read action) | - | 200 `{experiment_id, as_of, block_size, balanced: bool/null, strata: [{stratum, n_total: int/null, arms: [{arm_key, fraction_ppm, n: int/null}], balanced: bool/null, suppressed: bool}], covariates: [{dim (locale, pilot_week, invite_depth), by_arm: [{arm_key, buckets: [{value, n: int/null}]}]}]}` | `NOT_FOUND`, `STATE_CONFLICT` (`not_registered`: no assignments exist before `running`) | n/a | - | `A-R` |
 
-`balanced` is computed from the unsuppressed counts inside the trust boundary and is true when, in every stratum, `abs(n_arm * 1,000,000 - n_total * weight_ppm) < block_size * 1,000,000`; it is `null` only before the first assignment. A cell below `analytics.min_cohort_k` is `null` with `suppressed: true` (AN-06) and the next-smallest sibling is suppressed too (AN-07); `balanced` stays visible so that a defect is never hidden by suppression. With 30 to 50 members most strata fall under `k`; that is intended (13.11) [A]. No member id, no per-member arm and no covariate value of one member appears. [D]
+`balanced` is computed from the unsuppressed counts inside the trust boundary and is true when, in every stratum, `abs(n_arm * 1,000,000 - n_total * fraction_ppm) < block_size * 1,000,000`; it is `null` only before the first assignment. A cell below `analytics.min_cohort_k` is `null` with `suppressed: true` (AN-06) and the next-smallest sibling is suppressed too (AN-07); `balanced` stays visible so that a defect is never hidden by suppression. With 30 to 50 members most strata fall under `k`; that is intended (13.11) [A]. No member id, no per-member arm and no covariate value of one member appears. [D]
 
 ## 15.E.8 Incidents [D]
 
@@ -99,3 +99,130 @@ S15 has `Alarm` (15.29.4, an operator notification) and `Report` (15.29.3, a mem
 | `resolveIncident` | `POST /v1/admin/incidents/{inc_id}/resolutions` | `admin` `perm.incident.record` | `{resolution_code, reason}` | 200 `Incident` (`resolved`, `resolved_at`); event `incident.resolved` | `STATE_CONFLICT` (already `resolved`) | req | - | `A-W` |
 
 `PATCH` never changes `status`, `incident_type`, `source` or `resolution_code`; state changes are the two commands. A resolved row is immutable except that `note` becomes `null` at purge. Cited by part 13 as `PATCH /v1/admin/incidents`, a collection path that cannot carry a patch; the item path above replaces it. Idempotency: key required on every write; `resolveIncident` and `startIncidentInvestigation` are monotonic, so a replay with the same key returns the stored result and a repeat with a new key is `409`. Provider warnings and account problems enter only through this operation or a member report; the system never reads a provider page to create them (ground rule 2). [D]
+
+## 15.E.9 Interviews and interview coverage [D]
+
+FD§9 asks for 8 to 10 qualitative interviews including reasons for stopping. The platform tracks that they happened, not what was said (13.6.14): no name, no quote, no recording, no link to a `mem_` id. S15 has no such resource, and it is a real capability, so it is NEW. `Interview` (`ivw_`, permanent) = `{ivw_id, segment, held_on: date, stop_reason_codes: [enum], theme_codes: [text<40>], notes_ref: text<200>/null, corrects_id: id<ivw>/null, created_at}`; `segment`: `active_donor`, `stopped_donor`, `requester`, `never_started`, `reviewer_or_operator`; `stop_reason_codes`: `too_slow`, `too_many_rejections`, `unclear_task`, `service_limit_or_warning`, `safety_concern`, `no_work_available`, `credit_expired`, `lost_interest`, `other`; each `theme_codes` entry matches `^[a-z][a-z0-9_]{2,39}$`. Rows are immutable; a wrong row is corrected by a new row with `corrects_id` (the pattern of `CalibrationRecord`, 15.32.3 [A]) and coverage counts a corrected row once.
+
+| op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `createInterview` | `POST /v1/admin/interviews` | `admin` `perm.interview.record` | `{segment, held_on: date, consent_recorded: true, stop_reason_codes, theme_codes, notes_ref?, corrects_id?}` | 201 `Interview`, `Location`; event `interview.recorded` | `VALIDATION_FAILED` (`details.reason`: `consent_not_recorded` when `consent_recorded` is not `true`; `held_on` in the future; `stop_reason_codes` not empty for `active_donor`; any field naming a person or a member is `unknown_field`), `NOT_FOUND` (`corrects_id`) | req | - | `A-W` |
+| `getInterviewCoverage` | `GET /v1/admin/interview-coverage` | `admin` `perm.metrics.view` (`perm.metrics.view_small_cells` for suppressed counts, logged) | - | 200 `{as_of, total: int, by_segment: [{segment, count: int/null, suppressed: bool}], stop_reasons: [{code, count: int/null, suppressed: bool}], has_stopped_donor: bool, target: {min: int, max: int}/null, within_target: bool/null}` | - | n/a | - | `A-R` |
+
+`consent_recorded` is a required field that must be `true`, so a row cannot exist without the interviewee's consent to coded notes (`AN-11`); the API cannot verify the consent, only that the interviewer asserted it [H]. `total` is shown; a split below `analytics.min_cohort_k` is `null` with `suppressed: true`, so at the planned scale (8 to 10 interviews) the splits are hidden unless the caller holds `perm.metrics.view_small_cells`, which writes a read action (AN-09). `has_stopped_donor` is never suppressed: without a `stopped_donor` interview the reasons for stopping cannot be reported (13.6.14). `target` is read from the effective pre-registration when it carries a qualitative plan (8 to 10, FD§9) and is `null` otherwise [A]. Idempotency: key required; there is no natural key, so a replay is the only protection against a double row. [D]
+
+## 15.E.10 Metric snapshots and pre-registration evaluations [D]
+
+S15 publishes `getPublicMetrics` and `listPublicMetricSnapshots` (15.33.2) for the published bundle and `getCapacitySnapshot` (15.31) for live capacity; it has no admin read of the internal metric rows that part 13 writes (`MET-nn`, `CAL-nn`, `EXP-nn.<outcome>`, `PRR.<prr_id>.<id>`). Aggregates only: no operation here returns a row about one member (AN-03).
+
+| op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `listMetricSnapshots` | `GET /v1/admin/metric-snapshots` | `admin` `perm.metrics.view` (`perm.metrics.view_small_cells` to see values of `suppressed` rows; each such use is logged as a read action, AN-09) | `?kind` (`met`, `cal`, `exp`, `prr`: the family of `metric_no`, the `?kind=` of 11c:615), `?metric_no` (exact, or a prefix ending in `.` such as `PRR.prr_01j9...`), `?visibility` (`internal`, `public`), `?population` (`all`, `external`), `?from`, `?to` (bounds on `window_end`), `?latest=true` (newest row per `metric_no` and `dims_hash`) | list of `MetricSnapshot` as defined in 13.5.4, newest `window_end` first; `value` is `null` where `suppressed` or `no_data` | `VALIDATION_FAILED` (`kind` and `metric_no` family disagree; `from` after `to`) | n/a | cursor | `A-R` |
+| `listPreRegistrationEvaluations` | `GET /v1/admin/pre-registrations/{prr_id}/evaluations` | `admin` `perm.metrics.view` | `?latest=true` | list of `Evaluation` = `{evaluated_at, source_watermark, window_closed: bool, thresholds: [{id, metric_no, outcome (pass, fail, inconclusive), observed_value, n_obs, ci_low_ppm, ci_high_ppm, locked_value, live_parameter_value/null}], rules: [{id, outcome (proceed, do_not_proceed, inconclusive)}], snapshot_ids: [id<mts>]}`, newest first | `NOT_FOUND` (draft or unknown `prr_id`) | n/a | cursor | `A-R` |
+
+`Evaluation` is a decoded view of the `PRR.<prr_id>.<TH-id>` and `PRR.<prr_id>.<DR-id>` snapshot rows of 13.7.7 (value 0 `fail`, 1 `pass`, 2 `inconclusive`); it adds no data and no write path, because the evaluator is a scheduled job (`metrics.prereg_evaluator`, 13.10.1) and a person cannot trigger an evaluation or change its result. `live_parameter_value` is present only where the live value of a `parameter_ref` differs from the locked one (the drift printing of 13.7.7). The `MetricSnapshot` of 13.5.4 is one row per metric, window and dims; the `MetricSnapshot` of 15.33.4 is a published bundle for a period. The public bundle is a projection of the rows with `visibility = public` (Issues raised, item 5). [D][A]
+
+## 15.E.11 Client interaction events [D][A]
+
+Part 13 needs the moments between a card being opened and the result being pasted back to measure time per contribution (`MET-08`) and comprehension friction. It cites `POST /v1/events`. That path is not defined in S15, and the word "events" there already means the domain-event outbox of 15.34, so the path is changed and the operation id is kept.
+
+| op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `recordClientEvents` | `POST /v1/client-event-batches` | `member` | `{events: [ClientEvent]}`, 1 to 50 items, body at most `api.max_body_bytes` | 204, always, when the envelope is valid | `VALIDATION_FAILED` (an event does not match the schema of its `name`; unknown field; more than 50 events), `PAYLOAD_TOO_LARGE` | O | - | `RL-WRITE` |
+
+```
+ClientEvent { name: "ui.card_opened"/"ui.prompt_expanded"/"ui.prompt_copied"/"ui.service_opened"/"ui.paste_started"/"ui.variant_exposed",
+              lease_id?: id<lse>, service_id?: id<svc>, experiment_code?: text<10>, arm_key?: text<40>,
+              device_class?: "phone"/"tablet"/"desktop", locale?: "fa"/"en" }      required fields per name: 13.3.4
+```
+
+Rules [D]: (1) there is no client clock value in any field; the server stamps `occurred_at` (15.3 rule 3). (2) The server drops, without any error, an event whose `lease_id` is not a lease of the caller, whose `service_id` does not match the lease, a `ui.variant_exposed` whose `arm_key` is not the caller's logged assignment, a second row of any `ui.*` name except `ui.card_opened` for the same lease (13.3.5), and every event of a batch when `analytics.client_events_enabled` or the member's own setting is `false`; the always-`204` answer therefore confirms nothing about which events were kept or whether a lease exists. (3) It never changes a ledger entry, a lease, a cell or a verdict (loss of an event never blocks the UI). (4) Accepting `ui.card_opened` also writes `leases.last_card_opened_at` (13.10.1). (5) No event carries free text, a prompt, an output, a URL or clipboard content, and `ui.prompt_copied` and `ui.service_opened` record that a button was pressed, never what a provider page shows. (6) The anonymous page-load count `ui.landing_viewed` has no endpoint: a public write path would be a new unauthenticated surface that S15 does not have (15.33.1 makes public endpoints read-only apart from verification), so that count comes from aggregate counters at the front-end host, outside the API [A]. Idempotency: the key is optional; a replay with the same key returns the stored `204`, and without a key the deduplication of rule (2) makes a repeat harmless. Domain events: none; the analytics projector writes `events` rows from this input (13.3.5). Members who disabled client events send nothing, and the client reads that switch from the member setting proposed in Issues raised, item 4. The residual risk that a `lease_id` in a raw `events` row can be joined to a member inside the trust boundary for `retention.event_raw_days` is a trade-off, not a guarantee of unlinkability [V: privacy and legal review before launch].
+
+## 15.E.12 Acceptance scenarios [D]
+
+- `AC-api-rec-01` Given three `CalibrationRecord` rows exist for one service, When an operator calls `createCalibrationReport` and then calls it again with a new `Idempotency-Key` and no new records, Then the first answers `201` with a `report_hash` and the second `409 ALREADY_EXISTS` with `details.reason` = `report_exists` and `details.clr_id` equal to the first.
+- `AC-api-rec-02` Given a locked `PreRegistration` whose evaluator has run once, When `createDecisionReport` is called, Then `201`, `content` contains every threshold outcome and no member id; and for a draft `prereg_id` the answer is `404 NOT_FOUND`.
+- `AC-api-rec-03` Given an experiment in `draft` whose `prereg_id` names a locked pre-registration, When `registerExperiment` is called with a valid step-up, Then the status is `registered`, `block_size` is stored, and a later `PATCH` of its arms is `409 STATE_CONFLICT`.
+- `AC-api-rec-04` Given a running experiment with 12 assigned members and `analytics.min_cohort_k` = 10 in three strata, When `getExperimentBalance` is called without `perm.metrics.view_small_cells`, Then every stratum cell below 10 is `null` with `suppressed: true` and `balanced` is still `true` or `false`.
+- `AC-api-rec-05` Given an open `safety_incident` exists, When `listIncidents` is called with `unresolved_safety_or_provider=true`, Then it is listed without `note`; after `resolveIncident` it no longer is, and `incident.resolved` was emitted once.
+- `AC-api-rec-06` Given `consent_recorded` is `false`, When `createInterview` is called, Then `400 VALIDATION_FAILED` with `details.reason` = `consent_not_recorded` and no row is written.
+- `AC-api-rec-07` Given 2 interviews held and `analytics.min_cohort_k` = 10, When `getInterviewCoverage` is called by a caller without `perm.metrics.view_small_cells`, Then `total` is 2, every `count` of a split is `null` and `has_stopped_donor` is a boolean.
+- `AC-api-rec-08` Given snapshot rows for `MET-06` and `CAL-01` exist, When `listMetricSnapshots` is called with `kind=cal`, Then only `CAL-nn` rows are returned and no row contains a `mem_` id.
+- `AC-api-rec-09` Given the evaluator ran with `window_closed` false, When `listPreRegistrationEvaluations` is called with `latest=true`, Then every threshold outcome is `inconclusive` and `window_closed` is `false`.
+- `AC-api-rec-10` Given a member holds lease A and another member holds lease B, When the first sends a batch with `ui.card_opened` for A and for B, Then the answer is `204` in both cases and only the event for A is projected.
+
+## Issues raised
+
+1. **`CalibrationRecord` shape.** 15.32.3 stores one aggregate row per observation day (`cells_attempted`, `cells_completed`, `seconds_per_cell` array, counts); part 13.9.1 stores one row per run (`kind`, `account_label`, `input_chars`, `output_chars`, `result`, `auto_check_passed`, `copy_paste_error_kind`, `probe_kind`, `canary_script`, nullable `service_id` for clipboard probes). `CAL-06` and the probe statistics cannot be computed from the S15 row. Needed: either S15 adds these as optional fields (additive) or part 13 reduces the tool. Not decided here. Also `createCalibrationRecords` (13:930) is `createCalibrationRecord` in S15 and its permission is `perm.calibration.write`; that row is outside this cell's list and is not edited below.
+2. **`PreRegistration` shape and lock binding.** 15.32.1 and 13.7 define two different objects (S15: `scope`, `thresholds` with `measure_key`/`window_days`, `decision_rules` with `if`/`then`, `supersedes_id`, status `draft`/`locked`; part 13: `phase`, `content` with `study`, `measures`, `thresholds` with `TH-nn`, `min_sample`, `decision_rules` with a three-valued `expr`, `amends_id`, `version`, `chain_hash`, status with `lock_requested` and `abandoned`) and two different `content_hash` inputs. Proposed: S15 carries part 13's `content` document as one field, hashed once, with `scope` = `phase`. Separately, 15.32.1 does not bind the second approver to the content: add `content_hash` to the `lockPreRegistration` request and re-check it at execution, and refuse `updatePreRegistration` while an approval is pending.
+3. **Experiment.** 15.32.2 needs the status value `registered`, `startExperiment` requiring it and no longer re-reading `fraction_source`, and a `block_size_over_limit` validation. Part 13.8.2 makes start a two-person action (`experiment.start` in `security.two_person_actions`); 15.32.2 makes it step-up only. Part 13 fields `unit`, `strata`, `eligibility`, `salt`, `weight_ppm`, `parameter_overrides` have no S15 counterpart (`fraction_ppm`, `config`); S15 names win and the mapping is for the cell that reconciles 13.8.
+4. **Client events setting.** `Member` and `updateMe` (15.5) have no `client_events_enabled`, and `getFeatures` (15.8) carries no analytics switch, so a client cannot know whether to send. Proposed additive: `Member.client_events_enabled: bool` (initial configurable default `true` [A], to be reviewed for high-risk members [V]) and the global parameter reflected in `getFeatures`.
+5. **`MetricSnapshot` is two objects** (13.5.4 row, 15.33.4 bundle) with one prefix `mts_`.
+6. **Convention additions of this part:** id prefixes `clr_` and `dcr_`; permissions `perm.metrics.view`, `perm.metrics.view_small_cells`, `perm.metrics.export`, `perm.incident.record`, `perm.interview.record`; events `+calibration.report_frozen`, `+decision_report.created`; alarm kind `incident.safety_or_critical`; the event-name styles `prereg.locked` (13) and `preregistration.locked` (15.32.1) differ.
+7. **Cited but outside this cell's path list, not reconciled here:** `GET /v1/admin/calibration-proposals` (13:931) and `GET /v1/admin/capacity-dashboard`, `GET /v1/admin/bottleneck` (11c:615; S15 has `GET /v1/admin/capacity`).
+
+## Edits required in citing parts
+
+Each edit gives the part and line (a `*` marks a line derived by counting from the nearest cited line; the old text is exact and is what to match), the old text and the new text. Rows of the table 13.10.2 are quoted with their pipe characters. No edit is needed at 13:51, 13:921, 13:925, 13:929 and 11c:615: the paths cited there are now defined (`/v1/admin/metric-snapshots` with `?kind`, 15.E.10; evaluations, 15.E.10; balance, 15.E.7).
+
+```
+E1  13:870
+old: records the id range of the `calibration_records` used, and attaches the report id and a SHA-256 of its canonical JSON as evidence to the launch-gate item that S14.* designates for calibration data.
+new: records the id range of the `calibration_records` used, and returns the report id and `report_hash` (a SHA-256 of its canonical JSON); the operator attaches them as evidence to the launch-gate item that S14.* designates for calibration data with the launch evidence operation of S15.27 (`perm.launch.evidence`).
+
+E2  13:920
+old: | `recordClientEvents` | `POST /v1/events` | member | none (own leases only; 13.3.5) |
+new: | `recordClientEvents` | `POST /v1/client-event-batches` | member | none (own leases only; 13.3.5) |
+
+E3  13:175*
+old: A member-scheme batch endpoint accepts at most
+new: The member-scheme batch endpoint `recordClientEvents` (`POST /v1/client-event-batches`, S15.E.11, which answers 204 in every valid case) accepts at most
+
+E4  13:168*
+old: Public landing page loaded (count only; never deduplicated by visitor)
+new: Public landing page loaded (count only; never deduplicated by visitor); not sent through the API, S15.E.11 defines no public ingestion endpoint, so this count comes from aggregate counters at the front-end host
+
+E5  13:923
+old: | `approvePreRegistrationLock` | `POST /v1/admin/pre-registrations/{prr_id}/lock-approvals` | admin, step-up | `perm.prereg.lock` |
+new: | `lockPreRegistration`, `approveApproval` | `POST /v1/admin/pre-registrations/{prr_id}/lock`, then `POST /v1/admin/approvals/{apv_id}/approvals` by a different admin | admin, step-up, two-person | `perm.prereg.lock`, `perm.approval.decide` |
+
+E6  13:924
+old: | `getPreRegistrationProof` | `GET /v1/public/pre-registrations/{prr_id}/proof` | none | Returns `content_hash`, `chain_hash`, `locked_at`, `phase`, `version` only |
+new: | `getPublicPreRegistration` | `GET /v1/public/pre-registrations/{prr_id}` | none | Returns the locked `PreRegistration` of S15.33.2 with `content_hash`, `locked_at`, `post_launch` and the additive `chain_hash`; `phase` is `scope`, `version` is the depth of the `supersedes_id` chain |
+
+E7  13:607*
+old: | `status` | enum | `draft`, `lock_requested`, `locked`, `abandoned` |
+new: | `status` | enum | `draft`, `locked`, `abandoned`; a pending lock is an `AdminApproval` (S15.E.3), not a row status. Rows `draft -> lock_requested`, `lock_requested -> draft` and `lock_requested -> locked` of 13.7.2 are re-read as: initiation of `lockPreRegistration`, withdrawal or expiry of that approval, and execution by `approveApproval` |
+
+E8  13:623*
+old: `ChangeLogEntry` published with `content_hash`, `chain_hash`, `locked_at`, `phase`, `version` (not the content)
+new: `ChangeLogEntry` of kind `preregistration_lock` published with `content_hash`, `chain_hash`, `locked_at`, `scope` and the content (S15.32.1 publishes the content so that anyone can recompute the hash)
+
+E9  13:926
+old: | `createDecisionReport` | `POST /v1/admin/decision-reports` | admin | `perm.metrics.export` |
+new: | `createDecisionReport`, `listDecisionReports`, `getDecisionReport`, `getDecisionReportContent` | `POST`, `GET /v1/admin/decision-reports`; `GET /v1/admin/decision-reports/{dcr_id}`; `GET /v1/admin/decision-reports/{dcr_id}/content` | admin | `perm.metrics.export` (create, content), `perm.metrics.view` (lists, get) |
+
+E10 13:927
+old: | `createExperiment`, `updateExperiment` | `POST`, `PATCH /v1/admin/experiments[/{exp_id}]` | admin | `perm.experiment.manage` |
+new: | `createExperiment`, `updateExperiment` | `POST`, `PATCH /v1/admin/experiments[/{exp_id}]` | admin | `perm.experiment.edit` |
+
+E11 13:928
+old: | `registerExperiment`, `startExperiment`, `stopExperiment` | `POST /v1/admin/experiments/{exp_id}/registrations`, `/starts`, `/stops` | admin; `startExperiment` two-person | `perm.experiment.manage` |
+new: | `registerExperiment`, `startExperiment`, `stopExperiment` | `POST /v1/admin/experiments/{exp_id}/registrations`, `/starts`, `/stops` | admin, step-up; two-person start is open (S15.E Issues raised, item 3) | `perm.experiment.run` |
+
+E12 13:931
+old: | `getCalibrationStatistics`, `getCalibrationProposals` | `GET /v1/admin/calibration-statistics`, `/calibration-proposals` | admin | `perm.calibration.record` |
+new: | `getCalibrationSummary` (was `getCalibrationStatistics`), `getCalibrationProposals` | `GET /v1/admin/calibration/summary`, `GET /v1/admin/calibration-proposals` (path not reconciled here) | admin | `perm.calibration.read` |
+
+E13 13:932
+old: | `createCalibrationReport` | `POST /v1/admin/calibration-reports` | admin | `perm.calibration.record` |
+new: | `createCalibrationReport`, `listCalibrationReports`, `getCalibrationReport` | `POST`, `GET /v1/admin/calibration-reports`; `GET /v1/admin/calibration-reports/{clr_id}` | admin | `perm.calibration.write` (create), `perm.calibration.read` (lists, get) |
+
+E14 13:933
+old: | `createIncident`, `updateIncident`, `listIncidents` | `POST`, `PATCH`, `GET /v1/admin/incidents` | admin | `perm.incident.record` |
+new: | `createIncident`, `listIncidents`, `getIncident`, `updateIncident`, `startIncidentInvestigation`, `resolveIncident` | `POST`, `GET /v1/admin/incidents`; `GET`, `PATCH /v1/admin/incidents/{inc_id}`; `POST /v1/admin/incidents/{inc_id}/investigations`, `/resolutions` | admin | `perm.incident.record` (writes), `perm.metrics.view` (reads) |
+
+E15 13:934
+old: | `createInterview`, `getInterviewCoverage` | `POST /v1/admin/interviews`, `GET /v1/admin/interview-coverage` | admin | `perm.interview.record` |
+new: | `createInterview`, `getInterviewCoverage` | `POST /v1/admin/interviews`, `GET /v1/admin/interview-coverage` | admin | `perm.interview.record` (create), `perm.metrics.view` (coverage) |
+```
