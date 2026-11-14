@@ -270,3 +270,54 @@ response   Page<PublicTeam>, as_of: ts          ordered by name ascending, never
 Given / When / Then
 
 - `AC-api-C09` Given three teams of which one is `listed` and active with `team.min_public_members` members, one `listed` with one member fewer and one private, When an anonymous caller lists `/v1/public/teams`, Then only the first is returned, with `name`, `member_count`, `score` and no member data; with `ff.growth.v4_teams` off the answer is `404 NOT_FOUND`.
+
+## 15.C.5 Ground-rule check [D]
+
+| Rule | Result for this file |
+| --- | --- |
+| No invented provider facts (GR 1) | No provider, URL parameter, limit or price is named. `previewCells` and `getReservationAvailability` return values computed from configuration; availability copy says it is an estimate [V]. |
+| No automation of a volunteer's account (GR 2) | No new operation touches a volunteer's page, credentials or session. Rows 13 and 28 close two inputs that could widen that surface (base64 binary files, free-text requester notes); row 14 keeps waitlisting a server decision, not a requester action against a provider. |
+| Evidence tags and numbers (GR 3, 4) | Every decision carries a tag. The only numbers are inherited parameters (`appeal.window_days`, `reservation.max_horizon_days`, `admission.max_job_cells`, `team.min_public_members`, `analytics.min_cohort_k`, `public.ledger_lag_s`, `public.counter_refresh_s`) and the three-sample rule of `previewCells` (first, middle, last: a shape, not a tuned value). No parameter is added. |
+| Declared, not guaranteed (GR 5) | `refund_estimate`, `bookable` and the appeal outcome carry copy keys that say estimate or decision; no deadline is returned for appeals. |
+| Member and admin auth separated | All new member operations are `member`; the public ones are `none`; no admin route is added or reused. |
+| Idempotent writes | `createAppeal`, `withdrawAppeal`, `recordExperimentExposure` have `Idempotency-Key` `R` and natural idempotency; the other new operations are reads. |
+| Minimal data | See 15.C.3 rule 4; public teams and experiments show no member data, no count below the cohort threshold, no arm per member. |
+
+## 15.C.6 Convention additions made by this file [A]
+
+- **Operations (11):** `createAppeal`, `listAppeals`, `getAppeal`, `withdrawAppeal`, `recordExperimentExposure`, `getCancellationPreview`, `previewCells`, `getSettlementReceipt`, `getReservationAvailability`, `listPublicExperiments`, `listPublicTeams`. They are S15 operations and belong in the generated OpenAPI document and the contract tests (`BM0`).
+- **Event:** `+experiment.exposed` (also `experiment.assigned`, named by part 12 and absent from the S15b catalogue).
+- **`details.reason` values:** `appeal_exists` (`ALREADY_EXISTS`), `appeal_window_closed`, `not_appealable`, `appeal_decided` (`STATE_CONFLICT`), `job_incomplete` (`UNPROCESSABLE`).
+- **Enum values:** `appeal_kind` as accepted by members: `submission_rejection`, `job_rejection`, `member_ban`. The enum name and the full value set must be checked against S0, which this cell did not read [V].
+- **Copy keys:** `copy.api_error.<code>[.<reason>]` for the new reasons; one fixed text each for the cancellation estimate basis and the availability estimate (areas `job` and `reservation`, `S11.*`).
+
+## 15.C.7 Open points for the whole-API consistency cell [D][A]
+
+These are contradictions or gaps that this reconciliation exposed and that it cannot settle inside its own file. Each names the files that must change and a proposed resolution. The suggested edits in the canonical files are labeled S1 to S6.
+
+| # | Where | Finding | Proposed resolution |
+| --- | --- | --- | --- |
+| O1 | S15b 15.33.5 against S15a 15.8 and part 12.8 | S15b defines per-member share-card tokens, a public `/v1/public/share-cards/{token}`, `createShareCard`, `listMyShareCards`, `revokeShareCard`, the events `sharecard.*` and the cap `growth.share_card_max_active`. S15a says the server stores no image and no share link, and 12.8.1 and 12.8.3 forbid any per-member token because it would link a pseudonym to a public post (FD Principle 8). The two cannot both stand. | Keep the no-token design of S15a and 12.8 unless the owner decides otherwise under the G1 threat model; then remove 15.33.5 and the `sharecard.*` events, or, if tokens are chosen, rewrite 12.8 and S15a `getShareCard`. Row 25 follows the no-token design. |
+| O2 | S15a 15.8 against 12.9.2 | S15a has `listTeamMembers`, per-team `alias` and `visible`; 12.9.2 says a team page shows no member list and no alias in Phase 1. | Follow the stricter 12.9.2 for Phase 1: hide `listTeamMembers` and the alias fields behind the Phase 2 'full teams' flag, or state in S15a that they stay off until the G1 threat model covers them. |
+| O3 | S15a `Team.verified_cells_30d` against 12.9.2 | S15a counts 30 days; 12 scores the current UTC week and all time. `listPublicTeams` follows 12. | Align the member `Team` object to `score` `{week_start, week, all_time}` or define why both exist. |
+| O4 | S15b 15.29 against 12.9.1 | 12 has `team.locked`, `team.unlocked`, `team.disbanded` after reports; S15b has no admin endpoint, permission or event owner for them, so a reported team cannot be locked. | Add `lockTeam`, `unlockTeam` (single admin for lock, tightening) to S15b with `perm.report.triage` or a `perm.team.*` permission; the report outcome links to the action. |
+| O5 | S15a `createReport` | `subject_kind` `result` takes an `id<sub>`, which a requester never receives (`ResultItem` has `cell_id`, no submission id). 11b screens 13 and 16 report results. | Accept `id<cel>` for `subject_kind` `result` when the caller owns the job. |
+| O6 | S15a 15.7.3 `cancelJob` | The text says `refund_ucr` is visible in `getJob`; `Job` has no such field. | Point the text at `getSettlementReceipt` (this file) or add the field. |
+| O7 | S15a 15.7.3 `rateJob` | `PUT` only; 11b screen 17 must show an earlier rating and no read exists. | Add `rating` to `Job` (additive) or a `GET /v1/jobs/{job_id}/rating`; 11b rows `createJobRating`, `getJobRating` use `POST` and `GET` on a path that S15 defines with `PUT`. |
+| O8 | S15b 15.34.3 `appeal.overturned` | Consumers lack `job_svc`, so a `job_rejection` appeal has no effect owner; `template_rejection` is listed as a kind but members cannot file it. | Add `job_svc` as consumer and define what overturning a terminal `rejected` job does (a fast-tracked copy is the proposal); decide who files `template_rejection` for an author. |
+| O9 | S15a 15.3 rule 1 | Strict requests are defined for body fields; 11b sends query parameters that S15 does not define (`listServices ?state=approved`, `getManifest ?profile=requester`). | State whether an unknown query parameter is `400 VALIDATION_FAILED` reason `unknown_field`; edits E2 and E3 below drop these two. |
+| O10 | S15a `Features` against 12.11 | `flags` are booleans without arm names, yet 12.11.1 returns `a.arm_key`, and 12.11.5 says members see their own arm on a settings screen. No S15 operation shows that arm. | Check the mechanics of 12.12 for any with more than two arms or arm-specific client behavior; if any exists, add an optional `variants` map to `Features` (additive), and add a member read of own arms or drop the settings display. |
+| O11 | S15b 15.21.2 and S15a 15.12 | The `RL-READ` class gives `previewCells` the cost of a cheap read although it renders text. | Decide a class in S16.* if measurement requires one. |
+| O12 | `scripts/check_refs.py` | The script counts a `/v1/` path as defined if it appears anywhere in `spec/15*.md`, including the cited paths in the decision table of this file. It passes even if a REMOVE row is never applied, and it ignores methods and query strings. | After the edits below are applied, run it with this file excluded, and compare methods and queries by hand; the edits listed below include two method mismatches on defined paths (rows 150 and 121). |
+| O13 | S15a 15.13 last bullet | 'An endpoint not in a table does not exist' refers to the operation tables 'of this part'. | Say S15a, S15b and 15.C together, so the contract suite covers the eleven new operations. |
+| O14 | S15a `confirmJob` | The guards do not say what a `reservation_id` must satisfy; row 24 assumes `held`, owned by the caller, not past `target_date`, and a template match. | Copy the guard into S15a 15.7.2 (S2 below). |
+| O15 | Part 11d | Not read: the cell names no 11d line, but `check_refs.py` is run for it. | The cell that applies the edits searches 11d for every string in the decision table. |
+
+**Suggested edits in canonical files** (not citing parts; for the consistency cell)
+
+- **S1** S0 enum for report subjects and S15a 15.6.3 `createReport`: add `"team"` with `subject_id: id<tem>`; a reporter must belong to the team or see it in the public list.
+- **S2** S15a 15.7.2 `confirmJob` guards: with `reservation_id`, the reservation must be `held`, the caller's, not past `target_date`, and match template and cell count, else `409 STATE_CONFLICT` reason `reservation_state_invalid`.
+- **S3** S15a 15.13 and 15.1: the S15 operation tables include this file.
+- **S4** S15a 15.9: append the five new `details.reason` values of 15.C.6 to their code rows.
+- **S5** S15b 15.34: add `experiment.assigned` and `experiment.exposed`; add `job_svc` as consumer of `appeal.overturned`.
+- **S6** S15a 15.7.3 and `Job`: refund text (O6) and rating read-back (O7).
