@@ -1,0 +1,28 @@
+id: C-059
+title: Conventions and decisions skeleton (corrected acceptance)
+type: skeleton
+priority: 10
+lease_minutes: 15
+supersedes:
+- C-000
+after:
+- C-027
+- C-056
+goal: 'Same goal as C-000. Write spec/00-conventions.md (shared vocabulary) and spec/00-decisions.md (at most 10 lines). Follow the full scope of the prior cell C-000; existing content on branch cell/C-000 may be reused.'
+provides:
+- 'spec/00-conventions.md: shared names, IDs, enums, states, parameter naming, API conventions, cross-reference style'
+- 'spec/00-decisions.md: <=10-line list of biggest decisions'
+read:
+- docs/decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+allowed_paths:
+- spec/00-conventions.md
+- spec/00-decisions.md
+outputs:
+- spec/00-conventions.md
+- spec/00-decisions.md
+acceptance:
+- cmd: python scripts/check_spec.py spec/00-conventions.md --min-lines 120 --min-tags 8 --require 'ISS-' --require 'credit.lifetime_days' --require 'Idempotency-Key'
+- cmd: python scripts/check_spec.py spec/00-decisions.md --min-lines 8
+notes: 'Document cell: markdown only. 00-decisions.md is short by design. Mark facts you cannot know [V].'
