@@ -139,12 +139,12 @@ Numbered for reference as "S10.13.1 item n".
 1. **Pseudonymity by default.** Identity is a key pair made on the device. No name, phone number, social login or government identity is requested anywhere. E-mail is optional (`identity.email_optional` = true) and never a condition of any feature (FD§3.2).
 2. **Minimal collection.** Only the data in S10.13.2 exists. A new field, event or log line first passes S10.13.8.
 3. **No location.** The server never derives or stores a place from an IP address, time zone, locale or any API (S0.6.2); the client never requests geolocation permission; `public.location_display` = `never` by default (FD§6.1 rank 5). With `opt_in`, only a free-text label the member typed is shown, unverified, with a warning, and never for a group below `team.min_public_members`.
-4. **No fingerprinting.** A `Device` is a random client-generated token stored as a keyed hash (`secret.device_hash_key`, [A]). No canvas, audio, font-enumeration or hardware identifiers are read. The request log keeps no `User-Agent`. Constraint on S10.*.
+4. **No fingerprinting.** A `Device` is a random client-generated token stored as a hash (10a 10.9.1 and `ISS-103` decide plain SHA-256 of a 128-bit random token; `secret.device_hash_key` is then not created, unless S10.* adopts the keyed hash of `S5.*` 5.3.3, open item in A04). No canvas, audio, font-enumeration or hardware identifiers are read. The request log keeps no `User-Agent`. Constraint on S10.*.
 5. **No third-party requests** from any page, script, font or image (S10.15.5).
 6. **No raw IP stored** (`retention.raw_ip_stored` = false). Rate-limit counters use the daily-rolling `secret.ip_hash_key` (S10.14.4) and hold no member id.
 7. **Retention is enforced by jobs, not by intent.** Every retention class in S0.7 has a sweep; a sweep that falls behind raises an alarm (`hamyar_retention_overdue_rows_total` > 0).
 8. **Closure deletes.** On `member.closed` the sweep (interval `retention.sweep_interval_s`) deletes or opaques all `member_bound` rows; the ledger keeps only the opaque `mem_` id and day-granular times (`ISS-104`). Backups lose the data within `retention.backup_days`.
-9. **No content in logs.** Logs and metrics never contain submitted text, cell input or output, or any free text. Allowed fields: UTC minute, method, route template, status, duration, `request_id`, `principal_type`.
+9. **No content in logs.** Logs and metrics never contain submitted text, cell input or output, or any free text. Allowed fields: UTC minute, method, route template, status, duration, `request_id`, `principal_type`, and `actor_day_hash` (10a 10.14.1; key `secret.log_actor_key`, S10.14.2).
 10. **Admins see less than the database holds.** No admin screen shows IPs, e-mail, device hashes or public keys. The e-mail ciphertext is reachable only through the two-person disclosure path (S10.13.5).
 11. **Public surfaces are aggregates** with small-cohort suppression (`analytics.min_cohort_k`); per-member rows are never public.
 12. **Plain words.** Copy never says anonymous, untraceable, safe or guaranteed (Persian equivalents included, marked `needs_human_and_legal_review`).
@@ -155,15 +155,16 @@ Numbered for reference as "S10.13.1 item n".
 | --- | --- | --- | --- | --- | --- |
 | Member public key(s) | `member_keys` | Verify signatures | `member_bound` | No | System only |
 | `mem_` id, `status`, `trust_tier`, creation day | `members` | Account | `member_bound` | No | Admins see id, status, tier only |
-| Optional e-mail, only if the member supplies it | Ciphertext under `secret.email_encryption_key` [A] | Recovery notices if the identity file uses them | Deleted at `member.closed` | Yes, strongly, if supplied | System; decrypted only via S10.13.5 |
-| `Device` keyed hash | `devices` | Limits, `grant.max_per_device`, linking | `short` | No | System only |
+| Optional e-mail, only if the member supplies it | Ciphertext under `secret.email_encryption_key` [A] | Opt-in notices only; never a recovery factor (10a 10.5) | Deleted at `member.closed` | Yes, strongly, if supplied | System; decrypted only via S10.13.5 |
+| `Device` token hash | `devices` | Limits, `grant.max_per_device`, linking | `member_bound`, then the grant-memory residue of 10a 10.9.1 | No | System only |
 | Session token hash | `sessions` | Authentication | `retention.session_days` | No | System only |
+| Invite edges and tree position, recovery requests, device-link offers, security notices (10a 10.2, 10.10) | `invites`, `members`, `recovery_requests`, `device_link_offers`, `security_notices` | Accountability, recovery cap, linking | Edge cleared `invite.accountability_days` after joining (kept `retention.moderation_days` after a ban resolution); tree id and depth stay; the rest `short` or 90 days | Not alone; the edge links pseudonyms to each other | Operators (edges, logged); reviewers (counts) |
 | IP-hash counters (key hash, window, count) | Rate-limit store | Abuse limits | `retention.ip_hash_ttl_days`, key destroyed after | No once the key is destroyed; within the window a key holder can test a candidate IP | System only |
 | Cell input and output text, uploads | `cells`, `submissions`, `uploads` | The work | Payload purged `retention.job_payload_days` after the job is terminal | Not by policy (S0 and S1), but a requester may have typed personal text | Leasing volunteer; reviewers when flagged or reviewed; the requester (own job) |
 | Hashes and manifests (with `vol_` handle) | `manifests`, `submissions` | Provenance (FD§5.6) | `job_bound`, hashes stay | No; handle maps to a member only with its key version | Requester sees the manifest without handle; admins see the handle |
 | Ledger entries and lots | `ledger_entries`, `credit_lots` | Credit | `permanent` | A pseudonymous activity trace per `mem_` account | Admins; public page shows aggregates only (S10.13.6) |
 | Reports and appeals | `reports`, `appeals` | Moderation | `retention.moderation_days` after resolution, then counts | Pseudonymous ids only | Reviewers |
-| Admin action log | `admin_actions` | Accountability | `permanent` | Contains `mem_` and `adm_` ids, no free personal text (reason codes only) | Operators and reviewers |
+| Admin action log | `admin_actions` | Accountability | `permanent` | Contains `mem_` and `adm_` ids, no free personal text (reason codes only) | Operators (`perm.adminaction.view`, 10a 10.11) |
 | Request and ops logs | Log sink | Debugging | `retention.request_log_days`, `retention.ops_log_days` | No (fields in item 9) | Operators |
 | Analytics events | `events` | FD§9 measures | `retention.event_raw_days` | Member reference is `HMAC-SHA-256(secret.analytics_key[version], member_id)` [A] | Operators; aggregates only for publication |
 | Backups | Blob store | Recovery | `retention.backup_days` | Contains all of the above | Key custodians (S10.14.3) |
@@ -195,7 +196,7 @@ Numbered for reference as "S10.13.1 item n".
 | Preferences (locale, digits, calendar) | Browser storage | Harmless; no identifiers |
 | History, balances | Not cached beyond the open screen | Fetched from the server |
 
-**"Forget this device"** is a visible action: it deletes all local data above, revokes the session (`sessions` hash removed) and removes the `Device` record. The page title, icon and any notification text are neutral and carry no political or sensitive words. The design cannot protect an unlocked or already-inspected device or the volunteer's chat history at the provider (`THR-21`).
+**"Forget this device"** is a visible action: it deletes all local data above, revokes the session (`sessions` hash removed) and detaches the device token from this browser; the server-side `Device` row stays only as the grant-memory residue of 10a 10.9.1, so forgetting cannot reset `grant.max_per_device`. The page title, icon and any notification text are neutral and carry no political or sensitive words. The design cannot protect an unlocked or already-inspected device or the volunteer's chat history at the provider (`THR-21`).
 
 ### 10.13.5 Subpoena, seizure and compelled disclosure [D]
 
@@ -242,7 +243,7 @@ The platform adds no backdoor, no unlogged access path, no identity collection i
 | Share card | Cell count and badge only; no handle, no timestamp finer than a week, no place | FD§6.2 V3 |
 | Teams | Public only at `team.min_public_members` or more; totals only, no member rows; leaving is always possible | FD§6.2 V4 |
 | Place or affiliation | Never collected; `opt_in` shows a typed, unverified label with a warning | FD§6.1 rank 5 |
-| Invite trees | Never public; visible only to reviewers during farming review | `THR-06` |
+| Invite trees | Never public; operators see edges (every read logged), reviewers see counts only (10a 10.10, 10.11) | `THR-06` |
 
 ### 10.13.7 What the platform cannot promise [D]
 
@@ -308,6 +309,7 @@ The outcome is an `AdminAction` (`safety_review`: `passed` or `rejected`). A cha
 | --- | --- | --- | --- | --- |
 | `secret.volunteer_handle_key[version]` | `vol_` handle HMAC (S0.6.4) | 256-bit random | App, ledger and provenance code | `security.secret_rotation_days`; no overlap needed (new handles use the new version); a retired version is destroyed `retention.job_payload_days` days after retirement, which unlinks old handles by design |
 | `secret.ip_hash_key[version]` | Rate-limit counters (S0.6.4) | 256-bit random | Edge or app rate limiter | One version per UTC day; a version is destroyed `retention.ip_hash_ttl_days` x 86,400 s after its day ends |
+| `secret.log_actor_key[version]` | `actor_day_hash` in request log lines (10a 10.14.1) [A] | 256-bit random | Request logger | One version per UTC day; destroyed `retention.request_log_days` x 86,400 s after its day ends |
 | `secret.device_hash_key[version]` | `Device` keyed hash [A] | 256-bit random | Identity code | `security.secret_rotation_days`; old version kept until its devices age out (`short`) |
 | `secret.analytics_key[version]` | Member reference in `events` [A] | 256-bit random | Metrics pipeline | Rotated per phase (week-2 and week-4 return need stable references); destroyed `retention.event_raw_days` after its last event |
 | `secret.cursor_mac_key[version]` | Pagination cursor MAC (S0.11.6) | 256-bit random | App | `security.secret_rotation_days`; overlap `api.cursor_ttl_s` |
@@ -489,9 +491,9 @@ Permission names follow `perm.<area>.<action>` (S0.8.2); the matrix itself is in
 | Reporter | Any member or requester (`perm.report.file`) | File a report; see its outcome; appeal a dismissal once | See who the subject is beyond the reported object; see other reports |
 | Triager | `AdminUser` with `reviewer` (`perm.report.triage`) | Triage, request more evidence, dismiss, escalate | Ban; release a kill switch |
 | Decider | `AdminUser` with `reviewer` (`perm.report.decide`) | Warn, restrict, suspend, reject a job, pause a template, void cells | Decide a report about themselves, or an appeal of their own decision |
-| Second approver | A different `AdminUser` (`perm.member.ban_approve`) | Approve a ban, a legal-hold clear, a disclosure | Be the decider of the same action |
+| Second approver | A different `AdminUser` (`perm.member.ban`, two-person, 10a 10.11) | Approve a ban, a legal-hold clear, a disclosure | Be the decider of the same action |
 | Operator | `AdminUser` with `operator` | Engage kill switches with a logged reason; execute approved actions technically | Decide content questions alone |
-| Appeals reviewer | `AdminUser` with `reviewer` who was not the decider and has no declared conflict (`perm.appeal.review`) | Uphold or overturn | Handle an appeal about a decision they took |
+| Appeals reviewer | `AdminUser` with `reviewer` who was not the decider and has no declared conflict (`perm.appeal.decide`, 10a 10.11) | Uphold or overturn | Handle an appeal about a decision they took |
 | Counsel (external) | Outside the system | Advise on legal notices and disclosure [V] | Hold any system credential |
 | Subject | The reported member or requester | See the decision, its reason code and the object; appeal | See the reporter's identity |
 
@@ -655,7 +657,7 @@ All are convention additions (S0.1) and are reported under `## Issues raised`. D
 | `report_category` | `unsafe_prompt`, `injection_attempt`, `suspected_sensitive_data`, `prohibited_content`, `harassment`, `forged_or_junk_result`, `fraud_or_farming`, `impersonation`, `safety_of_person`, `legal_notice`, `other` |
 | `moderation_action` | `no_action`, `warn`, `restrict`, `suspend`, `ban`, `reject_job`, `pause_template`, `suspend_service`, `void_cells`, `takedown_output`, `refer_to_counsel` |
 
-**Permissions**: `perm.report.file`, `perm.report.triage`, `perm.report.decide`, `perm.member.ban_approve`, `perm.appeal.review`. **Secrets**: the `secret.*` names of S10.14.2 (never parameters). **Admin action kinds**: `disclosure.received`, `disclosure.release`, `secret.rotated`, `secret.emergency_access`, `safety_review`.
+**Permissions**: `perm.report.decide` is new (added to the 10a matrix: reviewer, X8, X11); `perm.report.file`, `perm.report.triage`, `perm.member.ban` and `perm.appeal.decide` are defined in 10a 10.11 and replace the proposals `perm.member.ban_approve` and `perm.appeal.review`. **Secrets**: the `secret.*` names of S10.14.2 (never parameters). **Admin action kinds**: `disclosure.received`, `disclosure.release`, `secret.rotated`, `secret.emergency_access`, `safety_review`.
 
 ## 10.19 Register of unverified items and assumptions
 
