@@ -132,7 +132,7 @@ CELL, one attempt
                       +--declined--> queued
  rejected, expired --requeued--> queued (attempt + 1)      rejected, expired --attempts_exhausted--> exhausted (T)
  queued, leased --paused--> suspended --resumed--> queued
- any non-terminal --cancelled--> cancelled (T)            any non-terminal --voided--> voided (T)
+ any non-terminal except submitted and flagged_for_audit --cancelled--> cancelled (T)            any non-terminal --voided--> voided (T)
 
 LEASE:  (none) --issued--> active --submission_received--> submitted
                            active --expired--> expired   active --released--> released   active --revoked--> revoked
@@ -188,7 +188,7 @@ DEFER changes no state and emits no event; it records `acceptance_deferred_until
 
 | id | from | event | to | guard | side effects | ledger effects | audit-log entry |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| LT-01 | (none) | `lease.issued` | active | Same transaction as CT-02; unique partial index allows one `active` lease per cell (5.29.3) | Store `nonce_hash` (SHA-256 of 16 random bytes, `lease.nonce_bytes`); `expires_at` = now + `lease.timeout_s`; `hard_expires_at` = `expires_at` + `lease.submit_grace_s`; `extensions` = 0; return the nonce once in the response and never store it | none | `lease.issued {cell_id, expires_at, hard_expires_at}` |
+| LT-01 | (none) | `lease.issued` | active | Same transaction as CT-02; unique partial index allows one `active` lease per cell (5.29.3) | Store `nonce_hash` (SHA-256 of 16 random bytes, `lease.nonce_bytes`); `expires_at` = now + `lease.timeout_s`; `hard_expires_at` (the column S9.* 9.4.4 calls `grace_until`) = `expires_at` + `lease.submit_grace_s`; `extensions` = 0; return the nonce once in the response and never store it | none | `lease.issued {cell_id, expires_at, hard_expires_at}` |
 | LT-02 | active | `lease.submission_received` | submitted | Same transaction as CT-03 | Store `submitted_at`; the nonce is spent | none | `lease.submission_received {submission_id}` |
 | LT-03 | active | `lease.expired` | expired | Same transaction as CT-04 | none | none | `lease.expired {}` |
 | LT-04 | active | `lease.released` | released | Same transaction as CT-05 | none | none | `lease.released {release_reason}` |
@@ -370,7 +370,7 @@ S4.* chooses the concrete store; it MUST provide all of the following, because w
 | GU-09 | A job is settled exactly once; its escrow ends at exactly 0; payouts + levy + refund = the amount held, with zero tolerance | Key `settle:<job_id>` or `cancel:<job_id>`; CAS on job and escrow | 5.29.8 |
 | GU-10 | No double-spend: a member balance never goes below 0, a job has at most one `hold`, a reservation at most one `hold` and one activation | Conditional balance update, lot consumption in the same transaction, unique keys | 5.29.7 |
 | GU-11 | Crash atomicity: after any crash a transition is either fully applied or not at all | 5.21.2 | 5.21.2 |
-| GU-12 | No lease is issued if accepting it would take the member's balance (escrow excluded) above the cap K x tier multiplier, and Commons minting never exceeds `mint.monthly_cap_credits` or `mint.per_member_daily_cap_credits` | Headroom reserved at lease, consumed at acceptance | 5.29.3 |
+| GU-12 | No lease is issued if accepting it would take the member's balance (escrow excluded) above the cap K x tier multiplier, and Commons minting never exceeds `mint.monthly_cap_credits` or `mint.per_member_daily_cap_credits`; refunds, restitution, grants and a demotion can still lift a balance above the cap (no clawback) | Headroom reserved at lease, consumed at acceptance | 5.29.3 |
 | GU-13 | Events are delivered at least once, in order per entity, and every consumer is idempotent on `event_id` | Outbox in the same transaction, relay, consumer dedupe | 5.29.10 |
 | GU-14 | An API call with an `Idempotency-Key` takes effect at most once per key within `api.idempotency_ttl_s`, and its stored response is replayed | S0.11.5 | 5.29.5 |
 
@@ -390,7 +390,7 @@ Every transaction acquires locks in this order and never goes back; two rows of 
 | 8 | `LedgerAccount` rows, ascending id | any ledger posting |
 | 9 | Ledger head (sequence and hash chain) | the last step of any ledger posting, held only for the append |
 
-The ledger head serializes ledger commits to keep one hash chain (S0.6.4) [A]; because it is taken last and held only for the append, contention is bounded by the append time, not by the length of the transaction.
+The `MintBudget` row (Commons leasing and acceptance) is taken after the `Cell` lock (order 4) and before the `Escrow` lock (order 7); no path takes it earlier. The ledger head serializes ledger commits to keep one hash chain (S0.6.4) [A]; because it is taken last and held only for the append, contention is bounded by the append time, not by the length of the transaction.
 
 ### 5.29.3 Leasing
 
@@ -682,7 +682,7 @@ def settle(job_id, mode):                    # mode in ('complete', 'cancel')
 | `ledger_checkpointer` | `ledger.checkpoint_interval_s` | none | Publish the checkpoint hash, key `checkpoint:<utc_date>` | Idempotent by date |
 | `metric_rollup` | `metrics.rollup_interval_s` | raw events | Upsert by `(metric, window)` | Idempotent upsert |
 | `outbox_relay` | continuous | unsent outbox rows | Deliver, then mark sent | A crash between delivery and marking redelivers; consumers dedupe on `event_id` (GU-13) |
-| `idempotency_purger`, `retention_purger` | hourly [A] | records past `api.idempotency_ttl_s`, rows past their retention class | Delete | Deleting an expired key is safe because L2 and L3 still protect the objects |
+| `idempotency_purger`, `retention_purger` | hourly [A] | records past `api.idempotency_ttl_s`, rows past their retention class (an `IN_PROGRESS` idempotency record older than `api.request_timeout_s` is also released, at the `lease.reap_interval_s` cadence: the effect commits atomically with its completion record, 5.21.2, so an older in-progress record means the request died before committing, and a retry must not be blocked until the TTL) | Delete | Deleting an expired key is safe because L2 and L3 still protect the objects |
 | `fsm_consistency_checker` | `ledger.invariant_check_interval_s` | read-only | Checks CK-01..CK-08 below | Read-only |
 
 **Consistency checks** [D][A: S6.* may register CK-03 to CK-05 as `INV-L` ids]. They run continuously beside the ledger invariants and raise an `Alarm`; CK-03 to CK-05 also emit `ledger.invariant_violated` with `details.check_id`.
@@ -693,7 +693,7 @@ def settle(job_id, mode):                    # mode in ('complete', 'cancel')
 | CK-02 | A cell is `leased` if and only if it has exactly one `active` lease whose id equals `active_lease_id`; an `active` lease past `hard_expires_at` by more than the reaper's lag is a finding |
 | CK-03 | Every `accepted` cell has exactly one `mint` or `payout` transaction of 1,000,000 `ucr`, unless reversed by CT-17; no other cell has one |
 | CK-04 | Every `closed` escrow has exactly one `settle` or `cancel` transaction, balance 0, and the closing identity holds; no `open` escrow belongs to a terminal job |
-| CK-05 | `mint_budget.reserved_ucr` = 1,000,000 x Commons cells in `leased`, `submitted`, `flagged_for_audit`; `minted_ucr` = the sum of `mint` entries of the period |
+| CK-05 | `mint_budget.reserved_ucr` = 1,000,000 x Commons cells in `leased`, `submitted`, `flagged_for_audit`; `minted_ucr` = the sum of `mint` entries whose lease was issued in the period (the period is that of the lease, 5.29.6, not of the entry timestamp) |
 | CK-06 | No terminal job has a non-terminal cell, an `active` lease or a non-`closed` escrow |
 | CK-07 | `entity_seq` is gapless for every entity and the last `to_state` equals the entity's `state` |
 | CK-08 | No submission exists without a lease in `submitted`, and no `submitted` lease without a submission |
@@ -785,7 +785,11 @@ Concurrency tests use a deterministic interleaving harness with named injection 
 - `AC-fsm-05` Given a restricted member with `trust.restriction_days` elapsed, When `restriction_lifter` runs twice, Then the tier is restored once and `member.restriction_lifted` is emitted once.
 - `AC-fsm-06` Given a template version in `awaiting_second_review` and `template.min_reviewers_new` = 2, When the same reviewer approves again, Then the unique key refuses it.
 - `AC-fsm-07` Given a service with only `unknown` flags, When `service.approved` is attempted, Then it is refused (`unknown` evaluates as `no`) and the state stays `in_review`.
-- `AC-fsm-08` Given the FD§3.3 job (N = 240, price 1.15), When it runs to `completed` with all cells accepted, Then 264 `payout` transactions of 1,000,000 `ucr`, one `levy` of 12,000,000 `ucr`, refund 0, escrow balance 0, and CK-03 and CK-04 pass. The inputs are the FD's illustrative values, not measurements.
+- `AC-fsm-08` Given the FD§3.3 job (N = 240, price 1.15), When it runs to `completed` with all 240 primary cells accepted and the 24 verification and rework cells of its pool (`floor(240 x 100,000 / 10^6)`) created and accepted, Then 264 `payout` transactions of 1,000,000 `ucr`, one `levy` of 12,000,000 `ucr`, refund 0, escrow balance 0, and CK-03 and CK-04 pass. The inputs are the FD's illustrative values, not measurements.
+- `AC-fsm-09` Given a lease past `hard_expires_at` and a reaper that crashes after CT-04 and before CT-11, When `cell_requeuer` runs, Then the cell ends `queued` with `attempt` + 1 (or `exhausted` at `cell.max_attempts`) and no `Lease` is `active` for it.
+- `AC-fsm-10` Given a cell in `submitted` whose submission reports a service, When the service is revoked with `inflight_policy` = `drain`, Then the cell proceeds to acceptance and is paid; with `void`, Then the cell is `voided` and unpaid; jobs pinned only to that service get `job.stop_requested` with `service_revoked`.
+- `AC-fsm-11` Given a cell declined by one donor, When another donor leases it, Then the lease succeeds (`active_lease_id` was cleared) and no unique-key violation occurs on `(cell_id, attempt)`.
+- `AC-fsm-12` Given a member job with N = 10 and `v_ppm` = 100,000 (pool `floor(10 x 100,000 / 10^6)` = 1 cell), When two non-primary cells are created while the 10 primary cells are non-terminal, Then the first is created and the second is refused by `pool_ok`.
 
 ## Issues raised
 
@@ -800,7 +804,7 @@ Each resolution is already applied in this file; `C-001` consolidates them into 
 Convention additions made by this part (not issues, listed so `C-001` can fold them back):
 
 1. Headings of this file are numbered `5.21`..`5.39` (5.21).
-2. New entities and fields: `StateTransition` (`stt_`, `ISS-55`); `TemplateApproval` (`tap_`, `template_approvals`, retention `permanent`) for per-reviewer approvals with `content_hash`; `MintBudget` (`mbd_`, `mint_budgets`, `permanent`, S6.* owns: `period`, `minted_ucr`, `reserved_ucr`, `cap_ucr`). Fields this part needs from S5a: `Job.origin`, `quote_expires_at`, `closure_reason`, `pause_causes`, `state_before_pause`, `pause_started_at`, `paused_total_s`, `admitted_at`, `escrow_id`, `levy_reserved_ucr`, `held_ucr`; `Cell.active_lease_id`, `attempt`, `acceptance_deferred_until`; `Lease.member_id`, `attempt`, `nonce_hash`, `expires_at`, `hard_expires_at`, `extensions`, `release_reason`; `Submission.content_hash`, `late`, `time_to_submit_s`, `reported_service_id`; `Member.tier_before_restriction`, `restricted_until`; `ServiceRegistryEntry.approved_at`, `review_due_at`, `grace_deadline_at`, `suspended_cause`; `Appeal.decision_ref`, `sequence`, `due_by`, evidence snapshot.
+2. New entities and fields: `StateTransition` (`stt_`, `ISS-55`); `TemplateApproval` (`tap_`, `template_approvals`, retention `permanent`) for per-reviewer approvals with `content_hash`; `MintBudget` (`mbd_`, `mint_budgets`, `permanent`, S6.* owns: `period`, `minted_ucr`, `reserved_ucr`, `cap_ucr`). Fields this part needs from S5a: `Job.origin`, `quote_expires_at`, `closure_reason`, `pause_causes`, `state_before_pause`, `pause_started_at`, `paused_total_s`, `admitted_at`, `escrow_id`, `levy_reserved_ucr`, `held_ucr`; `Cell.active_lease_id`, `attempt`, `acceptance_deferred_until`; `Lease.member_id`, `attempt`, `nonce_hash`, `expires_at`, `hard_expires_at`, `extensions`, `release_reason`; `Submission.content_hash`, `late`, `time_to_submit_s` (S9.* 9.12 calls it `lease_to_submit_s`; one column), `reported_service_id`; `Member.tier_before_restriction`, `restricted_until`; `ServiceRegistryEntry.approved_at`, `review_due_at`, `grace_deadline_at`, `suspended_cause`; `Appeal.decision_ref`, `sequence`, `due_by`, evidence snapshot.
 3. Transition `screening --job.cancel_requested--> cancelled` (JT-19).
 4. `closure_reason` value `cells_exhausted` (JT-15).
 5. Log-only event `lease.extended` (5.23.3) with no state change.
@@ -811,3 +815,4 @@ Convention additions made by this part (not issues, listed so `C-001` can fold t
 10. `grant` entries with reason `appeal_restitution` (`ISS-56`) and `reserve_donation` on member closure (MS-04).
 11. Metrics `hamyar_bgjob_last_success_seconds` and `hamyar_bgjob_failures_total`, and the worker names of 5.29.10 as `actor_id` values.
 12. Permission names `perm.job.*`, `perm.member.*`, `perm.template.*`, `perm.service.*`, `perm.submission.release` are proposals for S10.* (5.21.1).
+13. Transition `suspended --service.review_started--> in_review` when `suspended_cause` = `review_lapsed` (SVT-02; S0.9.6 needs the same transition), and the rule that `Cell.active_lease_id` is cleared when a cell leaves `leased`, `submitted` or `flagged_for_audit` other than to `accepted` (5.23.1).
