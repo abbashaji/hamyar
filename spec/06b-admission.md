@@ -57,7 +57,7 @@ This file specifies how the platform decides whether, when and at which quoted w
 
 | Name | Content | Retention |
 | --- | --- | --- |
-| `donor_day_counts` | `(member_id, day_utc, service_id or none, cells_accepted)` | `member_bound`; rows older than `W + 1` days are deleted by the rollup job |
+| `donor_day_counts` | `(member_id, day_utc, service_id or none, cells_accepted)`; `cells_accepted` counts cells in state `accepted` when the rollup runs and the rollup recomputes the last `W + 1` days, so a cell later `overturned` (S0 0.9.3) leaves the count at the next rollup [A] | `member_bound`; rows older than `W + 1` days are deleted by the rollup job |
 | forecast snapshots | One `MetricSnapshot` per scope and run (`admission.forecast.all`, `admission.forecast.<category_key>`): `B`, cohort size, history days, inputs hash. Aggregates only | `permanent` |
 | capacity view | The sum of `remaining` per category and the held reservations, computed on demand under the admission lock | none |
 
@@ -155,11 +155,13 @@ function phi_capacity(fc, a, b, now) -> Q        # member-job share of forecast 
   return Q(params.phi_ppm, 1e6) * total
 ```
 
+The short forms `phi_capacity(fc, a, b)` and `phi_capacity(fc, slot_k)` used elsewhere in this file mean this function with `now` = the forecast time of `fc` and `[a, b)` = the window or the slot. `reserved_in(a, b, S)` is the sum, over `held`, non-`degraded` reservations in scope S (all categories for `ALL`) and their slots k, of `plan[k] × overlap([a, b), slot_k) / step`, the same pro-rata fluid rule as capacity. [D]
+
 Check against FD§3.3: `B = 320` (40 donors × 8 cells), `h = 0`, `w = 1`, a 2-day window gives `phi_capacity = 0.5 × 320 × 2 = 320`, the number in `AC-admission-01`. [D]
 
 ### 6.24.3 Commons capacity bound
 
-The same snapshot publishes `commons_cells_per_day = (1 − φ) × B(ALL) × (1 − h)` as `MetricSnapshot` key `admission.commons_capacity_cells_per_day`. `S6.*` reads it as the "forecast redeemable capacity" that bounds `mint.monthly_cap_credits` (FD§4.2). With the FD§3.3 inputs, `(1 − 0.5) × 320 × 30 = 4,800`, the initial default of `mint.monthly_cap_credits`. [D]
+The same snapshot publishes `commons_cells_per_day = (1 − φ) × B(ALL) × (1 − h)` as `MetricSnapshot` key `admission.commons_capacity_cells_per_day`. It is the supply of Commons cells, not the capacity that can honor claims. That capacity is the member share, so the same snapshot also publishes `φ × B(ALL) × (1 − h)` as `MetricSnapshot` key `admission.redeemable_capacity_cells_per_day`, and `S6.*` bounds `mint.monthly_cap_credits` by this redeemable key (FD§4.2 bounds the cap by forecast redeemable capacity; FD§4.8 makes φ the share open to member jobs). The two keys are equal only at φ = 0.5: with φ = 0.3 and the FD§3.3 donors the Commons supply is `0.7 × 320 × 30 = 6,720` cells a month but the redeemable capacity is `0.3 × 320 × 30 = 2,880`, so a cap taken from the Commons key would mint more claims than member jobs can honor. S0 0.10.6 (default formula of `mint.monthly_cap_credits`) and `S6.*` must name the redeemable key; that is a cross-part change [A]. With the FD§3.3 inputs and φ = 0.5 both keys give `(1 − 0.5) × 320 × 30 = 4,800`, the initial default of `mint.monthly_cap_credits`. [D]
 
 ## 6.25 Per-category supply gauge (FD§5.7(8))
 
@@ -185,7 +187,7 @@ Restrictive opt-ins can starve one category while the platform as a whole has ca
 | Layer | Mechanism | Guarantee it gives |
 | --- | --- | --- |
 | L1 admission bound | Every quote, hold and reservation is tested against `φ × capacity` (6.27, 6.30) | Committed member cells cannot exceed φ of forecast capacity at the moment of admission |
-| L2 offer guard | The lease scheduler uses `offer_class` below whenever a donor could be offered either a Commons cell or a member-job cell | While both classes have eligible queued cells, the member share of leases never exceeds φ in any prefix of the offers, so Commons minting continues |
+| L2 offer guard | The lease scheduler uses `offer_class` below whenever a donor could be offered either a Commons cell or a member-job cell | While both classes have eligible queued cells, every `MEMBER` offer leaves the member share of leases in the trailing `admission.share_window_s` at most φ (6.26.4), so Commons minting continues |
 | L3 reservation share cap | Reserved cells in any slot never exceed `reservation.capacity_share_cap` of the φ capacity of that slot | Reservations cannot absorb the member share and then push it over φ |
 | Monitoring | `hamyar_admission_commons_share_ratio` (Commons leases divided by all leases over `admission.share_window_s`). An alarm (`Alarm`, S4.*) is raised when it stays below `1 − φ` while eligible Commons cells exist | Detects a scheduler defect |
 
@@ -208,6 +210,14 @@ function offer_class(donor, now) -> COMMONS | MEMBER | NONE        # called by t
 
 With φ = 0.5 and empty counters the first offer is Commons, the second member, then alternating. The counters are global, not per donor; a donor may receive a different mix. [A]
 
+### 6.26.4 Argument and limits [D][A]
+
+**Lemma (L2 right after a member offer).** Let `m`, `a` be the counters before a call that returns `MEMBER`. The guard gives `(m + 1) × 10^6 <= phi_ppm × (a + 1)`, so after the lease is issued `m' = m + 1`, `a' = a + 1` satisfy `m' <= φ × a'`. If the call returns `COMMONS`, `a' = a + 1`, `m' = m`, and `m <= φ × a` implies `m' <= φ × a'`. By induction `m <= φ × a` holds after every offer made while both classes are available when the window is infinite (counters since the start).
+
+**Limits, flagged.** (1) With a finite trailing window a lease leaving the window can break the invariant (a Commons lease leaving raises `m / a`); the guard then returns `COMMONS` until it is restored, so the bound holds right after each `MEMBER` offer, not at every instant. (2) Offers made because only one class has eligible cells for that donor (R8 opt-ins) are not limited and raise `m`; the Commons share of leases is at least `1 − φ` only where Commons cells are eligible for the donors served. (3) Leases are counted, not accepted cells. (4) L1 and L3 bound commitments against the forecast; L2 bounds the realized lease mix whatever the forecast does.
+
+**Conclusion.** (1 − φ) is preserved by construction for commitments (L1, with the backlog guard of 6.30.2 closing the reservation path) and for the lease mix under limits (1) and (2). It is not unconditional; `hamyar_admission_commons_share_ratio` monitors the rest. A per-eligibility-group counter is not specified.
+
 ### 6.26.3 Scheduler contract (consumed by S5.*, S8.*, S9.*) [D]
 
 | Id | Requirement |
@@ -226,7 +236,7 @@ Service is first come (SC-1), so the cells ahead of a new job must be done befor
 
 `R + backlog(S) <= phi_capacity(fc(S), t0, t0 + n × step) − reserved_in(t0, t0 + n × step, S)`
 
-with `backlog(S)` the sum of `remaining` over capacity-holding jobs in S (all of it counts, because first come puts it ahead), and `reserved_in` the cells of **held** reservations in S that overlap the window (an activated reservation is an ordinary job and is counted in the backlog, never in both). The job is admissible in a window only if both scopes pass. This is the FD§4.8 rule "committed cells over its window <= φ × forecast active capacity", made precise for several jobs, several categories and reservations (`ISS-65`). [D]
+with `backlog(S)` the sum of `remaining` over capacity-holding jobs in S (all of it counts, because first come puts it ahead), and `reserved_in` the cells of **held**, non-`degraded` reservations in S that overlap the window (pro rata by overlapping seconds, 6.24.2) (an activated reservation is an ordinary job and is counted in the backlog, never in both). The job is admissible in a window only if both scopes pass. This is the FD§4.8 rule "committed cells over its window <= φ × forecast active capacity", made precise for several jobs, several categories and reservations (`ISS-65`). [D]
 
 ### 6.27.2 Claim stretch (FD§4.7)
 
@@ -241,25 +251,30 @@ function quote_job(job, requested_window_s, now) -> Quote          # caller hold
   R      = ceil((N + V) * params.deadline_multiplier_standard)
   p_ucr  = 1_000_000 + v_ppm + lam_ppm ;  escrow_ucr = N * p_ucr
   cat    = job.category_key
-  fcA, fcC = latest_or_compute_forecast(ALL, now), latest_or_compute_forecast(cat, now)
+  fcA, fcC = latest_or_compute_forecast(ALL, now), latest_or_compute_forecast(cat, now)   # computed afresh at every quote (6.25); a stored snapshot is reused only inside the same lock hold
   if not fcA.ok: return decide_waitlist(fcA.reason)
   if not fcC.ok: return decide_waitlist(fcC.reason)
-  bA, bC = backlog(ALL), backlog(cat)
+  if exists_waiting_ahead(job, cat): return decide_waitlist("waitlist_ahead")   # no overtaking by new arrivals (FR-3)
+  bA, bC = backlog(ALL, ahead_of=job), backlog(cat, ahead_of=job)   # ahead_of: capacity-holding jobs with a smaller hold_seq than the job's own (all for a new job); the job's own hold is never counted twice
   n_min  = ceil(params.min_window_s / step)
   n_max  = params.max_window_days * 86400 / step
   feasible(n) = for S, fc, b in ((ALL, fcA, bA), (cat, fcC, bC)):
                    R + b <= phi_capacity(fc, now, now + n*step, now) - reserved_in(now, now + n*step, S)
   L_min  = smallest n in [n_min, n_max] with feasible(n)           # linear scan; never binary search
-  if none: return decide_waitlist("exceeds_max_window")
+  if none: return decide_waitlist("category_no_supply" if fcC.B == 0 else "exceeds_max_window")
   stretch = claim_stretch_ppm()
   n_need  = smallest n in [ceil(L_min * stretch / 1e6), n_max] with feasible(n)   # else n_need = L_min
   limiting = classify(L_min, n_need)    # global_capacity | category_supply | backlog | claim_pressure | window_bounds
   req = requested_window_s / step if requested_window_s else n_need   # validated: on the grid, in bounds
-  if req < n_need: return Quote(decision=counter_offer, window_s=n_need*step, ...)
+  if req < n_need or not feasible(req): return Quote(decision=counter_offer, window_s=n_need*step, ...)
   return Quote(decision=accept, window_s=req*step, ...)
 ```
 
 `requested_window_s` is optional (null means earliest). It must lie in `[admission.min_window_s, admission.max_window_days × 86,400]` and be a multiple of `step`, else `VALIDATION_FAILED`. The quote never promises less than `admission.min_window_s`, so "instant" completion is never quoted (Principle 10). A requester may choose a window longer than the earliest one. [D]
+
+**`exists_waiting_ahead(job, cat)`** is true when a `waiting` entry of `category_key` = `cat` exists whose `job_id` differs from the job's and whose `waitlist_seq` is smaller than the job's own entry (any entry, for a job without one). A new arrival in a category with a waiting entry is waitlisted behind it even if it would fit (`reason` = `waitlist_ahead`). Entries of other categories do not block it; the global scope is a residual starvation path (open decision 8, 6.39) [A].
+
+**`classify(L_min, n_need)`** returns the first match of: (1) `n_need > L_min`: `claim_pressure`; (2) the smallest `n >= 1` feasible in both scopes is below `n_min`: `window_bounds`; (3) the smallest `n` feasible in the category scope alone exceeds the smallest `n` feasible in the `ALL` scope alone: `category_supply`; (4) the smallest `n` feasible with `backlog` and `reserved_in` set to 0 is below `L_min`: `backlog`; (5) otherwise `global_capacity`. This reproduces WE-1 (`global_capacity`), WE-2 (`backlog`), WE-3 (`category_supply`) and WE-7 (`claim_pressure`). [D]
 
 ### 6.27.4 Quote record [D]
 
@@ -269,7 +284,7 @@ Stored on the `Job` as an immutable document `quote` (the column is `S5.*`'s); a
 | --- | --- |
 | `quote_seq`, `issued_at`, `expires_at` | `expires_at = issued_at + price.quote_ttl_s` (`admission.waitlist_quote_ttl_s` after a waitlist release; the activation deadline for a reserved job, 6.30) |
 | `decision` | `accept`, `counter_offer`, `waitlist` |
-| `reason` | For `waitlist`: `insufficient_history`, `forecast_below_min_donors`, `exceeds_max_window`, `category_no_supply`, `forecast_dropped_before_confirm` |
+| `reason` | For `waitlist`: `insufficient_history`, `forecast_below_min_donors`, `exceeds_max_window`, `category_no_supply`, `waitlist_ahead`, `forecast_dropped_before_confirm` |
 | `requested_window_s`, `window_s` | Declared window in seconds, a multiple of `step` (null when waitlisted) |
 | `cells_n`, `verification_cells_v`, `committed_cells_r`, `class_multiplier_ppm` | N, V, R |
 | `v_ppm`, `lambda_ppm`, `p_ucr`, `escrow_ucr` | Price stamped from `S6.*`; `escrow_ucr = N × p_ucr` (S0 0.6.1) |
@@ -292,7 +307,7 @@ Checked in order; the first failure refuses with the error shown and changes no 
 | 1 | `launch.member_jobs_enabled` is true | `403 LAUNCH_GATE_CLOSED` |
 | 2 | `kill.all_new_jobs`, `kill.template.<tpl_id>`, `kill.service.<svc_id>` and `kill.member.<mem_id>` are released | `503 KILL_SWITCH_ENGAGED` |
 | 3 | `N <= admission.max_job_cells` | `400 VALIDATION_FAILED` (details point to splitting the job) |
-| 4 | The member's jobs in `quoted`, `admitted`, `running`, `suspended`, `assembling`, `settling`, `cancelling` number fewer than `admission.max_concurrent_jobs_per_member` (checked at `job.submitted` and again under the lock) | `422 CAP_EXCEEDED` |
+| 4 | The member's jobs in `quoted`, `waitlisted`, `admitted`, `running`, `suspended`, `assembling`, `settling`, `cancelling` number fewer than `admission.max_concurrent_jobs_per_member` (checked at `job.submitted` and again under the lock, not counting the job itself; `waitlisted` is counted so that a waitlist release can never push the member above the cap) | `422 CAP_EXCEEDED` |
 | 5 | At `job.submitted`, unexpired balance is at least `N × p_ucr` at the current published price | `422 INSUFFICIENT_CREDIT` |
 
 ### 6.28.2 Decision table
@@ -300,6 +315,7 @@ Checked in order; the first failure refuses with the error shown and changes no 
 | Condition (evaluated top down) | Decision | Job transition (S0 0.9.2) | Capacity hold |
 | --- | --- | --- | --- |
 | A forecast is not `ok` for `ALL` or for the category | `waitlist` | `job.policy_passed` then `job.waitlisted` in one transaction | none |
+| A `waiting` entry of the same category is ahead of the job (`exists_waiting_ahead`, 6.27.3) | `waitlist` (reason `waitlist_ahead`) | same | none |
 | No feasible window within `n_max` | `waitlist` | same | none |
 | `req < n_need` (the requested window is too short) | `counter_offer` with window `n_need × step` | `job.policy_passed` (stays `quoted`) | yes if funded |
 | Otherwise | `accept` with the requested or earliest window | `job.policy_passed` (stays `quoted`) | yes if funded |
@@ -309,8 +325,8 @@ Checked in order; the first failure refuses with the error shown and changes no 
 
 ### 6.28.3 Holds, confirmation and expiry [D]
 
-- **Hold.** A hold is created only if the member's unexpired balance is at least `escrow_ucr` at quote time (`has_hold` = true). An unfunded member cannot reserve capacity by opening quotes. The hold takes the next `hold_seq` and counts in every later backlog.
-- **Confirm** (`confirmJobQuote`, body `{quote_seq}`; `Idempotency-Key` required). Under the admission lock: the job is `quoted`, `now < quote.expires_at`, `quote_seq` is current. With a hold, the job's own position is re-tested on `[now, now + window_s)` with only holds of smaller `hold_seq` as backlog; without a hold, a fresh test is run as for a new quote. If the window can still be honored, the system posts `escrow_hold` (S6.*), creates and queues the cells, and the job becomes `admitted` (`job.escrow_confirmed`), all in one transaction; `window_end_at = admitted_at + window_s`. If it cannot, the confirm is refused with `422 NO_CAPACITY` and `details.requote = true`, no escrow is posted, and either a new quote (`quote_seq + 1`, still `quoted`) or a `waitlist` follows according to 6.28.2 (reason `forecast_dropped_before_confirm`). If escrow cannot be funded (balance spent or a lot expired meanwhile) the answer is `422 INSUFFICIENT_CREDIT` and the job stays `quoted` until expiry.
+- **Hold.** A hold is created only if the member's unexpired balance is at least `escrow_ucr` plus the `escrow_ucr` of the member's other live holds at quote time (`has_hold` = true), so one balance cannot back several holds. An unfunded member cannot reserve capacity by opening quotes. The hold takes the next `hold_seq` and counts in every later backlog.
+- **Confirm** (`confirmJobQuote`, body `{quote_seq}`; `Idempotency-Key` required). Under the admission lock: the job is `quoted`, `now < quote.expires_at`, `quote_seq` is current, and guards 1 and 2 of 6.28.1 still pass (else the same error and no state change). With a hold, the job's own position is re-tested on `[now, now + window_s)` with only holds of smaller `hold_seq` as backlog; without a hold, a fresh test is run as for a new quote. If the window can still be honored, the system posts `escrow_hold` (S6.*), creates and queues the cells, and the job becomes `admitted` (`job.escrow_confirmed`), all in one transaction; `window_end_at = admitted_at + window_s`. If it cannot, the confirm is refused with `422 NO_CAPACITY` and `details.requote = true`, no escrow is posted, and either a new quote (`quote_seq + 1`, still `quoted`) or a `waitlist` follows according to 6.28.2 (reason `forecast_dropped_before_confirm`). If escrow cannot be funded (balance spent or a lot expired meanwhile) the answer is `422 INSUFFICIENT_CREDIT` and the job stays `quoted` until expiry.
 - **Expiry.** At `expires_at` the reaper (6.34) emits `job.quote_expired` and releases the hold. The job is terminal. A counter-offer is accepted only by confirming it.
 - **Cancel** from `quoted` releases the hold at once (`job.cancel_requested` to `cancelled`).
 - **Events.** Besides S0 events, `admission.quote_issued` is logged per quote (6.34).
@@ -347,7 +363,7 @@ function release_waitlist(now)                                   # holds admissi
   for e in entries where status == waiting order by waitlist_seq:
       if e.expires_at <= now: expire(e); continue
       if e.category_key in blocked: continue
-      q = quote_job(e.job, e.requested_window_s, now)
+      q = quote_job(e.job, e.requested_window_s, now)   # re-runs guards 1 to 3 of 6.28.1; an entry whose guard fails is skipped, keeps ageing and does not block its category
       if q.decision == waitlist: blocked.add(e.category_key); continue
       mark_released(e); transition(e.job, job.waitlist_released); issue(q, ttl=params.waitlist_quote_ttl_s)
 ```
