@@ -446,15 +446,20 @@ function evaluate_switch(switch_name, now) -> Pass | Fail(reasons)
     reasons = []
     required = param('launch.required_gate_ids')                  # e.g. ['G0','G1']
     always_required = ['G4']                                      # security.rotate_before_public_exposure is a constant true
-    gate_ids = union(required, always_required intersect switch_scope_gates(switch_name))
+    gate_ids = union(required, ['G0', 'G1'], always_required intersect switch_scope_gates(switch_name))   # G0 and G1 are a floor even if the parameter is edited (S0 also validates it)
     for gate in gate_ids:
         for item in blocking_items_for(gate, switch_name):        # S14.7.2 defines scope per switch
             if not (item.state == 'signed_off' and item.valid_until is (null or > now)):
                 reasons += 'item_not_valid:' + item.catalog_key
             if item.outcome == 'not_satisfied':
                 reasons += 'item_not_satisfied:' + item.catalog_key   # explicit, even though it also fails the line above
+    for item in switch_extra_items(switch_name):                   # S14.7.2 right-hand column: g2.* global, g3.envelope_defined, g5.* for member jobs; g3.mint_cap_decision for minting
+        if item.is_blocking and not (item.state == 'signed_off' and item.outcome != 'not_satisfied' and item.valid_until is (null or > now)):
+            reasons += 'item_not_valid:' + item.catalog_key
+    if switch_name == 'launch.minting_enabled' and not authorization_active('launch.member_jobs_enabled', now):
+        reasons += 'jobs_not_enabled'                             # GI-03
     if gate_set_includes('G0', gate_ids):
-        if count(services where service_gate(svc, now) == Pass) < param('launch.min_approved_services'):
+        if count(services where service_gate(svc, now, 'start') == Pass and service_items_valid(svc, switch_name, now)) < max(1, param('launch.min_approved_services')):   # floor 1: S0 allows 0, which would pass with no approved service
             if not fallback_adopted_and_sufficient(switch_name, now):   # S14.7.4
                 reasons += 'no_approved_service_and_no_fallback'
     if kill_switch_engaged(relevant_global_kill_keys(switch_name)):
@@ -462,7 +467,7 @@ function evaluate_switch(switch_name, now) -> Pass | Fail(reasons)
     return Pass if reasons is empty else Fail(reasons)
 ```
 
-`switch_scope_gates` and `blocking_items_for` restrict global items to the ones tagged for that switch in the catalog (most G1 and G4 items apply to all three switches; `g3.mint_cap_decision` applies only to `launch.minting_enabled`; `g5.*` applies only to `launch.member_jobs_enabled`); service-scoped items (`g0.svc.*`, `g2.svc.*`, `g3.svc.*`) are evaluated per service inside `service_gate`, not listed again at the top level, so they are not double-reasoned. [D]
+`switch_scope_gates` and `blocking_items_for` restrict global items to the ones tagged for that switch in the catalog (most G1 and G4 items apply to all three switches; `g3.mint_cap_decision` applies only to `launch.minting_enabled`; `g5.*` applies only to `launch.member_jobs_enabled`); service-scoped items are evaluated per service and not listed again at the top level, so they are not double-reasoned: `g0.svc.*` inside `service_gate`; `g2.svc.*` and `g3.svc.*` through `service_items_valid` (for `launch.member_jobs_enabled`: `g2.svc.prefill` only when the entry has `adapter.supports_prefill`, and all three `g3.svc.*`), so a service counts toward `launch.min_approved_services` only if they are valid. Items outside `gate_ids` that the table of 14.7.2 names are evaluated by `switch_extra_items`; without that loop `G2`, `G3` and `G5` items would never be read. [D]
 
 ### 14.7.2 Required items per switch
 
@@ -498,7 +503,7 @@ FD section 8.3 lists the fallbacks as what happens if no service clears G0; this
 
 ### 14.8.2 Closing a launch switch (one admin)
 
-`launch.switch_close` (holder of `perm.launch.switch_close`): sets the parameter to `false` and sets `revoked_at`, `revoked_by`, `revoked_reason = closed_by_admin` on the active authorization, in one transaction. No second admin and no evaluation are required, consistent with rule 4 (tighten at once). [D]
+`launch.switch_close` (holder of `perm.launch.switch_close`): sets the parameter to `false` and sets `revoked_at`, `revoked_by`, `revoked_reason = closed_by_admin` on the active authorization, in one transaction. No second admin and no evaluation are required, consistent with rule 4 (tighten at once). Closing `launch.member_jobs_enabled` also sets `launch.minting_enabled` to `false` and revokes its authorization in the same transaction (`revoked_reason = gate_regressed`), because minting without member jobs is refused at opening (`GI-03`) and must not outlive that condition. [D]
 
 ### 14.8.3 Automatic revocation
 
@@ -510,12 +515,19 @@ Kill switches are the brake of rule 6: they stop new starts, never in-flight clo
 
 - `killswitch.engage` (holder of `perm.killswitch.engage` for that key): inserts a new `KillSwitch` row with `state = engaged`, `seq` incremented, `reason_code`, `reason_text`; takes effect the instant the row commits, because every enforcement point reads the latest row live (S14.9), never a cached flag.
 - Release needs two admins, mirroring switch-open: `killswitch.release_propose` then `killswitch.release_approve` by a distinct admin, each holder of `perm.killswitch.release_approve`; the released row sets `approved_by`. There is no time window requirement on release the way there is on switch approval, because release only restores a state that engage can immediately re-close if something is still wrong.
-- Scope resolution for `kill.template.<id>` and `kill.service.<id>`: a missing row for a specific `tpl_id` or `svc_id` means `released`, because no kill switch has ever been engaged for that specific entity is not itself a dangerous default, since the entity is already gated by `service_gate` or template approval; a missing row for `kill.all_minting` or `kill.all_new_jobs` cannot occur because migrations always insert `seq = 1, state = released` for those two keys (S14.4.5), so their absence is never a case the code has to reason about.
+- Scope resolution for `kill.template.<id>` and `kill.service.<id>`: a missing row for a specific `tpl_id` or `svc_id` means `released`, because no kill switch has ever been engaged for that specific entity is not itself a dangerous default, since the entity is already gated by `service_gate` or template approval; a missing row for `kill.all_minting` or `kill.all_new_jobs` is evaluated as `engaged` (fail-closed): migrations insert `seq = 1, state = released` for those two keys (S14.4.5), so absence means a lost seed, a restore error or tampering, and must stop work rather than allow it.
 - `kill.member.<mem_id>` stops that member leasing new cells and creating new jobs; a lease already held at engage time may still be submitted (rule 6: not trapping an already-leased cell's value).
 
 ### 14.8.5 Panel
 
 The launch panel (a screen, not a new concept) shows, per switch: current parameter value, whether an active authorization exists and its `authorized_until`, the live `evaluate_switch` result, and for `Fail`, the reasons grouped by gate with a link to each failing item. It shows the kill-switch board: every key, its current state, and the three most recent rows. Full specification of the screen and its copy keys belongs to S11.* and S15.*; this part only fixes what must be true of the data it reads. [D]
+
+### 14.8.6 One admin, or one person behind two admin accounts [D][A]
+
+- The effective sign-off count is `max(2, launch.min_signoffs)`. The two-person rules of this part (sign-off, opening a switch, releasing a kill switch) are constants; `security.two_person_actions` may add actions but cannot remove these.
+- With exactly one active `AdminUser`, `SO-4` cannot be met and `launch.switch_approve` has no distinct approver: no item reaches `signed_off`, no switch opens, no kill switch is released. This is the intended fail-closed outcome, not an error; the panel shows `reasons: ['second_admin_required']`. The one admin can still attach evidence, reopen items, close switches and engage kill switches (tightening, rule 4).
+- There is no break-glass: no override account, environment variable or flag (rule 7). The remedy is organizational: a second admin who is a different person. Who the two admins are, and how a second admin is vetted, is an owner decision (S3.*) [V].
+- The tool cannot detect one human holding two `AdminUser` accounts (14.14). Each enrollment is an `AdminAction` naming the enrolling admin and the passkey `acr_` id (S10.*), so it is auditable afterwards, and enrolling an admin never counts toward any sign-off.
 
 ## 14.9 Enforcement points
 
@@ -523,12 +535,12 @@ Every enforcement point runs inside the same database transaction as the state c
 
 | Point | Guard | On failure |
 | --- | --- | --- |
-| `member.created` (registration completing) | `launch.members_may_join` is open (S14.4.4 active-authorization sense); `kill` has no relevant global key | `FORBIDDEN`, `reasons: ['members_not_open']` |
-| `job.created` | `launch.member_jobs_enabled` open; job's `service_requirement` satisfiable per S14.3's table (at least one, every, or open-weight service passes `service_gate`, or `human_review` fallback is active); `kill.all_new_jobs` released; requester's `kill.member.<id>` released | `FORBIDDEN` with the specific reason (`jobs_not_open`, `no_eligible_service`, `kill_switch_engaged`) |
-| `job.submitted` (job moving from draft/funding into queued, i.e. escrow confirmation) | Re-checks `service_gate` for every pinned service, since time has passed since creation; a service that regressed between creation and funding blocks submission rather than silently queuing cells against a now-unapproved service | `FORBIDDEN`, `reasons: ['service_gate_regressed:' + svc_id]` |
-| `cell.leased` | `service_gate` for the cell's service; `kill.template.<tpl_id>`, `kill.service.<svc_id>` and `kill.member.<mem_id>` of the leasing member all released | `FORBIDDEN` with the failing key named |
-| `cell.accepted` (R9's attested-service check) | `service_gate` for the attested service at the moment of acceptance, independent of what passed at lease time | Rejected per R9's existing `reject.policy_changed` path; this part adds no new rejection code here, it only adds `service_gate` as one more input R9 already expected to receive from S7.* |
-| `ledger.mint` (any entry with `kind = mint`) | `launch.minting_enabled` open; `kill.all_minting` released; the member's `kill.member.<id>` released | `FORBIDDEN`, `reasons: ['minting_not_open']` or `['kill_switch_engaged']` |
+| `member.created` (registration completing) | `launch.members_may_join` is open (S14.4.4 active-authorization sense); `kill` has no relevant global key | `LAUNCH_GATE_CLOSED`, `reasons: ['members_not_open']` |
+| `job.created` (member job and Commons job, whoever authors it) | `launch.member_jobs_enabled` open (a Commons job, authored by an admin or by `system`, needs `launch.minting_enabled` open instead [A]: it exists only to be leased and to mint); job's `service_requirement` satisfiable per S14.3's table (at least one, every, or open-weight service passes `service_gate`, or `human_review` fallback is active); `kill.all_new_jobs` released; requester's `kill.member.<id>` released | `LAUNCH_GATE_CLOSED` (`jobs_not_open`), `KILL_SWITCH_ENGAGED` (`kill_switch_engaged`) or `POLICY_REJECTED` (`no_eligible_service`), error codes of S0.11.3 |
+| `job.escrow_confirmed` (S0.9.2: `quoted` to `admitted`; this row was named `job.submitted`, which is `draft` to `screening` and is guarded by `R1` only); the same guard applies to `job.waitlist_released` re-quotes and to `reservation.activated` | Re-checks `service_gate` for every pinned service, since time has passed since creation; a service that regressed between creation and funding blocks submission rather than silently queuing cells against a now-unapproved service | `FORBIDDEN`, `reasons: ['service_gate_regressed:' + svc_id]` |
+| `cell.leased` and cell listing (`visibleCellsFilter`, S7.9.4: a cell that would be refused here is not shown) | the launch switch of the cell's job (`launch.member_jobs_enabled` for a member job, `launch.minting_enabled` for a Commons cell, so no volunteer receives work that cannot be paid); `service_gate(..., 'continue')` for the cell's service; `kill.template.<tpl_id>`, `kill.service.<svc_id>` and `kill.member.<mem_id>` of the leasing member all released | Listing: the cell is omitted. Lease: `LAUNCH_GATE_CLOSED` or `KILL_SWITCH_ENGAGED` with the failing key named |
+| `cell.accepted` (R9's attested-service check) | `service_gate(..., 'continue')` for the attested service at the moment of acceptance (the R9 snapshot also covers the template status and kill switches, S7.2.3), independent of what passed at lease time | Rejected per R9's existing `reject.policy_changed` path; this part adds no new rejection code here, it only adds `service_gate` as one more input R9 already expected to receive from S7.* |
+| `ledger.mint` (any entry with `kind = mint`) | `launch.minting_enabled` open; `kill.all_minting` released; the member's `kill.member.<id>` released | `LAUNCH_GATE_CLOSED` with `reasons: ['minting_not_open']`, or `KILL_SWITCH_ENGAGED` with `reasons: ['kill_switch_engaged']` |
 | `parameter write` of any `launch.*` boolean to `true` | Trigger `launch_param_needs_authorization` (S14.4.7) | Write refused at the database level, `INTERNAL` surfaced as `VALIDATION_FAILED` to the caller, since reaching this point without going through S14.8.1 is already a bug, not a user error |
 
 Transitions rule 6 exempts (never blocked by any switch or kill switch): refund and cancellation paths, settlement, escrow release on completion, expiry sweeps, data export, account recovery, and reading any of the data this part defines. These are enumerated here because a generic 'brakes stop everything' reading would be wrong and unsafe; `AC-launch-32` tests each one explicitly against every switch-closed and every kill-engaged combination. [D]
@@ -542,11 +554,30 @@ Transitions rule 6 exempts (never blocked by any switch or kill switch): refund 
 | `FlagAnswer` present but for a stale `terms_copy_id` | `flag_answer_stale`, fails `service_gate` |
 | `LaunchGateItem` row does not exist for a catalog key that should apply to this scope | Treated as `open` (the worst case), never skipped; a missing row is itself a data-integrity signal and `AC-launch-41` checks that every expected row exists after `service.created` and after `Template` approval |
 | `GateEvidence` with unreadable storage (object missing from the store) | Item cannot be newly signed off against it; an existing `signed_off` state is not retroactively invalidated by storage loss, but any later reopen attempt that needs to re-display the evidence fails clearly rather than silently |
-| `KillSwitch` row missing for a scoped key | `released` (S14.8.4); missing for `kill.all_minting`/`kill.all_new_jobs` cannot happen (seeded) |
+| `KillSwitch` row missing for a scoped key | `released` (S14.8.4); missing for `kill.all_minting`/`kill.all_new_jobs` is `engaged` (S14.8.4, `AC-launch-55`) |
 | `LaunchAuthorization` missing for a switch whose parameter reads `true` | Treated as closed; this state should be unreachable given the trigger in S14.4.7, and `AC-launch-18` specifically tries to force it via direct parameter manipulation under the migration role to confirm the trigger, not application code, is what prevents it |
 | `Parameter` for a `launch.*` or `kill.*`-adjacent value missing | Falls back to the compiled default (0.10.3's existing rule), which for every boolean in this part is the closed value |
 | Clock skew between the node evaluating and the node that wrote `valid_until` | Evaluation always uses the database's `now()`, never an application-server clock, so skew across app nodes cannot produce different answers (`AC-launch-27`) |
 | Two concurrent `gate.signed_off` calls on the same item and generation | Serialized by the unique constraint on `GateSignoff` and a row lock on the item during `SO-1`..`SO-8`; the loser sees a normal `CONFLICT` and may retry, which simply re-reads the now-updated state |
+
+### 14.9.2 Completeness, races and database backstops [D][A]
+
+Every path that can exercise one of the five capabilities passes through the guard named; there is no second path.
+
+| Capability | Every path | (a) global switch | (b) service state | (c) recorded flags with saved terms |
+| --- | --- | --- | --- | --- |
+| Admit a member | `member.created`, the only `INSERT` path into `members` (invite redemption, recovery, device linking and any import call it) | `launch.members_may_join` | Not applicable: a member is bound to no service until they declare one (S7.9.1). G0 is enforced when the switch opens: `evaluate_switch` requires G0 by default | Same |
+| Create a job | `job.created` (member, Commons, `system`-authored), `job.escrow_confirmed`, `job.waitlist_released`, `reservation.activated`, any reservation hold | `launch.member_jobs_enabled`; `launch.minting_enabled` for Commons | `service_gate` in `start` mode | Inside `service_gate` |
+| Mint credit | `ledger.mint`, reached only through `cell.accepted` | `launch.minting_enabled`, `kill.all_minting` | `service_gate` in `continue` mode, same transaction | Inside `service_gate` |
+| Lease a cell | `cell.leased` (`cell.requeued` creates no lease) | Switch of the cell's job | `service_gate` in `continue` mode | Inside `service_gate` |
+| Show a cell | the listing and any direct fetch of a cell by a volunteer | As lease | As lease | As lease |
+
+`grant` and referral entries are not mint and need an existing member; `refund`, `expire`, `retire` and `reversal` are exempt (rule 6).
+
+- **Principals.** Guards test the switch, never the caller. An `AdminUser` holding every permission, a founder, a test account and a `system` job (waitlist release, reservation activation, backlog authoring) are refused exactly like a member.
+- **Seeds and migrations.** Triggers fire for every database role, including the migration role: `members_need_open_gate` (an `INSERT` into `members` needs an active `LaunchAuthorization` of `launch.members_may_join`), `jobs_need_open_gate` (a `jobs` row may not be inserted or leave `draft` without the matching authorization of 14.9) and `ledger_mint_needs_open_gate` (an entry of type `mint` needs an active authorization of `launch.minting_enabled`). A seed or migration that creates members, jobs beyond `draft` or minted credit on a closed database therefore fails (`AC-launch-03`). The check `launch_integrity_check` runs every `ledger.invariant_check_interval_s`: it verifies that these triggers exist and are enabled, and that no member, job beyond `draft` or mint entry has a `created_at` outside an authorization interval `[created_at, min(revoked_at, authorized_until))`. On failure it engages `kill.all_minting` and `kill.all_new_jobs` itself (`acted_by = system`, `reason_code = ledger_concern`; engaging is a tightening) and raises the highest-severity `Alarm`. It cannot stop a database superuser (14.14).
+- **Races.** Each guard reads inside the deciding transaction under a shared lock on the rows it relies on (the registry row, the template row, the `LaunchAuthorization` row of the switch, and a per-key lock for each kill-switch key). `service.revoked`, `service.suspended`, `gate.reopened`, `launch.switch_close` and `killswitch.engage` take the exclusive lock of the same row or key before writing. A lease that commits first is found and revoked by the sweep that follows the revocation (S7.10.5); a lease that starts later is refused. After the sweep completes no `active` lease exists on a `revoked` service (`AC-launch-53`). The lock mechanism is implementation-specific; the property is the requirement.
+- **Fresh database.** All three launch parameters are `false` and no `LaunchAuthorization` exists; both global kill rows are `released` and are verified as present (14.8.4); zero services are `approved` (`INV-P08`); no `AdminUser` exists until the bootstrap of S10.*. No capability above can be exercised.
 
 ## 14.10 Screens (data contract only; copy and layout are S11.*/S15.*)
 
@@ -569,7 +600,7 @@ All follow 0.9.1's envelope. New event names introduced by this part, beyond `ga
 | `launch.switch_closed` | `launch.switch_close` or automatic revocation | `switch_name`, `authorization_id`, `revoked_reason` |
 | `killswitch.engaged` | `killswitch.engage` | `switch_key`, `seq`, `reason_code` |
 | `killswitch.release_proposed`, `killswitch.released` | release flow | `switch_key`, `seq` |
-| `service.review_due`, `service.suspended` | `RL-7` transition, grace-period sweep | `svc_id`, `cause` (`item_reopened` or `review_expired`) |
+| `service.review_due`, `service.review_lapsed` (the S0.9.6 name of the grace-period lapse to `suspended`), `service.suspended` | `RL-7` transition, grace-period sweep | `svc_id`, `cause` (`item_reopened` or `review_expired`) |
 
 Every row this part defines that is written by `system` still emits the same event as a human-caused write of the same kind, with `actor = system`, so downstream consumers (audit, S10.*) need no special case for machine-attached evidence. [D]
 
@@ -587,6 +618,13 @@ Every `AC-launch-nn` referenced above, collected: [D]
 | `AC-launch-32` | For every switch-closed and every kill-engaged combination, refunds, cancellations, settlement, escrow release on completion, expiry sweeps, data export and account recovery all still succeed. |
 | `AC-launch-40` | The application database role has no `DELETE` on `launch_gate_items`, `gate_evidences`, `gate_signoffs`, `launch_authorizations` or `kill_switches`, and no unrestricted `UPDATE` on `launch_gate_items` or `launch_authorizations`. |
 | `AC-launch-41` | After `service.created`, exactly the 12 `g0.svc.*` items exist for that service in state `open`; after a `Template` first reaches `approved`, its `g3.tpl.consistency` item exists. |
+| `AC-launch-50` | Every item is signed and valid except one blocking `G1` item, or except a `g5.*` item | A switch is proposed | Refused with `item_not_valid:<catalog_key>`; `G2`, `G3` and `G5` items named in 14.7.2 are evaluated, not only the gates in `launch.required_gate_ids` |
+| `AC-launch-51` | One active `AdminUser` | That admin attaches evidence, signs twice with two credentials, and proposes then approves a switch | No item reaches `signed_off` and no switch opens (`SO-4`); closing a switch, engaging a kill switch and reopening an item succeed; `launch.min_signoffs` set to 1 changes nothing |
+| `AC-launch-52` | Each switch closed, expired or revoked | Each of the five capabilities of 14.9.2 is attempted by a member, an admin with all permissions, a test admin and a `system` job | All refused with `LAUNCH_GATE_CLOSED` or `KILL_SWITCH_ENGAGED`; a listing omits the cells |
+| `AC-launch-53` | A lease request and `service.revoked` for the same service run concurrently, repeated under load | Both complete and the sweep runs | Either the lease was refused, or it was committed and then revoked; never an `active` lease on a `revoked` service afterwards |
+| `AC-launch-54` | A service in `review_due` inside its grace period | A new job, a lease, and an acceptance are attempted | The new job is refused; lease and acceptance pass on the answers of `approved_round`; after `grace_ends_at` all are refused |
+| `AC-launch-55` | The seed row of `kill.all_minting` is removed in a test database; separately a trigger of 14.9.2 is disabled | Minting is attempted; `launch_integrity_check` runs | Minting is refused as `engaged`; the check raises the highest-severity `Alarm` and engages both global kill switches |
+| `AC-launch-56` | `launch.member_jobs_enabled` and `launch.minting_enabled` open | A relied-on item is reopened; separately the jobs switch is closed by one admin | In the same transaction the dependent switches close and their authorizations are revoked; closing the jobs switch also closes minting |
 
 ## 14.13 Parameters introduced by this part (S16.* is authoritative; listed here for traceability)
 
@@ -605,10 +643,10 @@ Every `AC-launch-nn` referenced above, collected: [D]
 | `security.rotate_before_public_exposure` | `bool` (constant, not editable) | `true` |
 | `service.review_max_age_days` | `int` | `90` |
 | `service.review_grace_days` | `int` | `14` |
-| `calibration.min_samples_per_service` | `int` | `20` |
+| `calibration.min_samples_per_service` | `int` | `30` (S0.10.6 prevails) |
 
 ## 14.14 Honest limits
 
-This part enforces that evidence was attached and that two qualified people recorded a sign-off against it. It cannot read a terms-of-service document and decide whether a reviewer's `yes` was correct, cannot verify that a counsel memo reflects real legal advice rather than a convenient guess, cannot confirm a secret was actually rotated versus merely marked as rotated, and cannot detect collusion between the two required signers. The secret-pattern guard (`EV-3`) is a heuristic, not a proof of absence. Every regional availability answer, every counsel conclusion, every measured throughput number and every interview count is [V] until a named human has actually produced it; this document creates the places those things are recorded and the rule that nothing launches without them, not the things themselves. Where the Founding Document is itself unresolved (operator jurisdiction, FD section 8.3's open items, the minimum interview count), this part records that as an open item rather than inventing an answer, per ground rule 8. [D]
+This part enforces that evidence was attached and that two qualified people recorded a sign-off against it. It cannot read a terms-of-service document and decide whether a reviewer's `yes` was correct, cannot verify that a counsel memo reflects real legal advice rather than a convenient guess, cannot confirm a secret was actually rotated versus merely marked as rotated, and cannot detect collusion between the two required signers, cannot detect that two `AdminUser` accounts belong to one human, and cannot stop a database superuser or table owner from disabling a trigger (the integrity check of 14.9.2 detects that afterwards). The secret-pattern guard (`EV-3`) is a heuristic, not a proof of absence. Every regional availability answer, every counsel conclusion, every measured throughput number and every interview count is [V] until a named human has actually produced it; this document creates the places those things are recorded and the rule that nothing launches without them, not the things themselves. Where the Founding Document is itself unresolved (operator jurisdiction, FD section 8.3's open items, the minimum interview count), this part records that as an open item rather than inventing an answer, per ground rule 8. [D]
 
 Open issues this part raises for the tracker, beyond `ISS-141`, `ISS-143`, `ISS-144` and `ISS-147` already cited above: whether `kill.member.<id>` should also block that member's existing unleased job postings from attracting new leases from other members (current reading: no, since the kill is scoped to the member's own actions, and a separate `kill.job.<id>` would be needed for that, left out of scope here) [A]; and whether `g0.fb.ii`'s 'free hosted services, after their own terms check' needs its own sub-registry distinct from the main one, left to S7.*. [A]
