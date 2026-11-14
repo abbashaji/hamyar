@@ -20,10 +20,10 @@ Rules that apply to the whole part: [D]
 1. **Fail-closed.** Any gate input that is missing, unreadable, malformed, expired or ambiguous is evaluated as closed. S14.9 lists every case.
 2. **Server-side only.** A client, a hidden button or a cached page is never a control. Every enforcement point runs in the server transaction that changes state (S14.9).
 3. **Defaults live in migrations.** Migrations and seed data never set a launch switch to `true`, never create a service in any state but `unreviewed`, and never create a signed-off item. A CI check fails the build if they do (`AC-launch-03`).
-4. **Tighten at once, loosen with two people.** Closing a switch, engaging a kill switch or reopening an item needs one authorized admin. Opening a switch, releasing a kill switch or signing an item needs two distinct admins (R10 applied to launch; `security.two_person_actions`, 0.10.6).
+4. **Tighten at once, loosen with two people.** Closing a switch, engaging a kill switch or reopening an item needs one authorized admin. Opening a switch, releasing a kill switch or signing an item needs two distinct admins (R10 applied to launch; `security.two_person_actions`, 0.10.6; these two-person rules are constants of this part and do not depend on that editable parameter; the one-admin case is S14.8.6).
 5. **Evidence before assertion.** A sign-off binds to hashes of the evidence it relied on and to the values it watched; if either changes, the sign-off stops counting (S14.6).
 6. **Brakes never trap value.** Closing a gate stops transitions that start new work or create credit. It never blocks refunds, cancellations, settlement, expiry sweeps, data export or account recovery (S14.9, `AC-launch-32`).
-7. **No bypass.** There is no flag, environment variable, header, debug route or build option that skips a gate. Test suites open the gates through the same flow with seeded test admins (`AC-launch-03`).
+7. **No bypass.** There is no flag, environment variable, header, debug route or build option that skips a gate. Test suites open the gates through the same flow with seeded test admins (`AC-launch-03`). Seeded test admins exist only in non-production deployments; a production deployment refuses to start if any `AdminUser` row is marked as a test account [A].
 8. **Honest limits.** The tool checks that evidence exists, was reviewed by two people and is current. It does not read, interpret or judge the evidence (S14.14).
 
 Owned elsewhere: the service review machine and flag semantics (S7.*), admin authentication and the generic two-person mechanism (S10.*), the final operation list of the API (S15.*), final user-facing copy (S11.*), the values that replace defaults (S16.*).
@@ -67,30 +67,33 @@ Permissions [A] (names follow 0.8.2; the full matrix is S10.*):
 - `RL-2` The only transition into `approved` is `service.approved` (0.9.6). The database enforces its guard with a `CHECK` and a trigger, not only with application code: an `approved` row carries `approved_at`, `approved_by` (an `adm_` id holding `reviewer`) and `terms_copy_id`, and the trigger confirms the flag rows of `SG` below. A direct `UPDATE` to `approved` by the application role fails (`AC-launch-04`). Field names `approved_at`, `approved_by`, `reviewed_at`, `reviewed_by`, `terms_copy_id` are provisional; S7.* owns the entity (`ISS-147`). [A]
 - `RL-3` `unreviewed` counts as no. An absent `FlagAnswer` is `unknown`, and `unknown` is evaluated as `no` (0.8.3, FD§5.3).
 - `RL-4` 'Approved' means the service gate `SG` below holds. `SG` is evaluated again at every enforcement point that names a service (S14.9), not only when the service is approved.
-- `RL-5` Saved terms are bytes plus hash (0.6.4). A `FlagAnswer` is valid only against the latest `TermsCopy` of its service. Saving a newer copy with a different hash makes every older answer stale (S14.6, `AC-launch-21`).
+- `RL-5` Saved terms are bytes plus hash (0.6.4). A `FlagAnswer` is valid only against the `TermsCopy` rows of the review round it was recorded in (S7.10.1: `terms`, `usage_policy` and `permission_letter` copies); a copy of the same `copy_kind` saved later in that round supersedes the earlier one, and an answer citing a superseded copy is stale. Saving a newer copy with a different hash makes every older answer stale (S14.6, `AC-launch-21`).
 - `RL-6` A nightly job re-hashes every stored `TermsCopy`. A mismatch suspends the service (`service.suspended`) and raises an alarm. [A]
 - `RL-7` `service.approved` has one more guard than 0.9.6 lists: every per-service `G0` item of that service is `signed_off` and valid (S14.5, S14.7). Gate reopening on a service moves it to `review_due` (`ISS-143`).
 
 **Service gate `SG`** (pseudocode; reasons are returned in `details.reasons`):
 
 ```
-function service_gate(svc_id, now) -> Pass | Fail(reasons)
+function service_gate(svc_id, now, mode = 'start') -> Pass | Fail(reasons)    # mode: see 'Modes' below
     svc = registry.get(svc_id)                       # missing row -> Fail('service_unknown')
     reasons = []
-    if svc.state != 'approved':    reasons += 'service_not_approved'     # unreviewed, in_review, review_due, ... all count as no
-    tcp = terms_copies.latest(svc_id)
-    if tcp is null:               reasons += 'terms_copy_missing'
-    for key in ['third_party_task_use', 'prohibited_content_compatible']:
-        fa = flag_answers.latest(svc_id, key, region = null)
-        if fa is null or fa.answer != 'yes':   reasons += 'flag_not_yes:' + key     # null and 'unknown' are 'no'
-        elif tcp is not null and fa.terms_copy_id != tcp.id:
+    in_grace = (mode == 'continue' and svc.state in ('review_due', 'in_review') and svc.grace_ends_at is not null and now < svc.grace_ends_at)   # S7.10.4
+    if svc.state != 'approved' and not in_grace:    reasons += 'service_not_approved'     # unreviewed, in_review, review_due, ... all count as no
+    tset = terms_copies.of_round(svc_id, svc.approved_round)      # every copy saved in the approved round (S7.10.1)
+    if tset is empty or not has_kind(tset, 'terms') or not has_kind(tset, 'usage_policy'):               reasons += 'terms_copy_missing'
+    for key in ['third_party_task_use', 'prohibited_content_compatible', 'human_copy_paste_use', 'access_pooling_or_crediting']:
+        fa = flag_answers.latest(svc_id, svc.approved_round, key, region = null)   # only answers of the approved round are effective (S7 decision 9)
+        if flag_value(svc, key, null, ('admit' if mode == 'start' else 'accept')) != 'yes':   # S7.10.6 is the only reader of a flag   reasons += 'flag_not_yes:' + key     # null and 'unknown' are 'no'
+        elif fa.terms_copy_id not in ids(tset) or copy_is_superseded(fa.terms_copy_id):
                                                reasons += 'flag_answer_stale:' + key
-    if svc.reviewed_by is null or svc.reviewed_at is null:  reasons += 'reviewer_not_recorded'
-    if now >= svc.reviewed_at + param('service.review_max_age_days') * 86400:  reasons += 'review_expired'
-    if not g0_items_valid(svc_id, now):                      reasons += 'g0_items_not_signed'
+    if svc.approved_at is null or not approvers_recorded(svc, svc.approved_round):  reasons += 'reviewer_not_recorded'
+    if mode == 'start' and now >= svc.review_due_at:  reasons += 'review_expired'
+    if not g0_items_valid(svc_id, now, mode):                      reasons += 'g0_items_not_signed'
     if kill_switch_engaged('kill.service.' + svc_id):        reasons += 'kill_switch_engaged'
     return Pass if reasons is empty else Fail(reasons)
 ```
+
+**Modes** [D]. `mode = 'start'` (default) is used at job creation, escrow confirmation and every other point that starts work; `mode = 'continue'` is used at cell listing, `cell.leased` and `cell.accepted` of work already admitted. They differ only in the grace period of S7.10.4: in `continue` a service in `review_due` (or in `in_review` entered from `review_due`) still passes until `grace_ends_at`, on the answers of `approved_round`, and `g0_items_valid` ignores an item whose only defect is a passed `valid_until` or a reopen with `reopen_reason` `expired` or `service_state`. Every other reason (a flag that is not `yes`, a missing or stale terms copy, a `watched_change` reopen, an engaged `kill.service.<svc_id>`, state `suspended` or `revoked`) fails in both modes. `approved_at`, `approved_round`, `review_due_at` and `grace_ends_at` are the S7.10.1 fields; the names `reviewed_at`, `reviewed_by`, `approved_by` and `terms_copy_id` used elsewhere in this part are provisional (`ISS-147`) and map to them. `SG` never reads a `FlagAnswer` row itself: `flag_value` (S7.10.6, `INV-P03`) is the only reader. `SG` reads four gate flags because S7.10.3 guard 2 also makes `human_copy_paste_use` and `access_pooling_or_crediting` approval conditions (`ISS-71`).
 
 Per-purpose conditions (`R5`..`R7`) stay in the policy engine (S7.*). `SG` answers one question only: may any job be created or run for this service at all. [D]
 
@@ -107,15 +110,16 @@ Per-purpose conditions (`R5`..`R7`) stay in the policy engine (S7.*). `SG` answe
 
 | Service state | New jobs | New leases needing it | In-flight cells | Submission attested to it |
 | --- | --- | --- | --- | --- |
-| `unreviewed`, `in_review`, `rejected` | Refused | Refused | None can exist | Rejected, `reject.policy_changed` |
+| `unreviewed`, `rejected` | Refused | Refused | None can exist | Rejected, `reject.policy_changed` |
+| `in_review` | Refused | Refused, except an entry that entered `in_review` from `review_due`, which follows the `review_due` row until `grace_ends_at` | As `review_due` in that case, otherwise none can exist | As `review_due` in that case, otherwise `reject.policy_changed` |
 | `approved` | Allowed if `SG` | Allowed | Continue | Accepted if checks pass |
 | `review_due` | Refused at once | Allowed for `service.review_grace_days` | Continue for the grace period | Accepted within the grace period |
-| `suspended` | Refused | Refused | `cell.paused`; pinned jobs `job.paused` | Lease revoked, so `reject.lease_expired` |
-| `revoked` | Refused | Refused | `cell.voided`; pinned jobs `job.stop_requested` with closure_reason `service_revoked` | Rejected, `reject.policy_changed`; already accepted cells stay accepted and paid (R9: a change never legitimizes in-flight work retroactively and never claws back accepted work) |
+| `suspended` | Refused | Refused | `cell.paused`; pinned jobs `job.paused`; leases revoked | Acceptance held while the cause is a kill switch; `reject.policy_changed` if it ends in `revoked` or lapse (S7.10.5 prevails over this column) |
+| `revoked` | Refused | Refused | S7.10.5 prevails: a job whose eligible set becomes empty gets `job.stop_requested` with closure_reason `service_revoked` and its cells `cell.voided`; a job with other eligible services continues and affected cells requeue | Rejected, `reject.policy_changed`; already accepted cells stay accepted and paid (R9: a change never legitimizes in-flight work retroactively and never claws back accepted work) |
 
 ## 14.4 Data model
 
-Table and column naming follows 0.7. Entities marked [A] are convention additions (`ISS-147`). `GI-nn` ids name gate invariants local to this part. [A]
+Table and column naming follows 0.7. Entities marked [A] are convention additions (`ISS-147`). `GI-nn` ids name gate invariants local to this part. [A] Every character, byte or count limit stated in 14.4 (4,000; 2,000; 10 to 2,000 characters; secret-pattern heuristics) is an initial configurable default [A] whose parameter name S16.* assigns; none is derived.
 
 ### 14.4.1 `LaunchGateItem` (`launch_gate_items`, prefix `lgi_`, retention `permanent`)
 
@@ -277,7 +281,7 @@ Created for every `ServiceRegistryEntry`, including those that stay `unreviewed`
 | `g0.svc.terms` | G0 lead-in | Dated copy of the terms saved: bytes, hash, source reference, capture date | none | `satisfied` only if a `TermsCopy` exists, its hash was re-verified at attach, and the capture date is within `service.review_max_age_days` of sign-off |
 | `g0.svc.a` | G0(a) | May a personal free account be used to do tasks for other people? | `third_party_task_use` | Gate flag |
 | `g0.svc.b` | G0(b) | Is sharing, pooling, reselling or crediting access prohibited? | `access_pooling_or_crediting` | Gate flag |
-| `g0.svc.c` | G0(c) | What do the terms say about automation, scraping, prefilled links and copy-and-paste workflows? | `human_copy_paste_use`, `prefilled_link_use`; reviewer note for automation and scraping (`ISS-147`) | Gate flags |
+| `g0.svc.c` | G0(c) | What do the terms say about automation, scraping, prefilled links and copy-and-paste workflows? | `human_copy_paste_use`, `prefilled_link_use`; `info.automation_limits` (S7.11, `ISS-77`) | Gate flags |
 | `g0.svc.d` | G0(d) | Regional availability: may people in each required region use the service, and what do the terms say about circumvention? | `regional_availability`, one answer per region in the catalog attribute `required_regions` (initially `IR`, from FD section 8.3 G0(d)) [P]; regions of the operator's jurisdiction are added after counsel [V] | Gate flag per region |
 | `g0.svc.e` | G0(e) | Is commercial use of outputs allowed on the free tier? | `commercial_use_of_output` | Gate flag |
 | `g0.svc.f` | G0(f) | Is using outputs to train or develop other models allowed? | `training_use_of_output` | Gate flag |
@@ -287,7 +291,7 @@ Created for every `ServiceRegistryEntry`, including those that stay `unreviewed`
 | `g0.svc.j` | G0(j) | What does 'free allowance' formally mean and can it change without notice? | `info.allowance_may_change` | Info flag |
 | `g0.svc.k` | G0(k) | Would the provider give written permission for this use? | `info.written_permission`; if `yes`, the permission document as evidence (`document`, `restricted`) | Info flag |
 
-**Outcome rule for flag items** (`SO-7`): `satisfied` is allowed only when every gate flag behind the item is `yes` for the latest `TermsCopy`. If any is `no`, `unknown` or absent, the only allowed outcomes are `satisfied_with_conditions`, whose `conditions_text` states the effect (for example 'adapter is copy-only', 'purpose P2 stays locked', 'service stays unreviewed'), or `not_satisfied`. Info flags accept any recorded answer as `satisfied`, because the item records that the question was answered, not that the answer is favorable. A service can be approved only if `g0.svc.a` and `g0.svc.i` are `satisfied` (FD section 5.3, 0.8.3). [D]
+**Outcome rule for flag items** (`SO-7`): `satisfied` is allowed only when every gate flag behind the item is `yes` for the latest `TermsCopy`. If any is `no`, `unknown` or absent, the only allowed outcomes are `satisfied_with_conditions`, whose `conditions_text` states the effect (for example 'adapter is copy-only', 'purpose P2 stays locked', 'service stays unreviewed'), or `not_satisfied`. Info flags accept any recorded answer as `satisfied`, because the item records that the question was answered, not that the answer is favorable. A service can be approved only if `g0.svc.a` and `g0.svc.i` are `satisfied` (FD section 5.3, 0.8.3); the service gate also reads the flags behind `g0.svc.b` and `g0.svc.c` that S7.10.3 guard 2 requires (`ISS-71`). [D]
 
 ### 14.5.2 G0, counsel (scope `global`, role `operator`)
 
@@ -396,7 +400,7 @@ Attaching evidence never asserts an outcome; it only makes sign-off possible. An
 `gate.signed_off` succeeds only if all hold; a failure returns `FORBIDDEN` with `details.reasons` naming every failed guard, not only the first (fail-closed rule 1). [D]
 
 - `SO-1` The item is in `evidence_attached`. Signing from `open` is impossible by construction; there is no evidence yet to sign.
-- `SO-2` At least `launch.min_signoffs` (default 2) `GateSignoff` rows exist for `(item_id, item_generation)` whose `evidence_set_hash` equals the item's current evidence set hash, recomputed fresh at the moment of the check, never read from a cache.
+- `SO-2` At least `max(2, launch.min_signoffs)` (default 2) `GateSignoff` rows exist for `(item_id, item_generation)` whose `evidence_set_hash` equals the item's current evidence set hash, recomputed fresh at the moment of the check, never read from a cache.
 - `SO-3` Among those rows, at least one has `acted_as_role` equal to the item's `required_role`.
 - `SO-4` The qualifying rows come from at least two distinct `admin_user_id` values (R10's two-person rule; a single admin cannot sign the same item twice under two credentials to satisfy `SO-2`).
 - `SO-5` All qualifying rows carry the same `outcome`; signers who disagree record `not_satisfied` or a note, and the item stays `evidence_attached` until agreement, or an admin with `perm.launch.reopen` starts a fresh generation to reset the discussion. The tool does not arbitrate disagreement (ground rule 8).
