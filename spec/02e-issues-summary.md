@@ -69,3 +69,69 @@ No register rule decides these, so each row says what is applied and who finaliz
 | B4 | `ISS-52`, `ISS-64`, `ISS-79`, `ISS-101`, `ISS-114`, `ISS-117`, `ISS-118`, `ISS-119` | Id and heading collisions. `ISS-117`, `ISS-118`, `ISS-119` are used by both `11c` and `11d` (2.9 rule 2 forbids reuse). Heading ranges overlap: 11b numbers from 11.31 and cites 11.40 to 11.49, 11c from 11.41 upward, 11d from 11.40, so 11.41 to 11.49 belong to three files; 10a owns 10.1 to 10.19 and 10b numbers 10.11 to 10.19. The same S5 numbering problem is `needs_owner` in `ISS-52` and `proposed` in `ISS-64` and `ISS-79` | Nothing renumbered; file names of the cells stay authoritative | Assembly owner: one block for `11d`, one numbering plan for S10 and S11. The 11.4x overlap is found by this cell; no id yet |
 | B5 | `ISS-192`, `ISS-194`, `ISS-195`, `ISS-197` | S19 points at `OD-nn` rows that S3 defines differently. `ISS-192` cites `OD-01` for the exit-rule default (S3: operator jurisdiction); `ISS-194` cites `OD-03` for who acts on alarms (S3: hosting, storage, reachability countries); `ISS-197` cites `OD-04` for the reachability test method (S3: which services to review first). `ISS-196` (`OD-02`) and `ISS-198` (`OD-11`) match. `ISS-195` says S19 could not read S3 | S3 owns the `OD` ids (`ISS-38`, 3.1) | S3 and S19 owners; the three decisions become rows in 2.E.3 |
 | B6 | `ISS-98`, `ISS-112`, `ISS-151` | Operation names for one function: `rotateLeaseNonce` and `issueLeaseNonce`; 10a `createDeviceLinkOffer`, `createDeviceLinkClaim`, `createMemberKey` against 11a `createDeviceLinkCode`, `redeemDeviceLinkCode`, `rotateMemberKey`, with different parameter names (`02c` Observations, based on the sections read). `ISS-112` leaves it to S15 and C-022 without saying who wins | None chosen | S15a owns operation names |
+
+## 2.E.3 Issues with status `needs_owner`, and S3
+
+The 32 rows (31 unique ids; `ISS-119` carries two different decisions, one in `11c` and one in `11d`). `ISS-141` is added as a 33rd line because the line citing it calls it an owner decision, though no status is stated. Column 4 says whether S3.2 already lists the decision: `yes` (a row decides the same question), `partly` (a row covers part of it) or `no`. Rule 4 of 2.9 asks for `yes` on every line. Result: 7 `yes`, 7 `partly`, 18 `no`, plus `ISS-141` `no`. [D]
+
+| id | What the owner decides | Default the spec uses meanwhile | In S3.2 |
+| --- | --- | --- | --- |
+| `ISS-19` | Seed the Reserve before the pilot, or start with grants paused | Reserve starts empty; grants pause while it is empty | yes, `OD-06` |
+| `ISS-22` | Who authors the Commons backlog, license, publication target, sponsor label | Operator-authored, second-admin approved, nothing published until a target is chosen | yes, `OD-05` |
+| `ISS-43` | Ledger store under one serialization point | One ledger, one chain; a capacity formula and a load test decide the store (S4 4.6.2) | no (`OD-03` is the nearest: storage behind interfaces) |
+| `ISS-44` | Channel for expiry and other notices | In-app notices only; the platform sends only a message a member asks for | no (see A16) |
+| `ISS-47` | Backups: location, retention, legal sufficiency [V] | Encrypted, at least two locations, retention `ops.backup_retention_days`, purge by aging out | partly (`OD-12` covers `retention.*`, not backups) |
+| `ISS-49` | Whether a human review of the panel repository clears G4 | G4 `LaunchGateItem` stays open until a human signs off | no |
+| `ISS-52` | File names and heading numbers of S5 | The cell path is authoritative; S5a numbers `5.1` to `5.16` | no (assembly matter, see B4) |
+| `ISS-56` | Restitution for an overturned rejection or ban | Register default: no Reserve outflow beyond starter grants, so nothing is paid after escrow close; S5b applies a Reserve `grant` instead (A4) | no (`OD-09` names three other costs) |
+| `ISS-66` | Penalty or fee for a late cancel or no-show on a reservation | No money; a cooldown after a late cancel or expiry; one live reservation per member | no |
+| `ISS-71` | Whether approval needs `human_copy_paste_use` and `access_pooling_or_crediting` | The stricter guard of S7 7.10.3 (A8) | no |
+| `ISS-72` | Whether a `no` on `regional_availability` blocks approval [V: counsel] | Never blocks; shown as a declared-terms notice, no workaround | partly (`ASM-20` covers declared eligibility; `OD-01` is counsel) |
+| `ISS-73` | License pairing for `P2` and `P3` | `P0` with `L0`; `P1` with `L1`, `L2`; `P2` with `L3`; `P3` with `L0`, `L1`, `L2` [A]; no `P2` or `P3` rows in Phases 1 and 2 (A9) | no |
+| `ISS-76` | Credit for work done in good faith when a policy or service changes | Register: `ISS-27` pays a cell submitted and passed before the tightening, from the escrow; S7 applies no credit and requeue (A6) | no (`OD-09` covers the cost under `ISS-27`; `ISS-76` is not cited and its default differs) |
+| `ISS-81` | Whether a platform-side sandbox ever runs submitted code | No (`ISS-12`) | yes, `OD-08` (cites `ISS-12` only; same decision) |
+| `ISS-82` | How many independent reviewers exist in Phase 1 | `template.min_reviewers_new` = 2, two non-author approvals; not lowered silently | yes, `OD-02` (not cited by id) |
+| `ISS-85` | Verification costs: quote basis, high-risk templates, appeals, shortfalls | Register `ISS-16`: hard pool, job stops; Reserve pays nothing (A2, A3) | partly (`OD-09` covers a shortfall beyond the pool) |
+| `ISS-102` | E-mail purpose; at least two distinct admins | E-mail for opt-in notices only, never recovery or login; two admins before any two-person action | partly (`OD-02` covers admin count; e-mail purpose no) |
+| `ISS-105` | `lease.max_job_share_ratio` | Initial configurable default 0.34 of a job's cells per member, replaced by `P1M` | no |
+| `ISS-113` | When the recovery key is shown | After the first accepted cell, with a "key not saved" marker [H] | no |
+| `ISS-115` | What a requester gets when a job is cancelled or fails | In-flight cells finish, accepted ones are paid; refund = unstarted primary pay + unspent pool + levy not earned; partial `Deliverable` | no |
+| `ISS-119` (`11c`) | (a) one admin only; (b) `service.min_approvers` 1 or 2; (c) spent credit cannot be reversed; (d) notice period for a service approval; (e) who counts as founders | Two-person actions unavailable below two admins; (d) public entry at approval, no notice; (e) two distinct `operator` approvers | partly (`OD-02` for (a), (b); `OD-09` for (c); (d), (e) no) |
+| `ISS-119` (`11d`) | Minimum member age [V: counsel] | `identity.min_age_years` = 0; the age line is not rendered | no |
+| `ISS-124` | A member-specific token to randomize V3 acquisition | V1 on created-to-first-verified-cell; V2 randomizes only the in-app widget; V3 descriptive | no |
+| `ISS-127` | Any reward that moves money in Phase 2 [V: counsel] | None specified | no |
+| `ISS-168` | Number of admins at launch | Defaults stand and `C19` warns | yes, `OD-02` |
+| `ISS-171` | Exit rule governs launch, not building | Build proceeds on the brief; all `launch.*` switches `false` | partly (`ASM-26` rests on `ISS-31`; no `OD` row) |
+| `ISS-179` | Cap on pilot size (`launch.max_members` would be new) | Pilot size held by invite supply [A] | no |
+| `ISS-192` | Same decision as `ISS-171`, plus the watch on it (`RISK-39`, `TRIP-13`) | Same | no (S19 cites `OD-01`, B5) |
+| `ISS-194` | Who acts on each alarm and in what interval | Every tripwire names who acts; interval left to the owner | no (S19 cites `OD-03`, B5) |
+| `ISS-196` | A template one founder wrote cannot be approved by two founders | No template approved below `template.min_reviewers_new` | yes, `OD-02` |
+| `ISS-197` | Method of the reachability test from Iran; its repeat [V] | Test repeated before public exposure (`CHK-41`); `launch.members_may_join` stays `false` | partly (`OD-03` covers countries and [V]; not the test method) |
+| `ISS-198` | Thresholds locked before day 1 of Phase 1 | Values locked in a `PreRegistration`; Phase 1 does not start without them | yes, `OD-11` |
+| `ISS-127`, `ISS-141` | `ISS-141`: minimum number of G5 interviews | The tool records the count and the signers' attestation; no minimum | no (`ISS-141` only) |
+
+### Rows to add to S3.2
+
+S3 owns `OD-nn` ids (`ISS-38`), they are never reused, and S19 already uses the same ids with other meanings (B5). The rows below therefore carry no id; the S3 owner numbers them after reconciling with S19. "Extend" means the decision is already a row and only its text and issue ids change. [A]
+
+| Row | Issues | Decision | Default meanwhile | Needed before |
+| --- | --- | --- | --- | --- |
+| New 1 | `ISS-44`, `ISS-102` (e-mail half) | What e-mail is for, and how members are told of expiry | In-app notices; e-mail opt-in, notices only, never recovery or login | First member invitation |
+| Extend `OD-12` | `ISS-47` | Backups: places, retention, who holds the key [V] | Encrypted, two locations, `ops.backup_retention_days`, purge by aging out | `G1` sign-off |
+| Extend `OD-09` | `ISS-56`, `ISS-76`, `ISS-85` (d), `ISS-119` (`11c`) (c) | Whether the Reserve may pay anything beyond starter grants (appeal restitution, goodwill for policy changes) and who bears an overturned rejection | Reserve pays nothing beyond grants; donors bear it (A4, A6) | `BM7` acceptance |
+| New 2 | `ISS-85` (a), (b), (e), `ISS-16` item 2 | Quote basis of the verification pool before any measurement, and whether any template is `high` in Phase 1 | max(measured v, `price.v_prior`, v_floor) [A] | `BM7` acceptance |
+| Extend `OD-08` | `ISS-41`, `ISS-81`, `ISS-91` | Same sandbox decision; cite the dup rows | No | Never blocks the build |
+| Extend `OD-02` | `ISS-82`, `ISS-102` (admins), `ISS-119` (`11c`) (a), (b), (d), (e), `ISS-168`, `ISS-196` | One decision on how many independent people hold reviewer and admin roles in Phase 1, with the notice rule for approvals and who counts as founders | Numbers not lowered; two-person actions blocked below two admins | First sign-off |
+| New 3 | `ISS-71`, `ISS-72` | Approval guard for copy-paste and pooling flags; whether a regional `no` blocks approval [V] | Stricter S7 guard; region never blocks | `G0` sign-off |
+| New 4 | `ISS-73` | License pairing for `P2` and `P3` | Pairing of A9; rows absent | Before any `P2` or `P3` row is added |
+| New 5 | `ISS-49` | Human review of the panel repository for G4 | G4 item open | `G4` sign-off |
+| New 6 | `ISS-66` | Reservation penalty or fee | No money; cooldown | Before `ff.job.reservations` is enabled |
+| New 7 | `ISS-105` | `lease.max_job_share_ratio` | 0.34 | First `S1` job |
+| New 8 | `ISS-113` | When the recovery key is shown | After first accepted cell | `BM8` acceptance (member screens) |
+| New 9 | `ISS-115` | Cancel and failed-job accounting | As in the table above | `BM7` acceptance |
+| New 10 | `ISS-119` (`11d`) | Minimum member age [V] | 0, age line not rendered | Launch sign-off (copy review, `OD-13`) |
+| New 11 | `ISS-124`, `ISS-127` | Member-specific token for V3; money-moving rewards [V] | Descriptive V3; no rewards | `G1` sign-off; Phase 2 |
+| New 12 | `ISS-179`, `ISS-141` | Pilot size cap; minimum G5 interviews | Invite supply; no minimum | Pilot invitations; `G5` sign-off |
+| New 13 | `ISS-171`, `ISS-192`, `ISS-194`, `ISS-197` | Exit rule governs launch; who acts on alarms; reachability test method | Rule governs launch; every tripwire names who acts; test repeated before exposure | Launch sign-off; `G2` sign-off |
+| New 14 | `ISS-43` | Ledger store under one serialization point | One ledger, one chain, decided by capacity formula and load test | Before the ledger store is fixed (S4 4.6.2) |
+| New 15 | `ISS-52` | S5 file names and heading numbers | Cell path authoritative | Assembly |
