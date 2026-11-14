@@ -305,10 +305,10 @@ These are contradictions or gaps that this reconciliation exposed and that it ca
 | O6 | S15a 15.7.3 `cancelJob` | The text says `refund_ucr` is visible in `getJob`; `Job` has no such field. | Point the text at `getSettlementReceipt` (this file) or add the field. |
 | O7 | S15a 15.7.3 `rateJob` | `PUT` only; 11b screen 17 must show an earlier rating and no read exists. | Add `rating` to `Job` (additive) or a `GET /v1/jobs/{job_id}/rating`; 11b rows `createJobRating`, `getJobRating` use `POST` and `GET` on a path that S15 defines with `PUT`. |
 | O8 | S15b 15.34.3 `appeal.overturned` | Consumers lack `job_svc`, so a `job_rejection` appeal has no effect owner; `template_rejection` is listed as a kind but members cannot file it. | Add `job_svc` as consumer and define what overturning a terminal `rejected` job does (a fast-tracked copy is the proposal); decide who files `template_rejection` for an author. |
-| O9 | S15a 15.3 rule 1 | Strict requests are defined for body fields; 11b sends query parameters that S15 does not define (`listServices ?state=approved`, `getManifest ?profile=requester`). | State whether an unknown query parameter is `400 VALIDATION_FAILED` reason `unknown_field`; edits E2 and E3 below drop these two. |
+| O9 | S15a 15.3 rule 1 | Strict requests are defined for body fields; 11b sends query parameters that S15 does not define (`listServices ?state=approved`, `getManifest ?profile=requester`). | State whether an unknown query parameter is `400 VALIDATION_FAILED` reason `unknown_field`; the edits for 11b:121 and 11b:149 below drop these two. |
 | O10 | S15a `Features` against 12.11 | `flags` are booleans without arm names, yet 12.11.1 returns `a.arm_key`, and 12.11.5 says members see their own arm on a settings screen. No S15 operation shows that arm. | Check the mechanics of 12.12 for any with more than two arms or arm-specific client behavior; if any exists, add an optional `variants` map to `Features` (additive), and add a member read of own arms or drop the settings display. |
 | O11 | S15b 15.21.2 and S15a 15.12 | The `RL-READ` class gives `previewCells` the cost of a cheap read although it renders text. | Decide a class in S16.* if measurement requires one. |
-| O12 | `scripts/check_refs.py` | The script counts a `/v1/` path as defined if it appears anywhere in `spec/15*.md`, including the cited paths in the decision table of this file. It passes even if a REMOVE row is never applied, and it ignores methods and query strings. | After the edits below are applied, run it with this file excluded, and compare methods and queries by hand; the edits listed below include two method mismatches on defined paths (rows 150 and 121). |
+| O12 | `scripts/check_refs.py` | The script counts a `/v1/` path as defined if it appears anywhere in `spec/15*.md`, including the cited paths in the decision table of this file. It passes even if a REMOVE row is never applied, and it ignores methods and query strings. | After the edits below are applied, run it with this file excluded, and compare methods and queries by hand; the edits listed below include a method mismatch on a defined path (11b:150) and operation-id mismatches (11b:124, 11b:132, 11b:147, 11b:149). |
 | O13 | S15a 15.13 last bullet | 'An endpoint not in a table does not exist' refers to the operation tables 'of this part'. | Say S15a, S15b and 15.C together, so the contract suite covers the eleven new operations. |
 | O14 | S15a `confirmJob` | The guards do not say what a `reservation_id` must satisfy; row 24 assumes `held`, owned by the caller, not past `target_date`, and a template match. | Copy the guard into S15a 15.7.2 (S2 below). |
 | O15 | Part 11d | Not read: the cell names no 11d line, but `check_refs.py` is run for it. | The cell that applies the edits searches 11d for every string in the decision table. |
@@ -321,3 +321,140 @@ These are contradictions or gaps that this reconciliation exposed and that it ca
 - **S4** S15a 15.9: append the five new `details.reason` values of 15.C.6 to their code rows.
 - **S5** S15b 15.34: add `experiment.assigned` and `experiment.exposed`; add `job_svc` as consumer of `appeal.overturned`.
 - **S6** S15a 15.7.3 and `Job`: refund text (O6) and rating read-back (O7).
+
+## Edits required in citing parts
+
+For a later cell to apply [D]. Each block is one edit: a line number in the citing part (as given, or computed from the cited anchors 11b:116, 117, 120, 137, 151, which are consistent with the row order of the table), the old text and the new text. In 11b the old text is the whole table row; the applier matches the row, not the number, if the file has moved. Operation ids in 11b are the contract between screens and S15 (11b 11.34), so op-id mismatches on already defined paths are corrected here too, although a path-only check does not see them. Rows not listed (11b:115, 118, 119, 122, 123, 126, 127, 130, 138 to 140, 142, 144, 146, 152) already match S15 or the new operations of 15.C.4.
+
+### Part 11b, requester screens (spec/11b-requester-ux.md, table 11.34)
+
+```
+11b:116
+- | `getBalance` | `GET /v1/members/me/balance` (`balance_ucr`, `cap_ucr`, `member_status`, `cooldown_ends_at`) | 01, 07, 08 |
++ | `getBalance` | `GET /v1/balance` (`balance_ucr`, `member_cap_ucr`, `headroom_ucr`, `held_ucr`); `status` and `recovery.cooldown_until` come from `getMe` `GET /v1/members/me` | 01, 07, 08 |
+
+11b:117
+- | `listCreditLots` | `GET /v1/members/me/credit-lots` (`lot_id`, `amount_ucr`, `expires_at`) | 07, 08, 15 |
++ | `listLots` | `GET /v1/balance/lots` (`id`, `amount_ucr`, `remaining_ucr`, `expires_at`; `Page`, oldest expiry first) | 07, 08, 15 |
+
+11b:120
+- | `getPolicyProfile` | `GET /v1/policy-versions/current` (allowlist, phase locks, `license_options`) | 05 |
++ | `getTemplate`, `checkJobPolicy` | `GET /v1/templates/{template_id}` field `allowed`; `POST /v1/jobs/{job_id}/policy-checks` (dry run, `policy_version_id`) | 05 |
+
+11b:121
+- | `listServices` | `GET /v1/services?state=approved` (`service_id`, display names) | 05 |
++ | `listServices` | `GET /v1/services` (approved entries only, no query) (`id`, `display_name`) | 05 |
+
+11b:124
+- | `patchJob` | `PATCH /v1/jobs/{job_id}` (JSON Merge Patch, `If-Match` = `row_version`) | 05 |
++ | `updateJob` | `PATCH /v1/jobs/{job_id}` (JSON Merge Patch, `If-Match` = `row_version`) | 05 |
+
+11b:125
+- | `createUpload` | `POST /v1/jobs/{job_id}/uploads` JSON body `{file_name, encoding, content}`; `encoding` is `utf8` or `base64`; size limit `job.max_upload_bytes` | 03 |
++ | `createUpload` | `POST /v1/uploads` JSON body `{format, filename?, content, content_hash?}`, UTF-8 text only (no base64); attached by `upload_ids` on `createJob` or `updateJob`; size limit `job.max_upload_bytes` | 03 |
+
+11b:128
+- | `requestUploadReview`+ | `POST /v1/uploads/{upload_id}/review-requests` body `{note?}` | 04 |
++ (row removed: a flagged upload goes to a human reviewer automatically after `submitJobForScreening`)
+
+11b:129
+- | `createGlossary` | `POST /v1/jobs/{job_id}/glossaries` body `{entries:[{source,target}]}` | 03 |
++ | `createGlossary` | `POST /v1/glossaries` body `{name, source_lang, target_lang, entries:[{source,target}]}`; attached by `glossary_id` on `createJob` or `updateJob` | 03 |
+
+11b:131
+- | `submitJob` | `POST /v1/jobs/{job_id}/submission` -> `202`, Job `screening` (or already `quoted` / `rejected` when screening finished synchronously) | 05 |
++ | `submitJobForScreening` | `POST /v1/jobs/{job_id}/screenings` -> `200` Job `quoted` or `waitlisted`, `202` Job `screening`, `422 POLICY_REJECTED` (job `rejected`; read `details.job_id`) | 05 |
+
+11b:132
+- | `getQuote` | `GET /v1/jobs/{job_id}/quote` | 07, 08 |
++ | `getJobQuote` | `GET /v1/jobs/{job_id}/quote` | 07, 08 |
+
+11b:133, 11b:134, 11b:135
+- | `createWaitlistEntry` | `POST /v1/jobs/{job_id}/waitlist-entries` | 07 |
+- | `getWaitlistEntry` | `GET /v1/waitlist-entries/{waitlist_entry_id}` | 09 |
+- | `deleteWaitlistEntry` | `DELETE /v1/waitlist-entries/{waitlist_entry_id}` | 09 |
++ (three rows removed: the waitlist is a job state, read from `getJob` field `waitlist`; leaving it is `cancelJob`)
+
+11b:136
+- | `confirmEscrow` | `POST /v1/jobs/{job_id}/escrow-confirmation` body `{quote_hash, acknowledgements:[string]}` | 08 |
++ | `confirmJob` | `POST /v1/jobs/{job_id}/confirmations` body `{quote_hash, reservation_id?}` (acknowledgements are declared earlier, in `Declarations`) | 08, 11 |
+
+11b:137
+- | `getReservationAvailability`+ | `GET /v1/reservations/availability?from=&to=&cells=&job_type=` | 10 |
++ | `getReservationAvailability`+ | `GET /v1/reservations/availability?from=&to=&template_id=&cells=` (`bookable`, `reason`, `price_per_cell_ucr`; an estimate, not a hold) | 10 |
+
+11b:141
+- | `activateReservation` | `POST /v1/reservations/{reservation_id}/activation` body `{job_id}` | 11 |
++ (row removed: `confirmJob` with `reservation_id` activates the reservation)
+
+11b:143
+- | `listJobCells` / `getJobCell` | `GET /v1/jobs/{job_id}/cells`, `GET /v1/jobs/{job_id}/cells/{cell_id}` (primary cells only) | 13 |
++ | `listJobCells` | `GET /v1/jobs/{job_id}/cells` (primary cells only; outputs by `ordinal` from `listJobResults`) | 13 |
+
+11b:145
+- | `cancelJob` | `POST /v1/jobs/{job_id}/cancellation` | 14 |
++ | `cancelJob` | `POST /v1/jobs/{job_id}/cancellation` | 09, 14 |
+
+11b:147
+- | `getDeliverable` | `GET /v1/jobs/{job_id}/deliverable` | 16 |
++ | `getJobDeliverable` | `GET /v1/jobs/{job_id}/deliverable` | 16 |
+
+11b:148
+- | `downloadDeliverableFile` | `GET /v1/deliverables/{deliverable_id}/files/{file_name}` (bytes via `fetch` with the Bearer header; no query-string secrets, S0.11.1) | 16 |
++ | `getJobDeliverableContent` | `GET /v1/jobs/{job_id}/deliverable/content` (JSON `{media_type, encoding, content, content_hash}`; the client saves it as a file; Bearer header, no query-string secrets, S0.11.1) | 16 |
+
+11b:149
+- | `getManifest` | `GET /v1/jobs/{job_id}/manifest?profile=requester` | 16 |
++ | `getJobManifest` | `GET /v1/jobs/{job_id}/manifest` | 16 |
+
+11b:150
+- | `createJobRating`+ / `getJobRating`+ | `POST` and `GET /v1/jobs/{job_id}/rating` | 17 |
++ | `rateJob` | `PUT /v1/jobs/{job_id}/rating` (replaces an earlier rating; no read exists yet, 15.C.7 O7) | 17 |
+
+11b:151
+- | `createAppeal` / `getAppeal` | `POST /v1/appeals` with `appeal_kind` = `job_rejection`; `GET /v1/appeals/{appeal_id}` | 18 |
++ | `createAppeal`+ / `getAppeal`+ | `POST /v1/appeals` with `kind` = `job_rejection` and `subject_id` = the job id; `GET /v1/appeals/{appeal_id}` | 18 |
+```
+
+Prose in 11b that depends on the removed or changed rows (screen sections 03, 04, 07, 09, 11, 13, 16; line numbers not given to this cell) is changed to match [A]:
+
+- Screen 04 (flagged upload): no 'ask for review' button and no note field. It lists the finding codes and counts and offers 'delete upload' or 'submit for screening' (a flagged upload then waits for a human).
+- Screen 07 (quote when admission says `waitlist`): no 'join waitlist' button. The job is already `waitlisted` when the screening answer arrives; the screen shows `waitlist.position` and `waitlist.expires_at`.
+- Screen 09 (waitlist): reads `getJob`; the 'leave' action is `cancelJob` and says that the job ends (copy from it with `copy_from_job_id` to try again).
+- Screen 11 (reservation): 'use this reservation' is the choice of the reservation on the confirm screen (`confirmJob` with `reservation_id`).
+- Screen 13 (per-cell map): a cell detail panel uses the list item and `listJobResults`.
+- Screen 16 (results): the 'download' control saves the `content` string of `getJobDeliverableContent` under a client-built file name.
+
+### Part 12, public surfaces and growth (spec/12-public-growth.md)
+
+```
+12:29
+- | Public ledger | `listPublicLedgerCheckpoints`, `getPublicLedgerCheckpoint`, `listPublicLedgerFlows`: `GET /v1/public/ledger-checkpoints`, `GET /v1/public/ledger-checkpoints/{checkpoint_date}`, `GET /v1/public/ledger-flows` | `none` | `ff.public.ledger_page` | `public.counter_refresh_s` (a checkpoint by date is immutable: `ledger.checkpoint_interval_s`) | `SCR-pub-02` |
++ | Public ledger | `listPublicLedgerCheckpoints` (one date: `from` = `to`), `listPublicLedgerDaily`: `GET /v1/public/ledger/checkpoints`, `GET /v1/public/ledger/daily` | `none` | `ff.public.ledger_page` | `public.counter_refresh_s` | `SCR-pub-02` |
+
+12:35
+- | Share card payload | `getShareCardPayload` `GET /v1/share-cards/preview` | `member` | `ff.growth.v3_share_card` | `no-store` | in-app, `S11.*` |
++ | Share card payload | `getShareCard` `GET /v1/members/me/share-card` | `member` | `ff.growth.v3_share_card` | `no-store` | in-app, `S11.*` |
+
+12:38
+- | Flags and exposure | `listEffectiveFlags` `GET /v1/flags`, `recordExperimentExposure` `POST /v1/experiment-exposures` | `member` | none | `no-store` | none |
++ | Flags and exposure | `getFeatures` `GET /v1/members/me/features`, `recordExperimentExposure` `POST /v1/experiment-exposures` | `member` | none | `no-store` | none |
+
+12:466
+- `ineligible_behavior` is `off` for a new feature and `on` for a feature already shipped; it is fixed at lock. `GET /v1/flags` returns the member's effective variants and is the only place assignment is created (lazily, on first evaluation after the experiment is `running`).
++ `ineligible_behavior` is `off` for a new feature and `on` for a feature already shipped; it is fixed at lock. `GET /v1/members/me/features` (`getFeatures`) returns the member's effective flags as booleans, with no arm names, and is the only place assignment is created (lazily, on first evaluation after the experiment is `running`).
+
+12:511
+- - The client reports exposure with `POST /v1/experiment-exposures` (`assignment_id`, `surface_key`, `Idempotency-Key`); a server-side effect (for example an invitation created with a bonus) emits it from the server.
++ - The client reports exposure with `POST /v1/experiment-exposures` (`surface_key`, `Idempotency-Key`; the server finds the member's own assignment and answers `204` whether or not an experiment applies); a server-side effect (for example an invitation created with a bonus) emits it from the server.
+
+12.9.2 table (line not given to this cell; match the row text)
+- | `leaveTeam` | `DELETE /v1/team-memberships/{membership_id}` (sets `left_at`; the row stays) | required |
++ | `leaveTeam` | `DELETE /v1/teams/{team_id}/memberships/me` (sets `left_at`; the row stays) | optional, honored if sent |
+
+12.9.2 table (line not given to this cell; match the row text)
+- | `reportTeam` | `POST /v1/teams/{team_id}/reports` | required |
++ | `reportTeam` | `POST /v1/reports` with `subject_kind` = `team`, `subject_id` = the team id | required |
+```
+
+No edit is needed at 12:33 (`/v1/public/teams`) and 12:34 (`/v1/public/experiments`): the rows already match the operations defined in 15.C.4.7 and 15.C.4.8 [D]. The share-card text of 12.8.2 stays as it is, because it is the design that S15a follows (15.C.7 O1).
