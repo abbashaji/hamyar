@@ -526,7 +526,7 @@ applyChange(ctx, name, new_value, effective_from, reason):
 | `kill.member.<id>` | Authentication and lease issuance | Principal refused |
 
 - Engaging is one operator and immediate; releasing needs two operators (`security.two_person_actions`). Every change writes `KillSwitch`, `AdminAction`, an event and an epoch bump.
-- Launch switches: `members_may_join` is checked in `createMember`, `member_jobs_enabled` in `submitJob`, `minting_enabled` in `post` for `mint`; each refuses with `LAUNCH_GATE_CLOSED`. The only writer is `LaunchGate.applySignedOff`, which re-evaluates the gate rule of S14.* in the same commit. No environment variable, header, role or build flag bypasses it; dev, test and staging pass the same sign-off flow with synthetic administrators and synthetic evidence, and their data is labeled `synthetic` [D].
+- Launch switches: `members_may_join` is checked in `createMember` and in `leaseNextCell` (4.16 F1, `AC-bm6-01`), `member_jobs_enabled` in `submitJob` and `confirmEscrow` (`AC-bm7-01`), `minting_enabled` in `post` for `mint`; each refuses with `LAUNCH_GATE_CLOSED`. The only writer is `LaunchGate.applySignedOff`, which re-evaluates the gate rule of S14.* in the same commit. No environment variable, header, role or build flag bypasses it; dev, test and staging pass the same sign-off flow with synthetic administrators and synthetic evidence, and their data is labeled `synthetic` [D].
 
 ## 4.10 Migrations
 
