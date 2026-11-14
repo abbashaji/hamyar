@@ -10,7 +10,7 @@ For each cited path the surrounding 12 lines of the citing part were read to lea
 - **NEW**: S15 has no such capability and the capability is legitimate. It is defined in full in 15.D.4 in the S15 table format.
 - **REMOVE**: the cited use must not exist (15.D.5), with what the citing part does instead.
 
-Result for the 38 cited paths: 23 ALIAS, 13 NEW, 1 REMOVE, and 1 split (`audit-queue-items`: audits are ALIAS, quarantine is NEW, `gold-views` is REMOVE). Four sub-decisions inside ALIAS rows are also removals (the bulk sign-off, the transaction list, non-public change-log entries, `requeue_at_front`); they are named in 15.D.5. This file adds 21 operations to S15; every one is an admin-surface operation and none touches the member or public surface [D].
+Result for the 38 cited paths: 23 ALIAS, 13 NEW, 1 REMOVE, and 1 split (`audit-queue-items`: audits are ALIAS, quarantine is NEW, `gold-views` is REMOVE). Four sub-decisions inside ALIAS rows are also removals (the bulk sign-off, the transaction list, non-public change-log entries, `requeue_at_front`); they are named in 15.D.5. This file adds 20 operations to S15; every one is an admin-surface operation and none touches the member or public surface [D].
 
 | # | Cited path | Cited at | Decision | Resolves to |
 | --- | --- | --- | --- | --- |
@@ -53,7 +53,7 @@ Result for the 38 cited paths: 23 ALIAS, 13 NEW, 1 REMOVE, and 1 split (`audit-q
 | 37 | `/v1/admin/work-claims` | 11c:797, 11c:798, 11c:799 | NEW | `listWorkClaims`, `createWorkClaim` |
 | 38 | `/v1/admin/work-claims/{}/releases` | 11c:799 | NEW | `releaseWorkClaim` (and `takeoverWorkClaim`) |
 
-The 21 new operations: `previewAdminAction`, `startAdminActionVerification`, `listQuarantinedSubmissions`, `getQuarantinedSubmissionContent`, `releaseQuarantinedSubmission`, `rejectQuarantinedSubmission`, `getBottleneck`, `getOperationsSnapshot`, `overturnCells`, `voidCell`, `stopJob`, `listLeases`, `releaseLease`, `listAdminMetricSnapshots`, `createParameterChangeSet`, `runTemplateChecks`, `listWorkClaims`, `createWorkClaim`, `releaseWorkClaim`, `takeoverWorkClaim`, `getAdminAction`-free (no further ops) [D].
+The 20 new operations: `previewAdminAction`, `startAdminActionVerification`, `listQuarantinedSubmissions`, `getQuarantinedSubmissionContent`, `releaseQuarantinedSubmission`, `rejectQuarantinedSubmission`, `getBottleneck`, `getOperationsSnapshot`, `overturnCells`, `voidCell`, `stopJob`, `listLeases`, `releaseLease`, `listAdminMetricSnapshots`, `createParameterChangeSet`, `runTemplateChecks`, `listWorkClaims`, `createWorkClaim`, `releaseWorkClaim`, `takeoverWorkClaim` (20 operations) [D].
 
 ## 15.D.2 Rules shared by every new operation [D]
 
