@@ -125,3 +125,76 @@ recordExperimentExposure  req { surface_key: text<40> }        204, no body
 Given / When / Then
 
 - `AC-api-C03` Given a member assigned to the control arm of a running experiment, When the client posts the exposure twice with different keys, Then both answers are `204` and exactly one `experiment.exposed` exists; for a member with no assignment the answer is the same `204` and no row or event exists.
+
+### 15.C.4.3 Cancellation preview (row 6)
+
+S15a 15.7.3 says `cancelJob` refunds unstarted cells and that the refund is known only after settlement, and S6.* alone decides what part of the levy and the verification pool stays payable on a partial run. A client that guessed the refund would duplicate S6.* rules, so the preview is a server read that runs the same settlement function in dry-run mode. [D][A]
+
+| op | Method and path | Auth | Idem | RL | OK | Events |
+| --- | --- | --- | --- | --- | --- | --- |
+| `getCancellationPreview` | `GET /v1/jobs/{job_id}/cancellation-preview` | member | - | `RL-READ` | 200 | - |
+
+```
+CancellationPreview { job_id: id<job>, state: enum<job states of 0.9.2>, as_of: ts,
+                      cancellable: bool, reason: null/"not_cancellable",
+                      outcome: "immediate"/"settling"/null,
+                      cells: { unstarted: int, in_flight: int, accepted: int },
+                      escrow: { held_ucr: ucr, paid_out_ucr: ucr },
+                      refund_estimate: { lower_ucr: ucr, upper_ucr: ucr }/null, basis_copy_key: copy_key }
+```
+
+- `outcome` is `immediate` in `draft`, `quoted` and `waitlisted` (`200`, nothing held, `refund_estimate` null) and `settling` in `admitted`, `running` and `suspended` (`202` on cancel). In any other state `cancellable` is `false` and `reason` is `not_cancellable`; the preview answers `200`, not `409`, because it is a read. [D]
+- `cells.unstarted` is `queued` plus `suspended`, `in_flight` is `in_progress`, `accepted` as in `JobProgress` (S15a 15.7.3). `escrow` repeats `JobProgress.escrow`. [D]
+- `refund_estimate` comes from the S6.* settlement function run on current state. This part defines no arithmetic; it fixes one invariant: 0 <= `lower_ucr` <= `upper_ucr` <= `escrow.held_ucr` - `escrow.paid_out_ucr`. The figure is an estimate, not a promise: in-flight cells may still be accepted or fail before settlement, and the amount that counts is the one in `getSettlementReceipt`. `basis_copy_key` points at the fixed text that says so. [D][A][P: `S6.*` defines the function and may return null when it cannot bound the refund]
+- Owner only; another member's job is `404 NOT_FOUND`. The preview changes nothing and takes no `Idempotency-Key`. [D]
+
+Given / When / Then
+
+- `AC-api-C04` Given a `running` job with 240 primary cells of which 100 are `queued`, 20 `in_progress` and 120 `accepted`, When its owner calls `getCancellationPreview`, Then `cancellable` is `true`, `outcome` `settling`, `cells` is `{unstarted: 100, in_flight: 20, accepted: 120}`, `refund_estimate.upper_ucr` does not exceed `escrow.held_ucr` - `escrow.paid_out_ucr`, no event is emitted and nothing is posted; for a `completed` job `cancellable` is `false` with `reason` `not_cancellable`.
+
+### 15.C.4.4 Cell preview (row 7)
+
+A requester who pastes a wrong column is told only after a rejection or a bad result. A preview of three cells rendered by the template lets the wizard (screens 03 and 05) catch that before escrow. Cells and leases do not exist before `confirmJob`, so this is a pure render. [D][A]
+
+| op | Method and path | Auth | Idem | RL | OK | Events |
+| --- | --- | --- | --- | --- | --- | --- |
+| `previewCells` | `GET /v1/jobs/{job_id}/cell-preview` | member | - | `RL-READ` | 200 | - |
+
+```
+CellPreview { job_id: id<job>, as_of: ts, planned_cells: int,
+              samples: [ { ordinal: int, prompt: { text: string, char_count: int, hash: hash },
+                           output: { format: "text"/"json", max_chars: int, max_bytes: int } } ],      0..3 items
+              findings: [ { code: string, count: int } ] }
+```
+
+- **Allowed states:** `draft`, `screening`, `quoted`, `waitlisted`. After `confirmJob` the cells exist and this is `409 STATE_CONFLICT` reason `job_state_invalid`. Missing required `inputs` or no attached upload is `422 UNPROCESSABLE` reason `job_incomplete`. [D]
+- **Selection is deterministic:** the first, the middle (floor of half) and the last ordinal that the template splitter plans, so a repeated call returns the same bytes and an `ETag` works. `planned_cells` is the splitter output, read only and not stamped on the job; the stamped `cell_count` is still set by `submitJobForScreening`. [D]
+- **As rendered by the same template function** as the volunteer work order: wrapper, delimiters, instruction text. The random delimiter token differs from the one a real cell gets, so the hash differs; the field `hash` is therefore a preview hash, not a cell hash. The preview carries no `service`, `open_url`, lease or nonce, and no volunteer ever sees a preview. [D]
+- **Content stays the requester's own.** The text is the requester's own uploaded data inside the reviewed template; `findings` repeats `Upload.screening` counts only, never matched text (S15a 15.7.1). Not stored by the preview, never logged (S15a 15.3 rule 5), `Cache-Control: no-store`. [D]
+- **Cost.** The render uses the splitter on up to `job.max_upload_bytes`; it shares `RL-READ`, and S12.* of the rate parameters may give it its own class if measurement shows abuse [A][H].
+
+Given / When / Then
+
+- `AC-api-C05` Given a `draft` job with an upload that the splitter plans as 240 cells, When its owner calls `previewCells` twice, Then both answers hold exactly three samples with ordinals 1, 120 and 240 and equal bodies, `planned_cells` is 240, and no `Cell`, `Lease` or ledger row exists; after `confirmJob` the same call is `409 job_state_invalid`.
+
+### 15.C.4.5 Settlement receipt (row 11)
+
+S15a promises a refund 'visible in `getJob`' (15.7.3), but the `Job` object has no refund field; the requester has no way to see what was paid out, levied and returned. [D]
+
+| op | Method and path | Auth | Idem | RL | OK | Events |
+| --- | --- | --- | --- | --- | --- | --- |
+| `getSettlementReceipt` | `GET /v1/jobs/{job_id}/receipt` | member | - | `RL-READ` | 200 | - |
+
+```
+Receipt { job_id: id<job>, state: enum<job states of 0.9.2>, settled_at: ts, escrow_ucr: ucr, refund_ucr: ucr,
+          lines: [ { kind: "primary_pay"/"verification_pay"/"levy"/"refund", amount_ucr: ucr, cells: int/null } ] }
+```
+
+- **When:** only after settlement, that is in `completed`, `failed` (partial) and `cancelled` jobs whose escrow is `closed` (events `job.settled`, `job.settled_partial`, `job.cancel_settled`, `escrow.closed`). Before that, and for a job that never held escrow (`rejected`, `quote_expired`, `cancelled` from `draft`, `quoted` or `waitlisted`): `409 STATE_CONFLICT` reason `job_state_invalid`, `details.state`. [D]
+- **Identity:** the ledger closes the escrow account to zero, so `escrow_ucr` equals the sum of all `lines` including `refund`, and `refund_ucr` equals the `refund` line (0 if absent). This is checkable by the client and by a test. [D]
+- **Line kinds belong to S6.*;** an unknown kind is rendered by a client as 'other'. The receipt names no volunteer, no lease, no counterparty and no other job. [D][A][P: `S6.*` decides whether unused verification pool is a `refund` or another line]
+- Owner only (`404 NOT_FOUND` otherwise); safe read; the same numbers appear on the member's own ledger entries (S15a 15.6.5) without a counterparty. [D]
+
+Given / When / Then
+
+- `AC-api-C06` Given a `completed` job whose escrow was 276,000,000 ucr, When its owner calls `getSettlementReceipt`, Then the sum of `lines[].amount_ucr` is `276000000`, `refund_ucr` matches the `refund` line, and for a `running` job the answer is `409 STATE_CONFLICT` reason `job_state_invalid`.
