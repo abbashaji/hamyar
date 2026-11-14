@@ -195,3 +195,92 @@ The FD§4.9 table was read line by line for this cell (it has 10 rows: cell enve
 | Lease timeout | TBD from measured time per cell | `lease.timeout_s` (`lease.extend_s`, `lease.submit_grace_s` are additions) | 1,200 = 10 x 120 |
 
 Two rows of S16 16.18 are not in FD§4.9: the Reserve ceiling (`reserve.ceiling_credits`, from FD§4.2: "a published ceiling") and the daily per-member mint cap; the table should say so (CR-10). Parameters that the FD body requires and FD§4.9 omits all have a canonical row: eta threshold (`price.eta_alarm_threshold`, FD§4.3), claim ratio threshold (`inflation.claim_ratio_threshold_weeks`) and mint-cap utilization (`inflation.mint_utilization_alarm`, FD§4.7), per-device, per-invite-tree and per-day grant limits (`grant.max_per_device`, `grant.max_per_invite_tree_per_day`, `grant.max_per_day`, FD§4.6), concurrent jobs (`admission.max_concurrent_jobs_per_member`, FD§4.8), deadline multiplier (`admission.deadline_multiplier_standard`, FD§4.8). No FD parameter maps to two canonical names. [D]
+
+## 16.D.8 Safety-critical defaults
+
+### 16.D.8.1 Defaults that are a safety-critical fail-closed value [D]
+
+The default is the closed or strict end; the system is safe if nobody ever edits the row. A change in the open direction is impossible (constant), gate-only (`launch.*`) or a loosening (notice and a second operator, S16 16.2.3). [D]
+
+| Class | Rows and default |
+| --- | --- |
+| Switches closed until sign-off | `launch.members_may_join` false; `launch.member_jobs_enabled` false; `launch.minting_enabled` false; `launch.required_gate_ids` `["G0","G1"]`; `launch.min_signoffs` 2; `launch.min_approved_services` 1. Kill switches default `released` and feature flags default off are not parameters (S0 0.10.6) |
+| Constants (not editable) | `mint.requires_launch_gate` true; `ledger.allow_negative_balance` false; `ledger.reversal_min_approvers` 2; `grant.non_transferable` true; `verify.model_judge_mints_credit` false; `verify.third_exec_on_mismatch` true; `retention.raw_ip_stored` false; `analytics.third_party_trackers` false; `analytics.cookies_enabled` false; `policy.tighten_immediate` true; `policy.recheck_on_accept` true; `optin.sensitive_topics_default` false; `security.rotate_before_public_exposure` true; `ui.card.expand_required_first_use` true; `price.v_rounding` `ceil`; `mint.cap_period` `utc_month` |
+| Credit creation and spend | `grant.reserve_floor_credits` 0 (grants pause, never overdraw); `grant.required_verified_cells` 1; `grant.max_per_device` 1; `admission.phi` 0.50 (below 1, `C1`); `mint.monthly_cap_credits` 4,800 behind the launch gate; `reserve.ceiling_credits` 1,000; `credit.member_cap_credits` 350 |
+| Verification | `verify.audit_rate_floor` 0.02 and `verify.gold_rate_floor` 0.01 (must stay above 0, `S16D-C2`); `verify.blanket_redundancy_n` 3; `verify.new_donor_blanket_cells` 5; `trust.cap_multiplier.restricted` 0.25 |
+| Content screening and policy | `screen.pii_action` `reject`; `screen.output_url_action`, `screen.output_code_action`, `screen.output_request_action` `quarantine`; `screen.max_urls_per_input` 0; `screen.output_max_urls` 0; `screen.invisible_char_max` 0; `screen.review_rate_new_requester` 1.0; `optin.default_purposes` `["P0","P1"]`; `optin.default_sensitivities` `["S0","S1"]`; `policy.loosen_min_approvers` 2; `policy.loosen_min_notice_days` 7 |
+| Privacy and exposure | `analytics.min_cohort_k` 10; `team.min_public_members` (5 now, 10 after `F-10`); `public.location_display` `never`; `public.ledger_lag_s` 300; `ledger.member_timestamp_granularity_s` 86,400 (the coarsest value); `lease.max_job_share_ratio` 0.34; `identity.recovery_key_bits` 128; `identity.recovery_cooldown_s` 86,400 |
+| Access and approval | `security.two_person_actions` (four actions, must keep `parameter.loosen`); `session.admin_idle_ttl_s` 1,800; `session.admin_abs_ttl_s` 28,800; `ratelimit.recovery_attempts_per_day` 5 |
+
+### 16.D.8.2 Parameters that are not safe to loosen without notice [D]
+
+Every loosening already takes notice (`change.notice_days_default` 7, `change.notice_days_price` 14) and a second operator; the rows below are those where the harm of an unannounced loosening cannot be undone or cannot be seen by a member before it happens, so the notice must not be shortened, waived or set to 0 (`F-07`, `S16D-C9`) and the change-log entry states the reason. [D][A]
+
+| Group | Loosening direction | Why it cannot wait or be reversed |
+| --- | --- | --- |
+| `mint.monthly_cap_credits`, `credit.member_cap_credits`, `trust.cap_multiplier.*` | raise | credit created or held cannot be uncreated except by Reserve retirement (FD§4.2); claims exceed capacity (FD§4.7) |
+| `admission.phi`, `reservation.capacity_share_cap`, `admission.max_job_cells` | raise | admitted jobs and held reservations are promises that cannot be withdrawn |
+| `reserve.ceiling_credits` | either way | retirement is irreversible; the group is `N` |
+| `price.*`, `credit.lifetime_days*`, `admission.*`, `reservation.*` | any | changes what members hold or pay; 14 days |
+| `verify.*_floor`, `verify.audit_rate_s`, `verify.gold_rate_g`, `trust.*_min_*`, `verify.blanket_redundancy_n` | lower | weakens fraud controls; abuse during the gap is not recoverable |
+| `analytics.min_cohort_k`, `team.min_public_members`, `public.ledger_lag_s`, `public.location_display`, `job.manifest_time_granularity_s`, `ledger.member_timestamp_granularity_s`, `identity.recovery_*` | lower or open | a disclosure cannot be taken back; a `SEC` reason is recorded |
+| `retention.*` | raise | data is kept longer; applies to new rows only |
+| `session.*_ttl_s`, `security.two_person_actions`, `security.secret_rotation_days` | longer or smaller set | a hijacked session or secret lives longer |
+| `screen.*`, `policy.*`, `service.*`, `optin.default_*`, `template.min_reviewers_*` | loosen | content or terms exposure; 7 days minimum |
+| `launch.*` | switch on | gate sign-off only; never a plain edit |
+
+## 16.D.9 Acceptance criteria
+
+| Id | Given | When | Then |
+| --- | --- | --- | --- |
+| `AC-paramd-01` | the seeded defaults | the seed check runs | every relation of 16.D.2 and 16.D.3 holds, except the two listed failures (`S16D-C3` in the arm, `S16D-C21` until CR-08), which return warnings |
+| `AC-paramd-02` | `price.eta_alarm_threshold` = 0.90 with the defaults | the write is made | it is refused naming `S16D-C1` (0.90 > 0.8696) |
+| `AC-paramd-03` | `retention.ip_hash_ttl_days` = 0 | the write is made | refused naming `S16D-C13`; nothing is changed |
+| `AC-paramd-04` | `change.notice_days_default` = 0 | the write is made | refused naming `S16D-C9` |
+| `AC-paramd-05` | `admission.min_window_s` = 0 | the write is made | refused naming `S16D-C5` |
+| `AC-paramd-06` | `retention.session_days` lowered to 60 alone | the write is made | refused naming `S16B-C1` with the batch hint (`F-16`); as a batch with both session limits it is accepted as `tighten` |
+| `AC-paramd-07` | `team.min_public_members` = 5 | the write is made | accepted with the warning `S16D-C21`, recorded in the log entry |
+| `AC-paramd-08` | one active admin | any of the approver counts in `S16D-C19` is 2 | the warning is returned and recorded; no loosening completes |
+| `AC-paramd-09` | a name from 16.D.5 marked alias, or `abuse.admin_lookup_rate` | it is seeded or written | not created and refused as unknown (`AC-param-14`) |
+| `AC-paramd-10` | `security.two_person_actions` without `parameter.loosen` | the write is made | refused naming `S16D-C20` |
+
+## 16.D.10 Hypotheses, verifications, assumptions
+
+**Hypotheses [H]**: the Reserve, not `grant.max_per_day`, is the binding limit on starter grants at the FD§3.3 inputs (`F-13`); accelerated-arm members cannot fund a 240-cell job from earned credit alone (`F-17`); two weeks of margin is enough between `price.v_window_days` and `retention.event_raw_days` (2 days of margin today).
+
+**Verifications [V]** (what, by whom, where stored): whether escrowed credit keeps ageing (S6 owner, S6.* text, `S16D-C3`); the meaning of redeemable capacity (S6 owner, `F-02`); what happens when verification need exceeds the priced v (S6 owner, `F-20`); archive interval behind `ops.rpo_s` (S4 owner, `F-18`); distinct reporters in the template autopause (S9 owner, `F-19`); data sources of the v and throughput windows (S13 and S6, `S16D-C14`); one job behind `ops.purge_interval_s` and the S10 retention sweep (S4 owner); the S11 console passages for `abuse.admin_lookup_rate` and `session.admin_stepup_s` (owner of S11, `ISS-16015`); the S10a, S14 and S15b names of 16.D.5.
+
+**Assumptions [A]** (with the decision that could overturn each): the corrected default `team.min_public_members` = 10 (a `SEC` decision may exempt team totals); min(phi, 1 - phi) as the mint bound; the canonical choices of 16.D.5 where the two names have one value; ranges `1..90` for notice and `1..` for the IP-hash TTL; recommendations on the public flags.
+
+**What this part cannot promise** [D]: every default stays a starting value until its measurement exists; passing every relation shows that the table is consistent, not that any value is safe for real members, legal anywhere or enough for a pilot of 30 to 50 members (FD§9).
+
+## Corrections required
+
+Exact edits to other files, none made by this cell. `S` = `spec/00-conventions.md`, `P` = `spec/16-parameters.md`, `B` = `spec/16b-parameters-a.md`, `C` = `spec/16c-parameters-b.md`. Each is minimal and renames nothing. [D]
+
+| No | File and place | Exact change | Finding |
+| --- | --- | --- | --- |
+| CR-01 | P 16.15, row 1, first cell | replace `Minimum eta (Reserve inflow versus spend)` by `Minimum round-trip efficiency eta = 1/(1+v+lambda), cells requested per cell contributed` | `F-01` |
+| CR-02 | P 16.3 `C13`; P 16.5 row `mint.monthly_cap_credits`; S Table A same row | `C13`: replace the factor phi by min(phi, 1 - phi) (as integer ppm: min(phi_ppm, 1,000,000 - phi_ppm)). Rows: replace `x (1 - 0.5)` and `x phi 0.5` by `x 0.5, where 0.5 = min(phi, 1 - phi)`; default 4,800 unchanged. P 16.7 closing note on `ISS-166` and 16.18 follow | `F-02` |
+| CR-03 | P 16.7 `admission.min_window_s` and `admission.window_step_s`; S Table A | validation of the min window becomes `admission.window_step_s .. admission.max_window_days x 86400; C7, C9, S16D-C5`; of the step `1..86,400, divides 86,400; C9` | `F-05` |
+| CR-04 | P 16.11 `retention.ip_hash_ttl_days`; S Table B | validation `0..30` becomes `1..30; S16D-C13` | `F-06` |
+| CR-05 | P 16.3 `C2`; S 0.10.3 `C2` | append `; verify.gold_rate_floor > 0` | `F-09` |
+| CR-06 | P 16.13 and S Table A rows `change.notice_days_default`, `change.notice_days_price` | validation `0..90` becomes `1..90` (price: `>= change.notice_days_default`; `S16D-C9`) | `F-07` |
+| CR-07 | P 16.13 and S Table A row `change.notice_days_price` | `(for price.*, admission.*, credit.*)` becomes `(for price.*, credit.*, admission.*, reservation.*)` | 16.D.6 |
+| CR-08 | P 16.14 and S Table C row `team.min_public_members` | default 5 becomes 10 (= `analytics.min_cohort_k`) with `S16D-C21`; the pilot report states that few teams reach it | `F-10` |
+| CR-09 | P 16.5 and S Table A row `inflation.mint_cap_cut_ratio` | default cell appends `; the cap after the cut = floor(cap x (1 - ratio))` | `F-21` |
+| CR-10 | P 16.18 | the basis of the three size defaults reads `[A] initial safe default, no derivation (FD§4.1: measured in Phase 0), replaced by CAL`; the Reserve ceiling and `mint.per_member_daily_cap_credits` are marked as not FD§4.9 rows; last paragraph states that FD§4.9 was re-read (this file) | `F-22`, 16.D.7 |
+| CR-11 | S 0.10.3 and 0.10.5 | `tighten_direction` enum becomes `up`, `down`, `toward:<value>`, `none`; `public` default text becomes `true except the rows listed in S16 16.17.5`; 0.10.5 lists the operator exceptions of S16 16.12 and the area `abuse` (owner `operator`) | 16.D.6 |
+| CR-12 | P 16.16 and 16.17.5 | public exceptions: add `ops.purge_interval_s`; hidden list: add `lease.max_job_share_ratio`, `growth.referral.max_per_day`, `growth.referral.max_per_invite_tree_per_30d`; recommended: `grant.max_per_invite_tree_per_day` | 16.D.6 |
+| CR-13 | B (new rows, owner of S10 and S14 to supply values) | add rows for the generic two-person approval lifetime (S10a name; type duration_s, range 600..604,800 as 16.B.6, default 86,400, `T↓`, `SEC`; the S15b name an alias), `identity.code_max_attempts`, `identity.registration_mode`, `invite.strikes_to_revoke_issuing`, `invite.tree_freeze_ban_threshold`; `abuse.admin_lookup_rate` marked not seeded until type, unit and default are given | 16.D.5 |
+| CR-14 | C 16.C.3 `ui.requester.appeal_note_max_chars`; C 16.C.2 `ui.lease.warn_remaining_s` | the note range `0..5,000` becomes `100 .. appeal.reason_max_chars` (field name [V]); the warning range becomes `1 .. lease.timeout_s`, so it cannot be switched off | `F-11`, `F-23` |
+| CR-15 | P 16.12 `template.autopause_report_count` | `5 reports` becomes `5 reports from distinct reporting members` [V S9.9.2] | `F-19` |
+| CR-16 | P 16.16 `ops.rpo_s` | add `[V]: no parameter bounds the log-archive interval; the S4 owner adds one or states 300 s as a target` | `F-18` |
+| CR-17 | P 16.8 `verify.duplicate_min_chars` | validation appends `; >= verify.duplicate_shingle_chars` (`S16D-C11`) | `F-08` |
+| CR-18 | P 16.3 | the list of 16.3 gains `S16D-C1`..`S16D-C24` of 16.D.3 and its worked check; `AC-param-02` counts them | 16.D.3 |
+| CR-19 | P 16.3 intro and 16.17.2 | a relation that mentions `credit.lifetime_days` is evaluated twice, with `credit.lifetime_days` and with `credit.lifetime_days_accelerated`, while `ff.experiment.expiry_arm` is on | `F-03` |
+| CR-20 | S14 text at 14:603 and 14:600 (owner of S14) | `calibration.min_samples_per_service` 20 becomes 30; the S14 secret-rotation name becomes `security.secret_rotation_days` | 16.D.5 |
+| CR-21 | P 16.6 `price.eta_alarm_threshold` | validation `0..1` becomes `> 0 .. 1; S16D-C1` | `F-01` |
+| CR-22 | C 16.C.2 `ui.draft.ttl_s` | append: `the draft lives from its last write on the device; 3,600 s satisfies S16C-C4 on either reading` | `F-15` |
+| CR-23 | P 16.16 `security.two_person_actions` | validation appends `; always contains parameter.loosen (S16D-C20)` | `S16D-C20` |
+| CR-24 | P 16.3 | `S16D-C3` is recorded as a warning until S6 confirms whether escrowed credit keeps its lot expiry; if it does, `reservation.max_horizon_days` and the arm are an owner decision before the `PreRegistration` lock | `F-03` |
