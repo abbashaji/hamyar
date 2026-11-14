@@ -171,7 +171,7 @@ CellPreview { job_id: id<job>, as_of: ts, planned_cells: int,
 - **Selection is deterministic:** the first, the middle (floor of half) and the last ordinal that the template splitter plans, so a repeated call returns the same bytes and an `ETag` works. `planned_cells` is the splitter output, read only and not stamped on the job; the stamped `cell_count` is still set by `submitJobForScreening`. [D]
 - **As rendered by the same template function** as the volunteer work order: wrapper, delimiters, instruction text. The random delimiter token differs from the one a real cell gets, so the hash differs; the field `hash` is therefore a preview hash, not a cell hash. The preview carries no `service`, `open_url`, lease or nonce, and no volunteer ever sees a preview. [D]
 - **Content stays the requester's own.** The text is the requester's own uploaded data inside the reviewed template; `findings` repeats `Upload.screening` counts only, never matched text (S15a 15.7.1). Not stored by the preview, never logged (S15a 15.3 rule 5), `Cache-Control: no-store`. [D]
-- **Cost.** The render uses the splitter on up to `job.max_upload_bytes`; it shares `RL-READ`, and S12.* of the rate parameters may give it its own class if measurement shows abuse [A][H].
+- **Cost.** The render uses the splitter on up to `job.max_upload_bytes`; it shares `RL-READ`; a class of its own is a rate-limit parameter decision (S16.*) if measurement shows abuse [A][H].
 
 Given / When / Then
 
@@ -198,3 +198,75 @@ Receipt { job_id: id<job>, state: enum<job states of 0.9.2>, settled_at: ts, esc
 Given / When / Then
 
 - `AC-api-C06` Given a `completed` job whose escrow was 276,000,000 ucr, When its owner calls `getSettlementReceipt`, Then the sum of `lines[].amount_ucr` is `276000000`, `refund_ucr` matches the `refund` line, and for a `running` job the answer is `409 STATE_CONFLICT` reason `job_state_invalid`.
+
+### 15.C.4.6 Reservation availability (row 23)
+
+[D][A] Screen 10 shows a calendar. `createReservation` with `dry_run` answers for one date and spends a write-weight request each time (S15a 15.12), so a range read is needed. It applies exactly the guards of `createReservation` and reveals no capacity figure: the capacity dashboard (S15b 15.31) is admin only.
+
+| op | Method and path | Auth | Idem | RL | OK | Events |
+| --- | --- | --- | --- | --- | --- | --- |
+| `getReservationAvailability` | `GET /v1/reservations/availability` | member | - | `RL-READ` | 200 | - |
+
+```
+query   from: date, to: date, template_id: id<tpl>, cells: int
+200     { as_of: ts, data: [ { date: date, bookable: bool,
+                               reason: null/"date_full"/"reservation_capacity_share"/"reservation_horizon"/"reservation_limit",
+                               price_per_cell_ucr: ucr/null, free_cancel_until: ts/null } ],
+          page: { next_cursor: null, limit: int } }
+```
+
+- One entry per UTC date from `from` to `to`, ascending. `reason` repeats the `details.reason` that `createReservation` would return (`CAP_EXCEEDED` for the three limits, `NO_CAPACITY` for `date_full`), so one set of copy keys serves both. `price_per_cell_ucr` and `free_cancel_until` are the values `createReservation` would lock, present only when `bookable` is `true`. The list is bounded by `reservation.max_horizon_days`, so `next_cursor` is always null; the `Page` shape is kept for clients. [D]
+- `from` must not be before today (UTC), `to` not before `from`, the range at most `reservation.max_horizon_days` days, `cells` an integer from 1 to `admission.max_job_cells`, `template_id` an approved, unpaused template: else `400 VALIDATION_FAILED` (`range`). A date past the horizon inside a wider request is not returned; asking for one is the `400`. [D]
+- `bookable` is an estimate at `as_of`, not a hold: `createReservation` can still answer `NO_CAPACITY` (the normal race, as for offered cells in S15a 15.11). Copy says so. [D]
+- With `ff.job.reservations` off: `403 FORBIDDEN` reason `feature_disabled`, `details.flag` = `ff.job.reservations` (S15a 15.7.4). Not active only; a member at `reservation.max_active_per_member` gets `reservation_limit` on every date. [D]
+
+Given / When / Then
+
+- `AC-api-C07` Given `ff.job.reservations` on and one date at the capacity share limit, When a member asks for a three-day range, Then three entries come back in date order, the full date has `bookable` `false` and `reason` `date_full`, the others carry `price_per_cell_ucr`, and no hold or ledger row is created; with the flag off the answer is `403 FORBIDDEN` reason `feature_disabled`.
+
+### 15.C.4.7 Public experiments (row 18)
+
+[D][A] S15b 15.32.2 requires a locked pre-registration before an experiment can start, and 15.33.2 already publishes locked pre-registrations. A public page can therefore list experiments that have started without disclosing anything that is not already public. No per-member arm and no cohort count appears.
+
+| op | Method and path | Auth | Idem | RL | OK | Events |
+| --- | --- | --- | --- | --- | --- | --- |
+| `listPublicExperiments` | `GET /v1/public/experiments` | none | - | `PUB` | 200 | - |
+
+```
+PublicExperiment { key: text<64>, hypothesis: text<500>, status: "running"/"stopped", started_on: date, stopped_on: date/null,
+                   arms: [ { arm_key: text<40>, fraction_ppm: ppm } ], metrics: [ text<64> ],
+                   preregistration: { id: id<prr>, content_hash: hash, locked_at: ts } }
+response        Page<PublicExperiment>, as_of: ts          newest start first, filter status
+```
+
+- Only `running` and `stopped` experiments appear; `draft` experiments and the `flag_key`, `fraction_source` and arm `config` of S15b do not. `metrics` are the `measure_key` values of the experiment. `preregistration` is never null because starting requires it. [D]
+- No flag gate: the page is served whenever the API is up (12.1.2 says none). Common public rules apply: no cookies, `Cache-Control: public, max-age` at most `public.counter_refresh_s`, `ETag` and `304`, `PUB` class (S15b 15.33.1). [D]
+- Whether a running experiment may be disclosed before it ends is a design decision for `S13.*`; this endpoint publishes at `startExperiment`, in line with the public pre-registration. [A][V: `S13.*` owner confirms]
+
+Given / When / Then
+
+- `AC-api-C08` Given one `draft`, one `running` and one `stopped` experiment, When an anonymous caller lists `/v1/public/experiments`, Then two items are returned, none contains `flag_key`, `config` or any member count, and each carries the `content_hash` of its locked pre-registration; no `Set-Cookie` is sent.
+
+### 15.C.4.8 Public teams (row 22)
+
+[D][A] S15a 15.8 says a listed team's name and total may appear on public surfaces and S15b 15.33.1 rule 6 gates the public endpoints by flag, but no public teams endpoint exists. Part 12.9.2 decides the content: totals only, no member list, no alias in Phase 1, a place only if `public.location_display` is `opt_in`.
+
+| op | Method and path | Auth | Idem | RL | OK | Events |
+| --- | --- | --- | --- | --- | --- | --- |
+| `listPublicTeams` | `GET /v1/public/teams` | none | - | `PUB` | 200 | - |
+
+```
+PublicTeam { id: id<tem>, name: text<40>, member_count: int, group_label: text<40>/null,
+             score: { week_start: date, week: int, all_time: int } }
+response   Page<PublicTeam>, as_of: ts          ordered by name ascending, never by score
+```
+
+- **Who is listed:** teams that are `listed` (S15a: `listed` = true, 12: `join_mode` = `listed`), `active`, and have at least `team.min_public_members` active members; a team that drops below falls out at once. The threshold in force is the larger of `team.min_public_members` and `analytics.min_cohort_k`, so a public total can never single out a small group. [D][A]
+- **Score** is the accepted verified cells of the team's members inside their membership intervals: the current UTC calendar week (Monday 00:00 UTC, `week_start`) and all time (12.9.2). Cells that are later overturned lower it. Figures are lagged by `public.ledger_lag_s` like every public ledger-derived number. [D]
+- **Order is by name, not by score.** A public ranking of groups is competitive pressure on members in a high-risk context and is not asked for by FD; part 12 may override with a reason. [A]
+- `group_label` is present only when `public.location_display` is `opt_in` and the creator typed one; otherwise null. The platform never infers or verifies it. The `id<tem>` lets a viewer report the team (row 27); it links to no member. [D]
+- With `ff.growth.v4_teams` off: `404 NOT_FOUND`. No member id, alias or per-member contribution ever appears. [D]
+
+Given / When / Then
+
+- `AC-api-C09` Given three teams of which one is `listed` and active with `team.min_public_members` members, one `listed` with one member fewer and one private, When an anonymous caller lists `/v1/public/teams`, Then only the first is returned, with `name`, `member_count`, `score` and no member data; with `ff.growth.v4_teams` off the answer is `404 NOT_FOUND`.
