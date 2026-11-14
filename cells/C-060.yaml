@@ -1,0 +1,33 @@
+id: C-060
+title: 'Issue register: cross-check, late issues and owner decisions'
+type: normal
+priority: 5
+supersedes:
+- C-033
+goal: 'Do everything C-033 required (spec/02e-issues-summary.md, see below) AND close the register gap that made scripts/check_issues.py fail. Step 0 (gap): scripts/check_issues.py requires every ISS id in the leading-column of the Issues raised tables of the spec parts to appear in spec/02*.md. Ids raised in spec/16b-parameters-a.md (ISS-16001.., 21 ids), spec/16c-parameters-b.md (ISS-16101.., 13 ids) and spec/20-*.md (find the file with glob; also check every other spec/*.md part) are missing. Create spec/02f-issues-late.md (''# 2.F Late issues raised by parts'') that lists each missing id as a table row (id | title | severity | status | resolution/default copied from the raising part; do not invent facts; mark [V]/[A]), following the column layout of the existing register files spec/02b-issues-parts-a.md. Existing register files are not edited. Then C-033 content: read spec/02-issues.md, spec/02b-issues-parts-a.md, spec/02c-issues-parts-b.md, spec/02d-issues-parts-c.md, spec/02f-issues-late.md (the full register) and spec/03-assumptions.md. Write spec/02e-issues-summary.md (''# 2.E Register summary and owner decisions''): (1) counts by severity and status; (2) a table of issues that contradict each other or resolve the same FD point differently (id, id, the conflict, which resolution the spec applies, why; per spec/02-issues.md 2.9 rule 3 the central register wins); (3) every issue with status needs_owner, with the default the spec uses meanwhile and whether S3 (spec/03-assumptions.md) already lists it; add the missing ones as a table ''to add to S3''; (4) the issues whose resolution changes a requirement of the prompt (the owner must see these first). Do not edit other files. The previous attempt branch cell/C-033 holds a finished spec/02e-issues-summary.md that can be reused; it only needs the ids of 02f added to its counts and tables.'
+after:
+- C-030
+- C-031
+- C-032
+read:
+- docs/decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- spec/02-issues.md
+- spec/02b-issues-parts-a.md
+- spec/02c-issues-parts-b.md
+- spec/02d-issues-parts-c.md
+- spec/03-assumptions.md
+- spec/16b-parameters-a.md
+- spec/16c-parameters-b.md
+- scripts/check_issues.py
+allowed_paths:
+- spec/02e-issues-summary.md
+- spec/02f-issues-late.md
+outputs:
+- spec/02e-issues-summary.md
+- spec/02f-issues-late.md
+acceptance:
+- cmd: python scripts/check_spec.py spec/02e-issues-summary.md --min-lines 50 --min-tags 0
+- cmd: python scripts/check_issues.py
+notes: 'Audit/reconcile cell: be a critical reader. Read large files in chunks of at most 600 lines with read_files; do not paste file contents into chat. Ground rules of docs/decisions.md bind you: no invented provider facts, no automation of volunteer accounts, human presses Send, declared not guaranteed, numbers are formulas or labeled initial configurable defaults, mark [V]/[H]/[A]/[D]/[P]. Never rename existing IDs. Run preflight early: check_issues.py output lists every part with missing ids; every one must be covered in spec/02f-issues-late.md.'
