@@ -21,7 +21,7 @@ Reading rules [D]:
 | # | Decision | Tag | Basis |
 | --- | --- | --- | --- |
 | LD-01 | One global append-only ledger in integer micro-credits, hash-chained, with a single gap-free sequence | [D] | FD§4.2; S0 0.6.1 |
-| LD-02 | The five account types of S0 0.8.5. No entry type moves credit from one member to another; the only member-to-member effect is a `transfer` out of a job's escrow | [D] | FD§4.2 |
+| LD-02 | The five account types of S0 0.8.5. No entry type moves credit from one member to another; the only member-to-member effect is a `transfer` out of a job's escrow (and the restitution reversal of 6.6.3 after an escrow has closed) | [D] | FD§4.2 |
 | LD-03 | Donors are paid at acceptance, one `transfer` per accepted cell; settlement posts only the levy and the refund | [D] | ISS-09 |
 | LD-04 | Escrow is exactly N x `p_ucr` and is tracked in three bookkeeping budgets: primary, verification pool, levy | [D] | FD§4.3; FD§3.3 |
 | LD-05 | A verification cell is paid from the job's pool, then from the job's levy budget, never from mint or from the Reserve; the scheduler may not create a verification cell the budgets cannot pay | [D][A] | ISS-61 |
@@ -30,7 +30,7 @@ Reading rules [D]:
 | LD-08 | K bounds 'owned' credit (unexpired balance plus the member's own open escrow) and is enforced by a headroom reservation at lease time, so acceptance never fails for lack of headroom | [D][A] | FD§4.5; ISS-63 |
 | LD-09 | Acceptance of a cell and its mint or payout are one atomic database transaction; there is no 'accepted but unpaid' state | [D][A] | FD§4.2 |
 | LD-10 | Starter grant: once per member for life, after one verified contribution that was not checked by automatic checks alone, funded only from the Reserve; grants pause when the Reserve cannot pay | [D] | FD§4.6 |
-| LD-11 | Retirement of Reserve excess above `reserve.ceiling_credits` is the only way credit leaves existence; each retirement is an entry and a public log line | [D] | FD§4.2 |
+| LD-11 | Retirement of Reserve excess above `reserve.ceiling_credits` is the only way credit leaves existence, apart from a two-operator `reversal` that cancels a `mint` (6.6.3); each retirement is an entry and a public log line | [D] | FD§4.2 |
 | LD-12 | v is measured per job type over a trailing window; below the minimum sample the prior applies; a measured value is capped; a new v takes effect after notice | [D] | FD§4.3 |
 | LD-13 | A violated critical invariant engages `kill.all_minting` and `kill.all_new_jobs` automatically; releasing them needs two operators | [D][A] | prompt C |
 | LD-14 | Every object keeps the parameter versions it was created under (lot, escrow, lease, quote); changes are prospective | [D] | FD Principle 5 |
@@ -67,13 +67,16 @@ Rules [D]:
 | Claim ratio (weeks, in ppm) | `div_floor(claims_ucr x throughput_window_days, 7 x accepted_cells)` | down | Gauge only |
 | Mint-cap utilization | `div_floor(10^6 x minted_ucr, cap_ucr)` | down | Gauge only |
 | Effective member cap | `K_eff_ucr = div_floor(K_ucr x cap_multiplier_ppm, 10^6)` | down | Never allow more than the tier allows |
-| Automatic mint-cap cut | `new_cap_ucr = div_floor(cap_ucr x (10^6 - cut_ppm), 10^6)` | down | A cut is never smaller than declared |
+| Automatic mint-cap cut | `new_cap_ucr = 10^6 x div_floor(cap_ucr x (10^6 - cut_ppm), 10^12)` (a whole number of credits, as the type `credits` requires) | down | A cut is never smaller than declared |
+| Forecast redeemable capacity | `div_floor(phi_ppm x accepted_cells x 30, 10^6 x throughput_window_days)` | down | Alarm only (6.11.5) |
+| Retirement interval index | `div_floor(now_s, reserve.retire_interval_s)` | down | Idempotency key only (6.9.3) |
+| Effective levy gauge | `div_floor(levy_posted_ucr, accepted_primary_cells)` (levy per cell in ucr equals ppm) | down | Gauge only (6.7.3) |
 | Display of balances | credits, at most 2 decimals | down | Never show more than is held |
 | Display of prices and escrow | credits, exact expansion (at most 6 places), trailing zeros trimmed | exact | The quote shown is the amount escrowed |
 
 ### 6.3.3 Why FD§3.3 is exact under this representation [D]
 
-The escrow of a job of N primary cells is `escrow_ucr = N x (1,000,000 + v_ppm + lambda_ppm)`, a product and a sum of integers, so it is exact for every N, v and lambda. Its three parts are `N x 1,000,000` (primary pay), `N x v_ppm` (verification pool) and `N x lambda_ppm` (levy), and their sum is the escrow with no remainder. Rounding happens only where a ratio is measured (v, ceiling) and where a gauge is displayed. For the FD§3.3 inputs (v = 0.10, lambda = 0.05, N = 240) every part is a whole number of credits: 240, 24 and 12. That is a property of those inputs (240 x 0.10 = 24 exactly), not of the model; 6.14 states what happens when the pool is not a whole number of cells. The line-by-line reproduction is 6.15 and the test is `AC-ledger-01` / `T-unit-01` (6.16).
+The escrow of a job of N primary cells is `escrow_ucr = N x (1,000,000 + v_ppm + lambda_ppm)`, a product and a sum of integers, so it is exact for every N, v and lambda. Its three parts are `N x 1,000,000` (primary pay), `N x v_ppm` (verification pool) and `N x lambda_ppm` (levy), and their sum is the escrow with no remainder. Rounding happens only where a ratio is measured (v, ceiling) and where a gauge is displayed. For the FD§3.3 inputs (v = 0.10, lambda = 0.05, N = 240) every part is a whole number of credits: 240, 24 and 12. That is a property of those inputs (240 x 0.10 = 24 exactly), not of the model; 6.14 states what happens when the pool is not a whole number of cells. Where the rounding remainder goes: the only rounding that reaches an amount is the `div_ceil` in v; the surplus it puts in the pool (under N ucr for a job of N primary cells, because each cell is over-charged by less than 1 ucr) stays in escrow as unspent pool and returns to the requester in the refund at settlement (6.7.3). The levy `N x lambda_ppm` is a product of integers and has no remainder, and no entry splits an amount, so no entry has a remainder to allocate; floored values (K_eff, the cap cut, gauges, displayed balances) are never posted as amounts. The line-by-line reproduction is 6.15 and the test is `AC-ledger-01` / `T-unit-01` (6.16).
 
 ## 6.4 Accounts, lots and escrow slices
 
@@ -108,7 +111,7 @@ A lot is a dated portion of one member's balance (entity `CreditLot`, `lot_`). L
 | `earned_at`, `expires_at` | timestamptz | `expires_at > earned_at` |
 | `lifetime_param_name`, `lifetime_param_version` | text, int | The parameter and version that fixed `expires_at` (LD-14) |
 | `is_grant` | bool | True for starter and referral grants (non-transferable, `grant.non_transferable`) |
-| `status` | text | `active` (remaining > 0), `exhausted` (remaining = 0), `expired` (swept) |
+| `status` | text | `active` (remaining > 0), `exhausted` (remaining = 0), `expired` (swept); a refund that restores credit to an `exhausted` or `expired` lot sets it back to `active` |
 
 Indexes: spending index `(ledger_account_id, expires_at, earned_at, id) WHERE remaining_ucr > 0`; sweep index `(expires_at) WHERE remaining_ucr > 0`.
 
@@ -167,9 +170,10 @@ Lineage [D]: within one `transfer` entry the slices removed from escrow are the 
 | `paid_primary_ucr` | Sum of `transfer` for accepted primary cells |
 | `paid_pool_ucr`, `paid_levy_budget_ucr` | Sum of `transfer` for accepted verification cells, drawn from the pool and then from the levy budget (LD-05) |
 | `levy_posted_ucr`, `refunded_ucr` | Settlement postings |
+| `reversed_in_ucr` | Sum of `reversal` entries credited into this escrow (6.6.3); 0 unless a payout was reversed while the escrow was `open` or `settling` |
 | `accepted_primary_cells`, `accepted_verification_cells` | Counts, for settlement |
 
-Identity (INV-L06): `balance = funded_ucr - paid_primary_ucr - paid_pool_ucr - paid_levy_budget_ucr - levy_posted_ucr - refunded_ucr`, and the balance is 0 when `state` = `closed` (INV-L07).
+Identity (INV-L06): `balance = funded_ucr + reversed_in_ucr - paid_primary_ucr - paid_pool_ucr - paid_levy_budget_ucr - levy_posted_ucr - refunded_ucr`, and the balance is 0 when `state` = `closed` (INV-L07).
 
 ## 6.5 Entries, transactions, sequencing
 
@@ -211,7 +215,7 @@ Every change to credit goes through one function; nothing else writes ledger tab
 
 ```
 function post(txn_kind, natural_key, requested_by, build):
-    repeat up to 3 times on SERIALIZATION_FAILURE:
+    repeat up to 3 times (a constant [A]) on SERIALIZATION_FAILURE:
       BEGIN ISOLATION LEVEL SERIALIZABLE
         t = SELECT * FROM ledger_transactions WHERE txn_kind = ? AND natural_key = ?
         if t exists: COMMIT; return stored result of t                -- exactly once
@@ -233,7 +237,7 @@ Guarantees (stated exactly):
 
 1. **Exactly once.** A transaction with the same `(txn_kind, natural_key)` is posted at most once; a retry or replay returns the stored result and emits no event. Natural keys are deterministic (6.6), so two workers racing on the same cell, job or lot cannot both post.
 2. **Atomic.** All entries, lot movements, counter updates and outbox events of a transaction commit together or not at all. A cell's change to `accepted` and its mint or payout are in the same database transaction (LD-09); the storage choice in `S4.*` must therefore keep ledger and cell state in one transactional store, or give up the rule explicitly [A].
-3. **Serializable and ordered.** Postings are totally ordered by `seq`. The single `ledger_head` lock makes posting a serial section [A]; at the volume this system targets (thousands of cells a day, FD§3.3 scale) that is sufficient, and the throughput limit is measured in `T-load-*` (`S18.*`).
+3. **Serializable and ordered.** Postings are totally ordered by `seq`. The single `ledger_head` lock makes posting a serial section [A]; at the volume this system targets (the FD§3.3 illustration implies 40 donors x 8 cells = 320 cells a day, an illustration and not a forecast) that is expected to be sufficient, and the throughput limit is measured in `T-load-*` (`S18.*`).
 4. **No partial effects on failure.** A guard failure returns the API error of S0 0.11.3 (`INSUFFICIENT_CREDIT`, `CAP_EXCEEDED`, `LAUNCH_GATE_CLOSED`, `KILL_SWITCH_ENGAGED`, `STATE_CONFLICT`) and changes nothing.
 5. **Clock independence.** Guards that read time use one server timestamp `now` taken at the start of the transaction; `now` is stored in `created_at` of every entry of that transaction.
 
@@ -250,20 +254,20 @@ One row per operation. Entry types and transaction kinds are those of S0 0.8.5; 
 | Reservation activation | `reservation.activated` | `reservation_activate` | `escrow_release` E(reservation) -> E(job), N' x `quote_p_ucr`; `refund` E(reservation) -> M for the unused rest | slices move; refund restores | `activate:{reservation_id}` |
 | Settlement | `job.settled`, `job.settled_partial`, or `job.stop_requested` after drain | `settle` | `levy` E -> R, `levy_posted`; `refund` E -> M, rest (6.7) | levy drains slices; refund restores lots | `settle:{job_id}` |
 | Cancel | `job.cancel_settled`; `reservation.cancelled`; `reservation.expired` | `cancel` | as settlement; for a reservation only the `refund` | as settlement | `cancel:{job_or_reservation_id}` |
-| Expiry | sweeper (6.9) | `expire` | `expire` M -> R, lot remaining | lot remaining to 0, status `expired` | `expire:{lot_id}` |
+| Expiry | sweeper (6.9) | `expire` | `expire` M -> R, lot remaining | lot remaining to 0, status `expired` | `expire:{lot_id}:{k}`, k = number of earlier `expire` entries of that lot (0 at the first sweep; a lot restored by a refund after a sweep is swept again as k + 1) |
 | Retirement | scheduler (6.9) | `retire` | `retire` R -> X, excess over ceiling | none | `retire:{interval_index}` |
 | Starter grant | eligibility check (6.10) | `grant` | `grant` R -> M, `grant.starter_credits` | creates lot, `grant_starter` | `grant:starter:{member_id}` |
 | Referral bonus | S12 event after the newcomer's verified cell and `growth.referral.hold_s` | `grant` | `grant` R -> M, bonus (ISS-06) | creates lot, `grant_referral` | `grant:referral:{referral_id}:{referrer_or_newcomer}` |
 | Reserve donation | member request (ISS-08) | `reserve_donation` | `reserve_donation` M -> R, amount | `pick_lots` excluding grant lots | `donate:{member_id}:{idempotency_key}` |
 | Reversal | two operators approve (6.6.3) | `reversal` | mirror of the reversed entry, up to what can be recovered | mirrors | `reversal:{reversed_entry_id}` |
 
-There is no other way to create or move credit. No row moves credit from member to member except through an escrow (`escrow_hold` then `transfer`), so there is no peer-to-peer transfer to farm or launder [D].
+There is no other way to create or move credit. No row moves credit from member to member except through an escrow (`escrow_hold` then `transfer`), apart from the two-operator restitution reversal of 6.6.3, so there is no peer-to-peer transfer to farm or launder [D].
 
 ### 6.6.1 Guards (every one must hold, otherwise nothing is written) [D]
 
 | Operation | Guards and error |
 | --- | --- |
-| Mint | `launch.minting_enabled` true (`LAUNCH_GATE_CLOSED`); `kill.all_minting`, `kill.template.<tpl_id>`, `kill.service.<svc_id>`, `kill.member.<mem_id>` all `released` (`KILL_SWITCH_ENGAGED`); the cell is `accepted` in this same transaction, belongs to a job with `is_commons`, has no earlier `mint` entry, and the R9 re-check passed; member `status` = `active`; amount is exactly 1,000,000; the three headroom checks of 6.8 hold against the versions stored on the lease (`CAP_EXCEEDED`) |
+| Mint | `launch.minting_enabled` true (`LAUNCH_GATE_CLOSED`); `kill.all_minting`, `kill.template.<tpl_id>`, `kill.service.<svc_id>`, `kill.member.<mem_id>` all `released` (`KILL_SWITCH_ENGAGED`); the cell is `accepted` in this same transaction, is charged (`charged_job_id`, else its own job) to a job with `is_commons`, has no earlier `mint` entry, and the R9 re-check passed; member `status` = `active`; amount is exactly 1,000,000; the three headroom checks of 6.8 hold against the versions stored on the lease (`CAP_EXCEEDED`) |
 | Payout | Escrow `state` in (`open`, `settling`); the cell is `accepted`, charged to this job and unpaid; the budget rule of 6.7 holds; headroom of 6.8 (lease-time reservation); the donor is not `banned` at lease time |
 | Hold and booking | `launch.member_jobs_enabled` true; `kill.all_new_jobs`, template and service switches released; member `active` and past `identity.recovery_cooldown_s`; the quote is unexpired (`price.quote_ttl_s`) and its snapshots are those it was made under; the admission result of file 06b is `admitted` (or a reservation slot); unexpired credit >= escrow (`INSUFFICIENT_CREDIT`); `admission.max_concurrent_jobs_per_member` not exceeded |
 | Settlement and cancel | Escrow `state` = `settling`; no cell of the job is in `leased`, `submitted` or `flagged_for_audit` (S5.* drains or voids them first; `STATE_CONFLICT` otherwise) |
@@ -311,7 +315,7 @@ A reversal corrects an earlier entry without editing it (S0 0.8.5). Reasons: `ce
 | `transfer`, escrow `closed` | M -> requester's member account. Escrow accounts never reopen, so this is a restitution, not a mirror; no rework cell is created (the job is closed) | As above |
 | `grant`, `expire`, `levy`, `retire`, `refund`, `escrow_hold` | Mirror along the original accounts | Only for `posting_error`, never for reasons about cells |
 
-A reversal never creates credit and never drives an account below zero. Reversal entries are excluded from the cap checks of 6.8 (they return credit that was already counted) [D][A].
+A reversal never creates credit and never drives an account below zero. A reversal of a `transfer` into an open or settling escrow raises `reversed_in_ucr` and leaves the `paid_*` counters and `accepted_primary_cells` unchanged; the returned credit is part of the balance at settlement and goes back to the requester in the refund, and the rework cell is paid from the pool budget like any verification cell (6.7.2). Reversal entries are excluded from the cap checks of 6.8 (they return credit that was already counted) [D][A].
 
 ## 6.7 Escrow, settlement, refunds on cancel
 
@@ -345,7 +349,7 @@ function settle(job):                                    -- post('settle'|'cance
     levy_available = e.levy_budget_ucr - e.paid_levy_budget_ucr
     levy_posted    = min(levy_due, levy_available)
     if levy_posted > 0: post levy(E -> R, levy_posted), draining slices earliest expiry first
-    refund         = balance(e) - levy_posted               -- everything else: unspent primary, unspent pool, unspent levy
+    refund         = balance(e) - levy_posted               -- balance(e) is the value read before the levy entry is planned; everything else: unspent primary, unspent pool, unspent levy
     if refund > 0: post refund(E -> M(requester), refund), restoring remaining slices to their lots
     e.state = 'closed'; assert balance(e) == 0              -- INV-L07
 ```
@@ -367,11 +371,11 @@ owned(m, t) = sum(remaining_ucr of m's lots with expires_at > t)
 headroom(m, t) = max(0, K_eff(m) - owned(m, t) - 1,000,000 x active_leases(m))
 ```
 
-Each active lease counts as one credit that may arrive. The tier multipliers are `trust.cap_multiplier.new` / `.established` / `.trusted` / `.restricted` = 0.50 / 1.00 / 1.50 / 0.25 (initial configurable defaults, S0 0.10.6), so at K = 350 a `new` member holds at most 175, an `established` member 350 and a `trusted` member 525. A new member therefore cannot yet reach the 300 credits of the FD§3.3 example; Sara is `established` (T-unit-01 fixture) [A].
+Each undecided lease counts as one credit that may arrive: `active_leases(m)` (and `active_commons_leases`) counts the member's cells in `leased`, `submitted` or `flagged_for_audit`, so the reservation lasts from the lease until the cell is accepted, rejected or expired, not only while the Lease is `active`; at posting, the cell being accepted is left out of the count. The tier multipliers are `trust.cap_multiplier.new` / `.established` / `.trusted` / `.restricted` = 0.50 / 1.00 / 1.50 / 0.25 (initial configurable defaults, S0 0.10.6), so at K = 350 a `new` member holds at most 175, an `established` member 350 and a `trusted` member 525. A new member therefore cannot yet reach the 300 credits of the FD§3.3 example; Sara is `established` (T-unit-01 fixture) [A].
 
 ### 6.8.2 Headroom is reserved at lease time [D]
 
-A lease may be issued only if all three hold (the function is `ledger.can_lease(member, cell, now)`, called by `S5.*` inside the leasing transaction, after `SELECT ... FOR UPDATE` on the member's account so concurrent leases cannot both pass):
+A lease may be issued only if all three hold (the function is `ledger.can_lease(member, cell, now)`, called by `S5.*` inside the leasing transaction, after `SELECT ... FOR UPDATE` on the member's account and, for a Commons cell, on the `issuance` account row (both in ascending account id, the lock order of `post()`), so that concurrent leases of one member, and concurrent Commons leases of different members at the monthly-cap boundary, cannot both pass):
 
 | Check | Applies to | Condition |
 | --- | --- | --- |
@@ -395,26 +399,26 @@ Every lot has its own date (6.4.2); the balance view returns the unexpired lots 
 every credit.expiry_sweep_interval_s (default 3600 s):
     for lot in SELECT * FROM credit_lots WHERE remaining_ucr > 0 AND expires_at <= now
                  ORDER BY expires_at, id LIMIT batch:
-        post('expire', 'expire:' + lot.id):  expire(M(lot) -> R, lot.remaining_ucr); lot -> status 'expired'
+        post('expire', 'expire:' + lot.id + ':' + count_expire_entries(lot.id)):  expire(M(lot) -> R, lot.remaining_ucr); lot -> status 'expired'
 ```
 
-Expired credit moves to the Reserve and is never silently deleted (FD§4.5). A lot restored from a refund after its date is swept the same way (ISS-07). One entry per lot keeps the trail exact. Notice: members are told `credit.expiry_notice_days` (default 7) before a lot expires by an in-app notice computed from the same query (no e-mail is required, FD§3.2). A swept lot emits `ledger.lot_expired` (new log event, 6.17).
+Expired credit moves to the Reserve and is never silently deleted (FD§4.5). A lot restored from a refund after its date is swept the same way (ISS-07): the restoration sets its status back to `active`, and the sweep count k in the natural key (6.6) stops the second sweep being read as a replay of the first. One entry per sweep keeps the trail exact. Notice: members are told `credit.expiry_notice_days` (default 7) before a lot expires by an in-app notice computed from the same query (no e-mail is required, FD§3.2). A swept lot emits `ledger.lot_expired` (new log event, 6.17).
 
 ### 6.9.2 The Reserve [D]
 
-A public account (FD§4.2). Inflows: `levy` (6.7), `expire` (6.9.1), `reserve_donation` (ISS-08). Outflows: `grant` (6.10) and `retire`. Its balance, ceiling and every inflow and outflow total are public (`S12.*`, lagging by `public.ledger_lag_s`). Nothing else may debit it (INV-L12).
+A public account (FD§4.2). Inflows: `levy` (6.7), `expire` (6.9.1), `reserve_donation` (ISS-08). Outflows: `grant` (6.10) and `retire`. Its balance, ceiling and every inflow and outflow total are public (`S12.*`, lagging by `public.ledger_lag_s`). Nothing else may debit it (INV-L12), except a two-operator `reversal` (6.6.3).
 
 ### 6.9.3 Retirement above the ceiling [D]
 
 ```
-every reserve.retire_interval_s (default 86,400 s), interval_index = floor(now / reserve.retire_interval_s):
+every reserve.retire_interval_s (default 86,400 s), interval_index = div_floor(now_s, reserve.retire_interval_s):
     ceiling = reserve.ceiling_credits x 10^6 ; excess = balance(R) - ceiling
     if excess >= reserve.retire_min_credits x 10^6:
         post('retire', 'retire:' + interval_index): retire(R -> X, excess); entry.reserve_balance_after_ucr = ceiling
         publish a ChangeLogEntry kind 'retirement' with seq, amount and balance after
 ```
 
-Retirement is the only way credit leaves existence, so every retirement is public and `retired` equals cumulative retired (INV-L02). Defaults: ceiling 1,000 credits, minimum retirement 10 credits (avoids noise). `reserve.ceiling_credits >= grant.starter_credits` (constraint C5) so the Reserve can always fund at least one grant [D]. Retirement does not look at queued grants: with the defaults the ceiling is 333 times G, and lowering the ceiling is a parameter change with notice (6.12) [A].
+Retirement is the only way credit leaves existence (the one other case is a two-operator reversal of a `mint`, 6.6.3, which cancels the mint itself), so every retirement is public and `retired` equals cumulative retired (INV-L02). Defaults: ceiling 1,000 credits, minimum retirement 10 credits (avoids noise). `reserve.ceiling_credits >= grant.starter_credits` (constraint C5) so the Reserve can always fund at least one grant [D]. Retirement does not look at queued grants: with the defaults the ceiling is 333 times G, and lowering the ceiling is a parameter change with notice (6.12) [A].
 
 ## 6.10 Starter grant G and anti-farming limits
 
@@ -452,7 +456,7 @@ A member denied only for `reserve_empty`, `day_limit`, `tree_limit` or `cap` is 
 | Many fake members, each taking G | Condition 3 needs real verified work per fake member (and a new donor's first cells are blanket-verified, `verify.new_donor_blanket_cells`); conditions 4 to 6 cap the rate | A farm with many real devices can still collect; the loss is bounded below |
 | One person, many devices | `grant.max_per_device`; device records are keyed hashes (S0 0.7), so evasion is possible and is [H] to be measured | Not preventable by this layer alone; invite-tree limits and the trust tiers add friction |
 | Invite-tree rings | Condition 5; `invite.tree_max_members`, `invite.min_accepted_cells_to_issue` (S10.*) | Same |
-| Draining the Reserve | The Reserve never goes below `grant.reserve_floor_credits` (grants pause); daily drain <= `grant.max_per_day` x G = 20 x 3 = 60 credits at the initial defaults (formula) | An attacker can hold grants permanently at the daily maximum until an operator lowers `grant.max_per_day` or pauses grants |
+| Draining the Reserve | The Reserve never goes below `grant.reserve_floor_credits` (grants pause); daily drain <= `grant.max_per_day` x G = 20 x 3 = 60 credits of starter grants a day at the initial defaults (formula); referral bonuses (S12.*) draw on the same Reserve and floor, and S12.* states whether `grant.max_per_day` counts them | An attacker can hold grants permanently at the daily maximum until an operator lowers `grant.max_per_day` or pauses grants |
 | Selling or pooling grants | No member-to-member entry exists; grant lots are non-transferable | Account sale is outside the ledger (S10.*) |
 | Referral bonuses as a second channel | Same Reserve floor and the limits `growth.referral.*` (S12.*); a bonus is a `grant` entry (ISS-06) and is checked against `K` | Owned by S12.* |
 
@@ -535,13 +539,13 @@ after each rollup:
     if claim_ratio_ppm > inflation.claim_ratio_threshold_weeks x 10^6          -- default 6.0 weeks
        and no automatic cut in the last price.publish_period_days             -- one cut per 30 days
        and mint.monthly_cap_credits > 0:
-        new_cap_ucr = div_floor(cap_ucr x (10^6 - inflation.mint_cap_cut_ratio_ppm), 10^6)       -- default cut 25%
+        new_cap_ucr = 10^6 x div_floor(cap_ucr x (10^6 - inflation.mint_cap_cut_ratio_ppm), 10^12)       -- default cut 25%
         write ParameterVersion for mint.monthly_cap_credits by principal 'system', change_class 'tighten',
         effective at once; ChangeLogEntry published within change.tighten_publish_within_s;
         events parameter.changed and ledger.mint_cap_cut
 ```
 
-File 06b reads `claim_ratio_ppm` to lengthen quoted windows. Raising the cap again is a `loosen` change: notice, a second operator, and the forecast check below. Mint cap against capacity: FD§4.2 says the cap is no higher than forecast redeemable capacity. Redeemable capacity is the cells member jobs can use, so `redeemable_per_month = div_floor(admission.phi_ppm x accepted_cells x 30, inflation.throughput_window_days)` and the alarm `ledger.mint_cap_above_forecast` (`warn`, plus a required second approver on the edit) fires when `mint.monthly_cap_credits x 10^6 > redeemable_per_month x 10^6`; with the FD§3.3 illustration (40 donors x 8 cells x 30 days x phi 0.5) it gives 4,800, the default cap. S0 0.10.6 writes that derivation with (1 - 0.5); the two agree only at phi = 0.5, and this file uses phi (ISS-63). Before throughput data exists (Phase 0) the check is skipped and the cap is the configured default [A].
+File 06b reads `claim_ratio_ppm` to lengthen quoted windows. Raising the cap again is a `loosen` change: notice, a second operator, and the forecast check below. Mint cap against capacity: FD§4.2 says the cap is no higher than forecast redeemable capacity. Redeemable capacity is the cells member jobs can use, so `redeemable_per_month = div_floor(admission.phi_ppm x accepted_cells x 30, 10^6 x inflation.throughput_window_days)` (in cells, which equal credits) and the alarm `ledger.mint_cap_above_forecast` (`warn`, plus a required second approver on the edit) fires when `mint.monthly_cap_credits x 10^6 > redeemable_per_month x 10^6`; with the FD§3.3 illustration (40 donors x 8 cells x 30 days x phi 0.5) it gives 4,800, the default cap. S0 0.10.6 writes that derivation with (1 - 0.5); the two agree only at phi = 0.5, and this file uses phi (ISS-63). Before throughput data exists (Phase 0) the check is skipped and the cap is the configured default [A].
 
 ### 6.11.6 Publication and versioning [D]
 
@@ -600,7 +604,7 @@ FD§4.2 states the ledger invariant: total credit in existence = cumulative mint
 | `full` | Every `ledger.full_recompute_interval_s` (default 3,600 s) | Whole ledger | Entries only; caches (`balance_ucr`, lots, escrow counters) are compared against recomputation, never trusted |
 | `checkpoint` | Every `ledger.checkpoint_interval_s` (default 86,400 s) | Hash chain head | Published hash |
 
-The checker is a separate process with a read-only database role and its own code path: it does not call `post()` code and does not read a cache as truth (a check that shares a bug with the writer proves nothing). Each run writes an `InvariantCheck` row (`ivc_`: `invariant_id`, `run_kind`, `from_seq`, `to_seq`, `status`, `observed`, `expected`, `detail`, `started_at`, `finished_at`) and emits `ledger.invariants_passed`; a failure writes an `Alarm` (`alm_`), emits `ledger.invariant_violated` and increments `hamyar_ledger_invariant_violations_total{invariant_id}`. A dead-man alarm `ledger.checks_stale` (`critical`) fires when no `full` run has passed for twice `ledger.full_recompute_interval_s`; `hamyar_ledger_last_full_check_age_s` exposes it. Exact integer equality, zero tolerance (S0 0.6.1).
+The checker is a separate process with a read-only database role and its own code path: it does not call `post()` code and does not read a cache as truth (a check that shares a bug with the writer proves nothing). Each run writes an `InvariantCheck` row (`ivc_`: `invariant_id`, `run_kind`, `from_seq`, `to_seq`, `status`, `observed`, `expected`, `detail`, `started_at`, `finished_at`) and emits `ledger.invariants_passed`; a failure writes an `Alarm` (`alm_`), emits `ledger.invariant_violated` and increments `hamyar_ledger_invariant_violations_total{invariant_id}`. A dead-man alarm `ledger.checks_stale` (`critical`) fires when no `full` run has passed for twice `ledger.full_recompute_interval_s` [A: the factor 2 here, in `INV-L13` and in `INV-L18` is a constant, not a measurement]; `hamyar_ledger_last_full_check_age_s` exposes it. Exact integer equality, zero tolerance (S0 0.6.1).
 
 ### 6.13.2 The checks [D]
 
@@ -611,12 +615,12 @@ The checker is a separate process with a read-only database role and its own cod
 | `INV-L03` | Every cached `balance_ucr` equals credits minus debits recomputed from entries | full (touched accounts at commit) | critical |
 | `INV-L04` | Signs: member, escrow, Reserve, retired >= 0; issuance <= 0; closed escrow = 0 | commit, incremental, full | critical |
 | `INV-L05` | Lots: member balance = sum of its lots' `remaining_ucr`; `0 <= remaining <= initial`; `remaining` = sum of movements; per entry, member-holder deltas equal the entry's net effect on member accounts | commit, full | critical |
-| `INV-L06` | Escrow: balance = `funded - paid_primary - paid_pool - paid_levy_budget - levy_posted - refunded`; counters equal sums of entries; slices sum to the balance; no budget exceeded | commit, full | critical |
-| `INV-L07` | Closing identity: a closed escrow has balance 0 and `funded = paid_primary + paid_pool + paid_levy_budget + levy_posted + refunded`; `levy_posted <= accepted_primary x quote_lambda` | incremental, full | critical |
+| `INV-L06` | Escrow: balance = `funded + reversed_in - paid_primary - paid_pool - paid_levy_budget - levy_posted - refunded`; counters equal sums of entries; slices sum to the balance; no budget exceeded | commit, full | critical |
+| `INV-L07` | Closing identity: a closed escrow has balance 0 and `funded + reversed_in = paid_primary + paid_pool + paid_levy_budget + levy_posted + refunded`; `levy_posted <= accepted_primary x quote_lambda` | incremental, full | critical |
 | `INV-L08` | Mint backing: each `mint` entry has amount 1,000,000, a `cell_id` of a Commons cell that was `accepted` when posted (now `accepted` or `overturned`), and no second mint for that cell | incremental, full | high |
 | `INV-L09` | Payout backing: each `transfer` has amount 1,000,000, debits the escrow of the cell's job, a cell `accepted` or `overturned`, and at most one per cell | incremental, full | high |
 | `INV-L10` | Mint caps: for each `mint`, `month_mint_after_ucr <= mint_cap_ucr` and `member_day_mint_after_ucr <=` the daily cap of the recorded version; running sums equal recomputed sums | incremental, full | high |
-| `INV-L11` | Member cap: for each `mint`, `transfer`, `grant`, `owned_after_ucr <= cap_ucr` | incremental, full | high |
+| `INV-L11` | Member cap: for each `mint`, `transfer`, `grant`, `owned_after_ucr <= cap_ucr` | commit, incremental, full | high |
 | `INV-L12` | Reserve: only `grant`, `retire` and `reversal` debit it; after a `grant` the balance >= `grant.reserve_floor_credits`; after a `retire` the balance >= the ceiling used | commit, incremental, full | high |
 | `INV-L13` | Expiry: no unexpired-spend (no `escrow_hold` or `reserve_donation` movement from a lot with `expires_at <=` entry time); no `expire` before `expires_at`; no lot with `remaining > 0` older than `expires_at` plus twice `credit.expiry_sweep_interval_s` | incremental, full | high |
 | `INV-L14` | Chain: `seq` gap-free from 1; `prev_hash` equals the previous `entry_hash`; each `entry_hash` recomputes; head equals the last entry; the published checkpoint equals the recomputed prefix hash | incremental, checkpoint, full | critical |
@@ -663,28 +667,28 @@ per entry: sum(delta_ucr where holder is a member account) = credit_to_members -
 
 -- INV-L06
 SELECT e.id FROM escrows e JOIN ledger_accounts a ON a.id = e.ledger_account_id
- WHERE a.balance_ucr <> e.funded_ucr - e.paid_primary_ucr - e.paid_pool_ucr - e.paid_levy_budget_ucr
+ WHERE a.balance_ucr <> e.funded_ucr + e.reversed_in_ucr - e.paid_primary_ucr - e.paid_pool_ucr - e.paid_levy_budget_ucr
                         - e.levy_posted_ucr - e.refunded_ucr
     OR e.funded_ucr <> e.primary_budget_ucr + e.pool_budget_ucr + e.levy_budget_ucr
     OR e.paid_primary_ucr > e.primary_budget_ucr OR e.paid_pool_ucr > e.pool_budget_ucr
     OR e.paid_levy_budget_ucr + e.levy_posted_ucr > e.levy_budget_ucr;
-recompute paid_primary = sum(transfer of primary cells), paid_pool + paid_levy_budget = sum(transfer of verification cells),
+recompute reversed_in = sum(reversal credited into E), paid_primary = sum(transfer of primary cells), paid_pool + paid_levy_budget = sum(transfer of verification cells),
           levy_posted = sum(levy), refunded = sum(refund) from entries; compare; and sum(slices of E) = balance(E)
 
 -- INV-L07 (closed escrows)
 SELECT e.id FROM escrows e JOIN ledger_accounts a ON a.id = e.ledger_account_id
  WHERE e.state = 'closed' AND (a.balance_ucr <> 0
-   OR e.funded_ucr <> e.paid_primary_ucr + e.paid_pool_ucr + e.paid_levy_budget_ucr + e.levy_posted_ucr + e.refunded_ucr
+   OR e.funded_ucr + e.reversed_in_ucr <> e.paid_primary_ucr + e.paid_pool_ucr + e.paid_levy_budget_ucr + e.levy_posted_ucr + e.refunded_ucr
    OR e.levy_posted_ucr > e.accepted_primary_cells * e.quote_lambda_ppm);
 
 -- INV-L08
-SELECT e.id FROM ledger_entries e LEFT JOIN cells c ON c.id = e.cell_id LEFT JOIN jobs j ON j.id = c.job_id
+SELECT e.id FROM ledger_entries e LEFT JOIN cells c ON c.id = e.cell_id LEFT JOIN jobs j ON j.id = COALESCE(c.charged_job_id, c.job_id)
  WHERE e.entry_type = 'mint'
    AND (c.id IS NULL OR j.is_commons IS NOT TRUE OR e.amount_ucr <> 1000000 OR c.state NOT IN ('accepted','overturned'));
 SELECT cell_id FROM ledger_entries WHERE entry_type = 'mint' GROUP BY cell_id HAVING COUNT(*) > 1;
 
 -- INV-L09
-SELECT e.id FROM ledger_entries e JOIN cells c ON c.id = e.cell_id JOIN escrows s ON s.job_id = c.job_id
+SELECT e.id FROM ledger_entries e JOIN cells c ON c.id = e.cell_id JOIN escrows s ON s.job_id = COALESCE(c.charged_job_id, c.job_id)
  WHERE e.entry_type = 'transfer'
    AND (e.amount_ucr <> 1000000 OR e.debit_account_id <> s.ledger_account_id OR c.state NOT IN ('accepted','overturned'));
 SELECT cell_id FROM ledger_entries WHERE entry_type = 'transfer' GROUP BY cell_id HAVING COUNT(*) > 1;
@@ -725,7 +729,7 @@ SELECT e.id FROM ledger_entries e JOIN ledger_accounts d ON d.id = e.debit_accou
           ('reserve_donation','member','reserve'));
 
 -- INV-L17
-SELECT member_id FROM starter_grants GROUP BY 1 HAVING COUNT(*) > 1;
+SELECT e.credit_account_id FROM ledger_entries e JOIN credit_lots l ON l.origin_entry_id = e.id WHERE l.origin_kind = 'grant_starter' GROUP BY 1 HAVING COUNT(*) > 1;
 per device: count(starter grants of members sharing a Device record) <= grant.max_per_device
 per UTC day: count(grants) <= grant.max_per_day ; per invite tree per UTC day <= grant.max_per_invite_tree_per_day
 ```
@@ -738,7 +742,7 @@ per UTC day: count(grants) <= grant.max_per_day ; per invite tree per UTC day <=
 | `high` | A rule was broken but balances are consistent (`INV-L08` to `L13`, `L15`, `L17`) | Engage `kill.all_minting` and `kill.all_new_jobs`; page operators; postings continue so donors are still paid | Two operators release after review |
 | `warn` | A gauge or lag (`INV-L18`, `L19`, `ledger.v_cap_hit`, `ledger.eta_below_threshold`, `ledger.mint_utilization_high`, `ledger.mint_cap_above_forecast`, `ledger.claim_ratio_undefined`) | Alarm and ticket; no switch | Acknowledge in the admin tool |
 
-The response stops new credit and new claims, which is the direction that cannot make a corrupt ledger worse. Limits [D]: the checks detect, they do not repair; a checker bug can freeze a healthy ledger, so the checker is itself tested (6.16) and a freeze drill is part of `BM9` (S0 0.12); the alarm path is the monitoring stack of `S4.*`.
+The response stops new credit and new claims, which is the direction that cannot make a corrupt ledger worse. Limits [D]: the checks detect, they do not repair; a checker bug can freeze a healthy ledger, so the checker is itself tested (6.16) and a freeze drill is added to the `BM9` drills (S0 0.12 names only the backup and secret-rotation drills; S17.* to adopt it); the alarm path is the monitoring stack of `S4.*`.
 
 ## 6.14 Two things the Founding Document cannot promise as written
 
@@ -759,7 +763,7 @@ Where fractions arise. The price p = 1 + v + lambda has up to six decimal places
 
 Credit is fungible: when Sara's lot funds an escrow and a donor's lot is created from it, the donor's credit has several parents, and the Reserve mixes everything it receives. A unit-by-unit proof of origin does not exist, and the ledger must not claim one. What does hold, and what is checked:
 
-1. **Conservation.** Only `mint` creates credit and only `retire` destroys it (INV-L16). Therefore the credit in existence at any time equals cumulative net mint minus cumulative net retired (INV-L02), and each `mint` is backed by one distinct cell that was `accepted` in a Commons job at the moment of posting (INV-L08). Every unit in existence is therefore part of a pool created entirely by accepted Commons cells; this is the sense in which FD§4.2 is implementable.
+1. **Conservation.** Only `mint` creates credit and only `retire` destroys it (INV-L16), except that a two-operator `reversal` can cancel a `mint` (net mint falls) or correct a posting error; INV-L02 is stated in net terms for that reason. Therefore the credit in existence at any time equals cumulative net mint minus cumulative net retired (INV-L02), and each `mint` is backed by one distinct cell that was `accepted` in a Commons job at the moment of posting (INV-L08). Every unit in existence is therefore part of a pool created entirely by accepted Commons cells; this is the sense in which FD§4.2 is implementable.
 2. **Lineage where it is well defined.** `lot_movements` record, for each `transfer`, which slices of which lots became the donor's lot (6.4.3), so any lot can be traced back along transfer chains to mint lots, to a grant (whose origin is the Reserve) or to the Reserve boundary. Tracing stops at the Reserve because Reserve credit is pooled; a lineage query reports 'Reserve' there and does not guess.
 3. **What can break it.** (a) A Commons cell that is `overturned` after its credit was minted and spent: the mint can be reversed only up to what the donor still holds (6.6.3); the rest is the unrecovered mint, recorded as `shortfall_ucr`, published, and alarmed (`INV-L19`). Its bound is 1 credit per overturned minted cell. (b) ISS-03: gold, audit and review cells inside Commons jobs mint like any other Commons cell, so a share of minted credit pays for verification of Commons work, not for output a requester wanted; the Commons verification share is published beside v so this is visible. (c) Genesis: the ledger starts at zero with no pre-mint; test or simulation credit lives in a separate database and is never loaded into the production ledger (S18.*).
 4. **What the platform may say publicly.** 'Credit in existence equals credit minted for accepted Commons cells minus credit retired, checked every minute (declared), with the unrecovered amount shown.' It may not say that each credit unit is individually backed or that credit is guaranteed redeemable (FD Principle 11; credit is not money or a promised entitlement, FD§4.1).
@@ -816,7 +820,7 @@ Ids follow S0 0.5. The numbers `AC-ledger-01`..`16`, `T-unit-01`..`02`, `T-prop-
 | `AC-ledger-03` | N = 7 (escrow 8,050,000, pool 700,000, levy budget 350,000) | (a) No verification cell; (b) one verification cell is accepted | (a) payouts 7,000,000, levy 350,000, refund 700,000. (b) the cell takes 700,000 from the pool and 300,000 from the levy budget; levy posted 50,000, refund 0; no mint, no Reserve outflow |
 | `AC-ledger-04` | An admitted 240-cell job, no cell accepted | The requester cancels and the drain ends | `cancel` posts a refund of 276,000,000 and no levy; each lot is restored with its original `expires_at`; Sara's balance is 300,000,000 |
 | `AC-ledger-05` | Sara holds a 14-day grant lot, a 60-day lot earned earlier and a 60-day lot earned later | She funds a job needing more than the grant lot | Lots are consumed in order of `expires_at`; a lot with `expires_at <= now` is never consumed even if not yet swept |
-| `AC-ledger-06` | A job escrow includes a slice of a lot that expires while the job runs | The job settles with a refund covering that slice after `expires_at` | The lot is restored with its original date and the next sweep posts `expire` to the Reserve (ISS-07) |
+| `AC-ledger-06` | A job escrow includes a slice of a lot that expires while the job runs, and the member still holds the rest of that lot, which an earlier sweep has already expired | The job settles with a refund covering that slice after `expires_at` | The lot is restored with its original date and the next sweep posts a second `expire` entry (`expire:{lot_id}:1`) to the Reserve (ISS-07) |
 | `AC-ledger-07` | Reserve balance = ceiling + 25 credits; `reserve.retire_min_credits` = 10 | The retirement run executes twice in the same interval | One `retire` entry of 25 credits (`retire:{interval_index}` makes the second a replay); `balance(retired)` = 25; a public log line exists |
 | `AC-ledger-08` | Member owned 349 credits, K_eff 350 | Two leases are requested concurrently | Exactly one passes (headroom 1 credit); with owned 349.5 neither passes; `owned_after <= cap` on every mint (`T-adv-02`) |
 | `AC-ledger-09` | Reserve at 2 credits, G = 3, floor 0, 5 eligible members | The grant run executes | No grant is posted, `reserve_empty` is the only denial, order is preserved; after the Reserve reaches 3, the earliest-qualified member is granted first. A second grant for the same member, a second member on the same `Device`, or a 21st grant in a UTC day is denied with `already_granted`, `device_limit`, `day_limit` |
@@ -837,10 +841,10 @@ Ids follow S0 0.5. The numbers `AC-ledger-01`..`16`, `T-unit-01`..`02`, `T-prop-
 | `T-prop-03` | For any hold followed by any payouts, settlement and refund restore each lot's amount exactly to what the escrow slices still hold; total restored plus levy plus payouts equals the hold |
 | `T-prop-04` | For N, v, lambda in the validated ranges: `escrow_ucr` = primary + pool + levy; `eta_ppm` is monotone non-increasing in v and lambda; `div_ceil` never over-states v by more than 1 ppm |
 | `T-prop-05` | Any single-field mutation, deletion, reordering or insertion in the entry sequence is detected by `INV-L14` |
-| `T-prop-06` | For random cell outcomes in a job, `funded = paid + levy_posted + refunded`, `refund >= 0`, `levy_posted <= levy_due`, balance 0 at close |
+| `T-prop-06` | For random cell outcomes in a job, `funded + reversed_in = paid + levy_posted + refunded`, `refund >= 0`, `levy_posted <= levy_due`, balance 0 at close |
 | `T-prop-07` | Static check: no float type or non-helper division in the ledger, pricing and invariant modules |
 | `T-adv-01` | Two workers post the same `(txn_kind, natural_key)` concurrently: exactly one commits its entries |
-| `T-adv-02` | Many concurrent lease requests at the headroom boundary never push owned credit above K_eff (`INV-L11`) |
+| `T-adv-02` | Many concurrent lease requests at the headroom boundary never push owned credit above K_eff (`INV-L11`), and concurrent Commons leases by different members never push the month's mint above the cap (`INV-L10`) |
 | `T-adv-03` | Two concurrent holds by one member for two jobs that together exceed the balance: one succeeds, one gets `INSUFFICIENT_CREDIT` |
 | `T-adv-04` | With `launch.minting_enabled` false or `kill.all_minting` engaged, an accepting transition is refused and the cell stays undecided (LD-09) |
 | `T-adv-05` | The application role cannot UPDATE or DELETE ledger tables, nor write to them outside `post()` |
