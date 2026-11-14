@@ -10,6 +10,7 @@
 - Evidence tags follow S0.2. Every number in this part is either derived from a formula in S0 or is a reference to a parameter name in S0.10.6; no performance target or pilot size is invented here. Targets of load, restore and alert tests are set in `S18.*` and `S19.*` and recorded as `[V]` until a human sets them. [D]
 - Milestone acceptance tests use the id area `bm<n>` in lowercase: `AC-bm3-04` is the fourth acceptance test of `BM3`. This keeps them from colliding with feature-level `AC-<area>-<nn>` ids owned by other parts (reported as `ISS-172`). A test that is owned by another part is cited by its own id (for example `AC-ledger-01`). [D]
 - Work packages are `WP-BM<n>-<kk>` (17.9). A work-package id never appears in normative text of other parts. [A]
+- Port names in this part are working names for the ports of `S4.*` 4.6.1: `storage` = `TransactionalStore`, `objects` = `BlobStore`, `secrets` = `SecretStore`, `ratelimit_store` = `EphemeralStore`, `mail` = `Mailer`; `LogSink`, `MetricSink`, `BackupSink` and `StaticHost` get local bindings in `BM0`, `AlertSink` a console binding in `BM1`, `CheckRunner` the `Unavailable` binding in `BM6`; every real binding is reported by `BM9`. [A]
 
 **Build rules** (apply to every milestone; each is checked by CI, not by memory) [D]
 
@@ -38,7 +39,7 @@ BM0 foundation
                 |                                  +--> BM5 templates_and_commons_jobs
                 +--> BM4 identity_and_access -----+
    BM1 ------------------------------------------+
-   BM5 -------------------------------------------> BM6 execution_and_verification   (also needs BM1)
+   BM5 -------------------------------------------> BM6 execution_and_verification   (S0.12: BM6 depends directly on BM1; the `BM1` line above feeds `BM6`, not `BM5`)
    BM6 --> BM7 member_jobs_and_credit_economy
    BM6, BM7 --> BM8 experiences_and_public
    BM7, BM8 --> BM9 measurement_simulation_hardening
@@ -135,7 +136,7 @@ Preliminary proposals (the reviewer may overturn every row; none is a finding ab
 | `secret.volunteer_handle_key[version]`, `secret.ip_hash_key[version]` | Hamyar (S0.6.4) | Created per environment when the environment is created; rotated in the drill of `BM9`; rotation of the handle key unlinks old handles by design |
 | Every other secret named in `S10.*` (session signing, ledger checkpoint, storage, mail, database) | Hamyar | Same lifecycle; none is ever stored in the parameter table or returned by an API |
 
-Rules [D]: (1) a secret is never pasted into a chat, ticket, commit, work-package prompt or log; coding agents never receive production secrets (panel-review 4.5 item 6 shows how a legacy flow would have put one into a transcript); (2) each environment has its own secret store behind the `secrets` port; (3) rotation is: generate in the store, deploy, invalidate the old value, verify the old value is refused, record the names, date and performer (never values), attach the record to the gate items named in `S14.*`; (4) the full history of the panel repository and its logs are searched for secret values, with the caveat that the reviewed clone had one commit and the earlier history is unknown [V]; (5) the scope of the panel's `GITHUB_TOKEN` and the owner-wide `ALLOWED_REPOS` setting (panel-review 4.5 items 8 and 9) are narrowed or retired as part of PB-1.
+Rules [D]: (1) a secret is never pasted into a chat, ticket, commit, work-package prompt or log; coding agents never receive production secrets (panel-review 4.5 item 6 shows how a legacy flow would have put one into a transcript); (2) each environment has its own secret store behind the `secrets` port; (3) rotation is: generate in the store, deploy, invalidate the old value, verify the old value is refused, record the names, date and performer (never values), attach the record to the gate items named in `S14.*`; (4) the full history of the panel repository and its logs are searched for secret values, with the caveat that the reviewed clone had one commit and the earlier history is unknown [V]; (5) the scope of the panel's `GITHUB_TOKEN` and the owner-wide `ALLOWED_REPOS` setting (panel-review 4.3 and 4.5 item 8) are narrowed or retired as part of PB-1.
 
 ## 17.5 Environments, exposure boundary and the global Definition of Done
 
@@ -148,7 +149,7 @@ Rules [D]: (1) a secret is never pasted into a chat, ticket, commit, work-packag
 | `staging` | Persistent rehearsal and demo | Named operators only (access control in front of the application) [A] | Fictitious services; no real member data | Rehearsal sign-offs flagged `rehearsal`; a banner says so |
 | `production` | The real system | Nobody outside the operators until the exposure rule below holds | Real | Refuses the fixture profile and rehearsal sign-offs; only real gates |
 
-A fresh `production` database is seeded as in 17.8 and stays closed: services `unreviewed`, gates unsigned, `launch.*` off, no members. [D]
+A fresh `production` database is seeded as in 17.8 and stays closed: services `unreviewed`, gates unsigned, `launch.*` off, no members. Naming: `ci` here is the environment `test` and `production` is `prod` in `S4.*` 4.13.1 and in the `HAMYAR_ENV` values (`dev`, `test`, `staging`, `prod`); this part keeps `ci` and `production` as readable names only. [D]
 
 ### 17.5.2 Exposure boundary [D]
 
@@ -184,7 +185,7 @@ Each milestone has the same rows: scope (by reference), dependencies, stubbed, t
 | Entities | `Parameter`, `ParameterVersion`, `ChangeLogEntry`, `Event` (S0.7) and the outbox table |
 | Endpoints | `GET /v1/public/health` (public, S0.11.2); test-only conformance routes mounted only when environment is `ci` |
 | Depends on | none (PB-1..PB-3 inputs) |
-| Stubbed | Member and admin token verifiers (answer `AUTH_REQUIRED`); `secrets` (local file in `dev` only); `mail` (no-op); `objects` (local directory); `scheduler` (in-process); `ratelimit_store` (in memory). Removed by: `BM2` (admin verifier), `BM4` (member verifier, `mail`), host-bound implementations by `BM9` |
+| Stubbed | Member and admin token verifiers (answer `AUTH_REQUIRED`); `secrets` (local file in `dev` only); `mail` (no-op); `objects` (local directory); `scheduler` (in-process); `ratelimit_store` (in memory). Removed by: `BM2` (admin verifier), `BM4` (member verifier), host-bound implementations by `BM9`; `mail` stays a no-op until the owner chooses a binding (`BM4` Stubbed row, `BM9`) |
 | Working system | An API serves `/v1/public/health` in the S0.11 shapes; migrations, seeds and API conformance run in CI; production configuration refuses stubs |
 | Demo | Call health; list the seeded parameters; replay an idempotent request; show the CI run and the stub register |
 
@@ -219,11 +220,11 @@ Each milestone has the same rows: scope (by reference), dependencies, stubbed, t
 
 | Row | Content |
 | --- | --- |
-| Scope | `S6.*` ledger core: append-only double-entry ledger in integer `ucr`; account types and entry types of S0.8.5; `LedgerTransaction` groups (`ledger_txn_kind`); `CreditLot` with oldest-first spending, per-lot `expires_at` using the parameter version at `earned_at`, refund that restores lots with their original expiry (`ISS-07`); per-ledger `seq`; hash chain `entry_hash = SHA-256(prev_hash \|\| canonical(entry))` and daily checkpoint; `Escrow` and `Reserve` rows; bootstrap of the three singleton accounts (`issuance`, `retired`, `reserve`); reversal with two approvers (`ledger.reversal_min_approvers`, constant) as a ledger function that takes two distinct approver ids. Invariant machinery: the per-commit check (constant) and the sampled and full recompute jobs (`ledger.invariant_check_interval_s`, `ledger.full_recompute_interval_s`, `ledger.checkpoint_interval_s`), `InvariantCheck`, `Alarm`, event `ledger.invariant_violated`, metric `hamyar_ledger_invariant_violations_total`. Invariant classes (exact `INV-L<nn>` ids are in `S6.*`): conservation (all accounts sum to zero); `issuance` equals minus cumulative mint; `retired` equals cumulative retired; non-negative member, escrow and reserve balances; a closed escrow is exactly zero; lots of a member sum to the member balance; gapless `seq`; unbroken hash chain; no update or delete path |
+| Scope | `S6.*` ledger core: append-only double-entry ledger in integer `ucr`; account types and entry types of S0.8.5; `LedgerTransaction` groups (`ledger_txn_kind`); `CreditLot` with oldest-first spending, per-lot `expires_at` using the parameter version at `earned_at`, refund that restores lots with their original expiry (`ISS-07`); per-ledger `seq`; hash chain `entry_hash = SHA-256(prev_hash \|\| canonical(entry))` and periodic checkpoint (`ledger.checkpoint_interval_s`); `Escrow` and `Reserve` rows; bootstrap of the three singleton accounts (`issuance`, `retired`, `reserve`); reversal with two approvers (`ledger.reversal_min_approvers`, constant) as a ledger function that takes two distinct approver ids. Invariant machinery: the per-commit check (constant) and the sampled and full recompute jobs (`ledger.invariant_check_interval_s`, `ledger.full_recompute_interval_s`, `ledger.checkpoint_interval_s`), `InvariantCheck`, `Alarm`, event `ledger.invariant_violated`, metric `hamyar_ledger_invariant_violations_total`. Invariant classes (exact `INV-L<nn>` ids are in `S6.*`): conservation (all accounts sum to zero); `issuance` equals minus cumulative mint; `retired` equals cumulative retired; non-negative member, escrow and reserve balances; a closed escrow is exactly zero; lots of a member sum to the member balance; gapless `seq`; unbroken hash chain; no update or delete path |
 | Entities | `LedgerAccount`, `LedgerEntry`, `LedgerTransaction`, `CreditLot`, `Escrow`, `Reserve`, `InvariantCheck`, `Alarm` |
 | Endpoints | None public. Internal ledger interface and a command-line tool `ledger-cli` (`verify`, `checkpoint`, `explain`) |
 | Depends on | `BM0` |
-| Stubbed | Approver identities (test principals; admin flow arrives in `BM2`); lot-lifetime resolver (returns `credit.lifetime_days`; the expiry-arm resolver arrives in `BM6`); member accounts refer to a `mem_` id without a foreign key and escrows to a `job_` id without one (constraints added by `BM4`, `BM5`, 17.8, `ISS-176`); alarm delivery is log and console only |
+| Stubbed | Approver identities (test principals; admin flow arrives in `BM2`); lot-lifetime resolver (returns `credit.lifetime_days`; the expiry-arm resolver arrives in `BM6`); member accounts refer to a `mem_` id without a foreign key and escrows to a `job_` id without one (constraints added by `BM4`, `BM5`, 17.8, `ISS-176`); alarm delivery is log and console only until the owner chooses an alerting binding (`BM9`) |
 | Working system | A ledger driven through its internal interface; the FD§3.3 example posts and closes exactly; a seeded corruption raises `ledger.invariant_violated` |
 | Demo | In a throwaway database post the FD§3.3 example with `ledger-cli`, print the closing identity (264,000,000 + 12,000,000 = 276,000,000 ucr); then run the corruption script and watch the alarm |
 
@@ -260,7 +261,7 @@ Each milestone has the same rows: scope (by reference), dependencies, stubbed, t
 | Entities | `AdminUser`, `AdminCredential`, `Session` (admin), `AdminAction`, `KillSwitch`, `FeatureFlag`, `Experiment`, `ExperimentAssignment`, `PreRegistration`, `LaunchGateItem`, `CalibrationRecord`; `Parameter` editor on the `BM0` tables |
 | Endpoints | `/v1/admin/*` families: sessions, admin users, parameters, change-log, kill-switches, feature-flags, experiments, pre-registrations, launch-gates, calibration-records, admin-actions, ledger (read), alarms; public read: `/v1/public/parameters`, `/v1/public/change-log` (exact paths and `op` ids in `S15.*`) |
 | Depends on | `BM0`, `BM1` |
-| Stubbed | The approved-service count used by the gate rule is `0` until `BM3`, so the rule can never pass in `BM2`; `CalibrationRecord.service_key` is a free-text label until `BM3` adds a link to the registry (`ISS-173`); alarm delivery is console only (paging is an owner decision, `S3.*`); the assignment library is exercised with synthetic subjects until `BM4` |
+| Stubbed | The approved-service count used by the gate rule is `0` until `BM3`, so the rule can never pass in `BM2`; `CalibrationRecord.service_key` is a free-text label until `BM3` adds a link to the registry (`ISS-173`); alarm delivery is console only (paging is an owner decision, `S3.*`; the binding is reported or chosen by `BM9`); the assignment library is exercised with synthetic subjects until `BM4` |
 | Working system | An operator signs in with a passkey, edits a parameter prospectively, engages a kill switch, records calibration data, attaches evidence to a gate, and is refused when trying to turn a `launch.*` switch on |
 | Demo | Virtual passkey sign-in; loosen a parameter (needs second operator, notice period shown); engage and release a kill switch; enter calibration rows; try `launch.members_may_join` and read the list of unmet gate conditions |
 
@@ -396,7 +397,7 @@ Each milestone has the same rows: scope (by reference), dependencies, stubbed, t
 
 | Row | Content |
 | --- | --- |
-| Scope | `S5.*`, `S8.*`, `S9.*`: the full `Cell` machine and `Lease` and `Submission` machines (S0.9.3); cell offer endpoint that applies `R8` and the adapter capability of `BM3`; leasing with server-issued nonce (`lease.nonce_bytes`), timeout, extension, decline and release (`lease.*`), the reaper job (`lease.reap_interval_s`), paste-back with size limits (`cell.envelope.max_submission_bytes`), schema validation, escaping rules, never executing content, quarantine of outputs with links, code or requests for action, duplicate-submission replay returning the stored outcome. Verification: automatic checks in a pipeline, `GoldCell` library and insertion at `verify.gold_rate_g` (hidden: same shape as primary cells), `Audit` machine with sampling at `verify.audit_rate_s`, comparator and third execution, adaptive sampling with the floor, blanket redundancy for new donors (`verify.new_donor_blanket_cells`) and high-risk templates, donor reliability estimate (Beta prior `verify.reliability_prior_a`, `verify.reliability_prior_b`, window `verify.reliability_window_obs`) and the false-accept and false-reject estimators with their stated limits, timing and duplicate detection, human-review cells (`cell_kind` `review`, own gold cells, behind `ff.channel.human_review`), `rework` cells and `cell.overturned` with ledger reversal. Trust tiers: promotion, demotion, restriction (`trust.*`). Commons minting at acceptance: exactly 1,000,000 `ucr` per accepted cell of any `cell_kind` (`ISS-03`), under `mint.monthly_cap_credits`, `mint.per_member_daily_cap_credits`, `launch.minting_enabled` and `kill.all_minting`. Expiry-arm resolver for lot lifetimes (`ff.experiment.expiry_arm`). `Report`, `Appeal` (all `appeal_kind` values) and ban processes with the reviewer-is-not-the-decider rule; template auto-pause (`template.autopause_report_count`, `template.autopause_window_s`); service revocation effect on in-flight cells (`cell.voided`, `lease.revoked`); `R9` re-check at acceptance; queues for audits, abuse flags and appeals in the console; the `human_review` template; a scripted test donor built on the client SDK that supplies pre-written outputs and never touches any provider |
+| Scope | `S5.*`, `S8.*`, `S9.*`: the full `Cell` machine and `Lease` and `Submission` machines (S0.9.3); cell offer endpoint that applies `R8` and the adapter capability of `BM3`; leasing with server-issued nonce (`lease.nonce_bytes`), timeout, extension, decline and release (`lease.*`), the reaper job (`lease.reap_interval_s`), paste-back with size limits (`cell.envelope.max_submission_bytes`), schema validation, escaping rules, never executing content, quarantine of outputs with links, code or requests for action, duplicate-submission replay returning the stored outcome. Verification: automatic checks in a pipeline, `GoldCell` library and insertion at `verify.gold_rate_g` (hidden: same shape as primary cells), `Audit` machine with sampling at `verify.audit_rate_s`, comparator and third execution, adaptive sampling with the floor, blanket redundancy for new donors (`verify.new_donor_blanket_cells`) and high-risk templates, donor reliability estimate (Beta prior `verify.reliability_prior_a`, `verify.reliability_prior_b`, window `verify.reliability_window_obs`) and the false-accept and false-reject estimators with their stated limits, timing and duplicate detection, human-review cells (`cell_kind` `review`, own gold cells, behind `ff.channel.human_review`), `rework` cells and `cell.overturned` with ledger reversal. Trust tiers: promotion, demotion, restriction (`trust.*`). Commons minting at acceptance: exactly 1,000,000 `ucr` per accepted cell of any `cell_kind` (`ISS-03`), under `mint.monthly_cap_credits`, `mint.per_member_daily_cap_credits`, `launch.minting_enabled` and `kill.all_minting`. Expiry-arm resolver for lot lifetimes (`ff.experiment.expiry_arm`). `Report`, `Appeal` (all `appeal_kind` values) and ban processes with the reviewer-is-not-the-decider rule; template auto-pause (`template.autopause_report_count`, `template.autopause_window_s`); service revocation effect on in-flight cells (`cell.voided`, `lease.revoked`); `R9` re-check at acceptance; the `CheckRunner` port bound to `Unavailable` with `ff.verify.sandboxed_tests` off (`S4.*` 4.4.4, `ISS-41`; an isolated runner is enabled only by a G1 decision [V], so templates needing `run_tests` stay unapprovable); queues for audits, abuse flags and appeals in the console; the `human_review` template; a scripted test donor built on the client SDK that supplies pre-written outputs and never touches any provider |
 | Entities | `Lease`, `Submission`, `VerificationRecord`, `GoldCell`, `Audit`, `Report`, `Appeal`; `Cell` completed; `Member` trust tier fed |
 | Endpoints | `POST /v1/cells/{cell_id}/leases`, `POST /v1/leases/{lease_id}/submission` (S0.11.1), cell-offer, my-leases, reports, appeals, decline and release; admin: audits, gold-cells, reports, appeals, bans, verification-records (`S15.*`) |
 | Depends on | `BM1`, `BM5` (and through them `BM0`..`BM4`) |
@@ -431,6 +432,7 @@ Each milestone has the same rows: scope (by reference), dependencies, stubbed, t
 - `AC-bm6-23` Given `template.autopause_report_count` reports on one template inside `template.autopause_window_s`, Then `template.paused` and its cells pause.
 - `AC-bm6-24` Given submitted text containing markup, script and control characters, Then it is stored as data, returned only as `application/json`, never executed or interpreted, and every console view escapes it (injection and XSS suite `T-inj-*`).
 - `AC-bm6-25` Given the adversarial suite `T-adv-*` (forgery, replay, double submission, race between lease, requeue and cancel), Then every case ends in a valid state, the ledger invariants hold and no credit is minted that is not backed by an accepted cell.
+- `AC-bm6-26` Given `ff.verify.sandboxed_tests` off, When a template needing `run_tests` is submitted for approval or its cell for leasing, Then it is refused and no submitted content is executed anywhere (`AC-arch-16`).
 
 **Definition of Done (BM6)** adds to 17.5.3:
 
@@ -576,6 +578,20 @@ FD§9 Phase 1 measures and their sources (metric names and queries are owned by 
 - [ ] Completion of `BM9` is recorded as a build fact only; the statement "this authorizes no launch" is part of the record (`BR10`, S0.12 rule 6).
 - [ ] Second human signature on the DoD record (`BR10`).
 
+### 17.6.1 Architecture acceptance tests by milestone [A]
+
+The acceptance tests of `S4.*` (4.20) run in the milestone that builds their subject and stay in CI afterwards (`BR6`).
+
+| Milestone | Tests of `S4.*` |
+| --- | --- |
+| `BM0` | `AC-arch-08` (log canary, extended in later milestones), `AC-arch-17` (bootstrap refuses unsafe origins) |
+| `BM1` | `AC-arch-01`, `AC-arch-02`, `AC-arch-03`, `AC-arch-04`, `AC-arch-05`, `AC-arch-13` (dead-letter alarm needs `Alarm`) |
+| `BM2` | `AC-arch-06`, `AC-arch-07`, `AC-arch-09` (the brake needs kill switches), `AC-arch-15` |
+| `BM3` | `AC-arch-14` (`policy_version_id` on events), `AC-adapter-01`, `AC-adapter-02`, `AC-adapter-04`, `AC-adapter-06` |
+| `BM6` | `AC-arch-12`, `AC-arch-16` |
+| `BM8` | `AC-adapter-03`, `AC-adapter-05` (they scan the member bundle) |
+| `BM9` | `AC-arch-10`, `AC-arch-11` (portability and restore drills) |
+
 ## 17.7 Launch gates versus build milestones
 
 Building and launching are separate tracks. The build supplies the machinery and the evidence slots; humans supply the answers. Gates `G0`..`G5` are defined in FD§8.3 and specified as product features in `S14.*`. [D]
@@ -702,7 +718,7 @@ A **work package** (`WP-BM<n>-<kk>`, `kk` = `01`..`09`; the same number `j` as i
 | `web/shared`, `web/member`, `web/requester`, `web/console`, `web/public` | design system, i18n, calendar and bidi helpers; member screens; requester screens; reviewer and operator console; public pages | UI | the generated API client and `web/shared` only | `BM0` scaffold, `BM2`, `BM8` |
 | `seed/`, `migrations/`, `ci/`, `build/`, `copy/`, `docs/adr/` | seeds and fixtures; migrations; pipelines and manifests; stub register and DoD records; copy registry; decision records | support | n/a | all |
 
-Import direction is one-way (lower layers never import higher ones); modules of the same layer talk through ports or events (outbox, S0.9), never through each other's tables. `economy/` reads verified throughput from the read model fed by `execution/` events, not from `execution/` code. A boundary test (`T-unit-arch`) fails the build on a forbidden import. [A]
+Import direction is one-way (lower layers never import higher ones); modules of the same layer talk through ports or events (outbox, S0.9), never through each other's tables; the same-layer imports named in the "May import" column (for example `registry` to `admin` guards) are the only exception and form no cycle. `economy/` reads verified throughput from the read model fed by `execution/` events, not from `execution/` code. A boundary test (`T-unit-arch`) fails the build on a forbidden import. [A]
 
 **Protected shared files** (a WP may only append its own rows or ask the owner) [A]
 
@@ -815,7 +831,7 @@ Columns: `After` lists the packages of the same milestone whose provided contrac
 | `WP-BM5-01` | `template-model-and-versions` | `templates/model`: `Template`, `TemplateVersion`, slots, output schema, content hash, immutability after approval, supersession | S8, S0.9.5 | none | `AC-bm5-02` |
 | `WP-BM5-02` | `template-review-machine` | `templates/review`: review machine, second-reviewer rule, author-cannot-approve, edit rule, review history | S8, S0.9.5, S0.10.6 `template.min_reviewers_*` | `-01` | `AC-bm5-01`, `-12` |
 | `WP-BM5-03` | `lint-and-wrapping` | `templates/lint`, `templates/wrap`: task lint (`R3`), delimiter wrapping and neutralization, round-trip parser, adversarial corpus `seed/adversarial/templates/` | S9, S0.8.4 | none (pure functions) | `AC-bm5-06`, `-07` |
-| `WP-BM5-04` | `seed-templates-and-harness` | `seed/templates/*`, `templates/harness`: the five required templates as `draft`, sample fixtures, check runner without any lease | S8 | `-01` | `AC-bm5-08` |
+| `WP-BM5-04` | `seed-templates-and-harness` | `seed/templates/*`, `templates/harness`: the five required templates as `draft`, sample fixtures, check running on supplied sample outputs without any lease | S8 | `-01` | `AC-bm5-08` |
 | `WP-BM5-05` | `uploads-glossary-screening` | `jobs/uploads`, `jobs/screen`: `Upload`, `Glossary`, size limit, `screen.*` actions, reviewer screening queue data | S9, S0.10.6 `screen.*`, `job.max_upload_bytes` | none | `AC-bm5-05`, `-11` |
 | `WP-BM5-06` | `job-and-cell-machines` | `jobs/machines`: `Job` and `Cell` tables, transition tables from S0.9.2 and S0.9.3 up to `queued`, events, table-driven `T-fsm-*` | S5, S0.9.2, S0.9.3 | none | `AC-bm5-10` |
 | `WP-BM5-07` | `commons-jobs-and-splitter` | `jobs/commons`, `jobs/split`: operator-authored Commons backlog, template-specific splitter inside `cell.envelope.max_input_chars`, input hashes, reassembly order | S5, S8 | `-05`, `-06` | `AC-bm5-04` |
@@ -829,7 +845,7 @@ Columns: `After` lists the packages of the same milestone whose provided contrac
 | `WP-BM6-01` | `lease-engine` | `execution/lease`: `Lease` machine, nonce, timeout, extension, decline, release, reaper job, race-safe single active lease | S5, S0.9.3, S0.10.6 `lease.*` | none | `AC-bm6-02`, `-03` |
 | `WP-BM6-02` | `submission-intake` | `execution/submission`: paste-back endpoint, size and schema checks, escaping, quarantine and release, duplicate-submission replay, nonce and holder check | S5, S9, S0.11.1 | `-01` | `AC-bm6-04`, `-05`, `-06`, `-07` |
 | `WP-BM6-03` | `cell-offer-and-visibility` | `execution/offer`: offer endpoint, `R8` predicate call, adapter capability from `BM3`, launch-gate check on lease | S5, S7, S14 | `-01` | `AC-bm6-01`, `-20` (`R8` half) |
-| `WP-BM6-04` | `verification-and-gold` | `execution/verify`, `execution/gold`: checks pipeline, `GoldCell` library and hidden insertion, role-restricted gold answers, timing and duplicate detectors | S8, S9, S0.8.4 | `-02` | `AC-bm6-08`, `-15` |
+| `WP-BM6-04` | `verification-and-gold` | `execution/verify`, `execution/gold`, `execution/checkrunner` (`CheckRunner` port bound to `Unavailable`): checks pipeline, `GoldCell` library and hidden insertion, role-restricted gold answers, timing and duplicate detectors | S8, S9, S0.8.4 | `-02` | `AC-bm6-08`, `-15`, `-26` |
 | `WP-BM6-05` | `audits-sampling-reliability` | `execution/audit`, `execution/reliability`: `Audit` machine, comparator, third execution, adaptive sampling, blanket redundancy, Beta estimate, false-accept and false-reject estimators with limits | S8, S0.10.6 `verify.*` | `-04` | `AC-bm6-10`, `-11`, `-12`, `-13`, `-14` |
 | `WP-BM6-06` | `trust-and-review-cells` | `execution/trust`, `execution/review`, `seed/templates/human_review`: tier promotion, demotion, restriction; review cells and their gold; behind `ff.channel.human_review` | S8, S10, S0.9.4 | `-04`, `-05` | `AC-bm6-09`, `-16` |
 | `WP-BM6-07` | `acceptance-minting-overturn` | `execution/accept`: acceptance decision, `R9` re-check, mint call into the ledger (caps, `launch.minting_enabled`, `kill.all_minting`), expiry-arm resolver, overturn with `rework` cells | S5, S6, S0.8.5 | `-02` | `AC-bm6-17`, `-18`, `-19`, `-20` (`R9` half) |
@@ -1060,7 +1076,7 @@ Scripted in the staging suite (`AC-bm9-17`); the figures are for the initial con
 
 ## 17.12 Scope coverage matrix
 
-Every bullet of the prompt's product scope `A`..`K` and of the build-order requirements maps to the milestone that builds it and the tests that verify it. Nothing is deferred or shrunk: a row that depends on a human (counsel, interviews, a Persian reader, a penetration test, reachability measurements, host choice) is built as machinery with an evidence slot, and the human step is tagged `[V]`. The feature specification stays in the owning part. [D]
+Every bullet of the prompt's product scope `A`..`K` and of the build-order requirements maps to the milestone that builds it and the tests that verify it. Row ids are scope-item ids of the prompt: `C1`..`C8` here are not the constraints `C1`..`C8` of S0.10.3, and `G1`..`G4` are not the gates `G0`..`G5`. Nothing is deferred or shrunk: a row that depends on a human (counsel, interviews, a Persian reader, a penetration test, reachability measurements, host choice) is built as machinery with an evidence slot, and the human step is tagged `[V]`. The feature specification stays in the owning part. [D]
 
 | Row | Scope item (prompt) | Built in | Verified by |
 | --- | --- | --- | --- |
@@ -1132,7 +1148,7 @@ Every bullet of the prompt's product scope `A`..`K` and of the build-order requi
 | `K2` | Simulation harness, labeled as not evidence about human behavior | `BM9` | `AC-bm9-02`..`-05` |
 | `K3` | Given / When / Then criteria and a Definition of Done per milestone | 17.6, 17.5.3 | `GD1`..`GD13`, `BR10` |
 
-**Rows by milestone** (the inverse view; a milestone that closes a row only partly is named in its first row cell) [D]
+**Rows by milestone** (the inverse view lists the rows a milestone builds or completes; rows to which it only contributes appear in the "Built in" column above) [D]
 
 | Milestone | Rows it builds or completes |
 | --- | --- |
