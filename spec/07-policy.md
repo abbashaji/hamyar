@@ -929,7 +929,7 @@ These are the `policy` layer tests of S18.* (`T-policy-nn`) and must run in CI a
 | `T-policy-42` | PV2 FX1, TPL2 | P2 L3 S0 M0 | reject `R5.no_service_with_flag` |
 | `T-policy-43` | PV2 FX2, TPL2 | P3 L1 S0 M2 | pass {F} |
 | `T-policy-44` | PV2 FX2, TPL2 | P3 L1 S0 M0 | pass {G} (training flag and open publication both yes on G) |
-| `T-policy-45` | PV2 FX2, TPL2 | P3 L1 S1 M2 | reject `R6.p3_requires_s0` |
+| `T-policy-45` | PV2 FX2, TPL2 | P3 L1 S1 M2 | reject `R1.not_allowlisted` (row `L02` is `S0` only, and `R1` precedes `R6`; `R6.p3_requires_s0` stays as a second defense if a later version adds an `S1` row) |
 | `T-policy-46` | PV2 FX1, TPL2 | P3 L2 S0 M0 | reject `R6.no_service_with_flag` |
 | `T-policy-47` | PV2 FX2, TPL2 | P3 L0 S0 M2 | pass {F} |
 
