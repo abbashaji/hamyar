@@ -149,7 +149,7 @@ Rules [D]: (1) a secret is never pasted into a chat, ticket, commit, work-packag
 | `staging` | Persistent rehearsal and demo | Named operators only (access control in front of the application) [A] | Fictitious services; no real member data | Rehearsal sign-offs flagged `rehearsal`; a banner says so |
 | `production` | The real system | Nobody outside the operators until the exposure rule below holds | Real | Refuses the fixture profile and rehearsal sign-offs; only real gates |
 
-A fresh `production` database is seeded as in 17.8 and stays closed: services `unreviewed`, gates unsigned, `launch.*` off, no members. [D]
+A fresh `production` database is seeded as in 17.8 and stays closed: services `unreviewed`, gates unsigned, `launch.*` off, no members. Naming: `ci` here is the environment `test` and `production` is `prod` in `S4.*` 4.13.1 and in the `HAMYAR_ENV` values (`dev`, `test`, `staging`, `prod`); this part keeps `ci` and `production` as readable names only. [D]
 
 ### 17.5.2 Exposure boundary [D]
 
@@ -718,7 +718,7 @@ A **work package** (`WP-BM<n>-<kk>`, `kk` = `01`..`09`; the same number `j` as i
 | `web/shared`, `web/member`, `web/requester`, `web/console`, `web/public` | design system, i18n, calendar and bidi helpers; member screens; requester screens; reviewer and operator console; public pages | UI | the generated API client and `web/shared` only | `BM0` scaffold, `BM2`, `BM8` |
 | `seed/`, `migrations/`, `ci/`, `build/`, `copy/`, `docs/adr/` | seeds and fixtures; migrations; pipelines and manifests; stub register and DoD records; copy registry; decision records | support | n/a | all |
 
-Import direction is one-way (lower layers never import higher ones); modules of the same layer talk through ports or events (outbox, S0.9), never through each other's tables. `economy/` reads verified throughput from the read model fed by `execution/` events, not from `execution/` code. A boundary test (`T-unit-arch`) fails the build on a forbidden import. [A]
+Import direction is one-way (lower layers never import higher ones); modules of the same layer talk through ports or events (outbox, S0.9), never through each other's tables; the same-layer imports named in the "May import" column (for example `registry` to `admin` guards) are the only exception and form no cycle. `economy/` reads verified throughput from the read model fed by `execution/` events, not from `execution/` code. A boundary test (`T-unit-arch`) fails the build on a forbidden import. [A]
 
 **Protected shared files** (a WP may only append its own rows or ask the owner) [A]
 
@@ -831,7 +831,7 @@ Columns: `After` lists the packages of the same milestone whose provided contrac
 | `WP-BM5-01` | `template-model-and-versions` | `templates/model`: `Template`, `TemplateVersion`, slots, output schema, content hash, immutability after approval, supersession | S8, S0.9.5 | none | `AC-bm5-02` |
 | `WP-BM5-02` | `template-review-machine` | `templates/review`: review machine, second-reviewer rule, author-cannot-approve, edit rule, review history | S8, S0.9.5, S0.10.6 `template.min_reviewers_*` | `-01` | `AC-bm5-01`, `-12` |
 | `WP-BM5-03` | `lint-and-wrapping` | `templates/lint`, `templates/wrap`: task lint (`R3`), delimiter wrapping and neutralization, round-trip parser, adversarial corpus `seed/adversarial/templates/` | S9, S0.8.4 | none (pure functions) | `AC-bm5-06`, `-07` |
-| `WP-BM5-04` | `seed-templates-and-harness` | `seed/templates/*`, `templates/harness`: the five required templates as `draft`, sample fixtures, check runner without any lease | S8 | `-01` | `AC-bm5-08` |
+| `WP-BM5-04` | `seed-templates-and-harness` | `seed/templates/*`, `templates/harness`: the five required templates as `draft`, sample fixtures, check running on supplied sample outputs without any lease | S8 | `-01` | `AC-bm5-08` |
 | `WP-BM5-05` | `uploads-glossary-screening` | `jobs/uploads`, `jobs/screen`: `Upload`, `Glossary`, size limit, `screen.*` actions, reviewer screening queue data | S9, S0.10.6 `screen.*`, `job.max_upload_bytes` | none | `AC-bm5-05`, `-11` |
 | `WP-BM5-06` | `job-and-cell-machines` | `jobs/machines`: `Job` and `Cell` tables, transition tables from S0.9.2 and S0.9.3 up to `queued`, events, table-driven `T-fsm-*` | S5, S0.9.2, S0.9.3 | none | `AC-bm5-10` |
 | `WP-BM5-07` | `commons-jobs-and-splitter` | `jobs/commons`, `jobs/split`: operator-authored Commons backlog, template-specific splitter inside `cell.envelope.max_input_chars`, input hashes, reassembly order | S5, S8 | `-05`, `-06` | `AC-bm5-04` |
@@ -1148,7 +1148,7 @@ Every bullet of the prompt's product scope `A`..`K` and of the build-order requi
 | `K2` | Simulation harness, labeled as not evidence about human behavior | `BM9` | `AC-bm9-02`..`-05` |
 | `K3` | Given / When / Then criteria and a Definition of Done per milestone | 17.6, 17.5.3 | `GD1`..`GD13`, `BR10` |
 
-**Rows by milestone** (the inverse view; a milestone that closes a row only partly is named in its first row cell) [D]
+**Rows by milestone** (the inverse view lists the rows a milestone builds or completes; rows to which it only contributes appear in the "Built in" column above) [D]
 
 | Milestone | Rows it builds or completes |
 | --- | --- |
