@@ -4,10 +4,22 @@ api: every /v1/... path cited in any part is defined in spec/15a-api-core.md or 
 import re, glob, sys
 T = {f: open(f, encoding="utf-8").read() for f in sorted(glob.glob("spec/*.md"))}
 norm = lambda p: re.sub(r"\{[^}]*\}|:[a-z_]+", "{}", p.rstrip("/.,;)`|"))
+
+def verdict_rows(text):
+    """yield (path, verdict) for table rows with a backticked /v1 path and a cell that is exactly NEW, ALIAS or REMOVE"""
+    for line in text.splitlines():
+        if not line.startswith("|"): continue
+        cells = [c.strip().strip("*") for c in line.strip().strip("|").split("|")]
+        v = next((c for c in cells if c in ("NEW", "ALIAS", "REMOVE")), None)
+        m = re.search(r"`(/v1/[^`\s]+)`", line)
+        if v and m: yield m.group(1), v
 def paths(t): return set(norm(x) for x in re.findall(r"/v1/[A-Za-z0-9_\-/{}:]+", t))
 defined = set()
 for f, x in T.items():
-    if re.match(r"spec/15", f): defined |= paths(x)
+    if re.match(r"spec/15[ab]", f): defined |= paths(x)
+    elif re.match(r"spec/15[c-g]", f):  # reconcile files define only the paths whose verdict row says NEW
+        for pth, v in verdict_rows(x):
+            if v == "NEW": defined.add(norm(pth))
 only = [a for a in sys.argv[2:]]
 bad = {}
 for f, t in T.items():

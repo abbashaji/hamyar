@@ -1,0 +1,34 @@
+id: C-076
+title: 'FIX-05: apply API reconciliation to 10a identity'
+type: normal
+priority: 4
+lease_minutes: 90
+goal: 'Apply the listed edits to the part files, then write docs/fix/FIX-05.md. METHOD: for each edit, find the cited text by reading about 25 lines around the cited line (lines have drifted by a few lines since the audit; search nearby, do not guess). If the old text is there, make the minimal edit in place (apply_changes, small old -> new edits, never whole-file rewrites) and record status `applied`. If the new text is already there, `already-applied`. If the text cannot be found within 60 lines, `skipped-not-found` with what you searched. If the edit needs a decision that is not in docs/audit/FINAL.md section 4 with a default, `skipped-needs-owner`. The edits listed in the sources are the AUTHORIZED renames and re-pointings for this cell; apart from them never rename ids, parameters, endpoints or states, and never delete content. Where an edit and the Founding Document or a ground rule conflict, do not apply it: skipped-needs-owner with the reason. After ALL edits, RE-READ every edited place and state in ''## Read-back'' what you now see (quote at most one short phrase per row). The log has a table with columns exactly: edit | file:line | before | after | status, a ''## Read-back'' section, and ends with ''Result: DONE'' or ''Result: DONE WITH SKIPS''. The owner decisions D-01..D-22 and their defaults are in docs/audit/FINAL.md section 4; where a default exists, apply it and mark the edit as default-pending in the ''after'' column. Overall context and the full audit: docs/audit/FINAL.md (sections 3 and 5.1).
+
+
+  TASK FIX-05: Apply edits 1 to 14, 19 and 26 of the section ''## Edits required in citing parts'' of spec/15c-api-reconcile-core.md that target spec/10a-identity.md (challenge shape and purposes, registration, recovery, admin sign-in, admin ops table, device-link offer, claim and approval, key rotation, createMemberKey/createKeyRevocation/createRecoveryKey rows, recovery key effect, the ''hamyar/v1/...'' labels, line ~592). Also apply the verdict-table ALIAS and REMOVE rows of spec/15c-api-reconcile-core.md for every path cited in spec/10a-identity.md. After the edits no ALIAS/REMOVE path of the reconcile files may remain cited in 10a.
+
+  '
+after:
+- C-011
+- C-045
+read:
+- docs/decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- docs/audit/FINAL.md
+- spec/15c-api-reconcile-core.md
+- spec/15a-api-core.md
+- spec/15b-api-admin.md
+- spec/10a-identity.md
+allowed_paths:
+- docs/fix/FIX-05.md
+- spec/10a-identity.md
+outputs:
+- docs/fix/FIX-05.md
+acceptance:
+- cmd: python scripts/check_fixlog.py docs/fix/FIX-05.md
+- cmd: python scripts/check_spec.py spec/10a-identity.md --min-lines 738 --min-tags 1
+- cmd: python scripts/check_stale.py spec/10a-identity.md
+- cmd: python scripts/check_refs.py api 10a
+notes: 'Fix cell. You did not write these parts. Edits only inside allowed_paths. Large lists: work through them in order and commit after every ~10 edits (apply_changes), updating the log table as you go. Heading format and evidence tags as in docs/decisions.md. Do not run or claim to run anything; CI runs acceptance.'

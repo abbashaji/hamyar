@@ -1,0 +1,49 @@
+id: C-092
+title: 'FIX-21: heading and id collisions across S10 and S11'
+type: normal
+priority: 4
+lease_minutes: 90
+goal: 'Apply the listed edits to the part files, then write docs/fix/FIX-21.md. METHOD: for each edit, find the cited text by reading about 25 lines around the cited line (lines have drifted by a few lines since the audit; search nearby, do not guess). If the old text is there, make the minimal edit in place (apply_changes, small old -> new edits, never whole-file rewrites) and record status `applied`. If the new text is already there, `already-applied`. If the text cannot be found within 60 lines, `skipped-not-found` with what you searched. If the edit needs a decision that is not in docs/audit/FINAL.md section 4 with a default, `skipped-needs-owner`. The edits listed in the sources are the AUTHORIZED renames and re-pointings for this cell; apart from them never rename ids, parameters, endpoints or states, and never delete content. Where an edit and the Founding Document or a ground rule conflict, do not apply it: skipped-needs-owner with the reason. After ALL edits, RE-READ every edited place and state in ''## Read-back'' what you now see (quote at most one short phrase per row). The log has a table with columns exactly: edit | file:line | before | after | status, a ''## Read-back'' section, and ends with ''Result: DONE'' or ''Result: DONE WITH SKIPS''. The owner decisions D-01..D-22 and their defaults are in docs/audit/FINAL.md section 4; where a default exists, apply it and mark the edit as default-pending in the ''after'' column. Overall context and the full audit: docs/audit/FINAL.md (sections 3 and 5.1).
+
+
+  TASK FIX-21: docs/audit/A04.md finding 18, A10 finding 10, spec/02e-issues-summary.md B4: heading numbers collide (10a owns 10.1..10.19, 10b reuses 10.11..10.19; 11b spans 11.31..11.49 and 11c 11.41..11.59, 11d a third owner; ISS-117..ISS-119 block duplicated). Write a numbering plan at the top of the log (file -> new heading range, e.g. 10b becomes 10.20..10.39; 11b 11.30..11.49, 11c 11.50..11.69, 11d 11.70..), then renumber the headings in these four files and every in-text reference to them anywhere in these four files AND in other spec files that cite them (search by reading the files'' reference sections; cited text like `S10.13`, `11.41`, `AC-` ids stay unchanged). Do not renumber 10a. Remove the duplicate ISS-117..ISS-119 block only if it is a verbatim duplicate. References in files outside allowed_paths: list them in the log (file:line, old, new) as skipped-needs-owner so a follow-up cell can apply them.
+
+  '
+after:
+- C-089
+- C-078
+- C-081
+- C-012
+- C-014
+- C-015
+- C-016
+- C-045
+- C-050
+- C-051
+read:
+- docs/decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- docs/audit/FINAL.md
+- docs/audit/A04.md
+- docs/audit/A10.md
+- spec/02e-issues-summary.md
+- spec/10b-safety.md
+- spec/11b-requester-ux.md
+- spec/11c-admin-tools.md
+- spec/11d-i18n-copy.md
+allowed_paths:
+- docs/fix/FIX-21.md
+- spec/10b-safety.md
+- spec/11b-requester-ux.md
+- spec/11c-admin-tools.md
+- spec/11d-i18n-copy.md
+outputs:
+- docs/fix/FIX-21.md
+acceptance:
+- cmd: python scripts/check_fixlog.py docs/fix/FIX-21.md
+- cmd: python scripts/check_spec.py spec/10b-safety.md --min-lines 667 --min-tags 1
+- cmd: python scripts/check_spec.py spec/11b-requester-ux.md --min-lines 1022 --min-tags 1
+- cmd: python scripts/check_spec.py spec/11c-admin-tools.md --min-lines 832 --min-tags 1
+- cmd: python scripts/check_spec.py spec/11d-i18n-copy.md --min-lines 798 --min-tags 1
+notes: 'Fix cell. You did not write these parts. Edits only inside allowed_paths. Large lists: work through them in order and commit after every ~10 edits (apply_changes), updating the log table as you go. Heading format and evidence tags as in docs/decisions.md. Do not run or claim to run anything; CI runs acceptance.'

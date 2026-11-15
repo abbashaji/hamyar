@@ -1,0 +1,33 @@
+id: C-088
+title: 'FIX-17: 05a entities: device, member, invite minimization'
+type: normal
+priority: 4
+lease_minutes: 90
+goal: 'Apply the listed edits to the part files, then write docs/fix/FIX-17.md. METHOD: for each edit, find the cited text by reading about 25 lines around the cited line (lines have drifted by a few lines since the audit; search nearby, do not guess). If the old text is there, make the minimal edit in place (apply_changes, small old -> new edits, never whole-file rewrites) and record status `applied`. If the new text is already there, `already-applied`. If the text cannot be found within 60 lines, `skipped-not-found` with what you searched. If the edit needs a decision that is not in docs/audit/FINAL.md section 4 with a default, `skipped-needs-owner`. The edits listed in the sources are the AUTHORIZED renames and re-pointings for this cell; apart from them never rename ids, parameters, endpoints or states, and never delete content. Where an edit and the Founding Document or a ground rule conflict, do not apply it: skipped-needs-owner with the reason. After ALL edits, RE-READ every edited place and state in ''## Read-back'' what you now see (quote at most one short phrase per row). The log has a table with columns exactly: edit | file:line | before | after | status, a ''## Read-back'' section, and ends with ''Result: DONE'' or ''Result: DONE WITH SKIPS''. The owner decisions D-01..D-22 and their defaults are in docs/audit/FINAL.md section 4; where a default exists, apply it and mark the edit as default-pending in the ''after'' column. Overall context and the full audit: docs/audit/FINAL.md (sections 3 and 5.1).
+
+
+  TASK FIX-17: Resolve the safety contradiction: spec/10a-identity.md 10.14.2 and spec/10b-safety.md AC-safety-01 say an IP hash exists only in a volatile rate-limit counter store, never in the database or backups; spec/05a-entities.md stores `devices.creation_ip_hash`, `ip_hash_key_version`, `creation_ip_hash_expires_at` (lines ~136 and ~324, and the minimization table ~107). Apply the stricter reading (10a/10b): remove those three columns from Device (and the mention at ~107), and state that the creation-time IP hash lives only in the volatile counter keyed per window; record the data-minimization consequence (the invite-tree and per-day limits use the volatile counter only) and, if a limit in 10a needs a persisted value, log that as skipped-needs-owner rather than keep the column. Then docs/audit/A04.md findings 6, 15, 20, 21: clearing rule for the invite edge (use `invite.accountability_days` / S10 text), harmonize invite column names with 10a (`invited_by_member_id`, `inviter_member_id`: keep 10a''s names as canonical, alias in 05a), `vol_` handle not computed on public reads. Read 10a and 10b around the cited lines first.
+
+  '
+after:
+- C-087
+- C-003
+- C-046
+read:
+- docs/decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- docs/audit/FINAL.md
+- docs/audit/A04.md
+- spec/10a-identity.md
+- spec/10b-safety.md
+- spec/05a-entities.md
+allowed_paths:
+- docs/fix/FIX-17.md
+- spec/05a-entities.md
+outputs:
+- docs/fix/FIX-17.md
+acceptance:
+- cmd: python scripts/check_fixlog.py docs/fix/FIX-17.md
+- cmd: python scripts/check_spec.py spec/05a-entities.md --min-lines 1821 --min-tags 1
+notes: 'Fix cell. You did not write these parts. Edits only inside allowed_paths. Large lists: work through them in order and commit after every ~10 edits (apply_changes), updating the log table as you go. Heading format and evidence tags as in docs/decisions.md. Do not run or claim to run anything; CI runs acceptance.'

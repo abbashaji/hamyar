@@ -1,0 +1,34 @@
+id: C-081
+title: 'FIX-10: apply API reconciliation to 11c admin tools (part 2)'
+type: normal
+priority: 4
+lease_minutes: 90
+goal: 'Apply the listed edits to the part files, then write docs/fix/FIX-10.md. METHOD: for each edit, find the cited text by reading about 25 lines around the cited line (lines have drifted by a few lines since the audit; search nearby, do not guess). If the old text is there, make the minimal edit in place (apply_changes, small old -> new edits, never whole-file rewrites) and record status `applied`. If the new text is already there, `already-applied`. If the text cannot be found within 60 lines, `skipped-not-found` with what you searched. If the edit needs a decision that is not in docs/audit/FINAL.md section 4 with a default, `skipped-needs-owner`. The edits listed in the sources are the AUTHORIZED renames and re-pointings for this cell; apart from them never rename ids, parameters, endpoints or states, and never delete content. Where an edit and the Founding Document or a ground rule conflict, do not apply it: skipped-needs-owner with the reason. After ALL edits, RE-READ every edited place and state in ''## Read-back'' what you now see (quote at most one short phrase per row). The log has a table with columns exactly: edit | file:line | before | after | status, a ''## Read-back'' section, and ends with ''Result: DONE'' or ''Result: DONE WITH SKIPS''. The owner decisions D-01..D-22 and their defaults are in docs/audit/FINAL.md section 4; where a default exists, apply it and mark the edit as default-pending in the ''after'' column. Overall context and the full audit: docs/audit/FINAL.md (sections 3 and 5.1).
+
+
+  TASK FIX-10: Apply the second half of the section ''## Edits required in citing parts'' of spec/15e-api-reconcile-admin.md: blocks citing 11c lines 560 and above (615, 647-652 launch rows, 700-701 kill-switch engagement and release, 751-752, 793-801, the AC-* rows) and 13:921 (perm.metrics.view_small_cells removed, per 15e decision; if the cited line is in 13 note it in the log, FIX-11 edits 13). Also the ALIAS/REMOVE rows. After FIX-09 and this cell no ALIAS/REMOVE path may remain in 11c.
+
+  '
+after:
+- C-080
+- C-015
+- C-051
+read:
+- docs/decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- docs/audit/FINAL.md
+- spec/15e-api-reconcile-admin.md
+- spec/15b-api-admin.md
+- spec/11c-admin-tools.md
+allowed_paths:
+- docs/fix/FIX-10.md
+- spec/11c-admin-tools.md
+outputs:
+- docs/fix/FIX-10.md
+acceptance:
+- cmd: python scripts/check_fixlog.py docs/fix/FIX-10.md
+- cmd: python scripts/check_spec.py spec/11c-admin-tools.md --min-lines 832 --min-tags 1
+- cmd: python scripts/check_stale.py spec/11c-admin-tools.md
+- cmd: python scripts/check_refs.py api 11c
+notes: 'Fix cell. You did not write these parts. Edits only inside allowed_paths. Large lists: work through them in order and commit after every ~10 edits (apply_changes), updating the log table as you go. Heading format and evidence tags as in docs/decisions.md. Do not run or claim to run anything; CI runs acceptance.'

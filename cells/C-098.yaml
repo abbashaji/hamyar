@@ -1,0 +1,42 @@
+id: C-098
+title: 'FIX-27: remove the isolated test runner everywhere (ISS-12)'
+type: normal
+priority: 4
+lease_minutes: 90
+goal: 'Apply the listed edits to the part files, then write docs/fix/FIX-27.md. METHOD: for each edit, find the cited text by reading about 25 lines around the cited line (lines have drifted by a few lines since the audit; search nearby, do not guess). If the old text is there, make the minimal edit in place (apply_changes, small old -> new edits, never whole-file rewrites) and record status `applied`. If the new text is already there, `already-applied`. If the text cannot be found within 60 lines, `skipped-not-found` with what you searched. If the edit needs a decision that is not in docs/audit/FINAL.md section 4 with a default, `skipped-needs-owner`. The edits listed in the sources are the AUTHORIZED renames and re-pointings for this cell; apart from them never rename ids, parameters, endpoints or states, and never delete content. Where an edit and the Founding Document or a ground rule conflict, do not apply it: skipped-needs-owner with the reason. After ALL edits, RE-READ every edited place and state in ''## Read-back'' what you now see (quote at most one short phrase per row). The log has a table with columns exactly: edit | file:line | before | after | status, a ''## Read-back'' section, and ends with ''Result: DONE'' or ''Result: DONE WITH SKIPS''. The owner decisions D-01..D-22 and their defaults are in docs/audit/FINAL.md section 4; where a default exists, apply it and mark the edit as default-pending in the ''after'' column. Overall context and the full audit: docs/audit/FINAL.md (sections 3 and 5.1).
+
+
+  TASK FIX-27: The register''s blocking issue ISS-12 (spec/02-issues.md) resolves: the platform NEVER executes submitted content. spec/02e-issues-summary.md 2.E.1/2.E.2 A1 says S4, S8a and S9 must drop the isolated runner and `test_run` (ISS-41, ISS-81, ISS-91 still allow one; the flag has two names: `ff.verify.sandboxed_tests` in S4 and `ff.template.code_change_sandbox` in S8a). Read those three files for every mention of a runner, sandbox, test_run, `ff.verify.sandboxed_tests`, `ff.template.code_change_sandbox`, ''execute'', ''run the tests''; remove the runner and the flags; rewrite the code-change template''s verification as checks that never execute submitted code (static checks: parse, diff-applies-cleanly to the supplied snapshot, file-path allowlist, size, forbidden patterns; plus sampled audit against a second donor''s output); the requester runs the supplied tests on their own machine after delivery and may report results (a rating input, never credit-minting). The volunteer is never asked to run anything. Keep every other flag. Log each removal. Mark decision OD-08 default-applied.
+
+  '
+after:
+- C-077
+- C-002
+- C-008
+- C-010
+- C-047
+- C-048
+- C-049
+read:
+- docs/decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- docs/audit/FINAL.md
+- spec/02e-issues-summary.md
+- spec/02-issues.md
+- spec/04-architecture.md
+- spec/08a-templates.md
+- spec/09-result-return.md
+allowed_paths:
+- docs/fix/FIX-27.md
+- spec/04-architecture.md
+- spec/08a-templates.md
+- spec/09-result-return.md
+outputs:
+- docs/fix/FIX-27.md
+acceptance:
+- cmd: python scripts/check_fixlog.py docs/fix/FIX-27.md
+- cmd: python scripts/check_spec.py spec/04-architecture.md --min-lines 921 --min-tags 1
+- cmd: python scripts/check_spec.py spec/08a-templates.md --min-lines 1113 --min-tags 1
+- cmd: python scripts/check_spec.py spec/09-result-return.md --min-lines 788 --min-tags 1
+notes: 'Fix cell. You did not write these parts. Edits only inside allowed_paths. Large lists: work through them in order and commit after every ~10 edits (apply_changes), updating the log table as you go. Heading format and evidence tags as in docs/decisions.md. Do not run or claim to run anything; CI runs acceptance.'

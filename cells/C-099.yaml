@@ -1,0 +1,50 @@
+id: C-099
+title: 'Re-audit after fixes: readiness report round 2'
+type: normal
+priority: 3
+lease_minutes: 90
+goal: 'Independent re-audit after the fix round (cells FIX-01..FIX-27, docs/fix/FIX-*.md). You did not write any of it. (1) Read all docs/fix/FIX-*.md logs; for a sample of at least 40 edits marked `applied` spread over all logs (all of them for FIX-01, FIX-05, FIX-17, FIX-27), open the cited place in the part file and confirm the edit is really there; any false claim is a finding. (2) Re-run, by reading, the cross-part contradictions of docs/audit/FINAL.md section 2 rows 8-21 and 26: for each state whether it is closed (cite the lines you saw) or still open. (3) Re-check the four reasons of the NOT READY verdict in FINAL.md section 5: reconciliation applied? parts agree on the data model and the IP-hash datum? safety parameters fail closed (read the S0 and S16 rows)? owner decisions open (list the still-open ones with defaults)? (4) List every new defect introduced by the fix round that you notice. Write docs/audit/FINAL-2.md with: ''## Checked'', findings table (columns: # | severity | file:line | defect | action), the owner-decision list, a ''Verdict: READY | READY WITH LOGGED ITEMS | NOT READY'' as the last line, and a short list of the next fix tasks if not ready (one per cell: files, edit, acceptance). Do not edit other files. Be critical; do not soften earlier logs.'
+after:
+- C-072
+- C-073
+- C-074
+- C-075
+- C-076
+- C-077
+- C-078
+- C-079
+- C-080
+- C-081
+- C-082
+- C-083
+- C-084
+- C-085
+- C-086
+- C-087
+- C-088
+- C-089
+- C-090
+- C-091
+- C-092
+- C-093
+- C-094
+- C-095
+- C-096
+- C-097
+- C-098
+read:
+- docs/decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- docs/audit/FINAL.md
+allowed_paths:
+- docs/audit/FINAL-2.md
+outputs:
+- docs/audit/FINAL-2.md
+acceptance:
+- cmd: python scripts/check_audit.py docs/audit/FINAL-2.md
+- cmd: python scripts/check_params.py
+- cmd: python scripts/check_issues.py
+- cmd: python scripts/check_stale.py
+- cmd: python scripts/check_refs.py api
+notes: 'Audit cell: independent and critical. Read large files in chunks of at most 600 lines; do not paste file contents into chat. Nothing is executed by you; CI runs acceptance.'

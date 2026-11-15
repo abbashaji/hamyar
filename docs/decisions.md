@@ -36,3 +36,6 @@ Heading format: top-level heading of each file is `# <section number>. <title>` 
 
 ## Audit round (owner note)
 Cells C-030..C-057 audit and reconcile the merged spec. Objective checks run in CI: `scripts/check_params.py` (every parameter name used is defined in S0 or S16*), `scripts/check_issues.py` (every issue raised in a part is in the register spec/02*), `scripts/check_refs.py api` (every /v1 path cited is defined in S15*), `scripts/check_audit.py` (audit log structure). Audit logs live in `docs/audit/`. Audit cells fix defects in place with minimal edits; they never rename IDs, parameters, endpoints or states.
+
+## Fix round (owner note)
+Cells C-072..C-099 apply the fix tasks of docs/audit/FINAL.md section 5.1 and end with a re-audit (docs/audit/FINAL-2.md). Fix logs live in `docs/fix/`. New CI checks: `scripts/check_stale.py` (paths the reconciliation replaced or removed must not be cited), `scripts/check_refs.py api` is now strict (only S15a/S15b paths and NEW verdict rows of 15c..15f count as defined), `scripts/check_text.py` (regex assertions), `scripts/check_fixlog.py` (fix log structure). Owner decisions D-01..D-22 are in FINAL.md section 4; fix cells apply the stated defaults and mark them default-pending.

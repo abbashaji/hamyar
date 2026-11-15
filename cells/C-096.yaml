@@ -1,0 +1,39 @@
+id: C-096
+title: 'FIX-25: verification cost: v_commons vs v_member and the shortfall path (default of ISS-16)'
+type: normal
+priority: 4
+lease_minutes: 90
+goal: 'Apply the listed edits to the part files, then write docs/fix/FIX-25.md. METHOD: for each edit, find the cited text by reading about 25 lines around the cited line (lines have drifted by a few lines since the audit; search nearby, do not guess). If the old text is there, make the minimal edit in place (apply_changes, small old -> new edits, never whole-file rewrites) and record status `applied`. If the new text is already there, `already-applied`. If the text cannot be found within 60 lines, `skipped-not-found` with what you searched. If the edit needs a decision that is not in docs/audit/FINAL.md section 4 with a default, `skipped-needs-owner`. The edits listed in the sources are the AUTHORIZED renames and re-pointings for this cell; apart from them never rename ids, parameters, endpoints or states, and never delete content. Where an edit and the Founding Document or a ground rule conflict, do not apply it: skipped-needs-owner with the reason. After ALL edits, RE-READ every edited place and state in ''## Read-back'' what you now see (quote at most one short phrase per row). The log has a table with columns exactly: edit | file:line | before | after | status, a ''## Read-back'' section, and ends with ''Result: DONE'' or ''Result: DONE WITH SKIPS''. The owner decisions D-01..D-22 and their defaults are in docs/audit/FINAL.md section 4; where a default exists, apply it and mark the edit as default-pending in the ''after'' column. Overall context and the full audit: docs/audit/FINAL.md (sections 3 and 5.1).
+
+
+  TASK FIX-25: docs/audit/A08.md findings 13 and 14 and spec/02e-issues-summary.md A2/A3: apply the register''s resolution (ISS-16: hard pool, the job stops when verification cannot be paid; quote at max(measured v, `price.v_prior`, floor)) as the DEFAULT pending decision D-04: spec/08b-verification.md 8.31/8.32 and spec/06a-ledger.md 6.11.2, LD-05, `AC-ledger-03`, `T-unit-01` must agree: member-job v excludes Commons cells or both published separately (`v_commons`, `v_member`: keep 06a''s, make 8.31 say so); mandatory verification events are never skipped, but the scheduler may not create a verification cell the pool cannot pay: the shortfall path stops the job (state and event from spec/05b) and is never paid by a levy draw. Mark every edit default-pending D-04.
+
+  '
+after:
+- C-005
+- C-009
+- C-042
+- C-049
+- C-070
+read:
+- docs/decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- docs/audit/FINAL.md
+- docs/audit/A08.md
+- docs/audit/A01.md
+- spec/02e-issues-summary.md
+- spec/05b-state-machines.md
+- spec/08b-verification.md
+- spec/06a-ledger.md
+allowed_paths:
+- docs/fix/FIX-25.md
+- spec/08b-verification.md
+- spec/06a-ledger.md
+outputs:
+- docs/fix/FIX-25.md
+acceptance:
+- cmd: python scripts/check_fixlog.py docs/fix/FIX-25.md
+- cmd: python scripts/check_spec.py spec/08b-verification.md --min-lines 652 --min-tags 1
+- cmd: python scripts/check_spec.py spec/06a-ledger.md --min-lines 836 --min-tags 1
+notes: 'Fix cell. You did not write these parts. Edits only inside allowed_paths. Large lists: work through them in order and commit after every ~10 edits (apply_changes), updating the log table as you go. Heading format and evidence tags as in docs/decisions.md. Do not run or claim to run anything; CI runs acceptance.'

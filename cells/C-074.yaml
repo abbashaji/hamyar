@@ -1,0 +1,38 @@
+id: C-074
+title: 'FIX-03: parameter corrections in S0 tables'
+type: normal
+priority: 4
+lease_minutes: 90
+goal: 'Apply the listed edits to the part files, then write docs/fix/FIX-03.md. METHOD: for each edit, find the cited text by reading about 25 lines around the cited line (lines have drifted by a few lines since the audit; search nearby, do not guess). If the old text is there, make the minimal edit in place (apply_changes, small old -> new edits, never whole-file rewrites) and record status `applied`. If the new text is already there, `already-applied`. If the text cannot be found within 60 lines, `skipped-not-found` with what you searched. If the edit needs a decision that is not in docs/audit/FINAL.md section 4 with a default, `skipped-needs-owner`. The edits listed in the sources are the AUTHORIZED renames and re-pointings for this cell; apart from them never rename ids, parameters, endpoints or states, and never delete content. Where an edit and the Founding Document or a ground rule conflict, do not apply it: skipped-needs-owner with the reason. After ALL edits, RE-READ every edited place and state in ''## Read-back'' what you now see (quote at most one short phrase per row). The log has a table with columns exactly: edit | file:line | before | after | status, a ''## Read-back'' section, and ends with ''Result: DONE'' or ''Result: DONE WITH SKIPS''. The owner decisions D-01..D-22 and their defaults are in docs/audit/FINAL.md section 4; where a default exists, apply it and mark the edit as default-pending in the ''after'' column. Overall context and the full audit: docs/audit/FINAL.md (sections 3 and 5.1).
+
+
+  TASK FIX-03: Apply the corrections of spec/16d-parameter-consistency.md ''## Corrections required'' that target spec/00-conventions.md (S0 Tables A..C of 0.10.6): CR-06, CR-07 (S0 side), CR-09, CR-11, and CR-08 (team.min_public_members 5 to 10) per default of D-13 only if D-13''s default is ''team default 10''; the FINAL.md default says 5 with a warning: so record CR-08 skipped-needs-owner. CR-02 skipped-needs-owner (D-07). FIX-01 already did the safety ranges: do not touch those rows.
+
+  '
+after:
+- C-072
+- C-000
+- C-027
+- C-056
+- C-059
+- C-062
+- C-064
+- C-065
+- C-066
+read:
+- docs/decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- docs/audit/FINAL.md
+- spec/16d-parameter-consistency.md
+- spec/00-conventions.md
+allowed_paths:
+- docs/fix/FIX-03.md
+- spec/00-conventions.md
+outputs:
+- docs/fix/FIX-03.md
+acceptance:
+- cmd: python scripts/check_fixlog.py docs/fix/FIX-03.md
+- cmd: python scripts/check_spec.py spec/00-conventions.md --min-lines 907 --min-tags 1
+- cmd: python scripts/check_params.py
+notes: 'Fix cell. You did not write these parts. Edits only inside allowed_paths. Large lists: work through them in order and commit after every ~10 edits (apply_changes), updating the log table as you go. Heading format and evidence tags as in docs/decisions.md. Do not run or claim to run anything; CI runs acceptance.'

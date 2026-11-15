@@ -1,0 +1,33 @@
+id: C-079
+title: 'FIX-08: apply API reconciliation to 12 public and growth'
+type: normal
+priority: 4
+lease_minutes: 90
+goal: 'Apply the listed edits to the part files, then write docs/fix/FIX-08.md. METHOD: for each edit, find the cited text by reading about 25 lines around the cited line (lines have drifted by a few lines since the audit; search nearby, do not guess). If the old text is there, make the minimal edit in place (apply_changes, small old -> new edits, never whole-file rewrites) and record status `applied`. If the new text is already there, `already-applied`. If the text cannot be found within 60 lines, `skipped-not-found` with what you searched. If the edit needs a decision that is not in docs/audit/FINAL.md section 4 with a default, `skipped-needs-owner`. The edits listed in the sources are the AUTHORIZED renames and re-pointings for this cell; apart from them never rename ids, parameters, endpoints or states, and never delete content. Where an edit and the Founding Document or a ground rule conflict, do not apply it: skipped-needs-owner with the reason. After ALL edits, RE-READ every edited place and state in ''## Read-back'' what you now see (quote at most one short phrase per row). The log has a table with columns exactly: edit | file:line | before | after | status, a ''## Read-back'' section, and ends with ''Result: DONE'' or ''Result: DONE WITH SKIPS''. The owner decisions D-01..D-22 and their defaults are in docs/audit/FINAL.md section 4; where a default exists, apply it and mark the edit as default-pending in the ''after'' column. Overall context and the full audit: docs/audit/FINAL.md (sections 3 and 5.1).
+
+
+  TASK FIX-08: Apply the section ''## Edits required in citing parts'' of spec/15d-api-reconcile-requester-growth.md for the part 12 (12:29 public ledger row, 12:35 getShareCardPayload, 12:38 listEffectiveFlags / GET /v1/flags, 12:466, 12:511, the 12.9.2 rows) and the rows for 12 in the verdict table. Share-card contradiction between 15a and 15b is decision D-15: apply the default (computed card on request, no stored link) only to what part 12 says.
+
+  '
+after:
+- C-017
+- C-052
+read:
+- docs/decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- docs/audit/FINAL.md
+- spec/15d-api-reconcile-requester-growth.md
+- spec/15a-api-core.md
+- spec/12-public-growth.md
+allowed_paths:
+- docs/fix/FIX-08.md
+- spec/12-public-growth.md
+outputs:
+- docs/fix/FIX-08.md
+acceptance:
+- cmd: python scripts/check_fixlog.py docs/fix/FIX-08.md
+- cmd: python scripts/check_spec.py spec/12-public-growth.md --min-lines 770 --min-tags 1
+- cmd: python scripts/check_stale.py spec/12-public-growth.md
+- cmd: python scripts/check_refs.py api 12
+notes: 'Fix cell. You did not write these parts. Edits only inside allowed_paths. Large lists: work through them in order and commit after every ~10 edits (apply_changes), updating the log table as you go. Heading format and evidence tags as in docs/decisions.md. Do not run or claim to run anything; CI runs acceptance.'

@@ -1,0 +1,45 @@
+id: C-072
+title: 'FIX-01: safety floors of parameter ranges'
+type: normal
+priority: 4
+lease_minutes: 90
+goal: 'Apply the listed edits to the part files, then write docs/fix/FIX-01.md. METHOD: for each edit, find the cited text by reading about 25 lines around the cited line (lines have drifted by a few lines since the audit; search nearby, do not guess). If the old text is there, make the minimal edit in place (apply_changes, small old -> new edits, never whole-file rewrites) and record status `applied`. If the new text is already there, `already-applied`. If the text cannot be found within 60 lines, `skipped-not-found` with what you searched. If the edit needs a decision that is not in docs/audit/FINAL.md section 4 with a default, `skipped-needs-owner`. The edits listed in the sources are the AUTHORIZED renames and re-pointings for this cell; apart from them never rename ids, parameters, endpoints or states, and never delete content. Where an edit and the Founding Document or a ground rule conflict, do not apply it: skipped-needs-owner with the reason. After ALL edits, RE-READ every edited place and state in ''## Read-back'' what you now see (quote at most one short phrase per row). The log has a table with columns exactly: edit | file:line | before | after | status, a ''## Read-back'' section, and ends with ''Result: DONE'' or ''Result: DONE WITH SKIPS''. The owner decisions D-01..D-22 and their defaults are in docs/audit/FINAL.md section 4; where a default exists, apply it and mark the edit as default-pending in the ''after'' column. Overall context and the full audit: docs/audit/FINAL.md (sections 3 and 5.1).
+
+
+  TASK FIX-01: Set these validation ranges in BOTH files (S0 Table rows ~596, 640-641, 717, 762-763 and S16 rows ~161, 313, 389-392), writing the ranges exactly in this notation: `launch.min_signoffs` 2..5; `launch.min_approved_services` 1..20; `change.notice_days_default` 1..90; `change.notice_days_price` 1..90; `retention.ip_hash_ttl_days` 1..30; `price.eta_alarm_threshold` (0,1]. In S16 add to the row text the reason in one clause (fail-closed floor, FD Principle 5/8, 16d F-xx where the 16d file gives it: read spec/16d-parameter-consistency.md CR-04, CR-06 and the A03 finding 27 in docs/audit/A03.md). Note for the owner: floor 2 on `launch.min_signoffs` makes decision D-01 (a one-person team) explicit: with one admin no gate can be signed; that is intended, do not soften it.
+
+  '
+after:
+- C-000
+- C-022
+- C-027
+- C-054
+- C-056
+- C-059
+- C-062
+- C-064
+- C-065
+- C-066
+read:
+- docs/decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- docs/audit/FINAL.md
+- docs/audit/A03.md
+- spec/16d-parameter-consistency.md
+- spec/00-conventions.md
+- spec/16-parameters.md
+allowed_paths:
+- docs/fix/FIX-01.md
+- spec/00-conventions.md
+- spec/16-parameters.md
+outputs:
+- docs/fix/FIX-01.md
+acceptance:
+- cmd: python scripts/check_fixlog.py docs/fix/FIX-01.md
+- cmd: python scripts/check_spec.py spec/00-conventions.md --min-lines 907 --min-tags 1
+- cmd: python scripts/check_spec.py spec/16-parameters.md --min-lines 594 --min-tags 1
+- cmd: python scripts/check_text.py spec/00-conventions.md --present '`launch.min_signoffs`[^\n]*\| 2\.\.5 \|' '`launch.min_approved_services`[^\n]*\| 1\.\.20 \|' '`change.notice_days_default`[^\n]*\| 1\.\.90 \|' '`change.notice_days_price`[^\n]*\| 1\.\.90 \|' '`retention.ip_hash_ttl_days`[^\n]*\| 1\.\.30 \|' --absent '`launch.min_signoffs`[^\n]*\| 1\.\.5 \|' '`launch.min_approved_services`[^\n]*\| 0\.\.20 \|' '`retention.ip_hash_ttl_days`[^\n]*\| 0\.\.30 \|'
+- cmd: python scripts/check_text.py spec/16-parameters.md --present '`launch.min_signoffs`[^\n]*2\.\.5' '`launch.min_approved_services`[^\n]*1\.\.20' '`change.notice_days_default`[^\n]*1\.\.90' '`retention.ip_hash_ttl_days`[^\n]*1\.\.30' --absent '`launch.min_signoffs`[^\n]*\| 1\.\.5' '`launch.min_approved_services`[^\n]*\| 0\.\.20'
+- cmd: python scripts/check_params.py
+notes: 'Fix cell. You did not write these parts. Edits only inside allowed_paths. Large lists: work through them in order and commit after every ~10 edits (apply_changes), updating the log table as you go. Heading format and evidence tags as in docs/decisions.md. Do not run or claim to run anything; CI runs acceptance.'
