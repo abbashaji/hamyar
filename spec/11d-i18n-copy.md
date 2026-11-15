@@ -180,7 +180,7 @@ A comma is never read as a decimal point, because `1,5` read as `15` would silen
 | Date and time (24-hour clock) | `۲۰ آبان ۱۴۰۵، ۰۹:۳۰` | `11 Nov 2026, 09:30` |
 | Other calendar line in a detail view | `۱۱ نوامبر ۲۰۲۶` (digit set of the member) | `20 Aban 1405` |
 | ISO line in a detail view | `2026-11-11T09:30:00Z` (always ASCII) | same |
-| Duration | number plus `ثانیه`, `دقیقه`, `ساعت` or `روز` | number plus `s`, `min`, `h` or `d` words in full |
+| Duration | number plus `ثانیه`, `دقیقه`, `ساعت` or `روز` | number plus `seconds`, `minutes`, `hours` or `days`, written in full |
 | Credit expiry | the absolute date, then the days left | the same order |
 
 The clock is 24-hour in both locales [A] (no AM and PM markers to translate). Relative wording (`in 3 hours`) is used only for countdowns and for times less than one day away or past; everything else is absolute. [D]
@@ -235,8 +235,8 @@ Prompts, requester data, pasted answers, glossary terms and reviewer notes mix P
 | Declared language wins | If a template slot or output field declares its language (a BCP 47 tag from a closed list), the renderer sets `lang` and `dir` from it and uses `dir=auto` only for undeclared or mixed text. `dir=auto` follows the first strong character, so a Persian paragraph that starts with a Latin word would otherwise render left to right. Requirement on S8.*: slots and output fields carry `lang`. | AC-i18n-14 |
 | LTR tokens | Code, URLs, hashes, IDs, e-mail addresses and keys render in an `dir=ltr` isolate in the monospace stack (S11.46) and are never mirrored. Code blocks scroll horizontally. | AC-i18n-14 |
 | Fixing punctuation | A sentence-final mark next to an opposite-direction word is fixed by isolating that word, never by inserting direction marks into the content. | AC-i18n-14 |
-| Invisible controls are made visible | In the expanded prompt and in reviewer and requester result views, U+202A to U+202E, U+2066 to U+2069, U+200B, U+2060 and U+FEFF are always shown as labeled markers. U+200C, U+200D, U+200E and U+200F (legitimate in Persian text) are shown as markers only when the member turns on *show invisible characters*. Markers come from CSS-generated content or `user-select: none` elements, so they are never in a copied range. | AC-i18n-16 |
-| Screening | Embedding and override controls (U+202A to U+202E) and isolate controls (U+2066 to U+2069) in requester input or in a submission are flagged, because they can make text read differently from what it is (the same class of trick as source-code spoofing). The action is `screen.bidi_control_action`, initially `flag_for_review`; for a submission, a flag means `submission.quarantined` (S9.*). U+200C, U+200D, U+200E and U+200F are not flagged. | AC-i18n-17 |
+| Invisible controls are made visible | In the expanded prompt and in reviewer and requester result views, U+202A to U+202E, U+2066 to U+2069, U+200B, U+2060 and U+FEFF are always shown as labeled markers. U+200C, U+200D, U+200E, U+200F and U+061C (the Arabic letter mark; legitimate in Persian text) are shown as markers only when the member turns on *show invisible characters*. Markers come from CSS-generated content or `user-select: none` elements, so they are never in a copied range. | AC-i18n-16 |
+| Screening | Embedding and override controls (U+202A to U+202E) and isolate controls (U+2066 to U+2069) in requester input or in a submission are flagged, because they can make text read differently from what it is (the same class of trick as source-code spoofing). The action is `screen.bidi_control_action`, initially `flag_for_review`; for a submission, a flag means `submission.quarantined` (S9.*). U+200C, U+200D, U+200E, U+200F and U+061C are not flagged. | AC-i18n-17 |
 | Copy buttons | *Copy prompt* writes exactly the stored prompt text to the clipboard: no marks added or removed, no digit mapping, no trailing characters. Copying a UI-originated number or string writes the raw form without isolates. | AC-i18n-15 |
 | Paste-back | The field's content is sent exactly as it is in the field, without trimming. The server judges length and schema on the raw text (S9.*). | AC-i18n-15 |
 | Placeholders in notices | The renderer escapes dynamic text first, then isolates it (below). Numbers come from the formatter (S11.43). | AC-i18n-14 |
@@ -397,7 +397,7 @@ fn on_submit_press(lease_id):                    # only a person's press starts 
 fn try_send(d):
     if server_now() > d.expires_at + cfg.lease_submit_grace_s: d.state = 'expired_local'; return
     resp = POST /v1/leases/{d.lease_id}/submission   with the raw text, the lease nonce, Idempotency-Key d.key   # body per S15.*, S9.*
-    match resp: 2xx -> purge(d); show accepted_or_checking | 410, 409 -> d.state = 'expired_local'
+    match resp: 2xx -> purge(d); show accepted_or_checking | 410 LEASE_EXPIRED, 409 LEASE_CONFLICT -> d.state = 'expired_local' | 409 IDEMPOTENCY_IN_PROGRESS -> backoff(d), Retry-After wins
                 | 400, 413, 422 -> d.state = 'drafting' ; show errors | 429, 5xx, network -> backoff(d)
 ```
 
@@ -559,7 +559,7 @@ The notice is shown to every new member and does not depend on any guess about l
 | --- | --- | --- |
 | `copy.safety.iran_notice.*`, `copy.risk.account_notice.*`, `copy.privacy.pseudonymity_notice.*`, `copy.credit.not_money.*`, `copy.declared.not_guaranteed.*`, `copy.license.downstream_uncontrolled.body`, `copy.policy.no_circumvention.*` | The join page, in this order (safety first), displayed in full, not collapsed; then the consent keys | Static, readable without JavaScript and before an identity exists (S11.49) |
 | `copy.consent.join.*` | Below the notices on the join page | Every box starts unticked; all are required; no box is hidden or collapsed; the continue button stays focusable and explains what is missing (S11.48) |
-| `copy.identity.recovery_key_warning.*` | Immediately after the identity is created, before any other screen, and again from settings | The confirm box gates leaving the screen |
+| `copy.identity.recovery_key_warning.*` | Once, after the member's first accepted cell, as decided in `ISS-113` of S11 (`spec/11a-volunteer-ux.md`, 11.18; an owner decision); after a key rotation from settings a new key is shown once in the same way; a key is never shown a second time | The confirm step gates leaving the key screen, not the app; the unsaved-key marker stays until confirmed |
 | `copy.injection.advice.*` | The cell card, one tap away, and mandatory expansion on first use (FD§5.5); the help page | `copy.injection.clean_chat_hint.default` is the target of `adapter.clean_chat_hint_key` (S0.8.3) when an entry sets no hint of its own |
 | `copy.moderation.decline_explainer`, `copy.moderation.report_explainer` | Next to the decline and report buttons of the cell card; the help page | |
 | `copy.moderation.rejection_explainer` | On every rejected-result screen and the appeal screen | |
@@ -607,7 +607,7 @@ The keys above are not API error texts. API errors use their own `copy.*` keys t
 | Declining has no penalty and does not affect the trust level | `lease.decline_cooldown_s` constant 0; trust tiers move only on reliability evidence (S0.9.4); S8.* MUST NOT count declines in reliability | [V] S8.* |
 | A reviewer looks at every report; first look target; retention then counts only | `report.triage_sla_days`; S0.7 class `moderation`; S10.* | [V] S10.* |
 | A different reviewer decides an appeal; the window | S0.9.7 guard; `appeal.window_days` | consistent with S0 |
-| Credit moves only through completed work; is not bought, sold or sent directly | S0.8.5 entry types contain no member-to-member entry; `grant.non_transferable` | consistent with S0 |
+| Credit is earned through completed work or given as a declared grant (starter grant, referral bonus); is not bought, sold or sent directly | S0.8.5: `mint` and `transfer` for work, `grant` from the Reserve; no member-to-member entry; `grant.non_transferable`. The earlier wording 'only through completed work' was false because of `grant` | consistent with S0 after the A09 fix of the notice text |
 | Credit expires and balances show expiry dates | `credit.lifetime_days`; S6.*, S11 screens | consistent with S0 |
 | A price is shown before confirmation; a job is accepted only when declared capacity allows | Quote and admission flow (S6.*) | consistent with S0 |
 | Recovery cooldown | `identity.recovery_cooldown_s` | consistent with S0 |
@@ -616,7 +616,7 @@ The keys above are not API error texts. API errors use their own `copy.*` keys t
 | Defaults of opt-ins; sensitive topics off by default | `optin.default_*`; `optin.sensitive_topics_default` constant false | consistent with S0 |
 | Locked purposes open only after a terms review and a change-log entry | Rules `R5`, `R6`, `R10` (S0.8.4) | consistent with S0 |
 | Inputs are reviewed and suspicious results are flagged | Screening and quarantine (S9.*) | [V] S9.* |
-| Published numbers carry the measurement date; changes with advance notice | `change.notice_days_default`; public change log (S12.*) | consistent with S0 |
+| Published numbers carry the measurement date; changes with advance notice | `change.notice_days_default`; public change log (S12.*) | partly: a `tighten` change takes effect at once and is logged within `change.tighten_publish_within_s` (S0.10.3, R10), so 'advance notice' is not true for every change; the notice wording needs an owner decision [V] |
 | The safety note is shown to every new member and Hamyar does not infer location | S11.51.C; S0.6 (no IP-derived location) | consistent with this part |
 | Hamyar does not publish tips for getting around limits | Editorial rule; the copy checks of S11.50 | consistent with this part |
 | Drafts stay on the device for the stated time | S11.49; `ui.draft.ttl_s` | consistent with this part |

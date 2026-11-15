@@ -33,7 +33,7 @@ This file specifies every screen a volunteer (a member acting as `donor`) uses, 
 | V-04 | The card shows eight fixed fields and one provenance sentence on every cell, in both locales, before any other control | FD§5.5 | [D] |
 | V-05 | The full prompt is always one tap away; expansion is a UI gate (copy and open are disabled until expanded) when the server returns at least one `expand.*` reason; "can see" is enforced, "has read" is not claimed | FD§0.1 item 7, FD§5.5 | [D] |
 | V-06 | A decline is one tap, has no penalty, no cooldown (`lease.decline_cooldown_s` = 0) and no confirmation dialog | FD§5.5 | [D] |
-| V-07 | The platform cannot observe the Send press or the provider's answer, so the "under 60 seconds" figure is measured on the server as `submission.received` minus `lease.issued`, and is a hypothesis, not a promise | FD§3.2, FD§6.2 V1, X2 | [D][H] |
+| V-07 | The platform cannot observe the Send press or the provider's answer, so the "under 60 seconds" figure is measured on the server as `submission.received` minus `lease.issued` (for a first-time member the start is `member.created`, as in 11.7), and is a hypothesis, not a promise | FD§3.2, FD§6.2 V1, X2 | [D][H] |
 | V-08 | Prefill ("Open in service") is offered only when the registry entry says it is supported, the URL fits, and `prefilled_link_use` is `yes`; otherwise the screen is copy-only | S0.8.3, FD§10 caution | [D][V] |
 | V-09 | The recovery key is shown once, after the first accepted cell, not before it, so the 60-second path is not blocked; a visible "key not saved" marker stays until the member confirms the key | Stake before first accepted cell is at most 0 credit; FD§3.2 step 1 | [D][H] |
 | V-10 | Feedback after paste-back is asynchronous by design: the answer can be `accepted`, `rejected` with a reason code, or waiting for a second check; the volunteer is never told a cell was a hidden check before it is decided | FD§4.4 | [D] |
@@ -149,6 +149,7 @@ Every API failure maps to a screen state and a `details.copy_key`-style copy key
 | `VALIDATION_FAILED` | 400 | Field errors from `details.fields` | per field | Fix and resubmit |
 | `CAP_EXCEEDED` | 422 | At cap | `copy.balance.at_cap` | See balance |
 | `NOT_FOUND` | 404 | Item gone | `copy.error.not_found` | Back |
+| `AUTH_INVALID`, `MALFORMED_REQUEST`, `UNSUPPORTED_MEDIA_TYPE`, `PRECONDITION_FAILED`, `IDEMPOTENCY_KEY_MISMATCH`, `UNPROCESSABLE`, `ALREADY_EXISTS`, `INSUFFICIENT_CREDIT`, `POLICY_REJECTED`, `NO_CAPACITY` | 400, 401, 412, 415, 422, 409 | Generic error, or the field or screen state named in the screen's own States table (for example `ALREADY_EXISTS` in 11.15 and 11.17) | `copy.error.try_again` | Retry or go back; drafts kept |
 
 ### 11.4.8 What the device holds [D][A]
 
@@ -158,7 +159,7 @@ Every API failure maps to a screen state and a `details.copy_key`-style copy key
 | Session token | Device storage | `session.member_idle_ttl_s` idle, `session.member_abs_ttl_s` absolute | No cookies (S0.11.4) |
 | Display options | Device storage | Until changed | locale, digits, calendar |
 | Active lease data (prompt, nonce, `expires_at`) | Memory, with a best-effort copy in session storage | Until submit, decline or expiry | Session storage access is always wrapped in try and catch |
-| Paste-back draft | Memory and session storage | Until submit or tab close | Never uploaded before Submit |
+| Paste-back draft | Device storage keyed by lease id (memory only if storage is unavailable), as specified in S11.49 | Until acknowledged, until the lease end plus `ui.draft.ttl_s`, or until the member clears local data | Never uploaded before Submit; survives a tab close so a queued Submit can be retried |
 | Never held | Provider credentials, chat links, clipboard history, the provider's page content | n/a | X1..X7 |
 
 ## 11.5 API operation names and parameters this part uses
@@ -196,13 +197,13 @@ Convention additions requested by this part (C-022 completes the table; names ar
 
 | Name | Type | Initial configurable default | Validation | Replaced by |
 | --- | --- | --- | --- | --- |
-| `ui.first_load_budget_bytes` | int | 204,800 | 20,000..5,000,000 | `TEC` measurement on real phones and links |
+| `ui.first_load_budget_bytes` | int | 204,096 (the same budget as `ui.budget.first_load_bytes` of S11.55: 100,000 + 20,000 + 80,000 + 4,096; C-022 keeps one name) | 20,000..5,000,000 | `TEC` measurement on real phones and links |
 | `ui.offer_list_size` | int | 3 (equals the default of `lease.max_active_per_member`) | 1..`api.page_size_max` | `P1M` |
 | `ui.recovery_confirm_groups` | int | 2 | 1..8 | `SEC` |
 | `ui.status_poll_max_s` | duration_s | 60 (upper bound of the polling backoff) | 5..600 | `OPS` |
 | `appeal.reason_max_chars` | int | 1000 | 100..10000 | `OPS` |
 | `invite.required_to_join` | bool | true (closed Phase 1 pilot, FD§9) | | `FND` |
-| `ui.lease_warning_ratio` | ratio | 0.25 (warn when this share of `lease.timeout_s` remains) | 0..1 | `CAL` |
+| `ui.lease_warning_ratio` | ratio | 0.25 (warn when this share of `lease.timeout_s` remains; with the defaults it equals `ui.lease.warn_remaining_s` of S11.55, 300 s = 0.25 x 1,200 s; C-022 keeps one name) | 0..1 | `CAL` |
 
 ## 11.6 SCR-vol-01 Landing
 
@@ -221,7 +222,7 @@ Convention additions requested by this part (C-022 completes the table; names ar
 | P   What you do: copy a task, press Send in the   |
 |     chat service you already use, paste the answer|
 |     back. Verified answers earn expiring credit.  |
-| [ Start: about 2 minutes the first time ] (primary)|
+| [ Start ] (primary)                               |
 | ( I already have an identity )  (secondary link)  |
 +--------------------------------------------------+
 | What Hamyar never does   (4 icon+word rows)       |
@@ -268,7 +269,7 @@ Convention additions requested by this part (C-022 completes the table; names ar
 | Copy key | `fa` (draft) | `en` |
 | --- | --- | --- |
 | `copy.landing.headline` | یک دقیقه در روز، کارهای بازبینی‌شده، حساب خودِ شما. دکمهٔ ارسال را شما می‌زنید. | One minute a day. Reviewed tasks. Your own account. You press Send. |
-| `copy.landing.never_list` | همیار هرگز به جای شما ارسال نمی‌کند، صفحهٔ گفت‌وگوی شما را نمی‌خواند، رمز نمی‌خواهد، و هیچ‌وقت شما را به دور زدن محدودیت‌ها تشویق نمی‌کند. | Hamyar never presses Send for you, never reads your chat, never asks for passwords, and never encourages you to bypass any limit. |
+| `copy.landing.never_list` | همیار هرگز به جای شما ارسال نمی‌کند، صفحهٔ گفت‌وگوی شما را نمی‌خواند، رمز نمی‌خواهد، و هیچ‌وقت شما را به دور زدن محدودیت‌ها تشویق نمی‌کند. | Declared: Hamyar never presses Send for you, never reads your chat, never asks for passwords, and never encourages you to bypass any limit. |
 | `copy.landing.not_open` | همیار هنوز برای عضویت باز نیست. | Hamyar is not open for new members yet. |
 
 All keys carry `needs_human_and_legal_review`.
@@ -415,7 +416,7 @@ Field definitions [D]:
 | 6 | Expected time | `cell.envelope.expected_time_s` | Rounded up to whole minutes; labeled "expected", never "takes" [H] |
 | 7 | Category | Opt-in category of the cell (default, or a non-default purpose, license, service or topic category) | Drives the expansion rule (11.8.4) |
 | 8 | Credit | 1 credit when accepted | Says "when accepted"; never "you will earn" |
-| 9 | Lease time left | `expires_at` of the lease | Visible countdown with an extend action (11.10) |
+| - | Lease time left (header timer; not one of the eight card fields) | `expires_at` of the lease | Visible countdown with an extend action (11.10) |
 
 **Provenance line (fixed sentence) [D].** `copy.card.provenance`: `fa` «یک ناشناس این را خواسته است؛ متن زیر در تاریخ {date} توسط یک بازبین بررسی شده است.» and `en` "A stranger asked for this; the text below was reviewed by a reviewer on {date}." `{date}` is the template version's approval date in the member's calendar, the other calendar in the detail view. The sentence is exactly one sentence, is never shortened away, and is not a promise about quality or safety. Wording `needs_human_and_legal_review`.
 
@@ -511,7 +512,7 @@ For each service offered to this member, `listApprovedServices` returns only ser
 | `adapter.max_url_chars` | int | Longest allowed link |
 | `adapter.copy_only` | bool | True when prefill is unsupported or `prefilled_link_use` is not `yes` |
 | `adapter.clean_chat_hint_key` | copy key | Service-specific advice for a clean chat (memory off, new conversation) |
-| `prefill_allowed` | derived bool (server-computed) | See the rule below |
+| `prefill_allowed` | derived bool: the server computes the flag part, the client adds the length test | See the rule below |
 
 `prefill_allowed` = `adapter.supports_prefill` AND NOT `adapter.copy_only` AND `prefilled_link_use` = `yes` for the service (a flag answer, S0.8.3) AND `length(url) <= adapter.max_url_chars`, where `url` is the template filled with the prompt. A `FlagAnswer` of `unknown` counts as `no`. [D] The server computes the flag part; the client computes the length part against the actual encoded prompt, because encoding length depends on the text. The client never invents a link pattern, never guesses a service's URL, and never opens a link not produced from a registry template. [D]
 
@@ -569,7 +570,7 @@ function handoffModes(card, service):
 | Loading | `listApprovedServices` pending | Copy works at once if the prompt is on the device; service list shows a placeholder |
 | Error | `getLease` fails | Retry; the on-device prompt is still usable until the lease expires |
 | Offline or low bandwidth | No network | Copy and the instructions work; the link mode works because it needs no Hamyar call; Submit is deferred to paste-back |
-| Blocked: service paused | `kill.service.<svc_id>` engaged or service enters `review_due`, `suspended`, `revoked` | The service disappears from the list; a lease bound to `M1` for it is revoked; `copy.handoff.service_paused` |
+| Blocked: service paused | `kill.service.<svc_id>` engaged or service enters `review_due`, `suspended`, `revoked` | The service disappears from the list; for `suspended` or a kill switch a lease bound to `M1` for it is revoked; for `review_due` only new leases are blocked and an active lease continues until `service.review_grace_days` pass (S0.9.6); for `revoked` in-flight cells are handled per S7.*; `copy.handoff.service_paused` |
 | Blocked: lease expired | Lease timer passes `expires_at` | See 11.10; Copy disabled; "Back to tasks" |
 
 **API calls.** `listApprovedServices`, `getLease`, `extendLease`.
@@ -626,7 +627,7 @@ Return the provider's answer to Hamyar by a human paste, bound to the lease and 
 | Empty check | Submit disabled for an empty or whitespace-only field |
 | Advisory checks | Only checks that need no server secret: non-empty, size, and (when the template declares it) a language hint. The UI never runs the template's real automatic checks and never reveals gold or audit status, so the checks on the device cannot be used to probe the verifier (S9.*) |
 | Own-output reminder | If the pasted text equals the prompt text exactly, the screen shows `copy.paste.looks_like_prompt` (probably the wrong thing was copied) and still lets the volunteer submit |
-| Service and model | Service from the hand-off choice, changeable here; model name free text up to 80 characters [A], never required |
+| Service and model | Service from the hand-off choice, changeable here; model name free text up to 80 characters [A: an `initial configurable default` that has no parameter yet; S16.* should add one], never required |
 | Draft | Held in memory and session storage, never uploaded before Submit; survives going back and a page reload within the lease |
 | No attachments | No file or image upload; text only (X6, `R3`) |
 
@@ -634,7 +635,7 @@ Return the provider's answer to Hamyar by a human paste, bound to the lease and 
 
 ```
 function submit(lease, answer, service_id, model_name):
-    key = lease.idempotency_key                      # generated once per lease, kept on device
+    key = draft.idempotency_key                      # new key per Submit press, reused only by retries of the same body (S0.11.5, S11.49)
     body = { nonce: lease.nonce, text: answer, service_id, model_name }
     loop with backoff up to ui.status_poll_max_s:
         r = submitResult(lease_id, body, Idempotency-Key: key)
@@ -674,7 +675,7 @@ The client sends the nonce it received with the lease; it never generates, guess
 
 **Acceptance criteria**
 
-- `AC-vol-22` Given an active lease and a non-empty answer within limits, When Submit is tapped, Then `submitResult` is called once with the lease nonce, the volunteer-reported service and the `Idempotency-Key` fixed for that lease, and the screen moves to result feedback.
+- `AC-vol-22` Given an active lease and a non-empty answer within limits, When Submit is tapped, Then `submitResult` is called once with the lease nonce, the volunteer-reported service and the `Idempotency-Key` generated for that Submit press, and the screen moves to result feedback.
 - `AC-vol-23` Given the network drops during Submit, When it returns within the lease, Then the retry uses the same `Idempotency-Key` and exactly one `Submission` exists.
 - `AC-vol-24` Given an answer over `cell.envelope.max_output_chars` or `cell.envelope.max_submission_bytes`, When the field changes, Then Submit is disabled with `copy.paste.too_large`, and if the request is forced the server returns `PAYLOAD_TOO_LARGE` and the draft is kept.
 - `AC-vol-25` Given the lease expires while the volunteer is pasting, When Submit is tapped after `lease.submit_grace_s` or after the cell was re-leased, Then the server returns `LEASE_EXPIRED`, the screen shows `copy.error.lease_expired`, and the pasted text remains visible and copyable.
@@ -789,7 +790,7 @@ The volunteer also has "flagged" in the sense of their own report on a card (`SC
 +--------------------------------------------------+
 | Balance            12 credits                    |
 | Expires soonest    3 credits on {date J / G}     |
-| Cap                12 of 350 (credit.member_cap)  |
+| Cap                12 of 350 (credit.member_cap_credits)  |
 +--------------------------------------------------+
 | Lots, oldest first (spent in this order)         |
 |  # | Credits | Earned    | Expires    | Source   |
@@ -821,7 +822,7 @@ The volunteer also has "flagged" in the sense of their own report on a card (`SC
 
 | State | Condition | Behavior |
 | --- | --- | --- |
-| Empty | No lots | `copy.balance.empty`: "No credit yet. Your first accepted task adds 1 credit." with Take a task |
+| Empty | No lots | `copy.balance.empty`: "No credit yet. Your first accepted task adds 1 credit under the declared rules." with Take a task |
 | Loading | Fetching | Balance and lots show placeholders; static explanation text renders at once |
 | Error | `getBalance` fails | Last cached balance shown only if marked "last known" with its time, otherwise `copy.error.try_again` |
 | Offline or low bandwidth | No network | Cached values labeled last known; no calculation on the device |
@@ -1323,7 +1324,7 @@ The volunteer also has "flagged" in the sense of their own report on a card (`SC
 
 ## 11.22 Policy, privacy and risk notices (both languages)
 
-All text below is draft copy, marked `needs_human_and_legal_review`; none is a legal conclusion and each depends on facts that are [V]. Any sentence that promises something says "declared" (FD Principle 11). Notices are bundled with the app (V-14), version-stamped, and shown where named in the screens above. [D]
+All text below is draft copy, marked `needs_human_and_legal_review`; none is a legal conclusion and each depends on facts that are [V]. Any sentence that promises something says "declared" (FD Principle 11). Notices are bundled with the app (V-14), version-stamped, and shown where named in the screens above. [D] Precedence: S11.51 (`spec/11d-i18n-copy.md`) owns the notice texts; where a key below also exists there (`copy.privacy.pseudonymity_notice`, `copy.credit.not_money`, `copy.risk.injection`, `copy.risk.clean_chat`, `copy.recovery.warning`, `copy.recovery.cooldown`) the S11.51 text prevails and the row here is a placeholder to be removed at assembly. Promise-like sentences in this file follow the declared rule of S11.50. [D]
 
 | Copy key | Shown at | `fa` (draft) | `en` |
 | --- | --- | --- | --- |
