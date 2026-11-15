@@ -33,14 +33,19 @@
 | **Adapter capability fields** | The `adapter.*` fields of a `ServiceRegistryEntry` (prefill support, URL template, URL length limit, copy-only, clean-chat hint); entered by a reviewer, never hardcoded [V] | `S0.8.3` |
 | **Admin action** | `AdminAction`: the logged record of every operator and reviewer action | `S0.7` |
 | **Admission control** | Accepting a job only if its committed cells over its window fit within φ x forecast active capacity; otherwise a later quote or a waitlist place | `FD§11`; `S6.*` |
+| **Alarm** | `Alarm`: the record raised when a tripwire, a ledger invariant check or another monitored signal fires; an on-call person acknowledges it; it asks a human to look and does not establish a cause | `S0.7`; `S19.4` |
 | **Allowlist** | The set of permitted purpose, license, sensitivity and service-requirement combinations; data inside a `PolicyVersion` | `S0.8.1`; `S7.*` |
 | **Appeal** | `Appeal`: a challenge to a rejection, ban or report outcome, filed within `appeal.window_days` of the decision | `S0.9.7` |
 | **Application service** | A module that owns a set of entities and the transactions that change them | `S4.1` |
 | **Approved (service)** | The only service state that allows new jobs; reached only with the gate flags `yes`, a saved `TermsCopy` and a recorded reviewer | `S0.8.3`; `S0.9.6` |
+| **Assumption (ASM)** | `ASM-nn`: an assumption [A] the spec introduced because the FD is silent; each row of S3.3 names the open decision that could overturn it | `S0.2`; `S3.3` |
 | **Attested** | Said of the service and model named in provenance as reported by the volunteer; recorded for audit, not proof | `FD§5.6`; `S0.7` |
 | **Audit cell** | A sampled re-execution of a cell by a second donor, compared by a task-specific comparator, with a third execution on mismatch | `FD§11`; `S0.9.8`; `S8.*` |
 | **Auth scheme** | `none`, `member` or `admin`; a token of one scheme is never valid on endpoints of another | `S0.8.2`; `S0.11.4` |
 | **Badge** | `Badge`: a badge definition whose criteria use verified cells only; a badge held by a member is a `BadgeAward` | `FD§6.1`; `S0.7` |
+| **Bidirectional control character** | A Unicode control character that changes the display order of text; abuse of it in submitted text is a display attack, tested by `T-rtl-*` | `S19.3`; `S9.*`; `S11.*` |
+| **Binding (of a parameter version)** | The rule in the group header of S16.* that names which object stamps the parameter version it was created under (for example a `Lease` stamps `lease.timeout_s`); a later change never alters a stamped object | `S16.2.3` |
+| **Blanket redundancy** | Verification by `verify.blanket_redundancy_n` independent executions of one cell; allowed only for a new donor's first cells (`verify.new_donor_blanket_cells`) and high-risk templates | `FD§4.4`; `S0.8.6`; `S8.*` |
 | **BM0..BM9 (build milestone)** | The ids of the ten build milestones; written `BM`, never `M`, so they do not collide with the service requirements `M0`..`M2` | `S0.12`; `S17.*` |
 | **Build is not launch** | The principle that everything is built but no launch switch is on until the gates are signed off; every brake is enforced in the domain layer, inside the transaction it guards | `S4.2.1`; `S14.*` |
 | **Calibration (Phase 0)** | Recording cells per day per service, seconds per cell, refusal and failure rates and the copy-paste error rate; stored as `CalibrationRecord`; measurement code `CAL` | `FD§9`; `S0.10.4`; `S13.*` |
@@ -49,13 +54,20 @@
 | **Cell kind** | `primary`, `gold`, `audit`, `third`, `review` or `rework` | `S0.8.6` |
 | **Change class** | `tighten`, `loosen` or `neutral`; tightening takes effect at once, loosening needs notice and a change-log entry (R10) | `S0.8.6`; `S0.10.3` |
 | **Change log** | The public record of every parameter, policy, template or service change: `ChangeLogEntry` | `FD§4.3`; `S0.7`; `S12.*` |
+| **Change-policy code** | `T↓`, `T↑`, `T→x`, `N` or `C`: says which direction of change tightens a parameter, or that it has none or is constant | `S16.2.2` |
 | **Claim ratio** | Unexpired credit divided by verified weekly throughput, in weeks of capacity; published, with a threshold parameter `inflation.claim_ratio_threshold_weeks` | `FD§11`; `S0.10.6`; `S6.*` |
+| **Cohort suppression** | Hiding a public aggregate computed over fewer than `analytics.min_cohort_k` members, so that small groups cannot be re-identified | `S16.14`; `S13.*` |
+| **Commons backlog** | The standing queue of reviewed, openly licensed Commons jobs that absorbs steady supply; the only place credit is minted | `FD§0.1`; `S6.*` |
 | **Commons job** | A public-benefit job with openly licensed output, run from the standing Commons backlog; the only place credit is minted | `FD§11`; `FD§0.1` |
 | **Commons Reserve** | The public account funded by the levy and by expired credit, paying starter grants and referral bonuses; entity `Reserve`, bound to the `reserve` ledger account | `FD§11`; `S0.7`; `S0.8.5` |
+| **Comparator** | The task-specific, deterministic function that decides whether two executions of a cell match in an audit; model-based judging does not mint credit | `FD§4.4`; `S0.8.6`; `S8.*` |
+| **Config epoch** | A counter bumped when a new `ParameterVersion` takes effect; every event carries the epoch it ran under | `S4.9.2`; `S16.17.3` |
 | **Convention gap** | A name a part needs that S0 does not define; the part reports it in its `## Issues raised` so it can be folded back | `S0.1`; `S0.4` |
 | **Copy key** | `copy.<area>.<key>`: a user-facing text key with `fa` and `en` text and the marker `needs_human_and_legal_review` | `S0.5` |
+| **Counsel question (CQ)** | `CQ-nn`: a question put to counsel in the operator's jurisdiction, never a conclusion; `counsel` is an external adviser and not a system role [V] | `S19.7` |
 | **Credit** | A non-monetary, expiring claim on future cells of work, minted only for accepted Commons cells; stored as integer micro-credits | `FD§11`; `S0.6.1` |
 | **Credit lot** | `CreditLot`: a dated, expiring portion of a member's credit; credit is spent oldest-first | `S0.7`; `S0.8.5` |
+| **Cross-parameter constraint** | `C1`..`C20` and `S9-C1`..`S9-C3`: a rule over several parameters, evaluated on every write against the configuration as it will be at `effective_from`; an error refuses the write, a warning is recorded | `S0.10.3`; `S16.3` |
 | **Deadline class** | `standard` only; its multiplier is fixed at 1.0 in Phase 1 | `FD§4.8`; `S0.8.6` |
 | **Declared** | The wording rule for every user-facing promise and policy outcome: "declared" (Persian اعلام‌شده), never "guaranteed"; purpose, license and sensitivity are declarations by the requester that the platform cannot observe | `FD Principle 11`; `S0.2` |
 | **Device** | `Device`: a keyed-hash device record used for rate limits and device linking; no fingerprinting beyond what S10.* lists | `S0.7`; `S10.*` |
@@ -77,6 +89,7 @@
 | **Invariant (ledger)** | An automated check with an id `INV-L<nn>`, for example total credit in existence equals cumulative mint minus cumulative retired; exact integer equality, zero tolerance | `FD§4.2`; `S0.5`; `S6.*` |
 | **Invite tree** | The edges of `Invite` records (vouched invitations); size and depth are limited by `invite.tree_max_members` and `invite.tree_max_depth` | `S0.7`; `S10.*` |
 | **Issue** | `ISS-nn`: a problem or gap found in the FD or in an instruction, with a proposed resolution; ids are allocated in blocks per part | `S0.4` |
+| **Jalali calendar** | The Solar Hijri calendar; shown beside the Gregorian date in detail views; the server stores UTC only and never accepts or emits Jalali strings | `S0.6.2` |
 | **Job** | `Job`: a requester's request, or a Commons job, split into cells; has the state machine of S0.9.2 | `S0.7`; `S0.9.2` |
 | **Job type** | `translation_glossary`, `classify_extract`, `summarize_schema`, `code_change_tests`, `format_convert_validator` or `human_review`; extensible as data | `S0.8.6`; `S8.*` |
 | **Kill switch** | `KillSwitch`, `released` or `engaged`, for `kill.all_minting`, `kill.all_new_jobs`, a template, a service or a member; engaged by an operator with a logged reason | `S0.9.8`; `S0.10.6`; `S14.*` |
@@ -84,7 +97,9 @@
 | **Launch switch** | `launch.members_may_join`, `launch.member_jobs_enabled`, `launch.minting_enabled`; `false` in every build and flipped only by the gate sign-off flow | `S0.10.6`; `S0.12`; `S14.*` |
 | **Lease** | Time-boxed hold of a cell by one member, bound to a lease nonce; expires after `lease.timeout_s`; states `active`, `submitted`, `expired`, `released`, `revoked` | `S0.7`; `S0.9.3` |
 | **Ledger** | The one append-only, hash-chained double-entry record of credit, in integer micro-credits; accounts of type `member`, `escrow`, `reserve`, `issuance` and `retired`; entries of types such as `mint`, `transfer`, `levy`, `refund`, `expire`, `retire`; grouped in `LedgerTransaction`s | `FD§4.2`; `S0.8.5`; `S6.*` |
+| **Levy** | λ: the share of the price paid into the Commons Reserve at settlement; ledger entry `levy`; parameter `price.levy_lambda` | `FD§11`; `S0.8.5` |
 | **License** | `L0`..`L3`: the declared output license of a job; the project asserts no ownership of any output [V] | `FD§5.3`; `S0.8.1` |
+| **Measurement code** | `CAL`, `P1M`, `DEM`, `FND`, `CNS`, `SEC`, `TEC`, `OPS` or `CON`: names the evidence that replaces an initial configurable default; `CON` marks a constant | `S0.10.4`; `S16.19` |
 | **Member** | `Member`: a pseudonymous identity with a `status` and a `trust_tier`, holding the donor and requester capabilities | `S0.7`; `S0.8.2` |
 | **Mint** | Create credit for one accepted Commons cell of any `cell_kind`: ledger entry `issuance` to `member`, exactly 1,000,000 `ucr`, bounded by the monthly cap | `FD§11`; `S0.8.5` |
 | **Mint cap** | `mint.monthly_cap_credits`: the monthly issuance ceiling per UTC month, never above forecast redeemable capacity | `FD§4.2`; `S0.10.6` |
@@ -92,47 +107,63 @@
 | **Operator** | The admin-side role that runs the platform (in Phase 1 the founders); holds `perm.*` for parameters, kill switches and ledger operations; one of the four roles | `FD§11`; `S0.8.2` |
 | **Opt-in** | `OptIn`: a volunteer's purpose, sensitivity, license, service and topic opt-ins; defaults are `P0`, `P1`, `S0`, `S1`; each sensitive topic category is opt-in (R8) | `FD§5.4`; `S0.7`; `S0.10.6` |
 | **Outbox** | The table into which an event is written in the same database transaction as the state change it announces | `S0.9.1`; `S4.7` |
+| **Owner decision (OD)** | `OD-nn`: a decision only the owner can make. S3.2 and S19.9 each number their own series; a cross-part reference is written `S3.OD-nn` or `S19.OD-nn` | `S3.2`; `S19.9` |
 | **Parameter** | A named, validated, versioned configuration value `area.name`; changes are prospective unless they tighten (R10); every default is an `initial configurable default` replaced by a named measurement | `S0.10`; `S16.*` |
+| **Paste-back** | The step in which the volunteer pastes the service's answer into the cell page; the platform never reads the chat page and the human presses Send | `FD§10`; `S0.9.3`; `S9.*` |
+| **Phase 0..3** | The FD§9 roadmap: Phase 0 verify and prototype, no members; Phase 1 closed pilot of 30 to 50 people for 30 days, no money; Phase 2 open beta; Phase 3 marketplace and money, not scheduled | `FD§9` |
 | **Policy engine / profile** | The evaluator of rules `R1`..`R10` and the allowed combination of purpose, sensitivity, license and service; rows `Policy`, `PolicyVersion` and `Rule` | `FD§11`; `S0.7`; `S7.*` |
 | **Policy rule** | One of `R1`..`R10`, with a slug and a reason code; rules are data, evaluated in order, and the first failing rule rejects | `FD§5.4`; `S0.8.4` |
 | **Port** | An interface the domain depends on (store, clock, scheduler, alert delivery, backup target); not related to the service-adapter | `S4.1` |
 | **ppm** | Parts per million: the fixed-point form of every ratio, 1.0 = 1,000,000 | `S0.6.1` |
+| **Pre-build checklist** | `CHK-nn`: the three-stage list of items to finish before coding, before the first member and before public exposure; each item names its stored evidence | `S19.8` |
 | **Pre-registration** | `PreRegistration`: thresholds and decision rules recorded before launch and then locked | `FD§9`; `S0.7`; `S13.*` |
 | **Price** | `p = 1 + v + λ` per accepted primary cell; in integers `p_ucr = 1,000,000 + v_ppm + lambda_ppm`; escrow for N primary cells is `N * p_ucr` | `FD§4.3`; `S0.6.1`; `S6.*` |
 | **Provenance manifest** | The record of job, template, policy, service, verification and hashes attached to every output; entity `Manifest`; the no-training flag is contractual, not technically enforced | `FD§11`; `FD§5.6`; `S0.7` |
 | **Purpose** | `P0`..`P3`: the declared purpose of a job; `P2` and `P3` are locked in Phases 1-2 | `FD§5.3`; `S0.8.1` |
 | **Quarantine** | The submission state for output that contains links, code to run or requests for action; withheld from results rather than shown | `FD§5.5`; `S0.9.3`; `S9.*` |
+| **Quote** | The price `p_ucr` and completion window offered for a job, valid for `price.quote_ttl_s` and recording the parameter versions it used; a reservation fixes the price at booking | `FD§4.3`; `S6.*`; `S16.6` |
 | **Reason code** | `policy.<policy_rule_id>.<slug>` for a requester's rejection and `reject.*` for a volunteer's cell rejection | `S0.8.4` |
 | **Recovery key** | The secret that restores a pseudonymous identity without e-mail; at least `identity.recovery_key_bits` bits | `FD§11`; `S0.10.6`; `S10.*` |
+| **Redeemable capacity** | φ times forecast active capacity: the part of capacity that member jobs may claim; the mint cap is never set above it | `FD§4.2`; `S6.*` |
 | **Report** | `Report`: an abuse or content report from a volunteer or requester | `S0.7`; `S0.9.8` |
 | **Requester** | A member who spends credit on a job; one of the four roles | `FD§11`; `S0.8.2` |
 | **Reservation** | `Reservation`: a capacity booking for a future date, with credit escrowed at booking | `FD§4.8`; `S0.7`; `S0.9.8` |
 | **Reserve ceiling** | `reserve.ceiling_credits`: the published ceiling above which Reserve excess is retired | `FD§4.2`; `S0.10.6` |
 | **Retention class** | `permanent`, `member_bound`, `job_bound`, `moderation`, `short` or `ops`: how long a table's rows are kept | `S0.7`; `S10.*` |
 | **Retire** | Remove surplus Reserve credit from existence: ledger entry `reserve` to `retired`; the only way credit leaves the system, always logged | `FD§11`; `S0.8.5` |
+| **Reversal** | A ledger entry that mirrors an earlier entry to correct it; the original is never edited; it needs `ledger.reversal_min_approvers` approvers | `S0.8.5`; `S6.*` |
 | **Reviewer** | The admin-side role for templates, services, policy, appeals and audits; distinct from the member activity of executing `review` cells; one of the four roles | `FD§11`; `S0.8.2` |
 | **Rework cell** | A replacement cell created when an accepted cell is overturned; paid from the verification pool and counted in v | `FD§4.3`; `S0.8.6`; `ISS-05` |
 | **Round-trip efficiency (η)** | `η = 1/(1+v+λ)`: cells a member can request per cell contributed; in integers `eta_ppm = floor(10^12 / p_ucr)` | `FD§11`; `S0.6.1` |
+| **RTL (right-to-left)** | Right-to-left layout and text direction; Persian is first-class: mirrored layout, mixed-direction text inside prompts and outputs, Persian numerals as an option, Jalali and Gregorian dates; tested by `T-rtl-*` | `FD§10`; `S11.*` |
 | **Sensitivity** | `S0`..`S3`: the declared data sensitivity; `S2` is rejected and `S3` is never accepted; written without a dot, so it never collides with a spec reference such as `S1.2` | `FD§5.3`; `S0.3`; `S0.8.1` |
 | **Service-adapter** | The client-side module that prepares a prompt for one chat service from registry data (prefill where supported, copy-only otherwise); the human presses Send and the chat page is never read | `S4.1`; `S4.14` |
 | **Service Registry** | The dated record of each service's terms flags, saved terms copies and review state; every service ships `unreviewed`, and unknown counts as no | `FD§11`; `S0.7`; `S0.8.3`; `S7.*` |
 | **Service requirement** | `M0`..`M2`: any approved service, pinned approved services, or an open-weight model with a checked license | `FD§5.3`; `S0.8.1` |
 | **Session** | `Session`: a member or admin session; only the hash of the token is stored | `S0.6.4`; `S0.7` |
+| **Settlement** | Closing a job: the `settle` transaction posts the levy and the refund and leaves the escrow account at exactly zero; donors were already paid per accepted cell | `S0.8.5`; `S6.*` |
+| **Sign-off** | The recorded approval of a `LaunchGateItem` by `launch.min_signoffs` distinct admins; the only way a `launch.*` switch turns on | `S0.9.8`; `S14.*` |
 | **Size class** | `standard`, the only value in Phases 1-2 | `S0.8.6` |
 | **Spec reference** | The form `S<n>.<m>`, a heading `## <n>.<m>` of spec part `<n>`; a whole part is `S<n>.*` | `S0.3` |
 | **Starter grant** | A small, non-transferable Reserve transfer to a newcomer after `grant.required_verified_cells` verified contribution(s); ledger entry `grant`; expires after `grant.starter_lifetime_days`; pauses, never overdraws, when the Reserve is at or below its floor | `FD§11`; `S0.8.5` |
+| **Stop-loss** | The owner-written condition under which the project stops spending effort, and the FD§8.3 fallback then taken (`CHK-01`) | `FD§8.3`; `S19.8.1` |
 | **Submission** | `Submission`: one pasted-back result for one lease | `S0.7`; `S0.9.3` |
 | **Team** | `Team`: a self-created opt-in group; not shown publicly below `team.min_public_members` | `FD§6.1`; `S0.7`; `S12.*` |
 | **Template** | A reviewed prompt pattern with data slots and an automatic check; `Template` is the stable identity and `TemplateVersion` is immutable once approved | `FD§11`; `S0.7`; `S0.9.5`; `S8.*` |
 | **Terms copy** | `TermsCopy`: a saved copy of a service's terms (bytes, hash, source reference, capture date); required before a service can be approved | `S0.7`; `S0.8.3` |
+| **Threat model** | The written analysis for Iranian participants: what the platform stores, what a network observer can see, who could compel disclosure; launch gate `G1` | `FD§8.3`; `S10.*` |
 | **Transfer** | Move credit between accounts: ledger entry `escrow` to `member`, paid to a donor at acceptance of each cell of a member job; creates no new credit | `FD§11`; `S0.8.5` |
+| **Tripwire** | `TRIP-nn`: a named signal, threshold, automatic action, human action and release condition that turns a risk into an action; an alarm, not proof of a cause | `S19.4` |
 | **Trust tier** | `new`, `established`, `trusted` or `restricted`; raises caps and lowers sampling with a clean record; orthogonal to `member_status` | `FD§6.1`; `S0.9.4`; `S10.*` |
 | **ucr** | Micro-credit: 1 credit = 1,000,000 `ucr`; the integer unit of every ledger amount | `S0.6.1` |
 | **Unknown** | The flag answer `unknown`, evaluated as `no` everywhere; likewise a service in state `unreviewed` counts as no | `FD§5.3`; `S0.8.3`; `S0.9.6` |
+| **Unverified item (UNV)** | `UNV-nn`: a fact no one has verified, with who verifies it, where the answer is stored and what the system does meanwhile; an unanswered item counts as no | `S19.5` |
 | **Verification method** | `auto_check`, `gold`, `audit_second`, `audit_third`, `human_review` or `blanket_redundancy`, with outcome `pending`, `pass`, `fail` or `inconclusive` | `S0.8.6`; `S8.*` |
 | **Verification overhead (v)** | (Audit + gold + rework cells) divided by accepted primary cells over a trailing window per job type; `v_ppm = ceil(10^6 * verification_cells / accepted_primary_cells)`; measured and published | `FD§11`; `S0.6.1`; `S6.*` |
+| **Verification pool** | The part of a job's escrow that funds its verification, audit and rework cells: `N * v_ppm` ucr for N primary cells; a hard budget, and an unused remainder is refunded at settlement | `S0.6.1`; `S6.*` |
 | **Volunteer handle** | `vol_<32 hex>`: the keyed hash of a member id used in provenance; requesters never see it | `S0.6.4` |
 | **Waitlist** | `WaitlistEntry`: a place for a job the capacity cannot honor now; the job state is `waitlisted` and the entry lapses after `admission.waitlist_ttl_days` | `FD§4.8`; `S0.7`; `S0.9.2` |
+| **Window (job window)** | The completion period quoted for a job, between `admission.min_window_s` and `admission.max_window_days`; a window is promised, never instant completion (FD Principle 10); a job stops with partial settlement at `job.max_overrun_ratio` times its window | `FD§4.8`; `S6.*` |
 
 ## Issues raised
 
