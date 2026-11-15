@@ -9,12 +9,12 @@
 | E1 `price.eta_alarm_threshold` range, S0 | spec/00-conventions.md:596 | `0..1` | `(0,1]` | applied |
 | E2 `change.notice_days_default` range, S0 | spec/00-conventions.md:640 | `0..90` | `1..90` | applied |
 | E3 `change.notice_days_price` range, S0 | spec/00-conventions.md:641 | `0..90` | `1..90` | applied |
-| E4 `retention.ip_hash_ttl_days` range, S0 | spec/00-conventions.md:717 | `0..30` | `1..30` (default-pending, D-22) | applied |
-| E5 `launch.min_signoffs` range, S0 | spec/00-conventions.md:762 | `1..5` | `2..5` (default-pending, D-01) | applied |
+| E4 `retention.ip_hash_ttl_days` range, S0 | spec/00-conventions.md:717 | `0..30` | `1..30` (default applied, D-22 open) | applied |
+| E5 `launch.min_signoffs` range, S0 | spec/00-conventions.md:762 | `1..5` | `2..5` (default applied, D-01 open) | applied |
 | E6 `launch.min_approved_services` range, S0 | spec/00-conventions.md:763 | `0..20` | `1..20` | applied |
 | E7 `price.eta_alarm_threshold` range and reason, S16 16.6 | spec/16-parameters.md:161 | `0..1` | `(0,1]` and the clause: fail-closed floor, 0 would make the alarm unreachable (FD Principle 5/8, 16d F-01) | applied |
-| E8 `retention.ip_hash_ttl_days` range and reason, S16 16.11 | spec/16-parameters.md:313 | `0..30` | `1..30` and the clause: 0 would switch off the per-IP-hash join limit (FD Principle 5/8, 16d F-06) (default-pending, D-22) | applied |
-| E9 `launch.min_signoffs` range and reason, S16 16.13 | spec/16-parameters.md:389 | `1..5; C19` | `2..5; C19` and the clause: one sign-off is no two-person gate (FD Principle 5/8, 16d F-14, A03 finding 27) (default-pending, D-01) | applied |
+| E8 `retention.ip_hash_ttl_days` range and reason, S16 16.11 | spec/16-parameters.md:313 | `0..30` | `1..30` and the clause: 0 would switch off the per-IP-hash join limit (FD Principle 5/8, 16d F-06) (default applied, D-22 open) | applied |
+| E9 `launch.min_signoffs` range and reason, S16 16.13 | spec/16-parameters.md:389 | `1..5; C19` | `2..5; C19` and the clause: one sign-off is no two-person gate (FD Principle 5/8, 16d F-14, A03 finding 27) (default applied, D-01 open) | applied |
 | E10 `launch.min_approved_services` range and reason, S16 16.13 | spec/16-parameters.md:390 | `0..20` | `1..20` and the clause: 0 would pass the G0 count with no approved service (FD Principle 5/8, 16d 16.D.8.1, A03 finding 27) | applied |
 | E11 `change.notice_days_default` range and reason, S16 16.13 | spec/16-parameters.md:391 | `0..90; C20` | `1..90; C20` and the clause: 0 would remove the advance notice of a loosening (FD Principle 5/8, 16d F-07) | applied |
 | E12 `change.notice_days_price` range and reason, S16 16.13 | spec/16-parameters.md:392 | `0..90` | `1..90` and the clause: 0 would remove the advance notice of a loosening (FD Principle 5/8, 16d F-07) | applied |
