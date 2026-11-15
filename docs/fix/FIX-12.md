@@ -36,7 +36,7 @@
 | CR-36a refund read | spec/15a-api-core.md:545 | refund_ucr visible in getJob | read through getSettlementReceipt (part 15d), Job has no refund field | applied |
 | CR-36b Job.rating | spec/15a-api-core.md:489, 548 | Job had no rating | Job.rating object (score, comment, updated_at) or null, same shape as the rateJob response | applied |
 | CR-37 Team score and Phase 1 listing | spec/15a-api-core.md:586, 597 | Team had verified_cells_30d only; listTeamMembers and alias active | Team.score {week_start, week, all_time} added; listTeamMembers and alias stay defined but off until the part 12 owner enables them (flag name theirs) | applied |
-| CR-01, CR-02 admin id rename | spec/15a-api-core.md:19 (15.1 Operation tables) | 15a says admin ids are prefixed admin in the OpenAPI key | unchanged, default-pending D-08 (neither id renamed, both rules written down) | skipped-needs-owner |
+| CR-01, CR-02 admin id rename | spec/15a-api-core.md:11 (15.1 Operation tables) | 15a says admin ids are prefixed admin in the OpenAPI key | unchanged, default-pending D-08 (neither id renamed, both rules written down) | skipped-needs-owner |
 | CR-03 share cards | spec/15a-api-core.md:598 | getShareCard computed, no stored link | unchanged, default-pending D-15 (computed card); the deletion is in 15b, not this cell | already-applied |
 
 ## Notes and deviations
@@ -70,6 +70,6 @@ After all edits every place was read again in the branch file.
 - CR-33, line 394: the Payment bullet says the submission is stored with `verdict` `pending`.
 - CR-36, lines 489, 545, 548: Job has a `rating` line; cancelJob points at `getSettlementReceipt`; the Rating bullet ends with `Job.rating`.
 - CR-37, lines 586 and 597: Team shows a `score` line; the Teams bullet says the listing and alias are off.
-- Skipped rows: line 517 (confirmJob guards) and line 334 are unchanged; line 19 (admin id rule) and line 598 (share card) are unchanged.
+- Skipped rows: line 517 (confirmJob guards) and line 334 are unchanged; line 11 (admin id rule) and line 598 (share card) are unchanged.
 
 Result: DONE WITH SKIPS
