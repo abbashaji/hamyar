@@ -113,42 +113,37 @@ Operation ids (lowerCamelCase, S0.5) are the contract between the screens and S1
 | Operation id | Method and path (proposal) | Used by |
 | --- | --- | --- |
 | `listJobs` | `GET /v1/jobs?state=&cursor=&limit=` | 01 |
-| `getBalance` | `GET /v1/members/me/balance` (`balance_ucr`, `cap_ucr`, `member_status`, `cooldown_ends_at`) | 01, 07, 08 |
-| `listCreditLots` | `GET /v1/members/me/credit-lots` (`lot_id`, `amount_ucr`, `expires_at`) | 07, 08, 15 |
+| `getBalance` | `GET /v1/balance` (`balance_ucr`, `member_cap_ucr`, `headroom_ucr`, `held_ucr`); `status` and `recovery.cooldown_until` come from `getMe` `GET /v1/members/me` | 01, 07, 08 |
+| `listLots` | `GET /v1/balance/lots` (`id`, `amount_ucr`, `remaining_ucr`, `expires_at`; `Page`, oldest expiry first) | 07, 08, 15 |
 | `listTemplates` | `GET /v1/templates?job_type=` (approved versions only) | 02 |
 | `getTemplate` | `GET /v1/templates/{template_id}` | 02, 03 |
-| `getPolicyProfile` | `GET /v1/policy-versions/current` (allowlist, phase locks, `license_options`) | 05 |
-| `listServices` | `GET /v1/services?state=approved` (`service_id`, display names) | 05 |
+| `getPublicPolicy` | `GET /v1/public/policy` (`active.allowlist`; a phase lock is an allowlist row with `status` `locked`; `license_options` is derived from the allowed `license` values) | 05 |
+| `listServices` | `GET /v1/services` (approved entries only, no query) (`id`, `display_name`) | 05 |
 | `createJob` | `POST /v1/jobs` body `{template_id, copy_from_job_id?}` -> `Job` in `draft` | 02, 06, 18 |
 | `getJob` | `GET /v1/jobs/{job_id}` | all |
-| `patchJob` | `PATCH /v1/jobs/{job_id}` (JSON Merge Patch, `If-Match` = `row_version`) | 05 |
-| `createUpload` | `POST /v1/jobs/{job_id}/uploads` JSON body `{file_name, encoding, content}`; `encoding` is `utf8` or `base64`; size limit `job.max_upload_bytes` applies to the decoded bytes; the transport body limit of this operation is derived as `ceil(4 * job.max_upload_bytes / 3) + 4096` bytes because base64 adds one third, and replaces `api.max_body_bytes` for it [A] (`ISS-114`) | 03 |
+| `updateJob` | `PATCH /v1/jobs/{job_id}` (JSON Merge Patch, `If-Match` = `row_version`) | 05 |
+| `createUpload` | `POST /v1/uploads` JSON body `{format, filename?, content, content_hash?}`, UTF-8 text only (no base64); attached by `upload_ids` on `createJob` or `updateJob`; size limit `job.max_upload_bytes` | 03 |
 | `getUpload` | `GET /v1/uploads/{upload_id}` | 03, 04 |
 | `deleteUpload` | `DELETE /v1/uploads/{upload_id}` | 03 |
-| `requestUploadReview`+ | `POST /v1/uploads/{upload_id}/review-requests` body `{note?}` | 04 |
-| `createGlossary` | `POST /v1/jobs/{job_id}/glossaries` body `{entries:[{source,target}]}` | 03 |
+| `createGlossary` | `POST /v1/glossaries` body `{name, source_lang, target_lang, entries:[{source,target}]}`; attached by `glossary_id` on `createJob` or `updateJob` | 03 |
 | `previewCells`+ | `GET /v1/jobs/{job_id}/cell-preview` (up to three sample cells exactly as a volunteer sees them) | 03, 05 |
-| `submitJob` | `POST /v1/jobs/{job_id}/submission` -> `202`, Job `screening` (or already `quoted` / `rejected` when screening finished synchronously) | 05 |
-| `getQuote` | `GET /v1/jobs/{job_id}/quote` | 07, 08 |
-| `createWaitlistEntry` | `POST /v1/jobs/{job_id}/waitlist-entries` | 07 |
-| `getWaitlistEntry` | `GET /v1/waitlist-entries/{waitlist_entry_id}` | 09 |
-| `deleteWaitlistEntry` | `DELETE /v1/waitlist-entries/{waitlist_entry_id}` | 09 |
-| `confirmEscrow` | `POST /v1/jobs/{job_id}/escrow-confirmation` body `{quote_hash, acknowledgements:[string]}` | 08 |
-| `getReservationAvailability`+ | `GET /v1/reservations/availability?from=&to=&cells=&job_type=` | 10 |
+| `submitJobForScreening` | `POST /v1/jobs/{job_id}/screenings` -> `200` Job `quoted` or `waitlisted`, `202` Job `screening`, `422 POLICY_REJECTED` (job `rejected`; read `details.job_id`) | 05 |
+| `getJobQuote` | `GET /v1/jobs/{job_id}/quote` | 07, 08 |
+| `confirmJob` | `POST /v1/jobs/{job_id}/confirmations` body `{quote_hash, reservation_id?}` (acknowledgements are declared earlier, in `Declarations`) | 08, 11 |
+| `getReservationAvailability`+ | `GET /v1/reservations/availability?from=&to=&template_id=&cells=` (`bookable`, `reason`, `price_per_cell_ucr`; an estimate, not a hold) | 10 |
 | `createReservation` | `POST /v1/reservations` | 10 |
 | `listReservations` / `getReservation` | `GET /v1/reservations`, `GET /v1/reservations/{reservation_id}` | 01, 11 |
 | `cancelReservation` | `POST /v1/reservations/{reservation_id}/cancellation` | 11 |
-| `activateReservation` | `POST /v1/reservations/{reservation_id}/activation` body `{job_id}` | 11 |
 | `getJobProgress`+ | `GET /v1/jobs/{job_id}/progress` (ETag, conditional `If-None-Match`) | 12 |
-| `listJobCells` / `getJobCell` | `GET /v1/jobs/{job_id}/cells`, `GET /v1/jobs/{job_id}/cells/{cell_id}` (primary cells only) | 13 |
+| `listJobCells` | `GET /v1/jobs/{job_id}/cells` (primary cells only; outputs by `ordinal` from `listJobResults`) | 13 |
 | `getCancellationPreview`+ | `GET /v1/jobs/{job_id}/cancellation-preview` | 14 |
-| `cancelJob` | `POST /v1/jobs/{job_id}/cancellation` | 14 |
+| `cancelJob` | `POST /v1/jobs/{job_id}/cancellation` | 09, 14 |
 | `getSettlementReceipt`+ | `GET /v1/jobs/{job_id}/receipt` | 15 |
-| `getDeliverable` | `GET /v1/jobs/{job_id}/deliverable` | 16 |
-| `downloadDeliverableFile` | `GET /v1/deliverables/{deliverable_id}/files/{file_name}` (bytes via `fetch` with the Bearer header; no query-string secrets, S0.11.1) | 16 |
-| `getManifest` | `GET /v1/jobs/{job_id}/manifest?profile=requester` | 16 |
-| `createJobRating`+ / `getJobRating`+ | `POST` and `GET /v1/jobs/{job_id}/rating` | 17 |
-| `createAppeal` / `getAppeal` | `POST /v1/appeals` with `appeal_kind` = `job_rejection`; `GET /v1/appeals/{appeal_id}` | 18 |
+| `getJobDeliverable` | `GET /v1/jobs/{job_id}/deliverable` | 16 |
+| `getJobDeliverableContent` | `GET /v1/jobs/{job_id}/deliverable/content` (JSON `{media_type, encoding, content, content_hash}`; the client saves it as a file; Bearer header, no query-string secrets, S0.11.1) | 16 |
+| `getJobManifest` | `GET /v1/jobs/{job_id}/manifest` | 16 |
+| `rateJob` | `PUT /v1/jobs/{job_id}/rating` (replaces an earlier rating; no read exists yet, 15.C.7 O7) | 17 |
+| `createAppeal`+ / `getAppeal`+ | `POST /v1/appeals` with `kind` = `job_rejection` and `subject_id` = the job id; `GET /v1/appeals/{appeal_id}` | 18 |
 | `createReport` | `POST /v1/reports` | 13, 16 |
 
 ### 11.34.1 Response shapes the screens depend on [A]
