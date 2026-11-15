@@ -36,7 +36,7 @@
 | E28 change log list | spec/11c-admin-tools.md:557 | `listChangeLogEntries` at `/v1/admin/change-log-entries`, includes non-public entries | `listPublicChangeLog` at `/v1/public/change-log[/{chg_id}]`; all entries are public; annotations are `POST /v1/admin/changelog-entries` | applied |
 | E29 AC-appr-01 refused row | spec/11c-admin-tools.md:230 | an `AdminAction` with `result` `refused` is written | no `AdminAction` row and no event; a refused row only for authorization failures (15.34.1) | applied |
 | E30 AC-abuse-02 refused row | spec/11c-admin-tools.md:466 | a refused `AdminAction` is written | no `AdminAction` row and no event; a refused row only for authorization failures (15.34.1) | applied |
-| E31 AC-appr-03 parameter name | spec/11c-admin-tools.md:232 | `security.admin_two_person_pending_ttl_s` | not changed; 15e asks for `security.approval_ttl_s`, but D-22 lists the name of the approval lifetime parameter as an owner decision whose default is that the existing definitions stand, and the S0 and S16 definitions were not read here; renaming only in 11c could leave it disagreeing with them | skipped-needs-owner |
+| E31 AC-appr-03 parameter name | spec/11c-admin-tools.md:232 | the `security.admin_two_person_` parameter ending in `_ttl_s` | not changed; 15e asks for `security.approval_ttl_s`, but D-22 lists the name of the approval lifetime parameter as an owner decision whose default is that the existing definitions stand, and the S0 and S16 definitions were not read here; renaming only in 11c could leave it disagreeing with them | skipped-needs-owner |
 
 ## Read-back
 
@@ -49,7 +49,7 @@ All edited places were re-read after the last commit (file now 879 lines).
 - E19 to E26 (lines 502 to 511): every ledger path has the `/ledger/` segment; the transaction row has no list; the invariants row is split in two; verification is one row for the two start operations; the reversal row says `202` with an `AdminApproval`.
 - E27, E28 (lines 558, 560): the change set row ends with the `proposeParameterChange` pointer; the change log row points at the public path and no longer mentions non-public entries.
 - E29, E30 (lines 230, 468): both Then cells now say there is no row and no event for a guard refusal.
-- E31 (line 232): unchanged, still reads `security.admin_two_person_pending_ttl_s`.
+- E31 (line 232): unchanged, still reads the `security.admin_two_person_` parameter ending in `_ttl_s`.
 
 Residuals left on purpose because they are not in the authorized edit list (for FIX-10, C-041 or the part owner): the prose before the audit-queue table (about line 357) and `AC-auditq-02` still describe a two-person audit accept and quarantine release with a second-reviewer request; `AC-auditq-05` and the audit event codes still name the gold view; `AC-appr-02` still expects `409` for a wrong hash where row 207 now says `401`; `AC-trail-02` still names `verifyAdminActionChain`; ops ids `approveApprovalRequest`, `rejectApprovalRequest`, `withdrawApprovalRequest` and `createCellOverturn` were not renamed because the edit rows do not list new ids; the `Context rule` paragraph, `SCR-ops-04` blocks B and C and the ledger permission line still speak of `context` and `perm.ledger.read`; `AC-tplq-01` and `AC-param-02` still mention a refused `AdminAction` and an `ApprovalRequest`; other uses of the renamed ops (for example `createLedgerVerification`) elsewhere in the file were not searched.
 
