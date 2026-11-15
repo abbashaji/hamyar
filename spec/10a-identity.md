@@ -59,14 +59,14 @@ Browser storage can be evicted (storage pressure, per-site caps) [V]. The client
 ### 10.3.2 Signed message format and challenges [D]
 
 ```
-sig_input = utf8('hamyar/v1/') || purpose || 0x00 || audience || 0x00
-         || challenge_id || 0x00 || nonce || 0x00 || context_hash
+sig_input = utf8('hamyar:v1:') || purpose || 0x00 || audience || 0x00
+         || challenge || 0x00 || context_hash
 context_hash = SHA-256( RFC8785_canonical_json(request_body) )     # S0.6.4
 ```
 
-`purpose` is one of `register_device`, `register_recovery`, `session`, `step_up`, `rotate_device_key`, `rotate_recovery_key`, `link_claim`, `link_approve`, `recover`, `confirm_recovery`, `revoke_key`, `set_email`, `close_account`. `audience` is the member origin string. One signature therefore authorizes exactly one purpose, one origin and one request body, and cannot be replayed on another site or for another action. Reason: removes cross-protocol and cross-site replay.
+`purpose` is one of `create`, `session`, `rotate`, `recover`, `device_link`, `step_up`, `confirm_recovery` (S15.B.3.1 maps the former 13 names; sensitive actions use `step_up` with the `Step-Up` header of S15.B.4). `audience` is the member origin string. One signature therefore authorizes exactly one purpose, one origin and one request body, and cannot be replayed on another site or for another action. Reason: removes cross-protocol and cross-site replay.
 
-`POST /v1/auth-challenges` (auth `none`, rate limited by IP hash) returns `{challenge_id, nonce, expires_at}`. The nonce is 128 random bits, valid `identity.challenge_ttl_s` seconds, single use (marked used in the same transaction as the action it authorizes). Challenges are issued to anyone for any purpose and never reveal whether a key or member exists. [D]
+`POST /v1/identity-challenges` (auth `none`, rate limited by IP hash) returns `{challenge, expires_at}`. The challenge is 256 random bits, valid `identity.challenge_ttl_s` seconds, single use (marked used in the same transaction as the action it authorizes). Challenges are issued to anyone for any purpose and never reveal whether a key or member exists. [D]
 
 ### 10.3.3 Registration (pseudocode) [D]
 
@@ -75,13 +75,13 @@ client:
   token = loadOrCreate(device_token)                 # 128-bit CSPRNG, IndexedDB
   dk    = generateKey(Ed25519, extractable=false if supported)
   rs    = csprng(identity.recovery_key_bits / 8)     # recovery secret, never sent
-  rk    = Ed25519_from_seed( HKDF-SHA-256(rs, 'hamyar/v1/recovery', 'ed25519-seed', 32) )
-  ch    = POST /v1/auth-challenges {purpose: 'register_device'}
-  body  = {invite_code?, device_pub, recovery_pub, device_token: token,
+  rk    = Ed25519_from_seed( HKDF-SHA-256(rs, 'hamyar:v1:recovery', 'ed25519-seed', 32) )
+  ch    = POST /v1/identity-challenges {purpose: 'create'}
+  body  = {invite_code?, public_key, recovery_public_key, device_token: token,
            platform_class, key_storage, locale}
-  POST /v1/members  body + {challenge_id,
-         device_signature:   sign(dk, sig_input('register_device',   ch, ctx(body))),
-         recovery_signature: sign(rk, sig_input('register_recovery', ch, ctx(body)))}
+  POST /v1/members  body + {challenge,
+         proof:   sign(dk, sig_input('create',   ch, ctx(body))),
+         recovery_proof: sign(rk, sig_input('create', ch, ctx(body)))}
   -> show recovery key screen (10.4) before leaving onboarding
 ```
 
@@ -107,11 +107,11 @@ Server checks, in this order; the first failure stops the request: [D]
 | Item | Decision | Reason |
 | --- | --- | --- |
 | Payload | `identity.recovery_key_bits` bits (default 128, validation at least 128, multiple of 8) from the OS CSPRNG (`crypto.getRandomValues`); if that API is absent the client refuses to create an identity, it never falls back to `Math.random` or time | A guessable key defeats the design |
-| Checksum | C bits, the first C bits of SHA-256(`hamyar/v1/recovery-checksum` followed by the payload), where C is the smallest value at least 22 that makes (payload bits + C) divisible by 5 | Detects typos locally before any request; for 128 bits C = 22, so an undetected random typo has probability 2^-22, about 2.4 in 10 million |
+| Checksum | C bits, the first C bits of SHA-256(`hamyar:v1:recovery-checksum` followed by the payload), where C is the smallest value at least 22 that makes (payload bits + C) divisible by 5 | Detects typos locally before any request; for 128 bits C = 22, so an undetected random typo has probability 2^-22, about 2.4 in 10 million |
 | Encoding | Crockford base32 (digits and letters without I, L, O, U), groups of 5 characters joined by hyphens, upper case; 128 + 22 = 150 bits = 30 characters = 6 groups | Easy to copy by hand; case-insensitive |
 | Example (format only, not a key) | `7M4QX-9PT2D-HZ8E6-K3VBA-0WYN5-R1CGF` | |
 | Input normalization | Upper-case; strip spaces and hyphens; map I and L to 1 and O to 0; map Persian and Arabic-Indic digits to Latin digits; reject any other character; verify the checksum on the device | Persian keyboards and digit habits; typos never cost a request |
-| Derivation | `seed = HKDF-SHA-256(ikm = payload, salt = 'hamyar/v1/recovery', info = 'ed25519-seed', L = 32)`; the recovery keypair is the Ed25519 keypair of `seed` | High-entropy input needs no slow hash (S0.6.4) |
+| Derivation | `seed = HKDF-SHA-256(ikm = payload, salt = 'hamyar:v1:recovery', info = 'ed25519-seed', L = 32)`; the recovery keypair is the Ed25519 keypair of `seed` | High-entropy input needs no slow hash (S0.6.4) |
 | Guessing odds | 2^-128 per guess. Exhaustive search at an assumed 10^12 guesses per second (an illustrative upper bound for one very large attacker, not a measurement) takes 2^128 / 10^12 = 3.4 x 10^26 s, about 1.1 x 10^19 years [A] | Why no lockout, KDF or CAPTCHA is needed on the key itself |
 
 Word lists were rejected for Phase 1: a vetted Persian list of 2048 words does not exist in this project and an unvetted one risks ambiguous or offensive words [V]. A QR rendering of the same string is offered for moving the key to another device by camera.
@@ -135,8 +135,8 @@ The server holds `recovery_pub` only. Verification is a signature over a fresh c
 | Case | Rule |
 | --- | --- |
 | Recovery key never confirmed | Replaceable with a device-key step-up alone; the old key was never proven held |
-| Recovery key confirmed | Replacing it needs a device-key step-up AND a signature by the current recovery key, so a thief holding only an unlocked phone cannot lock the owner out |
-| Effect | New key `active` and unconfirmed; old key `retiring` for `identity.key_rotation_grace_s`, then `revoked`; a `SecurityNotice` on every device |
+| Recovery key confirmed | Replacing it needs a device-key step-up AND a signature by the current recovery key, so a thief holding only an unlocked phone cannot lock the owner out (the `recovery_signature` of `rotateKey`, S15.B.9) |
+| Effect | New key `pending` and `active` after `identity.key_rotation_grace_s` (both work meanwhile); old key `retiring` until then, then `revoked`; a `SecurityNotice` on every device |
 | After a recovery (10.8) | The key used is revoked at once and a new one is mandatory in the same request (it was typed on a device that may be hostile) |
 
 ## 10.5 Optional e-mail
@@ -164,7 +164,7 @@ The server holds `recovery_pub` only. Verification is a signature over a fresh c
 ```
 planned rotation of device key K_old -> K_new            # step-up required (10.13)
   client: generate K_new; persist it locally as 'pending' BEFORE sending anything
-  POST /v1/members/me/keys {device_pub: K_new.pub, replaces_key_id: K_old.id}
+  POST /v1/member-keys/rotations {kind: 'device', key_id: K_old.id, challenge, signature, new_public_key: K_new.pub, new_key_proof}
         signed by K_old (purpose rotate_device_key) AND by K_new (proof of possession)
   server: txn { K_new = MemberKey(active, authorized_by = K_old);
                 K_old.state = retiring, K_old.not_after = now + identity.key_rotation_grace_s;
@@ -188,21 +188,21 @@ Why a grace period: a lost response or a crash between the two sides must not lo
 Purpose: add a second device (new phone, desktop) to the same member without moving any private key. Every device holds its own keypair; no key export, no identity file and no session copying exists, because an exportable identity is a theft target. [D]
 
 ```
-Offer states: open --claim--> claimed --approval--> approved (T)
-              open|claimed --ttl--> expired (T);  open|claimed --cancel or attempts exhausted--> cancelled (T)
+Offer states: pending --claim--> awaiting_approval --approval--> linked (T)
+              pending|awaiting_approval --ttl--> expired (T);  pending|awaiting_approval --cancel or attempts exhausted--> denied (T)
 
-A (signed in, step-up):  POST /v1/device-link-offers
-    -> {offer_id, link_secret (128 random bits, QR and 26-character Crockford text),
+A (signed in, step-up):  POST /v1/device-links
+    -> {device_id, code (128 random bits, QR and 26-character Crockford text),
         expires_at = now + identity.device_link_code_ttl_s}
     server stores SHA-256(link_secret) only
 B (new device, no session): generate device key and device token;
-    POST /v1/device-link-offers/{offer_id}/claims {link_secret, device_pub, device_token,
+    POST /v1/device-links/redemptions {code, new_public_key, proof, device_token,
         platform_class, key_storage}  signed by B's key (purpose link_claim)
-    server: constant-time compare of the secret hash; attempts += 1; state claimed;
+    server: constant-time compare of the secret hash; attempts += 1; state awaiting_approval;
             claimed_key_hash = SHA-256(device_pub); only the first valid claim wins
     B and A both display  sas = (first 4 bytes of SHA-256(offer_id || device_pub) as uint32) mod 1,000,000, 6 digits
 A: shows platform_class and the 6 digits; the person confirms they match B's screen;
-    POST /v1/device-link-offers/{offer_id}/approval signed by A's key
+    POST /v1/device-links/{device_id}/approval {sas}, with the Step-Up header of A's key
         (purpose link_approve, context_hash covers offer_id and claimed_key_hash)
 server: txn { MemberKey(device, active, authorized_by_key_id = A.key, authorization_signature);
               upsert Device; SecurityNotice to all devices; emit member.device_linked }
@@ -212,24 +212,23 @@ B: next step is an ordinary session by challenge (10.13); B inherits nothing
 | Limit | Value | Reason |
 | --- | --- | --- |
 | Offer lifetime | `identity.device_link_code_ttl_s` (300 s) | A shoulder-surfed or photographed QR dies quickly |
-| Wrong-secret attempts per offer | `identity.code_max_attempts`, then `cancelled` | Online guessing of a 128-bit secret is already infeasible; this bounds noise |
 | Open offers per member | 1 | No stacking |
 | Offers per member per day | `ratelimit.device_link_offers_per_day` | Spam and probing |
 | Devices per member | `identity.max_devices_per_member` | Bounds one member running many parallel contributors; rate limits are per member anyway (10.9) |
 
 The 6-digit SAS (short authentication string) lets the person check that the key that claimed is the key their new device generated. It is not a secret and adds 10^-6 per-try assurance only; the real protection is single-claim: if an attacker claims first, the real device's claim fails visibly and the person cancels. [D]
 
-**Key chain** [D]: every `MemberKey` row stores the key that authorized it and that key's signature (the first two keys are self-signed at registration; keys added by recovery are signed by the recovery key). `GET /v1/members/me/keys` returns the chain; the client verifies it and warns on any key without a valid authorization. A server job re-verifies every active key and raises the alarm `identity.key_chain_invalid` (metric `hamyar_identity_key_chain_invalid_total`) on any row whose signature does not verify, which detects a key row inserted directly into the database. Limit, stated honestly: the server can still deny service, observe metadata and act inside its own ledger; the chain makes unauthorized key additions detectable by the member's clients, it does not make the operator powerless [H: detection works; test: `T-adv` seeded forged row].
+**Key chain** [D]: every `MemberKey` row stores the key that authorized it and that key's signature (the first two keys are self-signed at registration; keys added by recovery are signed by the recovery key). `GET /v1/member-keys` returns the chain; the client verifies it and warns on any key without a valid authorization. A server job re-verifies every active key and raises the alarm `identity.key_chain_invalid` (metric `hamyar_identity_key_chain_invalid_total`) on any row whose signature does not verify, which detects a key row inserted directly into the database. Limit, stated honestly: the server can still deny service, observe metadata and act inside its own ledger; the chain makes unauthorized key additions detectable by the member's clients, it does not make the operator powerless [H: detection works; test: `T-adv` seeded forged row].
 
 ## 10.8 Account recovery and its abuse risks
 
 ```
 client (new device, no session): person types the recovery key; normalize; verify checksum locally
-  ch   = POST /v1/auth-challenges {purpose: 'recover'}
+  ch   = POST /v1/identity-challenges {purpose: 'recover'}
   new_dk, new_rs -> new_rk generated as in 10.3.3
-  body = {recovery_pub, new_device_pub, new_recovery_pub, device_token, platform_class, key_storage}
-  POST /v1/recoveries body + {challenge_id, recovery_signature (old recovery key),
-        device_signature (new_dk), new_recovery_signature (new_rk)}
+  body = {recovery_public_key, new_public_key, new_recovery_public_key, device_token, platform_class, key_storage}
+  POST /v1/recoveries body + {challenge, recovery_signature (old recovery key),
+        proof (new_dk), new_recovery_proof (new_rk)}
 server:
   1. rate limits: ratelimit.recovery_attempts_per_day per IP hash and per device token
   2. verify challenge and all three signatures; find MemberKey(kind recovery, state active|retiring)
@@ -477,8 +476,8 @@ Legend: `Y` allowed when the conditions hold; `2P` allowed only with two-person 
 | Credentials per admin | At least `security.admin_min_credentials` active (a primary and an offline backup) | A lost authenticator must not lock an admin out |
 
 ```
-sign-in:  POST /v1/admin/auth-challenges  -> {challenge (32 random bytes, single use, ttl identity.challenge_ttl_s)}
-          POST /v1/admin/sessions {assertion}
+sign-in:  POST /v1/admin/auth/challenges  -> {challenge_id, public_key_options, expires_at}   (single use, ttl session.admin_stepup_ttl_s)
+          POST /v1/admin/sessions {challenge_id, assertion}
   server: exact origin and rpIdHash match; UP and UV flags set; signature valid for the stored public key;
           challenge matches and is unused; if sign_count is non-zero it must be greater than the stored one,
           else the credential is locked, the alarm admin.credential_cloned is raised and no session is issued;
@@ -590,7 +589,7 @@ IpHasher.hash(ip):                       # runs once, in edge middleware, before
 
 ### 10.14.3 Closure, export, deletion [D]
 
-`member.closed` (member-initiated, or after `retention.member_inactive_days`) deletes `MemberKey`, `Device` (except grant memory), `Session`, e-mail, `SecurityNotice`, `OptIn` and invite edges, and reduces the `Member` row to the opaque `mem_` id, as S0.7 requires. Ledger and provenance rows are `permanent` by design and contain no personal data; provenance carries `vol_` handles, not `mem_` ids (S0.6.4). Closure is irreversible and cannot be recovered. `GET /v1/members/me/export` returns the member's own rows in JSON. The interface states that closure does not rewrite the public ledger or published provenance.
+`member.closed` (member-initiated, or after `retention.member_inactive_days`) deletes `MemberKey`, `Device` (except grant memory), `Session`, e-mail, `SecurityNotice`, `OptIn` and invite edges, and reduces the `Member` row to the opaque `mem_` id, as S0.7 requires. Ledger and provenance rows are `permanent` by design and contain no personal data; provenance carries `vol_` handles, not `mem_` ids (S0.6.4). Closure is irreversible and cannot be recovered. `GET /v1/members/me/export` returns the member's own rows in JSON, one `section` per request (S15.B.5.2). The interface states that closure does not rewrite the public ledger or published provenance.
 
 ## 10.15 Member safety in a high-risk context
 
@@ -710,27 +709,27 @@ Names and paths are proposals for `S15.*`, which is authoritative; methods and p
 
 | `op` | Request | Auth | Permission | Idem |
 | --- | --- | --- | --- | --- |
-| `createAuthChallenge` | `POST /v1/auth-challenges` | none | `perm.identity.create_challenge` | no |
+| `createIdentityChallenge` | `POST /v1/identity-challenges` | none | `perm.identity.create_challenge` | no |
 | `createMember` | `POST /v1/members` | none | `perm.identity.create_member` | yes |
 | `createSession` | `POST /v1/sessions` | none | `perm.identity.start_session` | no |
 | `deleteSession` | `DELETE /v1/sessions/{ses_id}` | member | `perm.session.revoke_own` | no |
 | `createSessionRevocation` | `POST /v1/members/me/session-revocations` | member (X5) | `perm.session.revoke_own` | yes |
 | `getMe`, `exportMe` | `GET /v1/members/me`, `GET /v1/members/me/export` | member | `perm.identity.view_own`, `perm.identity.export_own_data` | no |
-| `listMemberKeys`, `createMemberKey` | `GET`, `POST /v1/members/me/keys` | member (X5 for POST) | `perm.identity.manage_keys` | POST yes |
-| `createKeyRevocation` | `POST /v1/members/me/keys/{mky_id}/revocation` | member (X5) | `perm.identity.manage_keys` | yes |
-| `createRecoveryKey`, `createRecoveryConfirmation` | `POST /v1/members/me/recovery-keys`, `POST /v1/members/me/recovery-confirmations` | member (X5) | `perm.identity.manage_keys` | yes |
+| `listMemberKeys`, `rotateKey` | `GET /v1/member-keys`, `POST /v1/member-keys/rotations` | member (X5 for POST) | `perm.identity.manage_keys` | POST yes |
+| `revokeMemberKey` | `DELETE /v1/member-keys/{key_id}` | member (X5) | `perm.identity.manage_keys` | yes |
+| `rotateKey` (`kind` `recovery`), `confirmRecoveryKey` | `POST /v1/member-keys/rotations`, `POST /v1/members/me/recovery-confirmations` | member (X5) | `perm.identity.manage_keys` | yes |
 | `createRecovery` | `POST /v1/recoveries` | none | `perm.identity.start_recovery` | yes |
-| `createDeviceLinkOffer`, `createDeviceLinkApproval` | `POST /v1/device-link-offers`, `POST /v1/device-link-offers/{dlo_id}/approval` | member (X5) | `perm.identity.link_device` | yes |
-| `createDeviceLinkClaim` | `POST /v1/device-link-offers/{dlo_id}/claims` | none | `perm.identity.link_device` (by secret) | no |
+| `createDeviceLink`, `approveDeviceLink` | `POST /v1/device-links`, `POST /v1/device-links/{device_id}/approval` | member (X5) | `perm.identity.link_device` | yes |
+| `redeemDeviceLink` | `POST /v1/device-links/redemptions` | none | `perm.identity.link_device` (by secret) | no |
 | `putMemberEmail`, `deleteMemberEmail` | `PUT`, `DELETE /v1/members/me/email` | member (X5) | `perm.identity.set_email` | yes |
 | `closeMember` | `POST /v1/members/me/closure` | member (X5) | `perm.identity.close_account` | yes |
 | `createInvite`, `deleteInvite` | `POST /v1/invites`, `DELETE /v1/invites/{inv_id}` | member | `perm.invite.issue`, `perm.invite.revoke_own` | yes |
-| `createAdminAuthChallenge`, `createAdminSession` | `POST /v1/admin/auth-challenges`, `POST /v1/admin/sessions` | none | none (WebAuthn) | no |
-| `createAdminAction`, `createAdminActionApproval` | `POST /v1/admin/actions`, `POST /v1/admin/actions/{act_id}/approvals` | admin | by action (10.11) | yes |
+| `startAdminLogin`, `createAdminSession` | `POST /v1/admin/auth/challenges`, `POST /v1/admin/sessions` | none | none (WebAuthn) | no |
+| `approveApproval` | `POST /v1/admin/approvals/{apv_id}/approvals` | admin | by action (10.11); a two-person action is started by the concrete operation, which answers `202` with an `AdminApproval` | yes |
 
 ### 10.18.2 Events and metrics [A]
 
-Events (S0.5 format, stored in the outbox): `member.created`, `member.key_rotated`, `member.key_revoked`, `member.device_linked`, `member.recovered`, `member.recovery_confirmed`, `member.email_set`, `member.email_removed`, `member.closed`, `invite.issued`, `invite.redeemed`, `invite.expired`, `invite.revoked`, `invite.strike_recorded`, `invite.tree_frozen`, `invite.tree_unfrozen`, `session.issued`, `session.revoked`, `device_link.offered`, `device_link.claimed`, `device_link.approved`, `device_link.cancelled`, `device_link.expired`, `admin.signed_in`, `admin.credential_added`, `admin.credential_locked`, `admin_action.proposed`, `admin_action.approved`, `admin_action.executed`, `admin_action.expired`. Events carry `actor` as principal type plus opaque id and never an IP, key or token.
+Events (S0.5 format, stored in the outbox): `member.created`, `member.key_rotated`, `member.key_revoked`, `member.device_linked`, `member.recovered`, `member.recovery_confirmed`, `member.email_set`, `member.email_removed`, `member.closed`, `invite.issued`, `invite.redeemed`, `invite.expired`, `invite.revoked`, `invite.strike_recorded`, `invite.tree_frozen`, `invite.tree_unfrozen`, `session.issued`, `session.revoked`, `device_link.offered`, `device_link.claimed`, `device_link.approved`, `device_link.cancelled`, `device_link.expired`, `admin.signed_in`, `admin.credential_added`, `admin.credential_locked`, `admin.approval_requested`, `admin.approval_granted`, `admin_action.executed` (the original operation's own event, S15.B.3.1), `admin.approval_expired`. Events carry `actor` as principal type plus opaque id and never an IP, key or token.
 
 Metrics (no id or IP in any label): `hamyar_identity_registrations_total`, `hamyar_identity_recoveries_total`, `hamyar_identity_recovery_failures_total`, `hamyar_identity_key_chain_invalid_total`, `hamyar_ratelimit_denied_total` (label: scope), `hamyar_session_revocations_total`, `hamyar_admin_pending_approvals_total`. Alarms (`Alarm`): `identity.key_chain_invalid`, `admin.credential_cloned`, a spike in `hamyar_identity_recovery_failures_total`.
 
