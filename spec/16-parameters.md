@@ -75,7 +75,7 @@ Evaluated on every write against the configuration as it will be at `effective_f
 | Id | Constraint | Kind |
 | --- | --- | --- |
 | `C1` | `0 < admission.phi < 1` | error |
-| `C2` | `verify.audit_rate_floor <= verify.audit_rate_s <= verify.audit_rate_max` and `verify.gold_rate_floor <= verify.gold_rate_g <= verify.gold_rate_max`; `verify.audit_rate_floor > 0` | error |
+| `C2` | `verify.audit_rate_floor <= verify.audit_rate_s <= verify.audit_rate_max` and `verify.gold_rate_floor <= verify.gold_rate_g <= verify.gold_rate_max`; `verify.audit_rate_floor > 0`; `verify.gold_rate_floor > 0` | error |
 | `C3` | `lease.timeout_s >= cell.envelope.expected_time_s` | error |
 | `C4` | `credit.lifetime_days_accelerated <= credit.lifetime_days`; `grant.starter_lifetime_days <= credit.lifetime_days` | error |
 | `C5` | `reserve.ceiling_credits >= grant.starter_credits` | error |
@@ -142,7 +142,7 @@ Owner `operator`. Binding (S6.* ledger file 6.12.2): `credit.lifetime_days*` to 
 | `mint.per_member_daily_cap_credits` | credits | >= 1; `C18` | 30 = 3 x the FD§3.2 habit of about 10 cells a day | `T↓` | `P1M` | S6.* |
 | `mint.requires_launch_gate` | bool | constant | true | `C` | `CON` | S6.*, S14.* |
 | `inflation.claim_ratio_threshold_weeks` | ratio · weeks | > 0 | 6.0 | `T↓` | `FND` (pre-registered), `P1M` | S6.*, S6.27.2 |
-| `inflation.mint_cap_cut_ratio` | ratio | 0 < x <= 1 | 0.25 (cut applied when the threshold is passed) | `T↑` | `FND` | S6.* |
+| `inflation.mint_cap_cut_ratio` | ratio | 0 < x <= 1 | 0.25 (cut applied when the threshold is passed); the cap after the cut = floor(cap x (1 - ratio)) | `T↑` | `FND` | S6.* |
 | `inflation.mint_utilization_alarm` | ratio | 0..1 | 0.90 | `N` | `OPS` | S6.*, S4.* |
 | `inflation.throughput_window_days` | days | 7..90 | 28 | `N` | `P1M` | S6.*, `C13` |
 
@@ -177,9 +177,9 @@ Owner `operator`. Binding: a quote, hold or reservation keeps the parameter vers
 | `admission.min_forecast_donors` | int | 1..1000 | 10 (the cohort size below which a mean is noise [H]) | `T↑` | `P1M`: forecast error; owner decision for a pilot of 30 to 50 (S6.39) | S6.24, S6.28 |
 | `admission.min_history_days` | int | 1..`admission.forecast_window_days`; `C10` | 3 | `T↑` | `P1M` | S6.24 |
 | `admission.horizon_discount_per_day` | ratio | 0 <= x < 1 | 0.00 (FD§3.3 exact; expected to become greater than 0 [H]) | `T↑` | `P1M`: forecast error by horizon | S6.24 |
-| `admission.min_window_s` | duration_s | > 0; `C7`, `C9` | 43,200 | `N` | `DEM`: accepted windows | S6.27 |
+| `admission.min_window_s` | duration_s | `admission.window_step_s` .. `admission.max_window_days` x 86400; `C7`, `C9`, `S16D-C5` | 43,200 | `N` | `DEM`: accepted windows | S6.27 |
 | `admission.max_window_days` | days | 1..60; `C7`, `C9` | 14 | `T↓` | `DEM` | S6.27 |
-| `admission.window_step_s` | duration_s | divides 86,400; `C9` | 43,200 (equal to `admission.min_window_s`) | `N` | `DEM` | S6.27 |
+| `admission.window_step_s` | duration_s | 1..86,400, divides 86,400; `C9` | 43,200 (equal to `admission.min_window_s`) | `N` | `DEM` | S6.27 |
 | `admission.max_job_cells` | int | 1..100000 | 300 = floor(350 / 1.15) rounded down to a multiple of 100 | `T↓` | `DEM`, then `P1M` | S6.*, S11.* |
 | `admission.max_concurrent_jobs_per_member` | int | 1..20 | 2 | `T↓` | `FND` | S6.29, S5.* |
 | `admission.waitlist_ttl_days` | days | 1..60 | 7 | `N` | `OPS` | S6.29 |
@@ -230,7 +230,7 @@ Owner `operator`. Binding: the sampling rates and multipliers that decided wheth
 | `verify.timing_regular_window_obs` | int | 5..1000 | 20 | `N` | `P1M` | S9.12 |
 | `verify.timing_regular_cv` | ratio | 0..1 | 0.05 [H] | `T↑` (a higher coefficient flags more) | `P1M` | S9.12 |
 | `verify.duplicate_similarity_threshold` | ratio | 0..1 | 0.95 | `T↓` | `P1M` | S9.11 |
-| `verify.duplicate_min_chars` | int | 1..10000 | 80 | `T↓` | `P1M`: rate of honest short agreement | S9.11 |
+| `verify.duplicate_min_chars` | int | 1..10000; >= `verify.duplicate_shingle_chars`; `S16D-C11` | 80 | `T↓` | `P1M`: rate of honest short agreement | S9.11 |
 | `verify.duplicate_shingle_chars` | int | 2..20 | 5 | `N` | `P1M` | S9.11 |
 | `verify.duplicate_minhash_perms` | int | multiple of 4; `S9-C2` | 128 (32 bands of 4 rows) | `N` | `OPS`: index cost | S9.11 |
 | `verify.duplicate_window_days` | days | 1..90 | 14 | `T↑` | `P1M` | S9.11 |
@@ -373,7 +373,7 @@ Owner `reviewer` for the first table, `operator` for the second (the owner colum
 | `screen.quarantine_max_age_days` | days | 1..60 | 7 | `T↓` | `OPS`: reviewer capacity | S9.9 |
 | `service.required_regions` | json list | ISO 3166-1 alpha-2 codes | `["IR"]`; the operator's jurisdiction is added once chosen [V] | `T↑` (longer list) | `CNS` | S7.10 |
 | `service.terms_copy_max_bytes` | int · bytes | 1024..52428800 | 5,242,880 (S0 value kept, `ISS-163`) | `T↓` | `OPS`: size of real terms documents | S7.10 |
-| `template.autopause_report_count` | int | 1..1000 | 5 reports inside `template.autopause_window_s` | `T↓` | `OPS` | S9.9.2, S8.* |
+| `template.autopause_report_count` | int | 1..1000 | 5 reports from distinct reporting members inside `template.autopause_window_s` [V S9.9.2] | `T↓` | `OPS` | S9.9.2, S8.* |
 | `template.autopause_window_s` | duration_s | 60..604800 | 3600 | `N` | `OPS` | S9.9.2, S8.* |
 
 ## 16.13 Launch, change control, ledger checks, job size
@@ -435,7 +435,7 @@ FD§9 requires that every measure and every stop/continue rule is recorded **bef
 
 | Pre-registered threshold | Seeded from parameter | FD source | Initial configurable default |
 | --- | --- | --- | --- |
-| Minimum eta (Reserve inflow versus spend) | `price.eta_alarm_threshold` | FD§4.3, FD§9 | 0.80 |
+| Minimum round-trip efficiency eta = 1/(1+v+lambda), cells requested per cell contributed | `price.eta_alarm_threshold` | FD§4.3, FD§9 | 0.80 |
 | Maximum false-accept rate | `verify.false_accept_alarm` | FD§4.4, FD§9 | 0.05 |
 | Maximum false-reject rate | `verify.false_reject_alarm` | FD§4.4, FD§9 | 0.10 |
 | Claim-to-capacity ratio that forces a mint cut | `inflation.claim_ratio_threshold_weeks` | FD§4.5, FD§9 | 6.0 weeks |
@@ -449,7 +449,7 @@ The three rows without a default are keys of `PreRegistration.thresholds` (`thr.
 
 ## 16.16 API, security, calibration, metrics, operations
 
-Owner `operator` (`calibration.min_samples_per_service` is `founders`). Binding: read at the next request, job run or cache refresh (`ops.config_cache_ttl_s`); none is stamped on a domain object. All `ops.*` rows are `public: no` except `ops.rpo_s`, `ops.rto_s` and `ops.backup_retention_days` (they are promises members can read) [A]. [D]
+Owner `operator` (`calibration.min_samples_per_service` is `founders`). Binding: read at the next request, job run or cache refresh (`ops.config_cache_ttl_s`); none is stamped on a domain object. All `ops.*` rows are `public: no` except `ops.rpo_s`, `ops.rto_s`, `ops.backup_retention_days` and `ops.purge_interval_s` (they are promises members can read; the purge interval is the latency of the deletion promise) [A]. [D]
 
 | Name | Type · unit | Validation | Initial configurable default | Chg | Cal | Used |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -461,10 +461,10 @@ Owner `operator` (`calibration.min_samples_per_service` is `founders`). Binding:
 | `api.request_timeout_s` | duration_s | 1..300 | 30 | `N` | `TEC` | S15.*, S4.* |
 | `security.secret_rotation_days` | int | 1..365 | 90 | `T↓` | `SEC` | S10.* |
 | `security.rotate_before_public_exposure` | bool | constant | true (FD§10) | `C` | `CON` | S10.*, S14.* |
-| `security.two_person_actions` | json | subset of the action names in S10.* | `["ledger.reversal","launch.signoff","parameter.loosen","killswitch.release"]` [A] | `T↑` (more actions) | `SEC` | S10.*, 16.17 |
+| `security.two_person_actions` | json | subset of the action names in S10.*; always contains `parameter.loosen` (`S16D-C20`) | `["ledger.reversal","launch.signoff","parameter.loosen","killswitch.release"]` [A] | `T↑` (more actions) | `SEC` | S10.*, 16.17 |
 | `calibration.min_samples_per_service` | int · cells | 1..10000 | 30 | `T↑` | `FND` | S0 0.10.4, S9.12 |
 | `metrics.rollup_interval_s` | duration_s | 60..86400 | 3600 | `N` | `OPS` | S13.*, S4.* |
-| `ops.rpo_s` | duration_s | 0..86400 | 300 | `T↓` | `OPS`: restore drill | S4.* |
+| `ops.rpo_s` | duration_s | 0..86400 | 300 [V]: no parameter bounds the log-archive interval; the S4 owner adds one or states 300 s as a target | `T↓` | `OPS`: restore drill | S4.* |
 | `ops.rto_s` | duration_s | 60..604800 | 14,400 | `T↓` | `OPS`: restore drill duration | S4.* |
 | `ops.txn_retry_max` | int | 0..20 | 5 | `N` | `OPS`: retry counters | S4.* |
 | `ops.capacity_headroom_ratio` | ratio | >= 1 | 5.0 | `T↑` | `OPS`: load test (S4.6.2) | S4.* |
@@ -536,7 +536,7 @@ A rollback is a new version with the old value; it is classified by the same rul
 
 ### 16.17.5 Public exposure [D][A]
 
-`GET /v1/public/parameters` (S0 0.11.2) lists, for every public parameter: name, unit, current value, owner role, change-policy code, calibration code, initial default, the next pending version with its `effective_from`, and a link to the change log. A member can therefore see what changes before it changes (FD Principle 5). These rows are `public: no` because publishing the exact value helps an attacker more than it helps a member: `security.*`; `ops.*` except `ops.rpo_s`, `ops.rto_s`, `ops.backup_retention_days`; `identity.recovery_*`; `ratelimit.recovery_attempts_per_day`, `ratelimit.*new_members_per_day`; `grant.max_per_device`; `growth.referral.max_per_referrer_per_30d`; `verify.timing_*`, `verify.duplicate_*`, `verify.audit_rate_*`, `verify.gold_rate_*`, `verify.adapt.*`, `trust.audit_multiplier.*`; the `screen.*` limits. A change to a hidden parameter still produces a public change-log entry that names the area and the change class and gives the notice period, but not the value; an owner may decide that is too little (`ISS-164`). Constants and the structure of the sampling method are public in S8.* and S9.*. [A]
+`GET /v1/public/parameters` (S0 0.11.2) lists, for every public parameter: name, unit, current value, owner role, change-policy code, calibration code, initial default, the next pending version with its `effective_from`, and a link to the change log. A member can therefore see what changes before it changes (FD Principle 5). These rows are `public: no` because publishing the exact value helps an attacker more than it helps a member: `security.*`; `ops.*` except `ops.rpo_s`, `ops.rto_s`, `ops.backup_retention_days`, `ops.purge_interval_s`; `identity.recovery_*`; `ratelimit.recovery_attempts_per_day`, `ratelimit.*new_members_per_day`; `grant.max_per_device`; `lease.max_job_share_ratio`; `growth.referral.max_per_referrer_per_30d`; `verify.timing_*`, `verify.duplicate_*`, `verify.audit_rate_*`, `verify.gold_rate_*`, `verify.adapt.*`, `trust.audit_multiplier.*`; the `screen.*` limits. A change to a hidden parameter still produces a public change-log entry that names the area and the change class and gives the notice period, but not the value; an owner may decide that is too little (`ISS-164`). Constants and the structure of the sampling method are public in S8.* and S9.*. [A]
 
 ### 16.17.6 Seeding and constants [D]
 
