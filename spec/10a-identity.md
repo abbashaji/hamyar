@@ -59,14 +59,14 @@ Browser storage can be evicted (storage pressure, per-site caps) [V]. The client
 ### 10.3.2 Signed message format and challenges [D]
 
 ```
-sig_input = utf8('hamyar/v1/') || purpose || 0x00 || audience || 0x00
-         || challenge_id || 0x00 || nonce || 0x00 || context_hash
+sig_input = utf8('hamyar:v1:') || purpose || 0x00 || audience || 0x00
+         || challenge || 0x00 || context_hash
 context_hash = SHA-256( RFC8785_canonical_json(request_body) )     # S0.6.4
 ```
 
-`purpose` is one of `register_device`, `register_recovery`, `session`, `step_up`, `rotate_device_key`, `rotate_recovery_key`, `link_claim`, `link_approve`, `recover`, `confirm_recovery`, `revoke_key`, `set_email`, `close_account`. `audience` is the member origin string. One signature therefore authorizes exactly one purpose, one origin and one request body, and cannot be replayed on another site or for another action. Reason: removes cross-protocol and cross-site replay.
+`purpose` is one of `create`, `session`, `rotate`, `recover`, `device_link`, `step_up`, `confirm_recovery` (S15.B.3.1 maps the former 13 names; sensitive actions use `step_up` with the `Step-Up` header of S15.B.4). `audience` is the member origin string. One signature therefore authorizes exactly one purpose, one origin and one request body, and cannot be replayed on another site or for another action. Reason: removes cross-protocol and cross-site replay.
 
-`POST /v1/auth-challenges` (auth `none`, rate limited by IP hash) returns `{challenge_id, nonce, expires_at}`. The nonce is 128 random bits, valid `identity.challenge_ttl_s` seconds, single use (marked used in the same transaction as the action it authorizes). Challenges are issued to anyone for any purpose and never reveal whether a key or member exists. [D]
+`POST /v1/identity-challenges` (auth `none`, rate limited by IP hash) returns `{challenge, expires_at}`. The challenge is 256 random bits, valid `identity.challenge_ttl_s` seconds, single use (marked used in the same transaction as the action it authorizes). Challenges are issued to anyone for any purpose and never reveal whether a key or member exists. [D]
 
 ### 10.3.3 Registration (pseudocode) [D]
 
@@ -75,13 +75,13 @@ client:
   token = loadOrCreate(device_token)                 # 128-bit CSPRNG, IndexedDB
   dk    = generateKey(Ed25519, extractable=false if supported)
   rs    = csprng(identity.recovery_key_bits / 8)     # recovery secret, never sent
-  rk    = Ed25519_from_seed( HKDF-SHA-256(rs, 'hamyar/v1/recovery', 'ed25519-seed', 32) )
-  ch    = POST /v1/auth-challenges {purpose: 'register_device'}
-  body  = {invite_code?, device_pub, recovery_pub, device_token: token,
+  rk    = Ed25519_from_seed( HKDF-SHA-256(rs, 'hamyar:v1:recovery', 'ed25519-seed', 32) )
+  ch    = POST /v1/identity-challenges {purpose: 'create'}
+  body  = {invite_code?, public_key, recovery_public_key, device_token: token,
            platform_class, key_storage, locale}
-  POST /v1/members  body + {challenge_id,
-         device_signature:   sign(dk, sig_input('register_device',   ch, ctx(body))),
-         recovery_signature: sign(rk, sig_input('register_recovery', ch, ctx(body)))}
+  POST /v1/members  body + {challenge,
+         proof:   sign(dk, sig_input('create',   ch, ctx(body))),
+         recovery_proof: sign(rk, sig_input('create', ch, ctx(body)))}
   -> show recovery key screen (10.4) before leaving onboarding
 ```
 
@@ -107,11 +107,11 @@ Server checks, in this order; the first failure stops the request: [D]
 | Item | Decision | Reason |
 | --- | --- | --- |
 | Payload | `identity.recovery_key_bits` bits (default 128, validation at least 128, multiple of 8) from the OS CSPRNG (`crypto.getRandomValues`); if that API is absent the client refuses to create an identity, it never falls back to `Math.random` or time | A guessable key defeats the design |
-| Checksum | C bits, the first C bits of SHA-256(`hamyar/v1/recovery-checksum` followed by the payload), where C is the smallest value at least 22 that makes (payload bits + C) divisible by 5 | Detects typos locally before any request; for 128 bits C = 22, so an undetected random typo has probability 2^-22, about 2.4 in 10 million |
+| Checksum | C bits, the first C bits of SHA-256(`hamyar:v1:recovery-checksum` followed by the payload), where C is the smallest value at least 22 that makes (payload bits + C) divisible by 5 | Detects typos locally before any request; for 128 bits C = 22, so an undetected random typo has probability 2^-22, about 2.4 in 10 million |
 | Encoding | Crockford base32 (digits and letters without I, L, O, U), groups of 5 characters joined by hyphens, upper case; 128 + 22 = 150 bits = 30 characters = 6 groups | Easy to copy by hand; case-insensitive |
 | Example (format only, not a key) | `7M4QX-9PT2D-HZ8E6-K3VBA-0WYN5-R1CGF` | |
 | Input normalization | Upper-case; strip spaces and hyphens; map I and L to 1 and O to 0; map Persian and Arabic-Indic digits to Latin digits; reject any other character; verify the checksum on the device | Persian keyboards and digit habits; typos never cost a request |
-| Derivation | `seed = HKDF-SHA-256(ikm = payload, salt = 'hamyar/v1/recovery', info = 'ed25519-seed', L = 32)`; the recovery keypair is the Ed25519 keypair of `seed` | High-entropy input needs no slow hash (S0.6.4) |
+| Derivation | `seed = HKDF-SHA-256(ikm = payload, salt = 'hamyar:v1:recovery', info = 'ed25519-seed', L = 32)`; the recovery keypair is the Ed25519 keypair of `seed` | High-entropy input needs no slow hash (S0.6.4) |
 | Guessing odds | 2^-128 per guess. Exhaustive search at an assumed 10^12 guesses per second (an illustrative upper bound for one very large attacker, not a measurement) takes 2^128 / 10^12 = 3.4 x 10^26 s, about 1.1 x 10^19 years [A] | Why no lockout, KDF or CAPTCHA is needed on the key itself |
 
 Word lists were rejected for Phase 1: a vetted Persian list of 2048 words does not exist in this project and an unvetted one risks ambiguous or offensive words [V]. A QR rendering of the same string is offered for moving the key to another device by camera.
