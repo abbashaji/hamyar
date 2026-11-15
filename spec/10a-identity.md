@@ -135,8 +135,8 @@ The server holds `recovery_pub` only. Verification is a signature over a fresh c
 | Case | Rule |
 | --- | --- |
 | Recovery key never confirmed | Replaceable with a device-key step-up alone; the old key was never proven held |
-| Recovery key confirmed | Replacing it needs a device-key step-up AND a signature by the current recovery key, so a thief holding only an unlocked phone cannot lock the owner out |
-| Effect | New key `active` and unconfirmed; old key `retiring` for `identity.key_rotation_grace_s`, then `revoked`; a `SecurityNotice` on every device |
+| Recovery key confirmed | Replacing it needs a device-key step-up AND a signature by the current recovery key, so a thief holding only an unlocked phone cannot lock the owner out (the `recovery_signature` of `rotateKey`, S15.B.9) |
+| Effect | New key `pending` and `active` after `identity.key_rotation_grace_s` (both work meanwhile); old key `retiring` until then, then `revoked`; a `SecurityNotice` on every device |
 | After a recovery (10.8) | The key used is revoked at once and a new one is mandatory in the same request (it was typed on a device that may be hostile) |
 
 ## 10.5 Optional e-mail
@@ -164,7 +164,7 @@ The server holds `recovery_pub` only. Verification is a signature over a fresh c
 ```
 planned rotation of device key K_old -> K_new            # step-up required (10.13)
   client: generate K_new; persist it locally as 'pending' BEFORE sending anything
-  POST /v1/members/me/keys {device_pub: K_new.pub, replaces_key_id: K_old.id}
+  POST /v1/member-keys/rotations {kind: 'device', key_id: K_old.id, challenge, signature, new_public_key: K_new.pub, new_key_proof}
         signed by K_old (purpose rotate_device_key) AND by K_new (proof of possession)
   server: txn { K_new = MemberKey(active, authorized_by = K_old);
                 K_old.state = retiring, K_old.not_after = now + identity.key_rotation_grace_s;
@@ -188,21 +188,21 @@ Why a grace period: a lost response or a crash between the two sides must not lo
 Purpose: add a second device (new phone, desktop) to the same member without moving any private key. Every device holds its own keypair; no key export, no identity file and no session copying exists, because an exportable identity is a theft target. [D]
 
 ```
-Offer states: open --claim--> claimed --approval--> approved (T)
-              open|claimed --ttl--> expired (T);  open|claimed --cancel or attempts exhausted--> cancelled (T)
+Offer states: pending --claim--> awaiting_approval --approval--> linked (T)
+              pending|awaiting_approval --ttl--> expired (T);  pending|awaiting_approval --cancel or attempts exhausted--> denied (T)
 
-A (signed in, step-up):  POST /v1/device-link-offers
-    -> {offer_id, link_secret (128 random bits, QR and 26-character Crockford text),
+A (signed in, step-up):  POST /v1/device-links
+    -> {device_id, code (128 random bits, QR and 26-character Crockford text),
         expires_at = now + identity.device_link_code_ttl_s}
     server stores SHA-256(link_secret) only
 B (new device, no session): generate device key and device token;
-    POST /v1/device-link-offers/{offer_id}/claims {link_secret, device_pub, device_token,
+    POST /v1/device-links/redemptions {code, new_public_key, proof, device_token,
         platform_class, key_storage}  signed by B's key (purpose link_claim)
-    server: constant-time compare of the secret hash; attempts += 1; state claimed;
+    server: constant-time compare of the secret hash; attempts += 1; state awaiting_approval;
             claimed_key_hash = SHA-256(device_pub); only the first valid claim wins
     B and A both display  sas = (first 4 bytes of SHA-256(offer_id || device_pub) as uint32) mod 1,000,000, 6 digits
 A: shows platform_class and the 6 digits; the person confirms they match B's screen;
-    POST /v1/device-link-offers/{offer_id}/approval signed by A's key
+    POST /v1/device-links/{device_id}/approval {sas}, with the Step-Up header of A's key
         (purpose link_approve, context_hash covers offer_id and claimed_key_hash)
 server: txn { MemberKey(device, active, authorized_by_key_id = A.key, authorization_signature);
               upsert Device; SecurityNotice to all devices; emit member.device_linked }
@@ -212,14 +212,13 @@ B: next step is an ordinary session by challenge (10.13); B inherits nothing
 | Limit | Value | Reason |
 | --- | --- | --- |
 | Offer lifetime | `identity.device_link_code_ttl_s` (300 s) | A shoulder-surfed or photographed QR dies quickly |
-| Wrong-secret attempts per offer | `identity.code_max_attempts`, then `cancelled` | Online guessing of a 128-bit secret is already infeasible; this bounds noise |
 | Open offers per member | 1 | No stacking |
 | Offers per member per day | `ratelimit.device_link_offers_per_day` | Spam and probing |
 | Devices per member | `identity.max_devices_per_member` | Bounds one member running many parallel contributors; rate limits are per member anyway (10.9) |
 
 The 6-digit SAS (short authentication string) lets the person check that the key that claimed is the key their new device generated. It is not a secret and adds 10^-6 per-try assurance only; the real protection is single-claim: if an attacker claims first, the real device's claim fails visibly and the person cancels. [D]
 
-**Key chain** [D]: every `MemberKey` row stores the key that authorized it and that key's signature (the first two keys are self-signed at registration; keys added by recovery are signed by the recovery key). `GET /v1/members/me/keys` returns the chain; the client verifies it and warns on any key without a valid authorization. A server job re-verifies every active key and raises the alarm `identity.key_chain_invalid` (metric `hamyar_identity_key_chain_invalid_total`) on any row whose signature does not verify, which detects a key row inserted directly into the database. Limit, stated honestly: the server can still deny service, observe metadata and act inside its own ledger; the chain makes unauthorized key additions detectable by the member's clients, it does not make the operator powerless [H: detection works; test: `T-adv` seeded forged row].
+**Key chain** [D]: every `MemberKey` row stores the key that authorized it and that key's signature (the first two keys are self-signed at registration; keys added by recovery are signed by the recovery key). `GET /v1/member-keys` returns the chain; the client verifies it and warns on any key without a valid authorization. A server job re-verifies every active key and raises the alarm `identity.key_chain_invalid` (metric `hamyar_identity_key_chain_invalid_total`) on any row whose signature does not verify, which detects a key row inserted directly into the database. Limit, stated honestly: the server can still deny service, observe metadata and act inside its own ledger; the chain makes unauthorized key additions detectable by the member's clients, it does not make the operator powerless [H: detection works; test: `T-adv` seeded forged row].
 
 ## 10.8 Account recovery and its abuse risks
 
