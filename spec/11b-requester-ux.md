@@ -695,7 +695,7 @@ Outcome and tag copy (rows carry `needs_human_and_legal_review`):
 | `poor` | Poor | ضعیف |
 | `accuracy` | Accuracy | دقت |
 | `format` | Output format | قالب خروجی |
-| `completeness` | Completeness | کامل بون |
+| `completeness` | Completeness | کامل بودن |
 | `speed_vs_quote` | Time compared with the quote | زمان نسبت به بازهٔ اعلام‌شده |
 | `other` | Something else | موارد دیگر |
 
