@@ -159,11 +159,11 @@ Sources: `## Corrections required` of 16d (CR-01 to CR-25, 25 rows) and of 15g (
 | --- | --- | --- | --- | --- |
 | 01 | P 16.15 row 1 | relabel eta as 1/(1+v+lambda) | not yet checked | 16.15 table starts at line 436 of `spec/16-parameters.md` |
 | 02 | P 16.3 `C13`; P 16.5 row `mint.monthly_cap_credits`; S Table A | use min(phi, 1 - phi) | **not applied** | P `C13` (line 92) still multiplies `admission.phi_ppm`; P line 140 still reads `x phi 0.5`; the divisor fix of A13 #1 is in, CR-02 is not |
-| 03 | P 16.7 `admission.min_window_s`, `admission.window_step_s`; S Table A | positive window floor and step range | **not applied** | P lines 181 and 183: `> 0; C7, C9` and `divides 86,400; C9` |
+| 03 | P 16.7 `admission.min_window_s`, `admission.window_step_s`; S Table A | positive window floor and step range | **not applied** | P lines 180 and 182: `> 0; C7, C9` and `divides 86,400; C9` |
 | 04 | P 16.11 `retention.ip_hash_ttl_days`; S Table B | range `1..30` | **not applied** | P line 313: `0..30` |
-| 05 | P 16.3 `C2`; S 0.10.3 `C2` | add `verify.gold_rate_floor > 0` | **not applied** (P) | P line 79 adds `> 0` for the audit floor only; S not yet checked |
-| 06 | P 16.13; S Table A | notice ranges `1..90` | **not applied** (P) | P lines 392 and 393: `0..90`; S not yet checked |
-| 07 | P 16.13; S Table A | `reservation.*` in `change.notice_days_price` | applied in P (by A13 #12) | P line 393 lists `reservation.*`; S Table A not yet checked |
+| 05 | P 16.3 `C2`; S 0.10.3 `C2` | add `verify.gold_rate_floor > 0` | **not applied** (P) | P line 78 adds `> 0` for the audit floor only; S not yet checked |
+| 06 | P 16.13; S Table A | notice ranges `1..90` | **not applied** (P) | P lines 391 and 392: `0..90`; S not yet checked |
+| 07 | P 16.13; S Table A | `reservation.*` in `change.notice_days_price` | applied in P (by A13 #12) | P line 392 lists `reservation.*`; S Table A not yet checked |
 | 08 | P 16.14; S Table C | `team.min_public_members` 5 to 10 | not yet checked | A11 #7 and 16d F-10 both say 5 |
 | 09 | P 16.5; S Table A | state cut as floor(cap x (1 - ratio)) | **not applied** | P line 145 reads `0.25 (cut applied when the threshold is passed)` |
 | 10 | P 16.18 | basis of size defaults, rows not in FD 4.9 | not yet checked | |
@@ -183,7 +183,7 @@ Sources: `## Corrections required` of 16d (CR-01 to CR-25, 25 rows) and of 15g (
 | 24 | P 16.3 | record `S16D-C3` as warning | not yet checked | |
 | 25 | C 16.C.8 | add `admission.redeemable_capacity_cells_per_day` | not yet checked | |
 
-Result of the checks made so far: of 25 corrections, 6 were checked in `spec/16-parameters.md`; 5 of them are not applied (02, 03, 04, 05, 06, 09: six rows, five distinct places plus CR-09) and 1 is applied (07, by an audit fix, not by the 16d correction). 19 are not yet checked.
+Result of the checks made so far: 7 of the 25 corrections were checked in `spec/16-parameters.md`. Six are not applied (CR-02, 03, 04, 05, 06, 09) and one is applied (CR-07, by an audit fix of A13, not by the 16d correction). CR-18 is not applied in the rows read (lines 78 to 100) and is not fully checked. 18 corrections are not yet checked.
 
 ### 3.2 15g corrections (15g CR-nn) and the 15c to 15f edit lists
 
