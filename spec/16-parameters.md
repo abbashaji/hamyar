@@ -89,16 +89,16 @@ Evaluated on every write against the configuration as it will be at `effective_f
 | `S9-C1` | `cell.envelope.max_submission_bytes >= 3 * cell.envelope.max_output_chars` (a character is at most 3 bytes in the accepted UTF-8 range) | error |
 | `S9-C2` | `verify.duplicate_minhash_perms` is a multiple of 4 | error |
 | `S9-C3` | `lease.max_validations >= 0` and `lease.max_gate_failures >= 1` | error |
-| `C13` | `mint.monthly_cap_credits * 10^6 <= floor(admission.phi_ppm * accepted_cells_in_window * 30 / inflation.throughput_window_days) * 10^6` once throughput data exists (skipped in Phase 0) | warning plus a second approver on the edit (S6.* ledger file 6.11.5; `ISS-166`) |
+| `C13` | `mint.monthly_cap_credits * 10^6 <= floor(admission.phi_ppm * accepted_cells_in_window * 30 / (inflation.throughput_window_days * 10^6)) * 10^6` with `admission.phi_ppm` in ppm, so the divisor carries 10^6, once throughput data exists (skipped in Phase 0) | warning plus a second approver on the edit (S6.* ledger file 6.11.5; `ISS-166`) |
 | `C14` | `lease.extend_s <= lease.timeout_s`; `lease.submit_grace_s <= lease.timeout_s` | error |
 | `C15` | `session.member_idle_ttl_s <= session.member_abs_ttl_s`; `session.admin_idle_ttl_s <= session.admin_abs_ttl_s` | error |
-| `C16` | `trust.demote_below_reliability <= trust.established_min_reliability <= trust.trusted_min_reliability` | error |
+| `C16` | `trust.demote_below_reliability <= trust.established_min_reliability <= trust.trusted_min_reliability`; `trust.established_min_cells <= trust.trusted_min_cells` | error |
 | `C17` | `reserve.retire_min_credits <= reserve.ceiling_credits`; `credit.expiry_notice_days <= credit.lifetime_days_accelerated` | error |
 | `C18` | `admission.donor_daily_clamp_cells >= 1`; `mint.per_member_daily_cap_credits >= 1` | error |
 | `C19` | `launch.required_gate_ids` contains `G0` and `G1`; `launch.min_signoffs <= count of active AdminUser` | error on the first, warning on the second (`ISS-168`) |
 | `C20` | `policy.loosen_min_approvers >= policy.tighten_min_approvers`; `policy.loosen_min_notice_days >= change.notice_days_default` | error |
 
-Worked check of the initial defaults against every constraint [D]: `C1` 0.5; `C2` 0.01 <= 0.05 <= 0.20 and 0.02 <= 0.10 <= 0.50; `C3` 1200 >= 120; `C4` 14 <= 60 twice; `C5` 1000 >= 3; `C6` 0.05 and 0.10 <= 0.50; `C7` 43,200 <= 1,209,600; `C8` 350 >= 300 x 1.15 = 345; `C9` 43,200 and 1,209,600 are multiples of 43,200; `C10` 3 <= 14 and 7 <= 14; `C11` 86,400 <= 2,592,000; `C12` 86,400 >= 1800; `S9-C1` 32,768 >= 18,000; `S9-C2` 128 = 4 x 32; `C13` skipped (Phase 0); `C14` 600 <= 1200, 120 <= 1200; `C15` 2,592,000 <= 7,776,000 and 1800 <= 28,800; `C16` 0.70 <= 0.80 <= 0.95; `C17` 10 <= 1000, 7 <= 14; `C18` 30 >= 1; `C19` `["G0","G1"]`; `C20` 2 >= 1, 7 >= 7. All pass (`AC-param-02`).
+Worked check of the initial defaults against every constraint [D]: `C1` 0.5; `C2` 0.01 <= 0.05 <= 0.20 and 0.02 <= 0.10 <= 0.50; `C3` 1200 >= 120; `C4` 14 <= 60 twice; `C5` 1000 >= 3; `C6` 0.05 and 0.10 <= 0.50; `C7` 43,200 <= 1,209,600; `C8` 350 >= 300 x 1.15 = 345; `C9` 43,200 and 1,209,600 are multiples of 43,200; `C10` 3 <= 14 and 7 <= 14; `C11` 86,400 <= 2,592,000; `C12` 86,400 >= 1800; `S9-C1` 32,768 >= 18,000; `S9-C2` 128 = 4 x 32; `C13` skipped (Phase 0); `C14` 600 <= 1200, 120 <= 1200; `C15` 2,592,000 <= 7,776,000 and 1800 <= 28,800; `C16` 0.70 <= 0.80 <= 0.95 and 10 <= 100; `C17` 10 <= 1000, 7 <= 14; `C18` 30 >= 1; `C19` `["G0","G1"]`; `C20` 2 >= 1, 7 >= 7. All pass (`AC-param-02`).
 
 ## 16.4 Cell envelope
 
@@ -177,7 +177,7 @@ Owner `operator`. Binding: a quote, hold or reservation keeps the parameter vers
 | `admission.min_forecast_donors` | int | 1..1000 | 10 (the cohort size below which a mean is noise [H]) | `T↑` | `P1M`: forecast error; owner decision for a pilot of 30 to 50 (S6.39) | S6.24, S6.28 |
 | `admission.min_history_days` | int | 1..`admission.forecast_window_days`; `C10` | 3 | `T↑` | `P1M` | S6.24 |
 | `admission.horizon_discount_per_day` | ratio | 0 <= x < 1 | 0.00 (FD§3.3 exact; expected to become greater than 0 [H]) | `T↑` | `P1M`: forecast error by horizon | S6.24 |
-| `admission.min_window_s` | duration_s | `C7`, `C9` | 43,200 | `N` | `DEM`: accepted windows | S6.27 |
+| `admission.min_window_s` | duration_s | > 0; `C7`, `C9` | 43,200 | `N` | `DEM`: accepted windows | S6.27 |
 | `admission.max_window_days` | days | 1..60; `C7`, `C9` | 14 | `T↓` | `DEM` | S6.27 |
 | `admission.window_step_s` | duration_s | divides 86,400; `C9` | 43,200 (equal to `admission.min_window_s`) | `N` | `DEM` | S6.27 |
 | `admission.max_job_cells` | int | 1..100000 | 300 = floor(350 / 1.15) rounded down to a multiple of 100 | `T↓` | `DEM`, then `P1M` | S6.*, S11.* |
@@ -389,7 +389,7 @@ Owner `operator`; `launch.*` needs `launch.min_signoffs` distinct admins and the
 | `launch.min_signoffs` | int | 1..5; `C19` | 2 distinct admins [A]; an owner decision if the team has one person (`ISS-168`) | `T↑` | `FND` | S14.* |
 | `launch.min_approved_services` | int | 0..20 | 1 (FD§8.3 exit rule; or a documented fallback) | `T↑` | `FND` | S14.*, S7.* |
 | `change.notice_days_default` | days | 0..90; `C20` | 7 (FD Principle 5) | `T↑` | `FND` | S0 R10, all parts |
-| `change.notice_days_price` | days | 0..90 | 14 (for `price.*`, `admission.*`, `credit.*`) | `T↑` | `FND` | S6.* |
+| `change.notice_days_price` | days | 0..90 | 14 (for `price.*`, `admission.*`, `reservation.*`, `credit.*`) | `T↑` | `FND` | S6.* |
 | `change.tighten_publish_within_s` | duration_s | 0..604800 | 86,400 (tightening is immediate, its public log entry follows within a day) | `T↓` | `FND` | S7.*, 16.17 |
 | `ledger.invariant_check_interval_s` | duration_s | 5..3600 | 60 (sampled checks; the per-commit check is a constant) | `T↓` | `OPS` | S6.*, S4.* |
 | `ledger.full_recompute_interval_s` | duration_s | 60..86400 | 3600 | `T↓` | `OPS` | S6.* |

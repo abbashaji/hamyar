@@ -4,7 +4,7 @@
 
 ## 3.1 How to read this part
 
-- There are two kinds of row. `OD-nn` is an open decision that only the owner can make. `ASM-nn` is an assumption [A] the spec introduced because the Founding Document (FD) is silent. Both id schemes are convention gaps reported in `ISS-38`. [D]
+- There are two kinds of row. `OD-nn` is an open decision that only the owner can make. `ASM-nn` is an assumption [A] the spec introduced because the Founding Document (FD) is silent. Both id schemes are convention gaps reported in `ISS-38`. The `OD-nn` ids of this part are local to S3: S19.9 numbers its own owner decisions `OD-01`..`OD-12` with different meanings, so a reference across parts is written `S3.OD-nn` or `S19.OD-nn`. [D]
 - Every open decision has a default that the spec uses meanwhile, so the build is never blocked by a decision that is not yet made. A default is not a recommendation. Any default that touches provider terms, law or member safety is also [V]. [D]
 - A decision is recorded where its default lives: a parameter version, an allowlist row, `LaunchGateItem` evidence or a `PreRegistration`. Until then its status is open; every row below is open. [D]
 - Later parts list their [A] tags in their own text. Assembly collects them as further `ASM-nn` rows with ids that continue this list, each naming the `OD-nn` that could overturn it. If no existing decision fits, the part adds an `OD-nn` row and reports it (S0.1). [D]
@@ -13,7 +13,7 @@
 
 | id | Decision | Why only the owner | Default used meanwhile | Needed before |
 | --- | --- | --- | --- | --- |
-| `OD-01` | Operator jurisdiction and legal exposure | Counsel's answers depend on it, and only the owner knows it (brief) | None assumed. No jurisdiction is hardcoded; every legal question is [V] for counsel (`CNS`) and is stored as `LaunchGateItem` evidence | `G0` sign-off |
+| `OD-01` | Operator jurisdiction, entity form and legal exposure | Counsel's answers depend on it, and only the owner knows it (brief) | None assumed. No jurisdiction or entity form is hardcoded; every legal question is [V] for counsel (`CNS`) and is stored as `LaunchGateItem` evidence | `G0` sign-off |
 | `OD-02` | Who reviews templates, services and policy; who is the second reviewer and the second sign-off; who writes the topic list (`ISS-26`) and the 12 initial allowlist rows (`ISS-35`) | Only the owner knows the team [V] | At least two distinct admin principals exist: `launch.min_signoffs` = 2, `template.min_reviewers_new` = 2, `service.min_approvers` = 1. If the owner is alone the spec does not lower the numbers; lowering is a `FND` decision with a public change-log entry | First sign-off; first template approval |
 | `OD-03` | Hosting, storage, and the countries the service must be reachable from | The owner pays and carries the risk; reachability from Iran is [V] | Stack-agnostic design with storage and hosting behind interfaces; S4 recommends a stack as a recommendation only | First deployment to a public address |
 | `OD-04` | Which services to review first, and whether to launch on a documented fallback when no service is Commons-capable (`ISS-11`) | Provider choice is the owner's, and terms are read by a human [V] | The registry ships with every service `unreviewed`; the spec names no provider; no fallback is accepted without a signed `LaunchGateItem` | `G0` sign-off |
@@ -26,6 +26,7 @@
 | `OD-11` | The founders' thresholds recorded before Phase 1: price-efficiency alarm, claim-ratio threshold, mint-cap cut, false-accept and false-reject alarms, return bars, decision rules, and the switch-off thresholds for review cells (`FND`) | The FD leaves these to the founders before Phase 1 (S0.10.4) | The S0.10.6 values, which are placeholders and not findings | Pre-registration lock, before day 1 of Phase 1 |
 | `OD-12` | Retention, logging and compelled-disclosure posture: the `retention.*` numbers and what S10.* promises members | A safety judgment about members in a high-risk setting (`SEC`) [V] | The S0.10.6 values, reviewed by a safety adviser before use | `G1` sign-off |
 | `OD-13` | Who reviews the Persian and English copy for language and legal accuracy | It needs a named human, and counsel for promises and notices [V] | Every `copy.*` key keeps `needs_human_and_legal_review`; the launch checklist (S14.*) has an item for it | Launch sign-off |
+| `OD-14` | The project name and public descriptor: whether `Hamyar` is used publicly, and whether the words "cooperative" and "bank" are ever used (FD§0.3, FD§8.2 row 12) | The choice of name is the owner's; availability of the name and the legal meaning of those words are unchecked [V] | `Hamyar` stays a provisional working name [D, provisional] (FD§0.3); public copy says "commons" and "contribute / request" and does not use "cooperative" or "bank"; "deposit / withdrawal" stay internal; counsel is asked (`CNS`) | Public exposure |
 
 ## 3.3 Assumptions introduced [A]
 
@@ -71,7 +72,7 @@ These are not assumptions of this spec. They are listed so a reader sees what th
 | Reachability of any host from Iran | [V] | Brief, scope I | `G2` item, S19.* |
 | The existing panel repository was not read | [P][V] | Brief, scope J | S4.* |
 | A first contribution takes under 60 seconds once practiced | [H] | FD§3.2 (cited in S0.10.6) | `ui.fast_contribution_threshold_s`, S13.* |
-| Free allowances cannot be transferred | [P] | S0.2 example | S7.*, `CNS` |
+| Free allowances cannot be transferred | [P] | FD§8.1 (also the example in S0.2) | S7.*, `CNS` |
 | Simulation output is never evidence about people | [D] | Brief, scope K | S18.* |
 
 ## 3.5 When each decision is needed
@@ -83,6 +84,7 @@ These are not assumptions of this spec. They are listed so a reader sees what th
 | `G0` sign-off | `OD-01`, `OD-04` |
 | `G1` sign-off | `OD-12` |
 | Launch sign-off | `OD-13` |
+| Public exposure | `OD-14` |
 | `BM4` acceptance | `OD-10` |
 | First Commons job and first publication | `OD-05` |
 | `BM7` acceptance | `OD-09` |
