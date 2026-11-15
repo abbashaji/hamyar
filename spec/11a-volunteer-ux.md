@@ -269,7 +269,7 @@ Convention additions requested by this part (C-022 completes the table; names ar
 | Copy key | `fa` (draft) | `en` |
 | --- | --- | --- |
 | `copy.landing.headline` | یک دقیقه در روز، کارهای بازبینی‌شده، حساب خودِ شما. دکمهٔ ارسال را شما می‌زنید. | One minute a day. Reviewed tasks. Your own account. You press Send. |
-| `copy.landing.never_list` | همیار هرگز به جای شما ارسال نمی‌کند، صفحهٔ گفت‌وگوی شما را نمی‌خواند، رمز نمی‌خواهد، و هیچ‌وقت شما را به دور زدن محدودیت‌ها تشویق نمی‌کند. | Declared: Hamyar never presses Send for you, never reads your chat, never asks for passwords, and never encourages you to bypass any limit. |
+| `copy.landing.never_list` | اعلام‌شده: همیار هرگز به جای شما ارسال نمی‌کند، صفحهٔ گفت‌وگوی شما را نمی‌خواند، رمز نمی‌خواهد، و هیچ‌وقت شما را به دور زدن محدودیت‌ها تشویق نمی‌کند. | Declared: Hamyar never presses Send for you, never reads your chat, never asks for passwords, and never encourages you to bypass any limit. |
 | `copy.landing.not_open` | همیار هنوز برای عضویت باز نیست. | Hamyar is not open for new members yet. |
 
 All keys carry `needs_human_and_legal_review`.
@@ -325,7 +325,7 @@ Five visible steps: Notice, Card, Hand-off, Paste-back, Done. Identity creation 
 
 | Copy key | `fa` (draft) | `en` |
 | --- | --- | --- |
-| `copy.notice.first_use` | ۱) از حساب خودتان استفاده می‌کنید و خودتان دکمهٔ ارسال را می‌زنید. ۲) متنی که کپی می‌کنید از طرف یک ناشناس است؛ بازبینی شده و همهٔ آن را می‌توانید بخوانید و هر کاری را رد کنید. ۳) شرایط سرویس شما و قوانین کشورتان ممکن است این کار را محدود کند؛ تصمیم با شماست. | 1) You use your own account and press Send yourself. 2) The text you copy comes from a stranger; it was reviewed, you can read all of it, and you may decline any task. 3) Your provider's terms and your country's rules may limit this; the decision is yours. |
+| `copy.notice.first_use` | • از حساب خودتان استفاده می‌کنید و خودتان دکمهٔ ارسال را می‌زنید. • متنی که کپی می‌کنید از طرف یک ناشناس است؛ بازبینی شده و همهٔ آن را می‌توانید بخوانید و از هر کاری انصراف دهید. • شرایط سرویس شما و قوانین کشورتان ممکن است این کار را محدود کند؛ تصمیم با شماست. | 1) You use your own account and press Send yourself. 2) The text you copy comes from a stranger; it was reviewed, you can read all of it, and you may decline any task. 3) Your provider's terms and your country's rules may limit this; the decision is yours. |
 
 **States**
 
