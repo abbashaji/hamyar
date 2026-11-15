@@ -383,7 +383,7 @@ Consequences derived from the defaults (a = b = 1, tail 0.10, window 50), stated
 
 ### 8.29.1 Rates [D]
 
-All rates are integer ppm (S0.6.1). In this section and in 8.24.2 a name with the suffix `_ppm` (for example `verify.audit_rate_floor_ppm`) denotes the stored ppm value of the S0 parameter without the suffix; it is not a separate parameter. Let `f` = `adapt_factor_ppm` of the member in the scope of the cell, `tier_mult` = `trust.audit_multiplier.<tier>` in ppm.
+All rates are integer ppm (S0.6.1). In this section and in 8.24.2 a name with the suffix `_ppm` (for example the stored ppm value of the parameter `verify.audit_rate_floor`, written audit_rate_floor_ppm in the pseudocode) denotes the stored ppm value of the S0 parameter without the suffix; it is not a separate parameter. Let `f` = `adapt_factor_ppm` of the member in the scope of the cell, `tier_mult` = `trust.audit_multiplier.<tier>` in ppm.
 
 ```
 f_lo = ceil(verify.audit_rate_floor_ppm * 1_000_000 / verify.audit_rate_s_ppm)        # = 200_000 at defaults
