@@ -1,0 +1,284 @@
+# 15.G API consistency
+
+*Spec part 15g · owner cell C-041 · whole-API audit of `spec/15a-api-core.md` (S15a), `spec/15b-api-admin.md` (S15b), the reconciliation files `15c-api-reconcile-core.md` (15.B), `15d-api-reconcile-requester-growth.md` (15.C), `15e-api-reconcile-admin.md` (15.D), `15f-api-reconcile-measurement.md` (15.E) and the enforcement points of `spec/14-launch-gates.md` (S14). Written against the ground rules of `docs/decisions.md` and Founding Document draft v0.1 (FD). This file edits nothing: every change it asks for is listed in `## Corrections required` for a later cell. Nothing here is legal advice and nothing has been checked against any provider's terms or any law; every provider-dependent value stays configuration data entered by a reviewer [V].*
+
+## 15.G.1 Method, precedence and conventions
+
+**Method** [D]. Every operation table of S15a, S15b and 15c to 15f was read for `op`, method and path template, `Auth`, `Idem`, error column and `Events`; ids were compared by `op`, by method plus path, and by capability (what the call does to state). The `Auth`, `Idem`, error and `Events` columns were then compared with S15a 15.4, 15.9, 15.10 and S15b 15.34, and the enforcement points of S14.9 and S14.9.2 were matched to endpoints. Not read by this cell: parts 07, 10a, 11b, 11c, 12 and 13 and S0; what this file says about them is quoted from the reconciliation files and is [A]. The edit lists at the end of 15c to 15f were not re-audited; they are already specified there.
+
+| Rule | Statement | Tag |
+| --- | --- | --- |
+| `P1` | S0 wins over every S15 file (S15a 15.1). | [D] |
+| `P2` | S15a and S15b win over a citing part and over 15c to 15f where they disagree about an existing op, path, state or parameter. 15c to 15f are additive overlays; where an overlay changes an existing S15 guard it counts only if a row below adopts it. | [D] |
+| `P3` | For launch-switch and kill-switch *behavior* (what is checked, when a switch may open, service-gate and sign-off logic) S14 wins, because S14 is binding on every part that creates members, jobs, cells or credit (S14 header). The S15 shapes carry that behavior and are corrected to match. | [D] |
+| `P4` | For the error wire shape (code, status, `details`) S15a 15.9 wins; S14 `reasons` strings map to `details.reason` or `details.reasons`. | [D] |
+| `P5` | Where two files disagree about what a response may reveal, the stricter privacy reading wins (FD Principle 8); where they disagree about whether a check exists, the stricter guard wins (fail-closed, S14 rule 1). | [D] |
+| `P6` | No operation id is renamed, with one forced exception: the 11 operation-id collisions of `G-01`, whose rename is logged as `CR-01`. | [D][A] |
+
+Ids: findings are `G-nn`, auth findings `V-nn`, idempotency gaps `IG-nn`, error gaps `ER-nn`, event gaps `EV-nn`, gate cross-checks `GT-nn`, corrections `CR-nn`. A `wins` entry names the file whose text stays; the correction column says what the loser changes.
+
+## 15.G.2 Same path or capability defined twice, with a difference
+
+The table lists every case found where the same operation id, the same method and path, or the same capability is defined in two places and the places differ in method, schema, auth or error codes. The 11 operation-id collisions are in 15.G.2.1.
+
+| id | Defined at (both places) | What differs | Wins | Correction |
+| --- | --- | --- | --- | --- |
+| `G-02` | S15a 15.8 `getShareCard` (`GET /v1/members/me/share-card`) against S15b 15.33.5 `createShareCard`, `listMyShareCards`, `revokeShareCard`, `getPublicShareCard` | Schema and capability. S15a: computed on request, no stored link, nothing to revoke, fields `verified_cells_total`, `badge_ids`. S15b: per-member 128-bit token stored as a hash, a public URL, revocation, fields `cells_verified`, `badge_key`, `issued_month`. A per-member token links a pseudonym to a public post (15d row 25, O1, quoting 12.8). Also S15b `createShareCard` answers `RATE_LIMITED` for a cap (the code for caps is `CAP_EXCEEDED`) and names no rate class ("member class of part a"). | S15a (stricter privacy, `P5`; no token) [A: part 12 text read only through 15d] | Remove S15b 15.33.5 and its four operations, the events `sharecard.*`, the entity `ShareCard` (`shc_`), `growth.share_card_max_active`, `AC-public-05` and the share-card item of 15.33.1 rule 6 (`CR-03`). If the owner of part 12 decides for tokens, S15a `getShareCard` is rewritten instead and the `CAP_EXCEEDED` and rate-class defects are fixed first. |
+| `G-03` | S15e 15.D.4.6 `listAdminMetricSnapshots` against S15f 15.E.10 `listMetricSnapshots`, both `GET /v1/admin/metric-snapshots`, `perm.metrics.view` | Same method and path, two op ids, two filter sets (`?kind` of the S13 catalogue against `?kind` in `met`, `cal`, `exp`, `prr`), and opposite authorization: 15e forbids any small-cell override (`perm.metrics.view_small_cells` "does not exist"), 15f uses that permission on this path, on `getExperimentBalance` and on `getInterviewCoverage`. | One operation, id `listMetricSnapshots` (the id part 13 and 11c:615 already use), with 15e's suppression rule and the union of the filters | Delete `listAdminMetricSnapshots`; delete `perm.metrics.view_small_cells` everywhere (15f 15.E.7, 15.E.9, 15.E.10, Issues 6); suppressed cells stay `null` for every admin, so no account can difference cohorts against `AN-08` (`CR-12`). Cells that part 13 needs unsuppressed are a separate decision with its own threat model (15e 15.D.4.6 rule 1). |
+| `G-04` | S15d 15.C.4.2 `recordExperimentExposure` (`POST /v1/experiment-exposures`, key `R`) against S15f 15.E.11 `recordClientEvents` event name `ui.variant_exposed` (key `O`, client sends `arm_key`) | Same capability (a member reached an experiment decision point) in two operations; 15d never lets the client name an arm, 15f accepts an `arm_key` and compares it with the logged assignment. | S15d (the client never names an arm) | Remove `ui.variant_exposed` and the fields `experiment_code`, `arm_key` from `ClientEvent` (15f 15.E.11, `AC-api-rec-10` unaffected). Part 13 cites exposure through `recordExperimentExposure` (`CR-13`). |
+| `G-05` | S15c 15.B.8.1 `getPublicPolicy` (`GET /v1/public/policy`) against S15d row 17 (composite `getTemplate` plus `checkJobPolicy`), both answers to the same citation `/v1/policy-versions/current` at 11b:120 | Two replacement rows for one cited line, with different edits (15c Edit 21 against 15d table 11.34 edits). 15d says no member endpoint returns the allowlist; 15c publishes it publicly. | S15c (public, always on, allowlist is already public through the change log, FD Principle 5) | Drop 15d row 17 as the answer for 11b:120; screen 05 reads `getPublicPolicy` for `active.allowlist` and `getTemplate` `allowed` per template (`CR-14`). |
+| `G-06` | S15b 15.32.2 `startExperiment` (`draft` to `running`) against S15f 15.E.7 `registerExperiment` (`draft` to `registered`, then `running`) | State machine and guard. 15f adds the status `registered`, makes `startExperiment` require it, and stops `startExperiment` re-reading `fraction_source`. | S15f (closes the edit window between lock and first assignment) | Add `registered` to `Experiment.status`, change the `startExperiment` guard and `AC-admin-25` accordingly (`CR-11`). The two-person start of 13.8.2 is not adopted: step-up only, because the two-person control already sits on `lockPreRegistration` [A]. |
+| `G-07` | S15b 15.32.1 `PreRegistration` and `lockPreRegistration` against 13.7 (as quoted in S15f Issues 2) | Two object shapes (`scope`, `thresholds[].measure_key` against `phase`, `content`, `TH-nn`, `chain_hash`, `lock_requested`) and two `content_hash` inputs. S15b also does not bind the second approver to the content approved. | S15b names; S15f's binding fix | Add `content_hash` to the `lockPreRegistration` request and re-check it at execution; refuse `updatePreRegistration` while an approval is pending (`STATE_CONFLICT`, `lock_pending`); carry part 13's `content` as one field of the S15b object, hashed once (`CR-11`). |
+| `G-08` | S14.4.2 to S14.4.3 and 14.6.2 (evidence uploads, signed outcomes, generations) against S15b 15.27.1 to 15.27.2 `attachGateEvidence`, `signOffGateItem` | Schema. S14 stores evidence bytes (`launch.evidence_max_bytes` 10,485,760), sniffs media type, has `restricted` visibility, signed `outcome` (`satisfied`, `satisfied_with_conditions`, `not_satisfied`, `adopted`, `declined`), `conditions_text`, `generation`, `valid_until`, `watch_digest`, and a WebAuthn challenge equal to the sign-off digest. S15b stores a text `ref` (content not stored), a `comment`, no outcome, no validity, a step-up bound to the evidence hash. The 10 MiB evidence limit also exceeds `api.max_body_bytes` (1,048,576) and S15b has no chunked path for evidence (it has one for terms copies, 15.23.2). | S14 for behavior (`P3`) | Rewrite `attachGateEvidence` and `signOffGateItem` to carry S14's fields (`CR-20`); add a chunked evidence upload on the pattern of 15.23.2 (`CR-21`); map `kind` enums (S15b: `service_review`, `terms_copy`, `counsel_ref`, `threat_model_ref`, `calibration_ref`, `measurement_ref`, `fallback_decision`, `other`; S14: `document`, `terms_copy_ref`, `flag_answer_ref`, `calibration_ref`, `measurement_report`, `counsel_memo`, `ci_artifact`, `rotation_record`, `secret_audit_note`, `history_scan_report`, `decision_record`, `interview_summary`, `attestation`) by taking S14's list. |
+| `G-09` | S14.7 `evaluate_switch`, S14.8 against S15b 15.27.3 `switchBlockers`, `changeLaunchSwitch`, `getLaunchStatus` | Rule. S14 requires `G4` always, per-switch extra items (`g2.*`, `g3.*`, `g5.*`), `jobs_not_enabled` for minting, authorization with `authorized_until` (a switch is open only while an active `LaunchAuthorization` exists), synchronous automatic closing on regression, and closing the jobs switch also closes minting. S15b requires `launch.required_gate_ids` signed, the approved-service floor, a locked pre-registration for `members_may_join`, `members_may_join` on before the other two, `kill.all_minting` released, no critical ledger alarm; it has no authorization expiry, no cascade, and `getLaunchStatus` shows no authorization state. | S14 for the rule (`P3`); S15b's extra clauses are kept as stricter additions (`P5`) | `changeLaunchSwitch` approval-time guard is `evaluate_switch` plus the three S15b-only clauses; execution writes `LaunchAuthorization` and the `ParameterVersion` in one transaction; `getLaunchStatus` gains `authorization: {authorized_until, revoked_at}` and live `reasons`; closing `launch.member_jobs_enabled` closes `launch.minting_enabled` (`CR-22`). The three extra clauses go into S14.7 so the lists cannot drift (`CR-23`). |
+| `G-10` | S14.3 `RL-7`, `service_gate` and S7.10.3 guard 2 (via `ISS-71`) against S15b 15.23.4 `approvalGuard`, `approveService` | Guard. S14 requires four gate flags (`third_party_task_use`, `prohibited_content_compatible`, `human_copy_paste_use`, `access_pooling_or_crediting`) and every per-service `g0.svc.*` item signed and valid; S15b requires two flags. S14.6.5 says reopening a `g0.svc.*` item moves the service to `review_due`; S15b `reopenGateItem` has no such effect. | S14 and S7 (stricter, `P3`, `P5`) | Extend `approvalGuard` and `details.missing` (`gate_flag_not_yes:<key>` for the two added keys, `g0_item_not_valid:<catalog_key>`); `reopenGateItem` moves the service to `review_due` in the same transaction and emits `service.review_due` with `cause` `item_reopened` (`CR-24`). |
+| `G-11` | S15b 15.28.1 `kill.member.<mem_id>`: `403 FORBIDDEN`, `copy.member.account_frozen`; S15a 15.4 pipeline step 7: any kill switch is `503 KILL_SWITCH_ENGAGED`; S14.9 and `AC-launch-52`: `KILL_SWITCH_ENGAGED` | Error code and status for the same refusal. S15a 15.9 lists `KILL_SWITCH_ENGAGED` `details.switch` without `kill.member.*` and `FORBIDDEN` reasons without `account_frozen`. | S15b (a retry would be misleading, as 15b says; the key is never published) | Add `FORBIDDEN` reason `account_frozen` to 15.9; limit step 7's 503 to the four published keys; reword S14.9 and `AC-launch-52` to "`LAUNCH_GATE_CLOSED`, `KILL_SWITCH_ENGAGED` or, for the member key, `FORBIDDEN` `account_frozen`" (`CR-25`). |
+| `G-12` | S14.4.5 `KillSwitch.reason_code` (`terms_change`, `safety_incident`, `abuse`, `ledger_concern`, `legal_hold`, `provider_warning`, `operator_decision`; reason text 10 to 2,000 characters) against S15b 15.28.2 `engageKillSwitch` (`safety_incident`, `integrity_violation`, `provider_notice`, `policy_defect`, `abuse`, `capacity`, `other`; `reason` 1 to 2,000) | Enum and length for one stored field. The system engagement of S14.9.2 uses `ledger_concern`, which the API enum lacks. | S15b enum (API request field), plus `legal_hold` | Add `legal_hold` to the S15b enum; S14.4.5 maps `terms_change` and `provider_warning` to `provider_notice`, `ledger_concern` to `integrity_violation`, `operator_decision` to `other`; one length rule, 10 to 2,000 (`CR-26`) [A][P: S0 enum owner]. |
+| `G-13` | S15b 15.28.1 `kill.all_minting` ("grants that mint") against S15a 15.6.5 `claimStarterGrant` and S14.9.2 (`grant` and referral entries "are not mint") | Scope. S15a posts `grant` from the Reserve; S14 exempts it from the minting gate. | S15a and S14 | Delete "grants that mint" from 15.28.1 (`CR-27`). |
+| `G-14` | S15a 15.7.2 and `AC-api-18` (`createJob` gated only with `submit`), S15b 15.28.1 (`createJob` answers 503 under `kill.all_new_jobs`), S14.9 and 14.9.2 (`job.created`, any reservation hold) | When a closed switch refuses job creation. S15a gates the draft only through `confirmJob`; S15b and S14 gate `createJob` itself. | S14 and S15b (stricter, `P5`) | `createJob` (any `submit`) is refused with `LAUNCH_GATE_CLOSED` or `KILL_SWITCH_ENGAGED`; correct `AC-api-18` and 15.7.2; the full list is GT-02 (`CR-28`). |
+| `G-15` | S15a 15.10 O-row against the 15.5, 15.8 tables | `revokeInvite`, `joinTeam`, `revokeReferral` are `R` in the tables and `O` in 15.10. | The tables (a destructive or secret-bearing write takes a required key) | Move the three ops to the `R` rows of 15.10 (`CR-30`). |
+| `G-16` | S15b 15.21.3 rule 4, 15.22.2 (`createAdminSession` key `opt`, "honored if sent") against S15a 15.10 (`createSession` key `X`; a session token is never replayable) | Idempotency semantics for the same kind of call. An honored key on `createAdminSession` stores a 201 body that holds a bearer token. | S15a | See `IG-03`. |
+| `G-17` | S15a 15.12 `RL-PUB`, `RL-BOOT`, `RL-READ` against S15b 15.21.2 `PUB`, `PUB-V`, `A-*`; S15b 15.33.5 "member class of part a" | Two class vocabularies; `RL-PUB` and `PUB` both name `ratelimit.public_rpm` per IP hash. | Both stay as classes of two surfaces; `PUB` is the S15b spelling of `RL-PUB` | State in 15.12 that `RL-PUB` = `PUB` and `PUB-V` is a sibling class; contract tests key on `details.class` (`CR-31`). |
+| `G-18` | S15b 15.33.1 rule 9 (`/v1/health` "defined in part a and BM0") against S15c 15.B.8.3 (`GET /v1/public/health`; part a defines none) | Path and owner. | S15c | Apply 15c Edit 25 (`CR-32`). |
+| `G-19` | S15d 15.C.4.1 member `createAppeal` kinds (`submission_rejection`, `job_rejection`, `member_ban`) against S15b 15.29.2 admin kinds (adds `template_rejection`) and `appeal.overturned` consumers | Enum coverage; a `job_rejection` overturn has no consumer (`job_svc` missing in 15.34.3, 15d O8). | S15d for what a member may file; S15b for the queue | Add `job_svc` as consumer of `appeal.overturned`; state that `template_rejection` is filed on behalf of an author by an admin only (`CR-35`). |
+| `G-20` | S15a 15.7.3 `cancelJob` ("refund visible in `getJob`") against S15d 15.C.4.5 `getSettlementReceipt` (`Job` has no refund field) | Where the refund is read. | S15d | Point 15.7.3 at `getSettlementReceipt` (15d O6/S6) (`CR-36`). |
+| `G-21` | S15a 15.8 `Team.verified_cells_30d`, `listTeamMembers`, per-team `alias` against 12.9.2 (as quoted in 15d O2, O3: weekly and all-time score, no member list, no alias in Phase 1) and S15d `listPublicTeams` | Fields and a listing the stricter reading forbids in Phase 1. | The stricter reading (`P5`) [A: part 12 read through 15d] | `Team` gains `score {week_start, week, all_time}`; `listTeamMembers` and `alias` stay defined but are off until the part 12 owner enables them, flag name theirs (`CR-37`). |
+| `G-22` | S15b 15.32.3 `CalibrationRecord` (one aggregate row per observation day) against 13.9.1 (one row per run, as quoted in S15f Issues 1) | Shape; `CAL-06` and probe statistics cannot be computed from the S15 row. | S15b names; additive optional fields | Add the optional fields part 13 needs (`input_chars`, `output_chars`, `kind`) to `createCalibrationRecord`; otherwise part 13 drops `CAL-06` (`CR-38`) [P: S13 owner]. |
+| `G-23` | S15b 15.33.4 `MetricSnapshot` (`mts_`, a published bundle) against 13.5.4 and S15e 15.D.4.6 rule 2, S15f 15.E.10 (a row per metric, window and dimension, same prefix) | One id prefix, two field lists. | S15e rule 2: one entity, the bundle is the row of kind `price_publication` | `getPublicMetrics` and `listPublicMetricSnapshots` return the latest rows of that kind; the bundle fields are its payload (`CR-39`) [A][P: S13 owner]. |
+| `G-24` | S15b 15.32.1 event `preregistration.locked` against 13 `prereg.locked` | Event name style. | S15b (names already in the 15.34 catalogue) | Part 13 uses `preregistration.locked` (`CR-13`). |
+
+### 15.G.2.1 Operation-id collisions (`G-01`)
+
+S15a 15.1 says `op` ids "are the keys of the generated OpenAPI 3.1 document"; two operations with one id cannot both be generated. Eleven ids are defined twice, once on the member surface and once on the admin surface (the admin ones are in S15b except `listLeases` and `releaseLease` in S15e and the member `listAppeals`, `getAppeal` in S15d). Rule [D][A]: the member surface keeps the bare name (the screens of 11a and 11b cite it as their contract, 11b 11.34); the admin duplicate takes the suffix `Admin`, the pattern S15b already uses for `listMembersAdmin` and `getMemberAdmin`. This is the one rename of `P6`; it needs the owner of S0 0.5 to confirm (`CR-01`).
+
+| Member operation (keeps its id) | Admin operation (new id) | Admin path |
+| --- | --- | --- |
+| `listServices` (`GET /v1/services`) | `listServicesAdmin` | `GET /v1/admin/services` |
+| `listTemplates`, `getTemplate` (`GET /v1/templates`) | `listTemplatesAdmin`, `getTemplateAdmin` | `GET /v1/admin/templates`, `GET /v1/admin/templates/{tpl_id}` |
+| `listReports`, `getReport` (`GET /v1/reports`) | `listReportsAdmin`, `getReportAdmin` | `GET /v1/admin/reports`, `GET /v1/admin/reports/{rpt_id}` |
+| `listLots` (`GET /v1/balance/lots`) | `listLotsAdmin` | `GET /v1/admin/ledger/lots` |
+| `listLedgerEntries` (`GET /v1/balance/entries`) | `listLedgerEntriesAdmin` | `GET /v1/admin/ledger/entries` |
+| `listLeases` (`GET /v1/leases`) | `listLeasesAdmin` | `GET /v1/admin/leases` |
+| `releaseLease` (`POST /v1/leases/{lease_id}/release`) | `releaseLeaseAdmin` | `POST /v1/admin/leases/{lse_id}/releases` |
+| `listAppeals`, `getAppeal` (`GET /v1/appeals`) | `listAppealsAdmin`, `getAppealAdmin` | `GET /v1/admin/appeals`, `GET /v1/admin/appeals/{apl_id}` |
+
+On the same ground, the ops of S15e and S15f whose path-parameter name differs from the S15b spelling for one resource (`{lse_id}` against `{lease_id}`, `{apl_id}` against `{appeal_id}`) are unaffected: the two surfaces have separate paths.
+
+## 15.G.3 Authentication scheme of every endpoint
+
+Every row of every operation table carries an explicit scheme; the classification below is exhaustive by path prefix, and the `none` list is exhaustive by operation (it is the only place a scheme can be wrong without anyone noticing). The rule under test is: a member operation never accepts an admin session, an admin operation never accepts a member bearer token, and no operation accepts both [D].
+
+| Prefix | Scheme | Operations (by file) | Wrong-scheme behavior stated |
+| --- | --- | --- | --- |
+| `/v1/*` outside `/v1/admin/*` and `/v1/public/*` | `member` (`Authorization: Bearer`, 256-bit opaque token) | S15a 15.5 to 15.8 (all but the six below), S15b 15.33.5, S15c 15.B.5, 15.B.6, S15d 15.C.4.1 to 15.C.4.6, S15f 15.E.11 | S15a 15.4: admin token is `401 AUTH_INVALID`, `wrong_scheme` |
+| `/v1/admin/*` | `admin` (WebAuthn session bearer; `SU` step-up in the body; `2P` approvals) | S15b 15.22 to 15.32, S15c 15.B.7, S15e 15.D.4, S15f 15.E.5 to 15.E.10 | **None** (`V-01`) |
+| `/v1/public/*` | `none` | S15b 15.33.2 (17 operations), S15c 15.B.8 (3), S15d 15.C.4.7 and 15.C.4.8 (2) | no credential is read |
+| bootstrap outside `/v1/public/*` | `none` | `createIdentityChallenge`, `createMember`, `checkInvite`, `createSession`, `recoverMember`, `redeemDeviceLink` (S15a 15.4) | no credential is read |
+| bootstrap inside `/v1/admin/*` | `none` (two also `admin`) | `startAdminLogin`, `createAdminSession`, `createCredentialChallenge` (`none` with `enrollment_code`, or `admin` `SU`), `registerAdminCredential` ("as the challenge") | none (`V-02`, `V-03`) |
+
+The `none` set is therefore 32 operations: 6 member bootstrap, 4 admin bootstrap, 22 public (the 17 of S15b, `getPublicPolicy`, `getPublicCapacity`, `getPublicHealth`, `listPublicExperiments`, `listPublicTeams`). After `CR-03` removes `getPublicShareCard` the number is 31 [D].
+
+| id | Finding | Violates | Correction |
+| --- | --- | --- | --- |
+| `V-01` | S15b never states what a member bearer token on an `admin` route does; S15a 15.4 states only the reverse. S15c 15.B.1 rule 1 restates the reverse for its own operations. A conforming build could answer `403` or `404`, and no acceptance criterion tests either direction. | The rule that both separations hold and are tested | Add to S15b 15.21.1 and 15.22.1: a member bearer token on an `admin` route is `401 AUTH_INVALID`, `details.reason` `wrong_scheme`, never `403` or `404`, and is not stored under an idempotency key. Add `AC-auth-01` and `AC-auth-02` (below) (`CR-04`). |
+| `V-02` | Four `none` operations live under `/v1/admin/*`, while S0 0.11.2 (as quoted in S15a 15.1) puts anonymous endpoints outside `/v1/public/*` and under neither surface prefix. This is deliberate (there is no other way to log in) but undocumented. They accept no session, so separation is not broken. | Documentation of the surface rule [A: S0 text read only through S15a] | S15b 15.21 states the exception and lists the four; S0 0.11.2 gains one sentence (`CR-05`). |
+| `V-03` | `createCredentialChallenge` and `registerAdminCredential` accept either `none` (with `enrollment_code`) or `admin` `SU`. They never accept `member`, but "no endpoint accepts both" is read literally. | Rule text | State precedence: a request that carries `enrollment_code` is `none` and ignores `Authorization`; a request without it needs an admin token with `SU`, and any other token is `wrong_scheme`. Splitting into two operations is the alternative and costs two ids (`CR-05`). |
+| `V-04` | Neither file says what an `Authorization` header on a `none` route does. A client library that always attaches the header would see either success or an error depending on the build. | Contract test gap | A header on a `none` route is ignored, not evaluated and never logged (S15a 15.3 rule 5); the two dual rows of `V-03` are the exception (`CR-04`) [A]. |
+| `V-05` | S15e 15.D.4.4 `takeoverWorkClaim` authorizes by "the operator role", not by a `perm.*` name; every other operation in S15b to S15f uses permissions (S0 0.8.2). | S0 0.8.2 | Add `perm.claim.takeover` (default holder `operator`) to 15.21.4 and 15.D.2 rule 6 (`CR-43`). |
+| `V-06` | S15f uses `perm.metrics.view_small_cells` on three operations. The permission lifts suppression for one admin account, which S15e forbids. | `P5`, `G-03` | See `G-03`. |
+| `V-07` | S15b 15.33.5 puts three member operations in the admin-and-public file with rate class "member class of part a". | `G-02`, `G-17` | Removed by `CR-03`. |
+| `V-08` | Member step-up (S15c 15.B.4) fails with `401 AUTH_INVALID` at pipeline step 7, while the same code for a bad token is step 4; `AC-api-02` tests the order of steps 1, 3, 4 and 8 only. | Test coverage | Add step 7 `step_up_required` to `AC-api-02` or a sibling criterion (`CR-04`). |
+| `V-09` | Admin and member step-up are two mechanisms (body `step_up` against header `Step-Up`) with the same reasons `step_up_required`, `step_up_invalid`. Intended (an admin `DELETE` has no body issue; a member `DELETE` does), but the reasons are in no catalogue (`ER-01`). | Catalogue | See `ER-01`. |
+
+Acceptance criteria added by this section [D]:
+
+- `AC-auth-01` Given a valid admin session token, When it is sent to any member operation of S15a to S15d, Then `401 AUTH_INVALID` with `details.reason` `wrong_scheme` and nothing is stored.
+- `AC-auth-02` Given a valid member bearer token, When it is sent to any `/v1/admin/*` operation other than the four bootstrap operations, Then `401 AUTH_INVALID` with `details.reason` `wrong_scheme` and nothing is stored; sent to a `none` operation it is ignored and the response is identical to the response without it.
+- `AC-auth-03` Given the generated OpenAPI document, When the `security` entry of every operation is read, Then each operation has exactly one scheme except the two dual rows of `V-03`, and the `/v1/admin/*` prefix never carries `member`.
+
+## 15.G.4 Idempotency-Key gaps on write endpoints
+
+A write is any operation that is not a `GET` and that changes state or writes an `AdminAction` of kind `write`. The `Idem` column of every table was checked against S15a 15.10 and S15b 15.21.3 rule 4. Gaps [D]:
+
+| id | Gap | Correction |
+| --- | --- | --- |
+| `IG-01` | S15a 15.10 puts `revokeInvite`, `joinTeam` and `revokeReferral` in the optional-key row; the 15.5 and 15.8 tables say `R` (`G-15`). | The tables win; move the three ops to the `R` rows (`CR-30`). |
+| `IG-02` | Operations marked `O` in the tables have no row in 15.10: `expandLeasePrompt`, `deleteUpload`, `checkJobPolicy`, `checkInvite`. | Add them: `expandLeasePrompt` records the expansion once and a replay returns the prompt again; `deleteUpload` is terminal; `checkJobPolicy` and `checkInvite` change nothing (`CR-30`). |
+| `IG-03` | S15b makes the key optional and "honored" on `startAdminLogin`, `createAdminSession`, `createCredentialChallenge` and `createStepUpChallenge` (the last contradicts rule 4, which lists only the first three). A stored `createAdminSession` 201 holds a session token; S15a never replays a session token (`createSession`, `X`). | All four become `X`: key ignored and never stored, the single-use challenge is the idempotency (`CR-06`). |
+| `IG-04` | `registerAdminCredential` is unauthenticated on the enrollment path yet `req`, so it is a fourth unauthenticated write that rule 4's "three" does not count; the scope of its stored record (principal) is the IP hash only if S15a 15.10's rule is extended to admin routes. | Name it in rule 4; state that the stored body holds `acr_id`, `label`, `created_at` and no secret (`CR-06`). |
+| `IG-05` | Scope of a stored record is defined for members and `none` routes (S15a 15.10) but not for admins. | Scope is (`adm_` id, method, path template with ids, key) for 24 hours (`api.idempotency_ttl_s`) (`CR-06`). |
+| `IG-06` | Two-person (`2P`) operations: the initiation answers `202` with an `AdminApproval`; the operation later runs "as the system" with no key of its own. Replay semantics are undefined: a replay of the initiation after execution could return a stale `pending` body. | Initiation replay returns the stored `202` with `Idempotent-Replayed: true` (the client polls `getApproval`); the executed operation's idempotency is the `AdminApproval` row (`status` moves to `approved` once, so execution cannot repeat); the final `approveApproval` replay returns its stored `200` with `result` (`CR-07`). |
+| `IG-07` | Secrets in approval results. `createAdminUser` returns `enrollment_code` "shown once to the approving admin" in the approval `result`, but `getApproval` returns `result` to every holder of `perm.approval.read` for as long as the row lives. S15a ISS-151 covers member secrets only. | Apply the ISS-151 pattern: `result` carries only a `secret_ref`; the code appears in the `200` of the final `approveApproval` call, stored encrypted in that call's idempotency record and purged at first read or `security.approval_ttl_s`. Same rule for every `2P` operation that returns a secret (`CR-07`). |
+| `IG-08` | POST operations that change nothing take `opt` (`evaluatePolicyDryRun`, `previewPolicyChange`, `previewParameterChange`, `previewAdminAction`, `runTemplateChecks`, `checkExperimentAssignment`, `verifyManifest`) while rule 4 says "every write" needs a key. Consistent in effect but not stated. | Add: a POST that changes no state and writes no `AdminAction` of kind `write` takes `opt` (`CR-06`). |
+| `IG-09` | `closeMember`: a replay after success meets a dead session and gets `401`; no `Idempotent-Replayed` is ever seen (S15c 15.B.5.1). | Accept as written [A]; add the sentence to S15a 15.10 so a client treats this `401` as done only for this operation (`CR-30`). |
+| `IG-10` | `createReservation` with `dry_run` true needs `R` although it holds nothing. | Accept (one rule per operation); state it in 15.7.4 (`CR-30`) [A]. |
+
+## 15.G.5 Error codes and reasons used but missing from the S15a 15.9 catalogue
+
+S15a 15.9 says a code or reason missing there is a convention gap. No new top-level `code` is used by any S15 file; the one stray code is `CONFLICT` in S14.9.1 (it means `STATE_CONFLICT`). The gaps are `details.reason` values, `details` keys and one field-code value [D]:
+
+| id | Code | Missing reasons or keys (source) |
+| --- | --- | --- |
+| `ER-01` | `AUTH_INVALID` | `step_up_required`, `step_up_invalid` (S15b 15.22.3, S15c 15.B.4, for admin and member), `assertion_invalid` (15.22.1) |
+| `ER-02` | `FORBIDDEN` | `account_frozen` (15.28.1); `service_gate_regressed:<svc_id>` (S14.9, as `reason` plus `details.service_id`); `second_admin_required` (S14.8.6); no reason is given for the initiator or repeat approver of `approveApproval` (add `approver_not_distinct`) |
+| `ER-03` | `VALIDATION_FAILED` | `prefill_requires_flag`, `hash_mismatch`, `missing_chunks` (15.23); `op_not_previewable` (15.D.4.1); `consent_not_recorded`, `fractions_sum`, `block_size_over_limit`, `override_invalid` (15.E); `details.fields[].code` `secret_pattern` (S14 EV-3, outside the closed field-code set of 15.3 rule 1) |
+| `ER-04` | `STATE_CONFLICT` | S15b: `not_pending`, `expired`, `guard_failed`, `approval_guard_failed` (used in 15.36.1; the table says `guard_failed`: keep `guard_failed` and fix the example), `last_credential`, `last_operator`, `already_engaged`, `not_engaged`, `release_guard_failed`, `service_not_recordable`, `copy_not_sealed`, `copy_other_service`, `already_reversed`, `would_overdraw_lot`, `outside_policy`, `experiment_running`, `notice_too_short`, `already_running`. S15c: `open_work`, `balance_changed`. S15d: `appeal_decided`, `appeal_window_closed`, `not_appealable`. S15e: `job_terminal`, `already_stopping`, `use_overturn`, `held_by_other`. S15f: `lock_pending`, `not_registered`, `incident_resolved`, `supersedes_not_latest`, `no_records` |
+| `ER-05` | `UNPROCESSABLE` | `no_semantic_change`, `contains_loosening`, `contains_tightening`, `mixed_change`, `public_text_required`, `immutable_constant`, `use_launch_endpoints`, `not_a_parameter`, `duplicate_name`, `no_change`, `prereg_required`, `prereg_not_locked`, `output_ref_required`, `criterion_not_reached`, `blocking_finding`, `no_evaluation_yet`, `job_incomplete` |
+| `ER-06` | `ALREADY_EXISTS` | `appeal_exists` (15d), `report_exists` (15f) |
+| `ER-07` | `PRECONDITION_FAILED` | `expected_version` mismatch (`proposeParameterChange`, `createParameterChangeSet`) is not an ETag mismatch: add `version_stale` |
+| `ER-08` | `LAUNCH_GATE_CLOSED`, `KILL_SWITCH_ENGAGED` | S14.9 `reasons` (`members_not_open`, `jobs_not_open`, `minting_not_open`) map to `details.reason`; `KILL_SWITCH_ENGAGED` `details.switch` lists four keys and S14 names the member key (see `G-11`) |
+| `ER-09` | `POLICY_REJECTED` | `details.reasons` slugs not yet in S0 0.8.4 or S7: `policy.R9.policy_version_stale` (15c), `policy.R3.reviewer_rejected`, `policy.R3.prohibited_category` (15c 15.B.7), `no_eligible_service` (S14.9) [P: S7 owner] |
+| `ER-10` | `RATE_LIMITED` | S15b 15.33.5 uses it for a count cap (`G-02`); caps are `CAP_EXCEEDED` |
+| `ER-11` | all | `details` keys used but not in the 15.9 column: `missing`, `blockers`, `guards`, `constraints`, `counts`, `balance_ucr`, `state`, `until`, `service_id`, `reasons` (STATE_CONFLICT, VALIDATION_FAILED, FORBIDDEN rows) |
+
+Each new reason also needs the `copy.api_error.<code>.<reason>` key of S15a 15.9 (S11 owns the text) (`CR-08`).
+
+## 15.G.6 Events emitted by endpoints but missing from the S15b 15.34 catalogue
+
+The catalogue at 15.34.2 to 15.34.5 was compared with the `Events` columns of S15a, S15b and 15c to 15f. S0 0.9.1 requires a state change and its event in one transaction, so a missing event is a defect, not a nicety [D].
+
+| id | Event | Emitted by | Correction |
+| --- | --- | --- | --- |
+| `EV-01` | `invite.created`, `invite.redeemed`, `invite.revoked` | `createInvite`, `createReferral`, `createMember`, `revokeInvite` | Add to 15.34.3 (producer `identity_svc`, consumer `analytics`) |
+| `EV-02` | `member.key_revoked`, `member.device_revoked`, `member.recovery_confirmed` | `revokeMemberKey`, `revokeDevice`, `confirmRecoveryKey` | Add (producer `identity_svc`) |
+| `EV-03` | `offer.declined`, `job.rated` | `declineOffer`, `rateJob` | Add (`metrics_svc`) |
+| `EV-04` | `team.created`, `team.joined`, `team.left`; `referral.issued`, `referral.redeemed`, `referral.activated`, `referral.paid`, `referral.voided` | S15a 15.8 | Add; `referral.paid` and `ledger.entry_committed` share a transaction |
+| `EV-05` | `experiment.assigned`, `experiment.exposed`, `experiment.registered` | `getFeatures` (lazy assignment), `recordExperimentExposure`, `registerExperiment` | Add (producer `config_svc`, consumer `analytics`) |
+| `EV-06` | `calibration.report_frozen`, `decision_report.created`, `incident.recorded`, `incident.resolved`, `interview.recorded`, `workclaim.expired` | S15e, S15f | Add; `workclaim.expired` is a scheduler event and `createWorkClaim`, `releaseWorkClaim`, `takeoverWorkClaim` emit none (audit only) |
+| `EV-07` | A job cancelled in `draft`, `quoted` or `waitlisted` (`cancelJob`, `200`, immediate; `closeMember`; `decideScreening` returning a job to `draft`) | S15a 15.7.3, S15c 15.B.5.1 | The catalogue has `job.cancel_requested` and `job.cancel_settled` only: no event for an immediate cancel. Add `job.cancelled` (payload `job_id`, `from_state`) (`CR-34`) |
+| `EV-08` | `lease.released`, `cell.declined` for every lease `closeMember` releases | S15c 15.B.5.1 | State that `closeMember` emits them per lease (`CR-34`) |
+| `EV-09` | S14.11 `launch.switch_proposed`, `launch.switch_approved`, `launch.switch_closed`, `killswitch.release_proposed`; automatic close on regression (S14.8.3) | `changeLaunchSwitch`, `releaseKillSwitch`, system | Map: proposal = `admin.approval_requested`, approval = `launch.<switch>_changed` (`value` true, `authorization_id`), close = `launch.<switch>_changed` with `value` false and `actor.principal_type` `system` when automatic; `release_proposed` = `admin.approval_requested` (`CR-22`) |
+| `EV-10` | `service.review_due` with `cause` `item_reopened` | `reopenGateItem` (`G-10`) | Add `cause` to the payload (`CR-24`) |
+| `EV-11` | `prereg.locked` (part 13) against `preregistration.locked` | `lockPreRegistration` | `G-24` |
+| `EV-12` | `sharecard.created`, `sharecard.revoked`, `sharecard.viewed` | S15b 15.33.5 | Removed with `G-02` |
+
+## 15.G.7 Launch gates and kill switches: enforcement points against endpoints
+
+S14.9 and S14.9.2 name seven enforcement points and say every path to a capability passes through exactly one. This section matches them to the operations that can create a job, admit a member, mint credit or lease a cell, and records which operation text names its check. A check is "named" when the operation's own text in S15a to S15f says which switch, kill switch or service gate it performs and which error it returns [D].
+
+### 15.G.7.1 Enforcement point to endpoint (`GT-01`)
+
+| S14 point | Endpoints that reach it | Named in S15? | Gap |
+| --- | --- | --- | --- |
+| `member.created` (`launch.members_may_join`) | `createMember` | Yes: `403 LAUNCH_GATE_CLOSED`, `details.switch` (15.5, `AC-api-01`) | S14.9.2 says invite redemption, recovery and device linking "call" `member.created`. In S15 only `createMember` inserts a member; `recoverMember` and `redeemDeviceLink` admit nobody and are exempt as account recovery (S14 rule 6). Correct S14.9.2 (`CR-40`). |
+| `job.created`, member job (`launch.member_jobs_enabled`, `kill.all_new_jobs`, requester's `kill.member`) | `createJob` (with `copy_from_job_id`), `submitJobForScreening`, `decideScreening` (pass), `requestJobQuote` | Partly: `requestJobQuote` names both switches (15.B.6); `confirmJob` names them at step 7; `createJob` and `submitJobForScreening` name none (`AC-api-18` limits `createJob` to `submit` true) | `G-14`, `CR-28` |
+| `job.created`, Commons job (`launch.minting_enabled`) | none | No | **No endpoint.** S15a lists `origin` `commons` on every `CellCard` but no S15 operation creates a Commons job or cell. Declare Commons authoring system-only (scheduler or seed under the same gate) or add an admin operation that carries the same gates (`CR-41`). |
+| `job.escrow_confirmed`, `job.waitlist_released`, `reservation.activated` (`service_gate` regression, `service_gate_regressed:<svc_id>`) | `confirmJob` (with or without `reservation_id`); the scheduler for the other two | `confirmJob` names the switches and `NO_CAPACITY`, not the service-gate regression or its error | Add the `FORBIDDEN` reason `service_gate_regressed` to 15.7.2 `confirmJob` (`CR-28`). The two scheduler events have no endpoint and are system paths (`GT-03`). |
+| `cell.leased` and cell listing | `createLease`, `listOfferedCells`, `getLease` | Partly. `createLease` lists "`launch.minting_enabled` for Commons cells; kill switches (template, service)"; `listOfferedCells` drops Commons cells on `launch.minting_enabled` false or `kill.all_minting`, and cells of a paused template or suspended service | Missing in both: `launch.member_jobs_enabled` for member-job cells, `service_gate(..., 'continue')` (flags, stale copy, `review_due` grace of S14.3), the leaser's `kill.member` (`account_frozen`, `G-11`), and `kill.all_minting` on `createLease` (`CR-29`). |
+| `cell.accepted` (`service_gate` in `continue` mode) | `submitResult`, `releaseQuarantinedSubmission`, `resolveAudit`, `decideAppeal` (overturn), and the verification service | No operation names it; 15.6.4 says only that acceptance posts the ledger entry | `CR-33` |
+| `ledger.mint` (`launch.minting_enabled`, `kill.all_minting`, member's `kill.member`) | the same four operations (mint happens inside acceptance) | No; S15b 15.28.1 says a mint-posting operation "answers `503` or is held" | Undefined for a stored submission. Rule [A][P: S6 owner]: `submitResult` never answers `503` or `403` for the mint gate once a lease was legitimately issued (S14 rule 6, no trapped value); the submission is stored with `verdict` `pending` and the mint is held until the gate reopens; `getSubmission` keeps returning `pending` (`CR-33`). |
+| Parameter write of a `launch.*` boolean to `true` | `changeLaunchSwitch`; refused on `proposeParameterChange` and `createParameterChangeSet` (`use_launch_endpoints`) | Yes | `G-09` for the evaluation it runs |
+
+### 15.G.7.2 Operations that create a job, admit a member, mint or lease a cell (`GT-02`)
+
+| Operation | Capability | Check named in its S15 text | Check it must name |
+| --- | --- | --- | --- |
+| `createMember` | admit | `launch.members_may_join` | none missing |
+| `createJob` | create a job | none for a draft (`submit` true: `launch.member_jobs_enabled`, `AC-api-18`); S15b 15.28.1 `kill.all_new_jobs` | `launch.member_jobs_enabled`, `kill.all_new_jobs`, `kill.template.<tpl_id>`, requester `kill.member` for every call (`G-14`) |
+| `submitJobForScreening` | create (leaves `draft`) | none | same set; plus `service_gate(start)` at admission (S14.3 table) |
+| `decideScreening` (pass) | create (job continues) | none | same set, evaluated again at the decision (`P5`) |
+| `requestJobQuote` | create (new quote) | `launch.member_jobs_enabled`, `kill.all_new_jobs`, `kill.template.<tpl_id>` | none missing |
+| `confirmJob` | create (escrow, cells) | `launch.member_jobs_enabled`, `kill.all_new_jobs` | add `service_gate_regressed`, `kill.template`, requester `kill.member` |
+| `createReservation` | create (a hold, S14.9.2 "any reservation hold") | none (only `ff.job.reservations`) | `launch.member_jobs_enabled`, `kill.all_new_jobs` (`CR-28`) |
+| `createLease` | lease | `launch.minting_enabled` (Commons), `kill.template`, `kill.service` | see `GT-01` row `cell.leased` |
+| `submitResult` | mint or transfer on acceptance | none | see `GT-01` rows `cell.accepted`, `ledger.mint` |
+| `releaseQuarantinedSubmission`, `resolveAudit`, `decideAppeal` (overturn that re-credits) | accept, so mint or transfer | none | same as `submitResult`; `decideAppeal` also gate-checks any fast-tracked job copy (15d O8) |
+| `claimStarterGrant`, referral payout | `grant` from the Reserve | none, by design (S14.9.2: not mint; `G-13`) | none; they need an existing member and are not a gate |
+| `createInvite`, `createReferral` | pre-admission codes | none | none; `createMember` is the single admission check [A] |
+| `recoverMember`, `redeemDeviceLink`, `closeMember`, `cancelJob`, refunds, expiry | exempt (S14 rule 6) | none | none; `AC-launch-32` covers them |
+| `extendLease`, `issueLeaseNonce`, `expandLeasePrompt` | continue held work | none | none: continuing a held lease is exempt (S14.8.4 `kill.member` note); state it (`CR-29`) |
+
+### 15.G.7.3 Unmatched on either side (`GT-03`)
+
+Enforcement points with **no endpoint**: Commons `job.created` (`CR-41`); `job.waitlist_released` and timer-driven `reservation.activated` (scheduler paths, correct as system paths; S14.9.2 already refuses them like a member); `launch_integrity_check` auto-engagement of both global kill switches (system, `actor.principal_type` `system`, 15.28.3 case 2 should also name it, `CR-22`); the ledger posting itself, reachable only through the four acceptance operations above.
+
+Endpoints with **no enforcement point** where S14 requires one: `createReservation`, `submitJobForScreening`, `decideScreening`, `createJob` (draft), `createLease` for member-job cells, `submitResult`, `releaseQuarantinedSubmission`, `resolveAudit`, `decideAppeal`. Endpoints with no enforcement point by design: `claimStarterGrant`, `createInvite`, `createReferral`, `extendLease`, `issueLeaseNonce`, and the exempt set above [D].
+
+Acceptance criteria added by this section [D]:
+
+- `AC-gate-01` Given every `launch.*` switch is `false`, When each operation of `GT-02` marked "create a job", "lease" or "admit" is called by a member and by an admin holding every permission, Then it is refused with `LAUNCH_GATE_CLOSED` and nothing is written (the exempt rows still succeed).
+- `AC-gate-02` Given `kill.member.<mem_id>` is engaged, When that member calls `createLease` or `createJob`, Then `403 FORBIDDEN` reason `account_frozen`, and `submitResult` on a lease held before the engagement is stored with `pending`.
+- `AC-gate-03` Given `launch.minting_enabled` closes after a Commons lease was issued, When the volunteer submits, Then `201`, `verdict` `pending`, no ledger entry until the switch reopens.
+
+## 15.G.8 Hand-offs from the reconciliation files, and their disposition
+
+| From | Item | Disposition |
+| --- | --- | --- |
+| 15d O1 | share-card contradiction | `G-02`, `CR-03` |
+| 15d O2, O3 | team member list, alias, 30-day score | `G-21`, `CR-37` |
+| 15d O4 | no admin `lockTeam` / `unlockTeam` for reported teams | Accept: add both as single-admin tightening operations with `perm.report.triage`, linked to the report outcome (`CR-17`) [A][P: part 12 owner] |
+| 15d O5 | `createReport` `subject_kind` `result` takes `id<sub>`, which a requester never sees | Accept `id<cel>` when the caller owns the job; add `team` (`CR-16`) |
+| 15d O6, O7 | refund text; rating read-back | `G-20`; add `rating` to `Job` (additive) (`CR-36`) |
+| 15d O8 | `appeal.overturned` consumers | `G-19`, `CR-35` |
+| 15d O9 | unknown query parameters | An unknown query parameter is `400 VALIDATION_FAILED`, `unknown_field`, `details.fields[0].path` the parameter, as for bodies (`CR-15`) |
+| 15d O10 | `Features` has no arm names | Keep booleans; no member-visible arm display in Phase 1 [A][P: part 12 owner] |
+| 15d O11, O13, O14 | rate class of `previewCells`; operation tables of 15.B to 15.E count; `reservation_id` guard | Accept: S15a 15.13 "an endpoint not in a table does not exist" covers S15a to S15g tables; add the S2 guard to `confirmJob` (`CR-15`) |
+| 15d O12 | `check_refs.py` counts a path as defined if it appears anywhere in `spec/15*.md` | Accept as a known limit of the script; run it again with the 15c to 15g decision tables excluded after the corrections are applied [A] |
+| 15e 1 to 2 | `AdminAction` hash fields; blocking template findings | Accept both as additive (`CR-18`) |
+| 15e 3 | two-person for audit accept and quarantine release | Not adopted: stay one admin with step-up. Both can create credit, so S10 confirms; if adopted they become `2P` without a path change [A][P: S10 owner] |
+| 15e 4 | member read context (report, alarm, audit, appeal id) | Add an optional-then-required `context_id` query to `getMemberAdmin` and `listLotsAdmin` if S10 adopts the insider-risk control; until then the logged read is the control (`CR-42`) [P: S10 owner] |
+| 15e 5, 15f 5 | `MetricSnapshot` dual object | `G-23` |
+| 15e 6, 15f 6 | new names for S0 (`clm_`, `clr_`, `dcr_`, permissions, events, alarm kinds) | Collected into `CR-09` and `CR-44` |
+| 15f 1 to 3 | calibration shape, pre-registration shape and binding, experiment states | `G-22`, `G-07`, `G-06` |
+| 15f 4 | `Member.client_events_enabled` | Accept additive field and reflect the global parameter in `getFeatures` (`CR-19`) [A][V: review for high-risk members] |
+| 15f 7 | `calibration-proposals`, `capacity-dashboard`, `bottleneck` paths | `capacity-dashboard` and `bottleneck` are resolved by 15e; `GET /v1/admin/calibration-proposals` remains undefined: either define it or remove it from 13:931 (`CR-13`) |
+| 15c observations | `redeemDeviceLink` signs no challenge; 11b paths not in S15 | Both stay with their owners (S10; the cell reconciling requester paths) [A] |
+
+## Corrections required
+
+Corrections are for later cells; this cell edited no other file. Each line gives the file and section, then the change. Order is by file.
+
+**`spec/00-conventions.md`**
+
+1. `CR-01` S0 0.5: operation ids are unique across the whole API; an admin operation that shares a name with a member operation takes the suffix `Admin` (`G-01`, 15.G.2.1). [P: S0 owner]
+2. `CR-05` S0 0.11.2: add that four bootstrap operations under `/v1/admin/*` are `none` (`V-02`).
+3. `CR-44` S0 0.8.2 and S10 matrix: record the permission mapping S14 to S15b (`perm.launch.attach_evidence` = `perm.launch.evidence`; `perm.launch.signoff` and `perm.launch.reopen` map to `signOffGateItem` and `reopenGateItem`; `perm.launch.switch_*` = `perm.launch.switch`; `perm.killswitch.engage` = `perm.killswitch.engage.<scope>`; `perm.killswitch.release_*` = `perm.killswitch.release`) and add `perm.launch.read_restricted`, `perm.claim.takeover`, `perm.screening.*`, `perm.job.stop`, `perm.cell.*`, `perm.lease.read`, `perm.claim.write`, `perm.metrics.view`, `perm.metrics.export`, `perm.incident.record`, `perm.interview.record`; do not add `perm.metrics.view_small_cells` (`G-03`).
+4. `CR-09` S0 0.6.3, 0.9, 0.10: add the entities, prefixes and events of `EV-01` to `EV-12` (minus the share-card events), the alarm kinds `admin_action.chain_broken` and `incident.safety_or_critical`, and the id prefixes `apv_`, `mls_`, `clm_`, `clr_`, `dcr_`.
+5. `CR-26` S0 0.10 `KillSwitch.reason_code`: add `legal_hold` to the S15b enum (`G-12`). [P: S0 enum owner]
+
+**`spec/14-launch-gates.md`**
+
+6. `CR-23` S14.7: add the three S15b-only blockers (`preregistration_not_locked` for `members_may_join`, `members_may_join_off` for the other two switches, `open_critical_ledger_alarm`) so the lists cannot drift (`G-09`).
+7. `CR-25` S14.9 and `AC-launch-52`: member-key refusal is `FORBIDDEN` `account_frozen`; the 14.9 failure column maps `reasons` to `details.reason` (`G-11`, `ER-08`).
+8. `CR-26` S14.4.5 and S14.9.2: use the S15b `reason_code` values and the 10-to-2,000-character rule (`G-12`).
+9. `CR-28` S14.9 `job.created`: add `kill.template.<tpl_id>`; S14.9.2 and `AC-launch-03`: state that the gate applies to insertion of a `jobs` row in any state, not only to leaving `draft` (`G-14`).
+10. `CR-40` S14.9.2 "Admit a member": delete "invite redemption, recovery, device linking" (`GT-01`).
+11. `CR-41` S14.9 `job.created` Commons: name the Commons authoring path (system-only or an admin operation) (`GT-03`).
+
+**`spec/15a-api-core.md`**
+
+12. `CR-04` 15.4: add the symmetric `wrong_scheme` rule, the ignored-header rule for `none` routes (`V-04`), and step 7 `step_up_required` to `AC-api-02`; add `AC-auth-01` to `AC-auth-03`.
+13. `CR-08` 15.9: add every reason and `details` key of `ER-01` to `ER-11`; add `kill.member.<mem_id>` handling (403) to step 7.
+14. `CR-28` 15.7.2 and 15.7.4: `createJob` (any `submit`), `submitJobForScreening`, `createReservation` and `confirmJob` name the gates of `GT-02` and the errors `LAUNCH_GATE_CLOSED`, `KILL_SWITCH_ENGAGED`, `FORBIDDEN` `service_gate_regressed`; fix `AC-api-18`.
+15. `CR-29` 15.6.2: `createLease` and `listOfferedCells` name the gates of `GT-01` (member-job switch, `service_gate(continue)`, `kill.member`, `kill.all_minting`); state that `extendLease`, `issueLeaseNonce`, `expandLeasePrompt` are exempt.
+16. `CR-33` 15.6.4: payment at acceptance names the mint gate; a closed gate holds the mint and leaves `verdict` `pending` (`GT-01`).
+17. `CR-30` 15.10: apply `IG-01`, `IG-02`, `IG-09`, `IG-10`; 15.7.3 `cancelJob`: point the refund at `getSettlementReceipt` and name the event for an immediate cancel (`CR-34`, `CR-36`).
+18. `CR-31` 15.12: `RL-PUB` = `PUB`; `PUB-V` is a sibling class (`G-17`).
+19. `CR-03` 15.8: keep `getShareCard`; delete nothing here (`G-02`). `CR-37`: `Team` gains `score`; `listTeamMembers` and `alias` stay off until enabled (`G-21`). `CR-15`: unknown query parameters are `400 unknown_field` (15.3 rule 1); add the `reservation_id` guard to `confirmJob` (15d S2). `CR-16`: `createReport` accepts `id<cel>` for `result` and `team` as a subject. `CR-19`: `Member.client_events_enabled`, `getFeatures` reflects the parameter. `CR-36`: `Job` gains `rating`.
+20. `CR-02` Apply the rename of `CR-01` to every citing text: 11b, 11c, 15d and 15e tables and edit lists, 13 (`listReports`, `getReport`, `listLots`, `listLedgerEntries`, `listLeases`, `releaseLease`, `listAppeals`, `getAppeal`, `listServices`, `listTemplates`, `getTemplate` in admin contexts).
+
+**`spec/15b-api-admin.md`**
+
+21. `CR-01`, `CR-02` Rename the admin duplicates of 15.G.2.1 in 15.23.1, 15.24, 15.29.2, 15.29.3, 15.30.1.
+22. `CR-03` Delete 15.33.5, `getPublicShareCard` in 15.33.2, `sharecard.*` in 15.34.4, `AC-public-05`, `growth.share_card_max_active` in `ISS-154`, and the share-card item of 15.33.1 rule 6 (`G-02`).
+23. `CR-04`, `CR-05` 15.21.1, 15.22.1: wrong-scheme rule and the four-bootstrap-operation exception.
+24. `CR-06`, `CR-07` 15.21.3 rule 4 and 15.22.4: `X` on the four challenge and login operations, name `registerAdminCredential`, admin idempotency scope, `2P` replay rule, no secret in `AdminApproval.result` (`IG-03` to `IG-08`).
+25. `CR-11` 15.32.1 and 15.32.2: `content_hash` on `lockPreRegistration`, `lock_pending`, status `registered`, `registerExperiment`, the changed `startExperiment` guard and `AC-admin-25` (`G-06`, `G-07`).
+26. `CR-12` Add `listMetricSnapshots` as the single admin read of `GET /v1/admin/metric-snapshots`, merged filters, no small-cell permission (`G-03`).
+27. `CR-20`, `CR-21` 15.27.1 and 15.27.2: `attachGateEvidence` and `signOffGateItem` carry the S14 fields (`outcome`, `conditions_text`, `generation`, `valid_until`, `watch_digest`, restricted visibility, signed digest); add a chunked evidence upload on the pattern of 15.23.2 sized from `launch.evidence_max_bytes` and `api.max_body_bytes` (`G-08`).
+28. `CR-22` 15.27.3 and 15.28.3: `changeLaunchSwitch` guard is S14 `evaluate_switch` plus the S15b clauses; `LaunchAuthorization` written with the parameter; `getLaunchStatus` shows `authorization` and live `reasons`; closing `launch.member_jobs_enabled` closes `launch.minting_enabled`; event mapping of `EV-09`; case 2 of 15.28.3 names `launch_integrity_check`.
+29. `CR-24` 15.23.4 and 15.27.2: `approvalGuard` adds the two flags and the `g0.svc.*` items; `reopenGateItem` moves the service to `review_due` (`G-10`).
+30. `CR-27` 15.28.1: delete "grants that mint" (`G-13`).
+31. `CR-35` 15.29.2 and 15.34.3: `job_svc` consumes `appeal.overturned`; `template_rejection` is filed by an admin for an author (`G-19`).
+32. `CR-32` 15.33.1 rule 9: `GET /v1/public/health` (15c Edit 25); also add policy, capacity, health, experiments and teams to the always-on list of rule 6.
+33. `CR-36` 15.37 and 15.36.1: use `guard_failed` in the example (`ER-04`); `CR-08` ties each reason to the catalogue.
+34. `CR-09`, `CR-34` 15.34: add the events of `EV-01` to `EV-12` and `job.cancelled`; `CR-18` add `prev_hash` and `entry_hash` to `AdminAction` (15e open point 1) and the blocking-finding guard to `submitTemplateReview`; `CR-17` add `lockTeam` and `unlockTeam`; `CR-42` add the member-read `context_id` if S10 adopts it; `CR-43` add `perm.claim.takeover`.
+
+**`spec/15c` to `spec/15f` and parts 11, 13**
+
+35. `CR-13` 15f: delete `ui.variant_exposed`, `experiment_code`, `arm_key` from `ClientEvent` (`G-04`); part 13: exposure goes through `recordExperimentExposure`, event name `preregistration.locked` (`G-24`), define or remove `calibration-proposals` (13:931).
+36. `CR-12` 15e 15.D.4.6: rename `listAdminMetricSnapshots` to `listMetricSnapshots`; 15f: delete `perm.metrics.view_small_cells`.
+37. `CR-14` 15d row 17 and its 11b:120 edit are replaced by the 15c Edit 21 (`G-05`); 11b screen 05 also reads `getTemplate` `allowed`.
+38. `CR-38` S15b `createCalibrationRecord` gains optional `input_chars`, `output_chars`, `kind`; otherwise part 13 drops `CAL-06` (`G-22`). `CR-39` the public metrics bundle is the snapshot of kind `price_publication` (`G-23`).
+
+After these corrections are applied, `scripts/check_refs.py api` is run with the decision tables of 15c to 15g excluded, and `AC-auth-01` to `AC-auth-03` and `AC-gate-01` to `AC-gate-03` are added to the contract suite (`BM0`) [A].
