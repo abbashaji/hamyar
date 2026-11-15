@@ -122,7 +122,7 @@ Operation ids (lowerCamelCase, S0.5) are the contract between the screens and S1
 | `createJob` | `POST /v1/jobs` body `{template_id, copy_from_job_id?}` -> `Job` in `draft` | 02, 06, 18 |
 | `getJob` | `GET /v1/jobs/{job_id}` | all |
 | `patchJob` | `PATCH /v1/jobs/{job_id}` (JSON Merge Patch, `If-Match` = `row_version`) | 05 |
-| `createUpload` | `POST /v1/jobs/{job_id}/uploads` JSON body `{file_name, encoding, content}`; `encoding` is `utf8` or `base64`; size limit `job.max_upload_bytes` | 03 |
+| `createUpload` | `POST /v1/jobs/{job_id}/uploads` JSON body `{file_name, encoding, content}`; `encoding` is `utf8` or `base64`; size limit `job.max_upload_bytes` applies to the decoded bytes; the transport body limit of this operation is derived as `ceil(4 * job.max_upload_bytes / 3) + 4096` bytes because base64 adds one third, and replaces `api.max_body_bytes` for it [A] (`ISS-114`) | 03 |
 | `getUpload` | `GET /v1/uploads/{upload_id}` | 03, 04 |
 | `deleteUpload` | `DELETE /v1/uploads/{upload_id}` | 03 |
 | `requestUploadReview`+ | `POST /v1/uploads/{upload_id}/review-requests` body `{note?}` | 04 |
@@ -351,8 +351,8 @@ Finding kinds the screen can display (detection is owned by S9.*; the set is a d
 | --- | --- |
 | Purpose | Collect the four mandatory declarations (purpose, license, sensitivity, service requirement; FD§5.2) in plain language, then submit the job for checking |
 | Entry conditions | Job `draft`; at least one upload with `screen_status` `passed` or `flagged_for_review` |
-| Blocks | Four option groups in this order: Purpose `P0`..`P3`, License `L0`..`L3`, Sensitivity `S0`..`S3`, Service `M0`..`M2`. Each option shows its code, a short name and the plain-language explanation of 11.44 (what it means, what it allows, what it does not). Options the active allowlist locks are shown disabled with the reason `copy.req.locked_phase` or `copy.req.locked_unreviewed` (for `P2`, `P3`, `L3`, `M2` in Phases 1-2; the data comes from `getPolicyProfile`, RD-03). Under License `L1`/`L2`: an optional `license_spdx_id` chosen from `license_options` [V counsel], and the downstream notice (11.45). Under Sensitivity `S1`: a required tick "I accept that a stranger will read this". Under Service `M1`: a list from `listServices`. A live volunteer-card preview (`previewCells`) updates with the choices. A read-only summary and the notices `copy.req.notice_declared`, `copy.req.notice_screening_limits`. Button Check my request |
-| States | `incomplete` (groups missing; the button is disabled and names them, which is the client form of `R1`), `combination_hint` (the allowlist says the combination is not accepted now: an inline explanation with the reason code; the button stays enabled because the server decides, RD-03), `s2_s3_chosen` (the definition is shown and the page says it will not be accepted now; the choice is allowed so that an honest answer is recorded and explained, RD-05) |
+| Blocks | Four option groups in this order: Purpose `P0`..`P3`, License `L0`..`L3`, Sensitivity `S0`..`S3`, Service `M0`..`M2`. Each option shows its code, a short name and the plain-language explanation of 11.44 (what it means, what it allows, what it does not). Options the active allowlist locks are shown disabled with the reason `copy.req.locked_phase` or `copy.req.locked_unreviewed` (for `P2`, `P3`, `L3`, `M2` in Phases 1-2; the data comes from `getPolicyProfile`, RD-03). Under License `L1`/`L2`: an optional `license_spdx_id` chosen from `license_options` [V counsel], and the downstream notice (11.45). Under Sensitivity `S1`: a required tick "I accept that a stranger will read this" (`ack.stranger_reads`). Acknowledgements: one tick per key of `required_acks` in the active policy version (S7.* 7.5.2: `ack.declared_not_guaranteed` and `ack.no_ownership_assurance` always, `ack.no_personal_data` for `S0` and `S1`, `ack.stranger_reads` for `S1`, `ack.open_license_reuse` for `L1` and `L2`), texts `copy.req.ack_*` (11.45), stored in `Job.acks` through `patchJob`; without them the server answers `R1` `ack_missing`. The tick that `SCR-req-08` sends as `downstream_use_uncontrolled` is the same acknowledgement as `ack.open_license_reuse` [A] (`ISS-114`). Under Service `M1`: a list from `listServices`. A live volunteer-card preview (`previewCells`) updates with the choices. A read-only summary and the notices `copy.req.notice_declared`, `copy.req.notice_screening_limits`. Button Check my request |
+| States | `incomplete` (groups missing; the button is disabled and names them, which is the client form of `R1`), `submit_refused` (`submitJob` returns an API error and the Job stays `draft`: `422 POLICY_REJECTED` with `details.reasons`, for example an `R1` sub-code, or `400 VALIDATION_FAILED`; the reasons of 11.43.1 are shown in place on this step, nothing is charged and every entered value is kept) [A: S7.* 7.1 decision 2], `combination_hint` (the allowlist says the combination is not accepted now: an inline explanation with the reason code; the button stays enabled because the server decides, RD-03), `s2_s3_chosen` (the definition is shown and the page says it will not be accepted now; the choice is allowed so that an honest answer is recorded and explained, RD-05) |
 | Actions | `getPolicyProfile`, `listServices`, `patchJob` (merge patch with `If-Match`), `previewCells`, `submitJob` (Check my request) |
 | Copy intent | Explain each code by its consequence for the requester, not by legal categories; always say "declared"; never imply that a declaration is verified or that output use can be controlled downstream |
 | Accessibility | Each group is a `fieldset` with a `legend`; options are radio buttons whose accessible description is the explanation; disabled options remain focusable and announce their reason; no information is carried only by the code letter |
@@ -457,7 +457,7 @@ Labels (copy keys; every row carries `needs_human_and_legal_review`):
 | `copy.req.quote_eta` | Round-trip efficiency: cells you can request per cell you contribute | بازدهی رفت‌وبرگشت: به ازای هر سلول مشارکت، چند سلول می‌توانید درخواست کنید |
 | `copy.req.quote_v_measured` | Measured over the last {days} days from {cells} cells | اندازه‌گیری‌شده در {days} روز گذشته از {cells} سلول |
 | `copy.req.quote_v_prior` | Estimated, not yet measured | برآوردی؛ هنوز اندازه‌گیری نشده |
-| `copy.req.quote_window` | Quoted window (not a promise of instant completion) | بازهٔ زمانی اعلام‌شده (نه وعدهٔ انجام فوری) |
+| `copy.req.quote_window` | Declared window (an estimate, not a promise of instant completion) | بازهٔ زمانی اعلام‌شده (نه وعدهٔ انجام فوری) |
 
 ## 11.38 Waitlist and reservation screens
 
@@ -574,7 +574,7 @@ function bottleneck(cells, now):                    # server side (S6.*/S8.* own
               checking: awaiting_check, double_checking: awaiting_second_check, paused: paused }
   groups  = group open by kind_of[c.status]
   top     = group with the largest size; ties: oldest state_since, then the order above
-  at_risk = [c for c in open if c.attempt >= cell.max_attempts - 1]      # one more failure exhausts it and fails the job
+  at_risk = [c for c in open if c.attempt >= cell.max_attempts - 1]      # the next attempt is the last one allowed; a failure of that attempt exhausts the cell and fails the job
   return { kind: top.kind, cells: size(top), since: min(state_since of top), at_risk_cells: size(at_risk) }
 
 function show_bottleneck_banner(progress):          # a neutral summary is always shown; the banner is the highlighted form
@@ -618,7 +618,7 @@ The linear baseline is crude because volunteer supply arrives in daily batches; 
 | Copy intent | Explain what the status means and what will happen next; keep outcome classes coarse so the sheet does not teach anyone how to beat verification |
 | Accessibility | Opens as a dialog that returns focus to its tile; Escape closes it; the attempt list is an ordered list |
 
-- **AC-req-45** Given a cell on attempt 3 with `cell.max_attempts` 5, When the sheet opens, Then it shows "attempt 3 of 5" from the parameter value, an "at risk" tag, and no volunteer identifier, no `vol_` handle and no output text anywhere in the response or the page.
+- **AC-req-45** Given a cell on attempt 4 with `cell.max_attempts` 5 (the next attempt is the last one allowed, so the at-risk rule of 11.39.2 applies), When the sheet opens, Then it shows "attempt 4 of 5" from the parameter value, an "at risk" tag, and no volunteer identifier, no `vol_` handle and no output text anywhere in the response or the page.
 
 ## 11.40 Cancellation and refund screens
 
@@ -881,6 +881,8 @@ Reasons arrive as `policy.<policy_rule_id>.<slug>` (S0.8.4) in `rejection.reason
 | `policy.R8.volunteer_optin_mismatch` (not a rejection) | `copy.req.note_r8` | Few volunteers currently accept this kind of request, so the window may be longer. | اکنون داوطلبان کمی این نوع درخواست را می‌پذیرند، پس ممکن است بازهٔ زمانی بلندتر شود. |
 | `policy.R9.policy_version_stale` | `copy.req.err_policy_changed` | The rules changed after your request was checked. Check it again; nothing was charged. | پس از بررسی درخواست شما، قواعد تغییر کرد. دوباره بررسی کنید؛ هیچ اعتباری کسر نشده است. |
 
+`policy.R9.policy_version_stale` is shown as this row only when the policy changed before confirmation (nothing was charged). When a rule change stops work after admission, credit was held, so the screen shows the pause or closure copy of 11.39.1 and the receipt of `SCR-req-15`. The optional `details.sub_code` (S7.* 7.4.3) selects a hint key `copy.policy.<rule_id>.<sub_code>.hint` shown under the reason; an unknown sub-code is ignored. S7.* reports an empty eligible service set as `policy.R7.license_exceeds_service_flags` with sub-code `no_approved_service`; `copy.req.err_no_service` applies where the API answers `422 UNPROCESSABLE` with `details.reason` `no_approved_service` instead. S7.* 7.4.3 also defines `copy.policy.<rule_id>.<slug>` texts for these same codes; C-001 must keep one set (`ISS-114`); until then the `copy.req.reason_*` rows below are rendered.
+
 For an unknown code the screen shows `copy.req.reason_unknown` (EN "This request was not accepted. The code below identifies the reason.", FA «این درخواست پذیرفته نشد. کد زیر دلیل آن را مشخص می‌کند.») and still shows the code.
 
 ### 11.43.2 Errors and conditions [D]
@@ -960,9 +962,12 @@ Every notice is a copy key with `fa` and `en` text and the marker `needs_human_a
 | --- | --- | --- | --- |
 | `copy.req.notice_stranger_reads` | 03, 05 (`S1`) | A stranger will read each piece of your text, inside their own AI account. Do not include anything private, personal or confidential. | یک غریبه هر بخش از متن شما را درون حساب هوش مصنوعی خودش می‌خواند. چیزی خصوصی، شخصی یا محرمانه وارد نکنید. |
 | `copy.req.notice_downstream_uncontrolled` | 05 (`L1`, `L2`), 08 (required tick), 16, manifest summary | **Downstream use uncontrolled.** Because you chose an open license, anyone may reuse the published results, including to train other models. Hamyar cannot control this. | **استفادهٔ بعدی کنترل‌نشده.** چون مجوز آزاد را انتخاب کرده‌اید، هر کسی می‌تواند از نتایج منتشرشده دوباره استفاده کند، از جمله برای آموزش مدل‌های دیگر. همیار نمی‌تواند این را کنترل کند. |
+| `copy.req.ack_declared_not_guaranteed` | 05 (`ack.declared_not_guaranteed`) | I understand that the rules are declared and are enforced only as far as is technically possible, not guaranteed. | می‌دانم که قواعد اعلام‌شده‌اند و فقط تا جایی که از نظر فنی ممکن است اعمال می‌شوند؛ تضمین‌شده نیستند. |
+| `copy.req.ack_no_ownership` | 05 (`ack.no_ownership_assurance`) | I understand that Hamyar claims no ownership of results and does not promise that they are protectable; volunteers waive claims on their answers. | می‌دانم که همیار مالکیتی بر نتایج ادعا نمی‌کند و وعده نمی‌دهد که قابل حمایت حقوقی باشند؛ داوطلبان از ادعای حق بر پاسخ‌های خود چشم می‌پوشند. |
+| `copy.req.ack_no_personal_data` | 05 (`ack.no_personal_data`) | I declare that this material contains no credentials, no personal data of identifiable people and nothing under confidentiality. | اعلام می‌کنم که این مطلب شامل گذرواژه یا اطلاعات ورود، اطلاعات شخصی افراد قابل شناسایی و چیزی که تعهد محرمانگی دارد نیست. |
 | `copy.req.notice_declared` | 05, 08 | These are your declarations. Hamyar checks them as far as it technically can, with reviewed templates, screening and sampling, but it cannot confirm that they are true or control what happens to results afterwards. | این‌ها اعلام‌های شماست. همیار تا جایی که از نظر فنی ممکن است آن‌ها را با قالب‌های بازبینی‌شده، بررسی خودکار و نمونه‌گیری می‌سنجد، اما نمی‌تواند درستی آن‌ها را تأیید کند یا آنچه را پس از آن بر سر نتایج می‌آید کنترل کند. |
 | `copy.req.notice_screening_limits` | 04, 05 | Automatic screening reduces risk but does not remove it. A reviewer may look at your input. | بررسی خودکار خطر را کم می‌کند اما از بین نمی‌برد. ممکن است یک بازبین ورودی شما را ببیند. |
-| `copy.req.notice_no_instant` | 07, 08 | The window is an estimate based on measured capacity. It is not a promise of instant completion, and results may arrive later or only in part. | بازهٔ زمانی یک برآورد اعلام‌شده بر پایهٔ ظرفیت اندازه‌گیری‌شده است، نه وعدهٔ انجام فوری؛ ممکن است نتایج دیرتر یا فقط بخشی از آن‌ها برسد. |
+| `copy.req.notice_no_instant` | 07, 08 | The window is a declared estimate based on measured capacity. It is not a promise of instant completion, and results may arrive later or only in part. | بازهٔ زمانی یک برآورد اعلام‌شده بر پایهٔ ظرفیت اندازه‌گیری‌شده است، نه وعدهٔ انجام فوری؛ ممکن است نتایج دیرتر یا فقط بخشی از آن‌ها برسد. |
 | `copy.req.notice_credit_not_money` | 07, 08, 15 | Credit is not money or property and cannot be exchanged for cash. It expires on the dates shown. | اعتبار پول یا دارایی نیست و به نقد تبدیل نمی‌شود. در تاریخ‌های نشان‌داده‌شده منقضی می‌شود. |
 | `copy.req.notice_retention` | 03 | Your text is kept for {days} days after the request ends, then deleted. Hashes and the provenance manifest are kept without your text. | متن شما تا {days} روز پس از پایان درخواست نگه‌داشته و سپس حذف می‌شود. چکیده‌های درهم‌ساز (هش) و شجرهٔ خروجی (مانیفست) بدون متن شما می‌مانند. |
 | `copy.req.notice_pseudonymous` | 01, 08 | Volunteers do not see who you are, and you do not see who they are. Hamyar collects as little as it can but does not promise anonymity. | داوطلبان نمی‌دانند شما که هستید و شما هم نمی‌دانید آن‌ها که هستند. همیار تا جای ممکن کمترین اطلاعات را جمع می‌کند، اما گمنامی کامل را وعده نمی‌دهد. |
@@ -1010,6 +1015,8 @@ Every notice is a copy key with `fa` and `en` text and the marker `needs_human_a
 - **AC-req-72** Given `kill.all_new_jobs` becomes true while the person is on step 5, When Check my request is pressed, Then `copy.req.err_kill_switch` is shown, the entered declarations remain and nothing is lost.
 - **AC-req-73** Given any requester route loads, When network requests are listed, Then every request goes to the application's own origin (RD-14, 11.46).
 - **AC-req-74** Given the right-to-left locale and a keyboard-only user, When the person completes the wizard from step 1 to step 7, Then every control is reachable in visual order, focus is always visible, and no step needs a pointer (`T-rtl`).
+- **AC-req-75** Given a draft whose declarations pass the client checks but fail `R1` on the server (for example `R1` `not_allowlisted`), When Check my request is pressed, Then `submitJob` answers an API error, the Job stays `draft`, the `R1` reason of 11.43.1 is shown on `SCR-req-05` with the entered values intact, and nothing is charged.
+- **AC-req-76** Given the active policy version requires `ack.declared_not_guaranteed`, `ack.no_ownership_assurance` and `ack.no_personal_data` for `S0` and `S1`, When the person has not ticked all of them, Then Check my request is disabled and names the missing ones; when all are ticked, `patchJob` stores them in `Job.acks` before `submitJob`.
 
 ## 11.48 Reuse from the existing panel [V]
 
@@ -1045,7 +1052,7 @@ These are listed so C-001 can fold them back into S0 (`ISS-114`). Until it does,
 | Secret | Optional platform manifest-signing key for `manifest.signature` | S10.* names it; the owner decides (S3.*) |
 | ID schemes | Decision ids `RD-nn` (this file); `copy.req.*`; `SCR-req-01`..`SCR-req-18`; `AC-req-01`..`AC-req-74` | Within S0.5 |
 
-| Parameter | Type and unit | Initial default | Validation | Replaced by |
+| Parameter | Type and unit | Initial configurable default | Validation | Replaced by |
 | --- | --- | --- | --- | --- |
 | `ui.credit_display_decimals` | int | 2 | 0..6 | `OPS` |
 | `ui.ratio_display_decimals` | int | 3 | 0..6 | `OPS` |
