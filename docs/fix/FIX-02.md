@@ -14,7 +14,7 @@
 | CR-10 (not FD rows) | spec/16-parameters.md:584, spec/16-parameters.md:585 | Mint cap row `derived (16.5)`; Reserve ceiling row `P1M` | `mint.per_member_daily_cap_credits` and `reserve.ceiling_credits` each marked as not an FD§4.9 row | applied |
 | CR-10 (last paragraph) | spec/16-parameters.md:588 | FD§4.9 table `not re-read line by line` | states the table (10 rows) was re-read in 16d 16.D.7 and that C-001 still re-checks at assembly | applied |
 | CR-12 (public ops) | spec/16-parameters.md:477, spec/16-parameters.md:563 | public exceptions `ops.rpo_s`, `ops.rto_s`, `ops.backup_retention_days` | `ops.purge_interval_s` added in the 16.16 header and in the 16.17.5 list | applied |
-| CR-12 (hidden `lease.max_job_share_ratio`) | spec/16-parameters.md:563 | hidden list without it | `lease.max_job_share_ratio` added to the hidden list; default-pending D-16 (default: ratio 0.34, hidden) | applied |
+| CR-12 (hidden `lease.max_job_share_ratio`) | spec/16-parameters.md:563 | hidden list without it | `lease.max_job_share_ratio` added to the hidden list; owner default D-16 applied (default: ratio 0.34, hidden) | applied |
 | CR-12 (hide the three recommended rows) | spec/16-parameters.md:563 | `growth.referral.max_per_day`, `growth.referral.max_per_invite_tree_per_30d` and `grant.max_per_invite_tree_per_day` are not in the hidden list | unchanged: 16d 16.D.6 calls these a recommendation [A] and an owner decision under `SEC`; FINAL section 4 has no default for them (default: stay public as today) | skipped-needs-owner |
 | CR-15 | spec/16-parameters.md:400 | `5 reports inside template.autopause_window_s` | `5 reports from distinct reporting members inside template.autopause_window_s [V S9.9.2]` | applied |
 | CR-16 | spec/16-parameters.md:492 | `ops.rpo_s` default `300` | `300 [V]: no parameter bounds the log-archive interval; the S4 owner adds one or states 300 s as a target` | applied |
@@ -28,7 +28,7 @@
 | CR-21 | spec/16-parameters.md:185 | `(0,1]; fail-closed floor: 0 would make the alarm unreachable ...` | unchanged: FIX-01 already set the range (`(0,1]` equals `> 0 .. 1`); row not touched; `S16D-C1` is now a row of 16.3 (line 100) | already-applied |
 | CR-22 | spec/16c-parameters-b.md 16.C.2 `ui.draft.ttl_s` (outside allowed_paths) | searched all 650 lines of `spec/16-parameters.md` for `ui.draft.ttl_s` and for draft-lifetime text: no such row (16.14 says UI budgets are added by S11 and 16c) | none: the cited row is in `spec/16c-parameters-b.md`, which this cell may not edit (FINAL 5.1 gives it to FIX-04) | skipped-not-found |
 | CR-23 | spec/16-parameters.md:489 | `subset of the action names in S10.*` | same, then `; always contains parameter.loosen (S16D-C20)` | applied |
-| CR-24 | spec/16-parameters.md:125 | no note on `S16D-C3` | note after the worked check: `S16D-C3` is a warning until S6 confirms whether escrowed credit keeps its lot expiry; owner decision before the PreRegistration lock; default-pending D-05 (escrow counts toward K, `ff.job.reservations` off for the arm) | applied |
+| CR-24 | spec/16-parameters.md:125 | no note on `S16D-C3` | note after the worked check: `S16D-C3` is a warning until S6 confirms whether escrowed credit keeps its lot expiry; owner decision before the PreRegistration lock; owner default D-05 applied (escrow counts toward K, `ff.job.reservations` off for the arm) | applied |
 
 ## Read-back
 
@@ -49,7 +49,7 @@ Every edited place was re-read after the second commit. What is there now:
 - CR-21, line 185: the row still shows the range `(0,1]` with the fail-closed note; not edited by this cell.
 - CR-22: no edit; `spec/16-parameters.md` has no `ui.draft.ttl_s` row.
 - CR-23, line 489: validation of `security.two_person_actions` now ends with the `parameter.loosen` rule and `S16D-C20`; default list unchanged.
-- CR-24, line 125: the paragraph after the worked check carries the `S16D-C3` warning note with D-05 named as default-pending.
+- CR-24, line 125: the paragraph after the worked check carries the `S16D-C3` warning note with decision D-05 named as the owner default in use.
 
 ## Notes
 
