@@ -501,14 +501,15 @@ The original entry is never edited (S0.7 forbids it); both stay visible and link
 
 | `op` | Method and path | Notes |
 | --- | --- | --- |
-| `listLedgerAccounts`, `getLedgerAccount` | `GET /v1/admin/ledger-accounts[/{lac_id}]` | Member accounts need `context` |
-| `listLedgerEntries`, `getLedgerEntry` | `GET /v1/admin/ledger-entries[/{lge_id}]` | Amounts as integer strings |
-| `listLedgerTransactions`, `getLedgerTransaction` | `GET /v1/admin/ledger-transactions[/{txn_id}]` | |
-| `listCreditLots` | `GET /v1/admin/ledger-accounts/{lac_id}/credit-lots` | `context` required |
-| `listInvariantChecks` | `GET /v1/admin/invariant-checks` | |
-| `createLedgerVerification` | `POST /v1/admin/ledger-verifications` | Body `{kind: chain or invariants}`; one at a time |
-| `listLedgerCheckpoints` | `GET /v1/admin/ledger-checkpoints` | |
-| `createLedgerReversal` | `POST /v1/admin/ledger-reversals` | `202` with an `ApprovalRequest` |
+| `listLedgerAccounts`, `getLedgerAccount` | `GET /v1/admin/ledger/accounts[/{lac_id}]` | Member accounts (`?member_id`) need `perm.ledger.read_member` and are logged reads |
+| `listLedgerEntries`, `getLedgerEntry` | `GET /v1/admin/ledger/entries[/{lge_id}]` | Amounts as integer strings |
+| `getLedgerTransaction` | `GET /v1/admin/ledger/transactions/{txn_id}` | No list; use `listLedgerEntries?txn_kind=` |
+| `listLots` | `GET /v1/admin/ledger/lots?member_id=` | `perm.ledger.read_member`, logged read |
+| `listInvariants` | `GET /v1/admin/ledger/invariants` | |
+| `listInvariantChecks` | `GET /v1/admin/ledger/invariants/{inv_id}/checks` | |
+| `startHashChainVerification`, `runInvariant` | `POST /v1/admin/ledger/verifications` with `{from_seq, to_seq}`; `POST /v1/admin/ledger/invariants/{inv_id}/runs` with `{mode}` | `perm.ledger.verify`; a concurrent run of one invariant is `409 STATE_CONFLICT` |
+| `listLedgerCheckpoints` | `GET /v1/admin/ledger/checkpoints` | |
+| `reverseLedgerEntry` | `POST /v1/admin/ledger/reversals` | `202` with an `AdminApproval` |
 | `listAlarms`, `acknowledgeAlarm` | `GET /v1/admin/alarms`, `POST .../{alm_id}/acknowledgements` | |
 
 No `PUT`, `PATCH` or `DELETE` route exists on any ledger resource.
@@ -554,9 +555,9 @@ No `PUT`, `PATCH` or `DELETE` route exists on any ledger resource.
 | --- | --- | --- |
 | `listParameters`, `getParameter` | `GET /v1/admin/parameters[/{name}]` | `ETag`; `name` is the dotted key |
 | `listParameterVersions` | `GET /v1/admin/parameters/{name}/versions` | |
-| `createParameterChangeSet` | `POST /v1/admin/parameter-change-sets` | `201` when executed (tighten, neutral), `202` when an `ApprovalRequest` is needed; `If-Match` per item |
+| `createParameterChangeSet` | `POST /v1/admin/parameter-change-sets` | `201` when executed (tighten, neutral), `202` with an `AdminApproval` (loosening set); `expected_version` per item; one parameter is `proposeParameterChange` at `POST /v1/admin/parameter-changes` (15.D.4.5) |
 | `withdrawParameterVersion` | `POST /v1/admin/parameter-versions/{pmv_id}/withdrawals` | `CT2` |
-| `listChangeLogEntries` | `GET /v1/admin/change-log-entries` | Includes non-public entries |
+| `listPublicChangeLog` | `GET /v1/public/change-log[/{chg_id}]` | All entries are public; annotations are `POST /v1/admin/changelog-entries` |
 
 | AC | Given | When | Then |
 | --- | --- | --- | --- |
