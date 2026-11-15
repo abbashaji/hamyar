@@ -202,12 +202,12 @@ Every confirm dialog is driven by one dry-run call, so the screen never computes
 
 | `op` | Method and path | Permission | Notes |
 | --- | --- | --- | --- |
-| `previewAdminAction` | `POST /v1/admin/action-previews` | the action's own | Body `{action_code, subject_id, payload}`; no `Idempotency-Key` needed (no write) |
-| `listApprovalRequests` / `getApprovalRequest` | `GET /v1/admin/approval-requests[/{apr_id}]` | any admin; rows filtered to what the viewer may decide or started | Filter `state`, `initiated_by_me` |
-| `approveApprovalRequest` | `POST /v1/admin/approval-requests/{apr_id}/approvals` | the action's | Body `{payload_hash, reason_code, reason_text}`; `409 STATE_CONFLICT` if not `pending`; `403 FORBIDDEN` for own request |
-| `rejectApprovalRequest` / `withdrawApprovalRequest` | `POST .../{apr_id}/rejections`, `.../withdrawals` | as above | Withdraw is initiator only |
-| `listAdminActions` / `getAdminAction` | `GET /v1/admin/admin-actions[/{act_id}]` | `perm.audit_trail.read` | Cursor-paged; viewer scope as in `SCR-ops-03` |
-| `verifyAdminActionChain` | `POST /v1/admin/admin-action-verifications` | `perm.audit_trail.read` | One verification runs at a time (`429 RATE_LIMITED` otherwise) |
+| `previewAdminAction` | `POST /v1/admin/action-previews` | the action's own | Body `{op, path_params?, body?}` where `op` is an S15 operation id (15.D.4.1); permission: the previewed op's own; no `Idempotency-Key` needed (no write) |
+| `listApprovals` / `getApproval` | `GET /v1/admin/approvals[/{apv_id}]` | `perm.approval.read` | Filter `status`, `action_name`, `awaiting_me`; entity `AdminApproval`, id `apv_` |
+| `approveApprovalRequest` | `POST /v1/admin/approvals/{apv_id}/approvals` | the action's | Body `{step_up}`; a step-up bound to another payload is `401 AUTH_INVALID` (`step_up_invalid`); `409 STATE_CONFLICT` if not `pending`; `403 FORBIDDEN` for own request |
+| `rejectApprovalRequest` / `withdrawApprovalRequest` | `POST /v1/admin/approvals/{apv_id}/rejections`, `POST /v1/admin/approvals/{apv_id}/withdrawals` (body `{reason}`) | as above | Withdraw is initiator only |
+| `listAdminActions` / `getAdminAction` | `GET /v1/admin/actions[/{act_id}]` | `perm.admin_action.read` | Cursor-paged; viewer scope as in `SCR-ops-03` |
+| `startAdminActionVerification` | `POST /v1/admin/admin-action-verifications` | `perm.admin_action.read` | Body `{from_date, to_date}`; one verification runs at a time (`409 STATE_CONFLICT`, `already_running`, otherwise) |
 
 All admin writes need `Idempotency-Key` (S0.11.5) and carry `RateLimit-*` headers against `ratelimit.admin_api_rpm`; repeated refusals of one admin are counted and surfaced to the operator as an `Alarm` (the Panel had no counter on admin-key retries, panel-review §4.5 item 4) [V][A].
 
@@ -227,7 +227,7 @@ All admin writes need `Idempotency-Key` (S0.11.5) and carry `RateLimit-*` header
 
 | AC | Given | When | Then |
 | --- | --- | --- | --- |
-| `AC-appr-01` | Admin A created a `ledger.reversal` request | A calls `approveApprovalRequest` on it | `403 FORBIDDEN`; an `AdminAction` with `result` `refused` is written; the request stays `pending` |
+| `AC-appr-01` | Admin A created a `ledger.reversal` request | A calls `approveApprovalRequest` on it | `403 FORBIDDEN`; no `AdminAction` row and no event (a refused `AdminAction` is written only for authorization failures, 15.34.1); the request stays `pending` |
 | `AC-appr-02` | A pending request with `payload_hash` H | B approves with a hash other than H | `409 STATE_CONFLICT`; nothing executes; B's dialog must reload the payload |
 | `AC-appr-03` | A pending request older than `security.admin_two_person_pending_ttl_s` | The timer runs | `approval.expired` is emitted by actor `system`; a later approval returns `409 STATE_CONFLICT` |
 | `AC-appr-04` | Only one active `AdminUser` holds `operator` | They open a `killswitch.release` dialog | `previewAdminAction` returns `fail_closed` true; the confirm button stays disabled and shows `copy.admin.fail_closed_one_admin` |
@@ -263,10 +263,10 @@ All admin writes need `Idempotency-Key` (S0.11.5) and carry `RateLimit-*` header
 | --- | --- | --- |
 | `listTemplateVersions` | `GET /v1/admin/template-versions` | Filters above; `ETag` per row |
 | `getTemplateVersion` | `GET /v1/admin/template-versions/{tpv_id}` | Includes diff base and lint results |
-| `runTemplateChecks` | `POST /v1/admin/template-versions/{tpv_id}/check-runs` | Deterministic, no side effects; result hash is stored in the approval `detail` |
+| `runTemplateChecks` | `POST /v1/admin/template-versions/{tpv_id}/check-runs` | Deterministic, no side effects; `check_hash` is stored in the `review` row by `submitTemplateReview` (15.D.4.7) |
 | `createTemplateVersionComment` | `POST .../{tpv_id}/comments` | `CT0` |
 | `requestTemplateChanges` | `POST .../{tpv_id}/change-requests` | `If-Match` |
-| `approveTemplateVersion` / `rejectTemplateVersion` | `POST .../{tpv_id}/approvals`, `.../rejections` | `If-Match`; `409 STATE_CONFLICT` if another admin holds the claim |
+| `approveTemplateVersion` / `rejectTemplateVersion` | `POST .../{tpv_id}/approvals`, `.../rejections` | `If-Match` |
 | `retireTemplateVersion` | `POST .../{tpv_id}/retirements` | `CT2` |
 
 | AC | Given | When | Then |
