@@ -95,3 +95,59 @@ Acceptance criteria added by this section [D]:
 - `AC-auth-01` Given a valid admin session token, When it is sent to any member operation of S15a to S15d, Then `401 AUTH_INVALID` with `details.reason` `wrong_scheme` and nothing is stored.
 - `AC-auth-02` Given a valid member bearer token, When it is sent to any `/v1/admin/*` operation other than the four bootstrap operations, Then `401 AUTH_INVALID` with `details.reason` `wrong_scheme` and nothing is stored; sent to a `none` operation it is ignored and the response is identical to the response without it.
 - `AC-auth-03` Given the generated OpenAPI document, When the `security` entry of every operation is read, Then each operation has exactly one scheme except the two dual rows of `V-03`, and the `/v1/admin/*` prefix never carries `member`.
+
+## 15.G.4 Idempotency-Key gaps on write endpoints
+
+A write is any operation that is not a `GET` and that changes state or writes an `AdminAction` of kind `write`. The `Idem` column of every table was checked against S15a 15.10 and S15b 15.21.3 rule 4. Gaps [D]:
+
+| id | Gap | Correction |
+| --- | --- | --- |
+| `IG-01` | S15a 15.10 puts `revokeInvite`, `joinTeam` and `revokeReferral` in the optional-key row; the 15.5 and 15.8 tables say `R` (`G-15`). | The tables win; move the three ops to the `R` rows (`CR-30`). |
+| `IG-02` | Operations marked `O` in the tables have no row in 15.10: `expandLeasePrompt`, `deleteUpload`, `checkJobPolicy`, `checkInvite`. | Add them: `expandLeasePrompt` records the expansion once and a replay returns the prompt again; `deleteUpload` is terminal; `checkJobPolicy` and `checkInvite` change nothing (`CR-30`). |
+| `IG-03` | S15b makes the key optional and "honored" on `startAdminLogin`, `createAdminSession`, `createCredentialChallenge` and `createStepUpChallenge` (the last contradicts rule 4, which lists only the first three). A stored `createAdminSession` 201 holds a session token; S15a never replays a session token (`createSession`, `X`). | All four become `X`: key ignored and never stored, the single-use challenge is the idempotency (`CR-06`). |
+| `IG-04` | `registerAdminCredential` is unauthenticated on the enrollment path yet `req`, so it is a fourth unauthenticated write that rule 4's "three" does not count; the scope of its stored record (principal) is the IP hash only if S15a 15.10's rule is extended to admin routes. | Name it in rule 4; state that the stored body holds `acr_id`, `label`, `created_at` and no secret (`CR-06`). |
+| `IG-05` | Scope of a stored record is defined for members and `none` routes (S15a 15.10) but not for admins. | Scope is (`adm_` id, method, path template with ids, key) for 24 hours (`api.idempotency_ttl_s`) (`CR-06`). |
+| `IG-06` | Two-person (`2P`) operations: the initiation answers `202` with an `AdminApproval`; the operation later runs "as the system" with no key of its own. Replay semantics are undefined: a replay of the initiation after execution could return a stale `pending` body. | Initiation replay returns the stored `202` with `Idempotent-Replayed: true` (the client polls `getApproval`); the executed operation's idempotency is the `AdminApproval` row (`status` moves to `approved` once, so execution cannot repeat); the final `approveApproval` replay returns its stored `200` with `result` (`CR-07`). |
+| `IG-07` | Secrets in approval results. `createAdminUser` returns `enrollment_code` "shown once to the approving admin" in the approval `result`, but `getApproval` returns `result` to every holder of `perm.approval.read` for as long as the row lives. S15a ISS-151 covers member secrets only. | Apply the ISS-151 pattern: `result` carries only a `secret_ref`; the code appears in the `200` of the final `approveApproval` call, stored encrypted in that call's idempotency record and purged at first read or `security.approval_ttl_s`. Same rule for every `2P` operation that returns a secret (`CR-07`). |
+| `IG-08` | POST operations that change nothing take `opt` (`evaluatePolicyDryRun`, `previewPolicyChange`, `previewParameterChange`, `previewAdminAction`, `runTemplateChecks`, `checkExperimentAssignment`, `verifyManifest`) while rule 4 says "every write" needs a key. Consistent in effect but not stated. | Add: a POST that changes no state and writes no `AdminAction` of kind `write` takes `opt` (`CR-06`). |
+| `IG-09` | `closeMember`: a replay after success meets a dead session and gets `401`; no `Idempotent-Replayed` is ever seen (S15c 15.B.5.1). | Accept as written [A]; add the sentence to S15a 15.10 so a client treats this `401` as done only for this operation (`CR-30`). |
+| `IG-10` | `createReservation` with `dry_run` true needs `R` although it holds nothing. | Accept (one rule per operation); state it in 15.7.4 (`CR-30`) [A]. |
+
+## 15.G.5 Error codes and reasons used but missing from the S15a 15.9 catalogue
+
+S15a 15.9 says a code or reason missing there is a convention gap. No new top-level `code` is used by any S15 file; the one stray code is `CONFLICT` in S14.9.1 (it means `STATE_CONFLICT`). The gaps are `details.reason` values, `details` keys and one field-code value [D]:
+
+| id | Code | Missing reasons or keys (source) |
+| --- | --- | --- |
+| `ER-01` | `AUTH_INVALID` | `step_up_required`, `step_up_invalid` (S15b 15.22.3, S15c 15.B.4, for admin and member), `assertion_invalid` (15.22.1) |
+| `ER-02` | `FORBIDDEN` | `account_frozen` (15.28.1); `service_gate_regressed:<svc_id>` (S14.9, as `reason` plus `details.service_id`); `second_admin_required` (S14.8.6); no reason is given for the initiator or repeat approver of `approveApproval` (add `approver_not_distinct`) |
+| `ER-03` | `VALIDATION_FAILED` | `prefill_requires_flag`, `hash_mismatch`, `missing_chunks` (15.23); `op_not_previewable` (15.D.4.1); `consent_not_recorded`, `fractions_sum`, `block_size_over_limit`, `override_invalid` (15.E); `details.fields[].code` `secret_pattern` (S14 EV-3, outside the closed field-code set of 15.3 rule 1) |
+| `ER-04` | `STATE_CONFLICT` | S15b: `not_pending`, `expired`, `guard_failed`, `approval_guard_failed` (used in 15.36.1; the table says `guard_failed`: keep `guard_failed` and fix the example), `last_credential`, `last_operator`, `already_engaged`, `not_engaged`, `release_guard_failed`, `service_not_recordable`, `copy_not_sealed`, `copy_other_service`, `already_reversed`, `would_overdraw_lot`, `outside_policy`, `experiment_running`, `notice_too_short`, `already_running`. S15c: `open_work`, `balance_changed`. S15d: `appeal_decided`, `appeal_window_closed`, `not_appealable`. S15e: `job_terminal`, `already_stopping`, `use_overturn`, `held_by_other`. S15f: `lock_pending`, `not_registered`, `incident_resolved`, `supersedes_not_latest`, `no_records` |
+| `ER-05` | `UNPROCESSABLE` | `no_semantic_change`, `contains_loosening`, `contains_tightening`, `mixed_change`, `public_text_required`, `immutable_constant`, `use_launch_endpoints`, `not_a_parameter`, `duplicate_name`, `no_change`, `prereg_required`, `prereg_not_locked`, `output_ref_required`, `criterion_not_reached`, `blocking_finding`, `no_evaluation_yet`, `job_incomplete` |
+| `ER-06` | `ALREADY_EXISTS` | `appeal_exists` (15d), `report_exists` (15f) |
+| `ER-07` | `PRECONDITION_FAILED` | `expected_version` mismatch (`proposeParameterChange`, `createParameterChangeSet`) is not an ETag mismatch: add `version_stale` |
+| `ER-08` | `LAUNCH_GATE_CLOSED`, `KILL_SWITCH_ENGAGED` | S14.9 `reasons` (`members_not_open`, `jobs_not_open`, `minting_not_open`) map to `details.reason`; `KILL_SWITCH_ENGAGED` `details.switch` lists four keys and S14 names the member key (see `G-11`) |
+| `ER-09` | `POLICY_REJECTED` | `details.reasons` slugs not yet in S0 0.8.4 or S7: `policy.R9.policy_version_stale` (15c), `policy.R3.reviewer_rejected`, `policy.R3.prohibited_category` (15c 15.B.7), `no_eligible_service` (S14.9) [P: S7 owner] |
+| `ER-10` | `RATE_LIMITED` | S15b 15.33.5 uses it for a count cap (`G-02`); caps are `CAP_EXCEEDED` |
+| `ER-11` | all | `details` keys used but not in the 15.9 column: `missing`, `blockers`, `guards`, `constraints`, `counts`, `balance_ucr`, `state`, `until`, `service_id`, `reasons` (STATE_CONFLICT, VALIDATION_FAILED, FORBIDDEN rows) |
+
+Each new reason also needs the `copy.api_error.<code>.<reason>` key of S15a 15.9 (S11 owns the text) (`CR-08`).
+
+## 15.G.6 Events emitted by endpoints but missing from the S15b 15.34 catalogue
+
+The catalogue at 15.34.2 to 15.34.5 was compared with the `Events` columns of S15a, S15b and 15c to 15f. S0 0.9.1 requires a state change and its event in one transaction, so a missing event is a defect, not a nicety [D].
+
+| id | Event | Emitted by | Correction |
+| --- | --- | --- | --- |
+| `EV-01` | `invite.created`, `invite.redeemed`, `invite.revoked` | `createInvite`, `createReferral`, `createMember`, `revokeInvite` | Add to 15.34.3 (producer `identity_svc`, consumer `analytics`) |
+| `EV-02` | `member.key_revoked`, `member.device_revoked`, `member.recovery_confirmed` | `revokeMemberKey`, `revokeDevice`, `confirmRecoveryKey` | Add (producer `identity_svc`) |
+| `EV-03` | `offer.declined`, `job.rated` | `declineOffer`, `rateJob` | Add (`metrics_svc`) |
+| `EV-04` | `team.created`, `team.joined`, `team.left`; `referral.issued`, `referral.redeemed`, `referral.activated`, `referral.paid`, `referral.voided` | S15a 15.8 | Add; `referral.paid` and `ledger.entry_committed` share a transaction |
+| `EV-05` | `experiment.assigned`, `experiment.exposed`, `experiment.registered` | `getFeatures` (lazy assignment), `recordExperimentExposure`, `registerExperiment` | Add (producer `config_svc`, consumer `analytics`) |
+| `EV-06` | `calibration.report_frozen`, `decision_report.created`, `incident.recorded`, `incident.resolved`, `interview.recorded`, `workclaim.expired` | S15e, S15f | Add; `workclaim.expired` is a scheduler event and `createWorkClaim`, `releaseWorkClaim`, `takeoverWorkClaim` emit none (audit only) |
+| `EV-07` | A job cancelled in `draft`, `quoted` or `waitlisted` (`cancelJob`, `200`, immediate; `closeMember`; `decideScreening` returning a job to `draft`) | S15a 15.7.3, S15c 15.B.5.1 | The catalogue has `job.cancel_requested` and `job.cancel_settled` only: no event for an immediate cancel. Add `job.cancelled` (payload `job_id`, `from_state`) (`CR-34`) |
+| `EV-08` | `lease.released`, `cell.declined` for every lease `closeMember` releases | S15c 15.B.5.1 | State that `closeMember` emits them per lease (`CR-34`) |
+| `EV-09` | S14.11 `launch.switch_proposed`, `launch.switch_approved`, `launch.switch_closed`, `killswitch.release_proposed`; automatic close on regression (S14.8.3) | `changeLaunchSwitch`, `releaseKillSwitch`, system | Map: proposal = `admin.approval_requested`, approval = `launch.<switch>_changed` (`value` true, `authorization_id`), close = `launch.<switch>_changed` with `value` false and `actor.principal_type` `system` when automatic; `release_proposed` = `admin.approval_requested` (`CR-22`) |
+| `EV-10` | `service.review_due` with `cause` `item_reopened` | `reopenGateItem` (`G-10`) | Add `cause` to the payload (`CR-24`) |
+| `EV-11` | `prereg.locked` (part 13) against `preregistration.locked` | `lockPreRegistration` | `G-24` |
+| `EV-12` | `sharecard.created`, `sharecard.revoked`, `sharecard.viewed` | S15b 15.33.5 | Removed with `G-02` |
