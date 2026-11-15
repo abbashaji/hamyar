@@ -149,3 +149,37 @@ S3 owns `OD-nn` ids (`ISS-38`), they are never reused, and S19 already uses the 
 | New 15 | `ISS-52` | S5 file names and heading numbers | Cell path authoritative | Assembly |
 | New 16 | `ISS-16009`, `ISS-16020` | Whether `invite.strike_window_days` is split, and whether `report.decision_sample_rate` has a floor | One parameter; no floor | Before the S16 seed runs; first report sampling |
 | New 17 | `ISS-16015`, `ISS-16017` | Values of `abuse.admin_lookup_rate`, and one name for the pending-approval lifetime | No value invented; `launch.approval_window_s` for the launch flow | Before the S16 seed runs (`AC-param-02`) |
+
+## 2.E.4 Issues whose resolution changes a requirement of the prompt
+
+The owner should see these first. "Kind": `replaces` (a stated requirement is swapped for another), `narrows` (the feature is built but does less than the prompt says), `widens`, `adds` (a condition the prompt lacks), `reading` (the prompt's wording is interpreted), `relaxes` (only if the owner accepts a proposal the register rejects). Prompt scope letters refer to `docs/source/prompt.md`. The last column says whether S3 already shows the owner the change. [D]
+
+| No. | Ids | Prompt text affected | What the resolution changes | Kind | Status; in S3 |
+| --- | --- | --- | --- | --- | --- |
+| P1 | `ISS-12` (dups `ISS-41`, `ISS-81`, `ISS-91`) | Scope E: a code-change template with supplied tests and automatic checks; "never executing submitted content" | `ISS-12`: the template's automatic checks execute nothing, the requester runs the supplied tests, verification is sampled. The three duplicates would run submitted code in an isolated runner, against the "never" of scope E | `narrows`; the duplicates `relax` | `proposed`; yes, `OD-08` (default no) |
+| P2 | `ISS-14` (dup `ISS-62`) | Scope C: invariants of FD§4.2 as automated checks | "Every unit traces to a Commons cell" cannot be a check; conservation plus mint provenance replace it, and public text must not claim a per-unit trace | `replaces` | `proposed`; no explicit row (S3 cites `ISS-12`, `ISS-19`, not this) |
+| P3 | `ISS-63` (a) | Scope C: "oldest-first spending" | Spend by earliest `expires_at`. It equals oldest-first only if all lots share a lifetime; the starter lot (`grant.starter_lifetime_days`, 14, `ISS-33`) and earned lots (`credit.lifetime_days`) differ | `replaces` | `proposed`; no |
+| P4 | `ISS-25` | Scope D: "a task may only ask the volunteer to copy, press Send and return text"; scope F: open-in-service buttons | The prompt's two statements disagree. The closed `volunteer_action_set` adds opening the service through the platform's own button (only when `prefilled_link_use` is `yes`) and pasting into the service | `widens` | `proposed`; yes, `ASM-21` |
+| P5 | `ISS-27`, `ISS-74` | Scope D: stamping at admission, re-check at acceptance | Re-check under both the stamped and the current version; a second, binding stamp at `escrow_confirmed` | `reading` | `proposed`; `ASM-23`, `OD-09` |
+| P6 | `ISS-16` item 4, `ISS-85` (b) | Scope E: blanket redundancy for new donors and high-risk templates | New-donor blanket redundancy only on Commons cells; if no template is `high` in Phase 1 (`ISS-85` (b)), blanket redundancy for high-risk never runs in Phase 1, though it is built | `narrows` | `proposed` / `needs_owner`; yes, `ASM-16`; `ISS-85` partly (`OD-09`) |
+| P7 | `ISS-93` | Scope E: detection of copy-paste of another donor's output | Similarity is a signal; only cross-cell reuse of long text is a hard case; short and schema-bound outputs are excluded | `narrows` | `proposed`; no |
+| P8 | `ISS-104`, `ISS-121`, `ISS-155` (3), `ISS-16106` | Scope G: public ledger; scope C: append-only ledger with exact entries | The public view is lagged aggregates and daily checkpoints with a hash, never per-entry rows; member-account times are cut to one UTC day (`ledger.member_timestamp_granularity_s`), and `ISS-16106` makes any change from that default a loosening that applies only to rows written afterwards | `narrows` | `proposed`; no |
+| P9 | `ISS-124` | Scope G: V1 to V6 as randomizable experiments; scope H: time to first verified cell | V1 is measured from account creation, not landing; V2 randomizes only the in-app widget; V3 randomizes share taps only | `narrows` | `needs_owner`; no |
+| P10 | `ISS-122`, `ISS-126` | Scope G: live counter, verified cells only | "Verified" means accepted `primary` and `rework`; member-visible counts include every kind. See A11: the two can leak gold | `reading` | `proposed` / `applied`; no |
+| P11 | `ISS-187` | Scope F: the sub-60-second path; scope K: testable Given / When / Then for every major feature | The time is a hypothesis [H] and is measured, never asserted; tests check structure only | `narrows` | `applied`; no |
+| P12 | `ISS-42`, `ISS-48`, `ISS-49` | Scope J: repository "unreviewed [V]", code and docs not read; scope I: "four existing secrets" | `docs/source/panel-review.md` exists and is the fact base, every panel decision keeps [V] and G4 stays open; the review finds a fifth secret (`EXT_TOKEN`), so five are rotated | `reading`; corrects a premise | `applied` / `proposed` / `needs_owner`; `ISS-49` not in S3 |
+| P13 | `ISS-11`, `ISS-19`, `ISS-102`, `ISS-132`, `ISS-168` | Brief: the "members may join" switch stays off until the checklist is signed off | Further conditions: a `commons_capable` service before minting (`ISS-11`); a locked pre-registration (`ISS-132`); root invites refused while the switch is off (`ISS-19`); two distinct admins before any two-person action, sign-off included (`ISS-102`, `ISS-168`) | `adds` | `proposed` / `needs_owner`; `OD-02`, `ASM-10`, `ASM-18` cover part |
+
+Not changes. `ISS-31`, `ISS-171` and `ISS-192` apply the prompt (build everything, gate the launch) over the exit rule of FD§8.3; they change the FD, not the prompt. Of the 37 ids of `02f`, only `ISS-16106` touches a prompt requirement (P8); the rest are names, ranges, defaults and conflicts between parts, with no prompt text changed. Read first: P1, P2, P4, P8, P9 and P13, which alter what the system does; P3, P5, P10 and P12 are readings the owner can confirm quickly. [D]
+
+## 2.E.5 What this cell did not do
+
+- It edited no part file and no register file other than creating `spec/02f-issues-late.md` and this file. The edits that tables A and B call for (S4, S5b, S6a, S6b, S7, S8a, S8b, S9, S11, S15a and the alias amendments of B7) belong to later audit cells, which must not rename ids, parameters, endpoints or states.
+- It read only the files the cell names, and the text of `ISS` rows in the finished C-033 file that the cell says may be reused. Claims about a part's text (for example 8.15, 7.10.3, 4.4.4, 6.24.3) are as the register rows report them, not re-read. [P]
+- It did not recount `02b`, `02c` and `02d`; their counts are C-033's. It checked no figure against the Founding Document beyond what the register rows quote; A17 is open for that reason, and the `fd_ref` values in `02f` are as the parts gave them.
+- It minted no `ISS` id. The findings marked "no id yet" (A3, A11, A17, the 11.4x overlap in B4, found by C-033) and the unresolved pointers of B5 are for the register owner to number. A18 and B7 to B8 join existing ids and need none.
+- `02f` is a copy of rows, with notes added; where a note says `recheck:` or `conflict:` it is this cell's reading and not the raising part's.
+
+## Issues raised
+
+none. The findings of this part are conflicts between ids that already exist; the ones without an id are listed in 2.E.5. [D]
