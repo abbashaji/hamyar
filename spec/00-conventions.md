@@ -517,7 +517,7 @@ filed|assigned|in_review|awaiting_second_review --appeal.withdrawn-->    withdra
 ### 0.10.1 Naming scheme [D]
 
 - A parameter name is `area.name` or `area.group.name`, lowercase `snake_case` segments: regex `^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*){1,2}$`. The name is the primary key and never changes; a rename is a new parameter plus retirement of the old one.
-- Unit suffixes: `_s` seconds, `_days` days (86,400 s), `_chars`, `_bytes`, `_credits` (whole credits, stored as ucr), `_per_day`, `_per_hour`, `_rpm`. A ratio has no suffix (the type says so) unless the FD symbol is part of the name.
+- Unit suffixes: `_s` seconds, `_days` days (86,400 s), `_chars`, `_bytes`, `_bits`, `_weeks` (a count of weeks), `_credits` (whole credits, stored as ucr), `_per_day`, `_per_hour`, `_per_30d`, `_per_90d`, `_rpm`. A ratio has no suffix (the type says so) unless the FD symbol is part of the name.
 - FD symbols map to names exactly: E -> `credit.lifetime_days`; K -> `credit.member_cap_credits`; v -> measured, published as `MetricSnapshot` (prior `price.v_prior`); λ -> `price.levy_lambda`; g -> `verify.gold_rate_g`; s -> `verify.audit_rate_s`; φ -> `admission.phi`; G -> `grant.starter_credits`; mint cap -> `mint.monthly_cap_credits`; lease timeout -> `lease.timeout_s`; cell envelope -> `cell.envelope.*`.
 - Not parameters: feature flags `ff.<area>.<name>` (entity `FeatureFlag`, default off), kill switches `kill.<scope>` (entity `KillSwitch`), and secrets `secret.<name>` (named in S10.*, never stored in the parameter table, never exposed by an API).
 
@@ -536,7 +536,7 @@ filed|assigned|in_review|awaiting_second_review --appeal.withdrawn-->    withdra
 | `value`, `version` | per type, int | Current value; `version` increases by 1 per accepted change; every version is an immutable `ParameterVersion` |
 | `effective_from` | timestamptz | Changes are prospective: `effective_from >= now + notice_days` unless `change_class` = `tighten` (R10: tighten at once) |
 | `tighten_direction` | enum `up`, `down`, `none` | Which direction of change counts as tightening (for example `verify.audit_rate_s` is `up`, `admission.phi` is `down`) |
-| `notice_days` | int | Advance notice for `loosen` and `neutral` changes; default `change.notice_days_default` |
+| `notice_days` | int | Advance notice for `loosen` and `neutral` changes; default `change.notice_days_default`, or `change.notice_days_price` for the areas `price`, `admission` and `credit` |
 | `owner` | enum | `operator`, `reviewer` or `founders` (area table 0.10.5); only the owner role may edit; a `loosen` change also needs a second `operator` approval [A] |
 | `calibration_source` | enum | Measurement code from 0.10.4 plus a free-text pointer to the replacing measurement |
 | `public` | bool | Published on the parameter page and change log (default true except `security.*`) |
@@ -755,7 +755,7 @@ The list below is the FULL set of parameter names; names are stable and C-022 co
 
 | Name | Type | Initial configurable default | Validation | Replaced by |
 | --- | --- | --- | --- | --- |
-| `launch.members_may_join` | bool | false (global switch; stays off until the gate checklist is signed off in the admin tool) | only settable when the gate rule in S14.* passes | `CON` default; flipped by sign-off |
+| `launch.members_may_join` | bool | false (global switch; stays off until the gate checklist is signed off in the admin tool) | only settable when the gate rule in S14.* passes | the sign-off flow of S14.* (not a `CON` constant: the default `false` is fixed, the value changes only through that flow) |
 | `launch.member_jobs_enabled` | bool | false | as above | flipped by sign-off |
 | `launch.minting_enabled` | bool | false | as above | flipped by sign-off |
 | `launch.required_gate_ids` | json | `["G0","G1"]` (FD§8.3 exit rule) | subset of G0..G5 that always contains G0 and G1 | `FND` |
@@ -879,7 +879,7 @@ Build milestones are written `BM0`..`BM9` (see `ISS-01` for why not `M0..Mn`). T
 
 1. Every milestone ends with a deployable, testable system. No milestone leaves a half-wired path reachable from a public or member surface.
 2. The ledger and its invariants (`BM1`) precede every feature that moves credit. The launch-gate machinery and the Service Registry (`BM2`, `BM3`) precede every feature that creates a job or shows a cell to a member (prompt J; ground rule 6).
-3. Every build of every milestone ships with `launch.members_may_join`, `launch.member_jobs_enabled` and `launch.minting_enabled` set to `false` (0.10.6, table C). No milestone changes those defaults. Only the sign-off flow built in `BM2` can flip them (S14.*).
+3. Every build of every milestone ships with `launch.members_may_join`, `launch.member_jobs_enabled` and `launch.minting_enabled` set to `false` (0.10.6, table C). No milestone changes those defaults. Only the sign-off flow built in `BM2` can flip them (S14.*). Acceptance tests that need a switch on (the minting and member-job tests of `BM6` and `BM7`) set it only inside an isolated test fixture that is never deployed [A].
 4. No milestone is conditional on pilot size. Phase 1 is a configuration of the finished system (FD§9) [P].
 5. Tests added by a milestone stay in CI and stay green in every later milestone (regression ratchet).
 6. Finishing a milestone never authorizes a launch. Launching is the sign-off of `G0`..`G5` (S14.*), independent of build progress [D].
@@ -887,8 +887,8 @@ Build milestones are written `BM0`..`BM9` (see `ISS-01` for why not `M0..Mn`). T
 | ID | Name | One-line theme | Depends on | A working system at the end of it |
 | --- | --- | --- | --- | --- |
 | `BM0` | `foundation` | Repo, CI, environments, migrations, the ID, time and hash libraries of 0.6, error model, idempotency, pagination, rate-limit headers, config-store schema, observability skeleton, storage and host interfaces | none | An API that serves `/v1/public/health` in the 0.11 shapes; migrations and API conformance tests run in CI |
-| `BM1` | `ledger_and_invariants` | Append-only double-entry ledger in integer `ucr`, lots and oldest-first spending, hash chain, continuous invariant checks with alarms, reversal with two approvers | `BM0` | A ledger driven only through its internal interface; the FD§3.3 example passes as `AC-ledger-01`; a seeded corruption raises `ledger.invariant_violated` |
-| `BM2` | `admin_gates_and_config` | Admin passkey authentication and sessions, `AdminAction` log, parameter editor with versions and public change log, kill switches, feature flags with logged assignment, `LaunchGateItem` checklist and sign-off, `launch.*` enforcement, pre-registration lock, Phase 0 calibration tool | `BM0`, `BM1` | An operator can change a parameter prospectively, engage a kill switch, record calibration observations and sign off a gate; a `launch.*` switch refuses to turn on unless the rule in S14.* holds |
+| `BM1` | `ledger_and_invariants` | Append-only double-entry ledger in integer `ucr`, lots and oldest-first spending, hash chain, continuous invariant checks with alarms, reversal entries (the internal interface requires `ledger.reversal_min_approvers` approver ids; admin identities arrive in `BM2`) | `BM0` | A ledger driven only through its internal interface; the FD§3.3 example passes as `AC-ledger-01`; a seeded corruption raises `ledger.invariant_violated` |
+| `BM2` | `admin_gates_and_config` | Admin passkey authentication and sessions, `AdminAction` log, the two-admin approval flow for ledger reversal on top of the `BM1` interface, parameter editor with versions and public change log, kill switches, feature flags with logged assignment, `LaunchGateItem` checklist and sign-off, `launch.*` enforcement, pre-registration lock, Phase 0 calibration tool | `BM0`, `BM1` | An operator can change a parameter prospectively, engage a kill switch, record calibration observations and sign off a gate; a `launch.*` switch refuses to turn on unless the rule in S14.* holds |
 | `BM3` | `registry_and_policy` | Service Registry with every service `unreviewed`, `TermsCopy` capture, dated `FlagAnswer`s, service review machine, rules `R1`..`R10` as data plus the evaluator, metadata validation, allowlist, reason codes, opt-in data model | `BM2` | A job-shaped request is accepted or rejected with `policy.<rule>.<slug>` reasons; no service can reach `approved` without a saved terms copy |
 | `BM4` | `identity_and_access` | Anonymous identity, `MemberKey`, recovery key, device linking, key rotation, optional e-mail, invites and invite trees, per-device, per-tree and per-day limits, roles and permission matrix, retention jobs, IP-hash handling | `BM2` | A member can be created, recovered and rate-limited; the permission-matrix suite passes; no raw IP appears in storage or logs |
 | `BM5` | `templates_and_commons_jobs` | `Template` and `TemplateVersion` review with the second-reviewer rule, the first template set, upload and screening, Commons backlog authoring, the `Job` machine for Commons jobs, cell creation | `BM3`, `BM4` | A reviewer approves a template; a Commons job splits into queued cells; job creation is refused for every `unreviewed` service |
@@ -897,7 +897,7 @@ Build milestones are written `BM0`..`BM9` (see `ISS-01` for why not `M0..Mn`). T
 | `BM8` | `experiences_and_public` | Volunteer, Requester, Reviewer and Operator screens in Persian and English (RTL, numerals, Jalali), service-adapter layer, notices and copy, public counter, public ledger and parameter pages, change log, milestone pages, share cards, teams, referrals, growth flags `V1`..`V6` | `BM6`, `BM7` | A new member completes the first-contribution flow and a requester completes the wizard in both locales; accessibility and low-bandwidth checks pass |
 | `BM9` | `measurement_simulation_hardening` | Event schema and metrics pipeline for every FD§9 Phase 1 measure, expiry-arm assignment, simulation harness with adversarial agents, load and end-to-end suites, backup and restore drill, secret rotation drill, pre-build checklist closure | `BM7`, `BM8` | Every FD§9 Phase 1 measure has a query; simulation reports carry the label "not evidence about human behavior"; the drills are logged |
 
-Rationale for the order [D]: money-like state (`BM1`) and the legal and safety brakes (`BM2`, `BM3`) are built before anything a member can touch; the Phase 0 calibration tool is in `BM2` so the founders can run Phase 0 measurements (`CAL`, 0.10.4) while the remaining milestones are built, because the envelope, lease and sampling defaults can only be replaced by measurement.
+Rationale for the order [D]: money-like state (`BM1`) and the legal and safety brakes (`BM2`, `BM3`) are built before anything a member can touch; the Phase 0 calibration tool is in `BM2` so the founders can run Phase 0 measurements (`CAL`, 0.10.4) while the remaining milestones are built, because the envelope, lease and timing defaults (`CAL`) can only be replaced by measurement; the sampling defaults wait for Phase 1 data (`P1M`).
 
 ## 0.13 Spec files and owner cells
 
@@ -907,25 +907,25 @@ One row per spec file. File names are proposals [A]: the `allowed_paths` of the 
 | --- | --- | --- | --- | --- |
 | S0 | Conventions and decisions skeleton | `spec/00-conventions.md`, `spec/00-decisions.md` | `C-027` | `ISS-01`..`ISS-09` |
 | S1 | Purpose, scope, how to read (evidence-tag legend, reusing 0.2) | `spec/01-purpose.md` | `C-001` | `ISS-11`..`ISS-19` |
-| S2 | Issues found in the Founding Document, consolidated from every `## Issues raised` | `spec/02-issues.md` | `C-001` | `ISS-21`..`ISS-29` |
+| S2 | Issues found in the Founding Document, consolidated from every `## Issues raised` | `spec/02-issues.md` and the reconciliation files `spec/02b-*.md`..`spec/02f-*.md` | `C-001` | `ISS-21`..`ISS-29` |
 | S3 | Assumptions [A] and open owner decisions | `spec/03-assumptions.md` | `C-001` | `ISS-31`..`ISS-39` |
 | S4 | System overview and architecture | `spec/04-architecture.md` | `C-002` | `ISS-41`..`ISS-49` |
-| S5 | Domain model: entities | `spec/05a-domain-model.md` | `C-003` | `ISS-51`..`ISS-53` |
+| S5 | Domain model: entities | `spec/05a-entities.md` | `C-003` | `ISS-51`..`ISS-53` |
 | S5 | State machines, idempotency, concurrency | `spec/05b-state-machines.md` | `C-004` | `ISS-54`..`ISS-56` |
-| S6 | Credit, ledger and pricing | `spec/06a-credit-ledger-pricing.md` | `C-005` | `ISS-61`..`ISS-63` |
-| S6 | Admission control | `spec/06b-admission-control.md` | `C-006` | `ISS-64`..`ISS-66` |
-| S7 | Policy engine and Service Registry | `spec/07-policy-registry.md` | `plan` | `ISS-71`..`ISS-79` |
-| S8 | Templates and verification pipeline | `spec/08-templates-verification.md` | `plan` | `ISS-81`..`ISS-89` |
-| S9 | Result return, anti-forgery and abuse defenses | `spec/09-result-return-abuse.md` | `plan` | `ISS-91`..`ISS-99` |
-| S10 | Identity, access, privacy and safety, with the threat model table | `spec/10-identity-privacy-safety.md` | `plan` | `ISS-101`..`ISS-109` |
+| S6 | Credit, ledger and pricing | `spec/06a-ledger.md` | `C-005` | `ISS-61`..`ISS-63` |
+| S6 | Admission control | `spec/06b-admission.md` | `C-006` | `ISS-64`..`ISS-66` |
+| S7 | Policy engine and Service Registry | `spec/07-policy.md` | `plan` | `ISS-71`..`ISS-79` |
+| S8 | Templates and verification pipeline | `spec/08a-templates.md`, `spec/08b-verification.md` | `plan` | `ISS-81`..`ISS-83` (08a), `ISS-84`..`ISS-86` (08b) |
+| S9 | Result return, anti-forgery and abuse defenses | `spec/09-result-return.md` | `plan` | `ISS-91`..`ISS-99` |
+| S10 | Identity, access, privacy and safety, with the threat model table | `spec/10a-identity.md`, `spec/10b-safety.md` | `plan` | `ISS-101`..`ISS-103` (10a), `ISS-104`..`ISS-106` (10b) |
 | S11 | Volunteer, Requester, Reviewer and Operator experiences, Persian first | `spec/11-experiences.md` | `plan` | `ISS-111`..`ISS-119` |
 | S12 | Public surfaces and growth experiments | `spec/12-public-growth.md` | `plan` | `ISS-121`..`ISS-129` |
 | S13 | Measurement, experiment support and pre-registration | `spec/13-measurement.md` | `plan` | `ISS-131`..`ISS-139` |
 | S14 | Launch gates G0..G5, exit rule, kill switches | `spec/14-launch-gates.md` | `plan` | `ISS-141`..`ISS-149` |
-| S15 | API specification | `spec/15-api.md` | `plan` | `ISS-151`..`ISS-159` |
-| S16 | Configuration parameter table (completes 0.10.6 without renaming) | `spec/16-parameters.md` | `C-022` | `ISS-161`..`ISS-169` |
+| S15 | API specification | `spec/15a-api-core.md`, `spec/15b-api-admin.md` and the reconciliation files `spec/15c-*.md`..`spec/15g-*.md` | `plan` | `ISS-151`..`ISS-159` |
+| S16 | Configuration parameter table (completes 0.10.6 without renaming) | `spec/16-parameters.md` and the reconciliation files `spec/16b-*.md`..`spec/16d-*.md` | `C-022` | `ISS-161`..`ISS-169` |
 | S17 | Build plan: milestones `BM0`..`BM9` in detail | `spec/17-build-plan.md` | `C-023` | `ISS-171`..`ISS-179` |
-| S18 | Test strategy and simulation harness | `spec/18-tests-simulation.md` | `plan` | `ISS-181`..`ISS-189` |
+| S18 | Test strategy and simulation harness | `spec/18-testing.md` | `plan` | `ISS-181`..`ISS-189` |
 | S19 | Risks, what remains unverified, pre-build checklist | `spec/19-risks.md` | `plan` | `ISS-191`..`ISS-199` |
 | S20 | Glossary | `spec/20-glossary.md` | `plan` | `ISS-201`..`ISS-209` |
 | S21 | Short Persian summary (about 10 lines) | `spec/21-persian-summary.md` | `plan` | `ISS-211`..`ISS-219` |
