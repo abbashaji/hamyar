@@ -49,7 +49,7 @@ Source: the `action` cell of each log table (`logged-cross-part`, `logged-needs-
 
 **Blocking, audit tables: none open** (A03 findings 1 to 4 and A05 finding 1 are marked fixed). **Blocking, register: `ISS-11` and `ISS-12` are open** (02e 2.E.1): both `proposed`, the owner has accepted none of the 193 register rows. `ISS-12` (the platform never executes submitted content) is contradicted by A07 finding 3, which added a check-runner milestone and work package to `spec/17-build-plan.md` (row `X-01` below).
 
-| # | Log | Cell | Sev | file:line | Defect (short) | Status |
+| # | Log | Cell | severity | file:line | Defect (short) | action |
 | --- | --- | --- | --- | --- | --- | --- |
 | 1 | A01 #6 | C-042 | major | spec/06a-ledger.md:316 | Reversal of `levy`, `refund`, `escrow_hold` mirrors into a possibly closed escrow; breaks INV-L04, INV-L07 and `escrows never reopen` | needs-owner |
 | 2 | A02 #9 | C-043 [A] | major | spec/06b-admission.md:162 | S0 0.10.6 default formula of `mint.monthly_cap_credits` uses (1 - 0.5); S6 must read the redeemable key, not the Commons key | cross-part |
@@ -235,3 +235,6 @@ Files are the only files the cell may edit. Rule for every task: no id, paramete
 | FX-16 | `spec/02*-issues*.md`, `spec/03-assumptions.md`, `spec/19-risks.md`, `spec/16-parameters.md` 16.15 | mint ids for 02e A3, A11, A17; collect the owner decisions of section 4 as rows of S3.2 with unique `OD` ids; seeds for TRIP-10, 11, 15 (A13 #6); recount 02e | `check_issues.py` | |
 | FX-17 | the parts named in `Untabled` | log the 25 untabled minor items (A06 8, A12 6, A15 11) as register rows or fix them | each item has a row or an edit | |
 | FX-18 | `spec/18-testing.md` | add `AC-auth-01..03`, `AC-gate-01..03` (15g), `AC-paramd-01..10` (16d) to the criteria and the BM table; A14 #18 to #20 | every new test id cited by one criterion | FX-06, FX-08 |
+
+
+Verdict: NOT READY
