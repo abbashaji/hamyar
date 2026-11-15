@@ -70,7 +70,7 @@ The directions for rows whose defining part states one (S0 for `verify.audit_rat
 
 ## 16.3 Cross-parameter constraints
 
-Evaluated on every write against the configuration as it will be at `effective_from` (all pending versions applied), so two individually valid edits cannot combine into an invalid state (16.17.2). `C1`..`C8` are S0 0.10.3; `C9`..`C12` are proposed by the admission part and `S9-C1`..`S9-C3` by the result-return part; `C13`..`C20` are added here [A].
+Evaluated on every write against the configuration as it will be at `effective_from` (all pending versions applied), so two individually valid edits cannot combine into an invalid state (16.17.2). `C1`..`C8` are S0 0.10.3; `C9`..`C12` are proposed by the admission part and `S9-C1`..`S9-C3` by the result-return part; `C13`..`C20` are added here [A]; `S16D-C1`..`S16D-C24` are added from `spec/16d-parameter-consistency.md` 16.D.3 and evaluated like every other constraint [A]. A relation that mentions `credit.lifetime_days` is evaluated twice, once with `credit.lifetime_days` and once with `credit.lifetime_days_accelerated`, while `ff.experiment.expiry_arm` is on (16d F-03).
 
 | Id | Constraint | Kind |
 | --- | --- | --- |
@@ -97,8 +97,32 @@ Evaluated on every write against the configuration as it will be at `effective_f
 | `C18` | `admission.donor_daily_clamp_cells >= 1`; `mint.per_member_daily_cap_credits >= 1` | error |
 | `C19` | `launch.required_gate_ids` contains `G0` and `G1`; `launch.min_signoffs <= count of active AdminUser` | error on the first, warning on the second (`ISS-168`) |
 | `C20` | `policy.loosen_min_approvers >= policy.tighten_min_approvers`; `policy.loosen_min_notice_days >= change.notice_days_default` | error |
+| `S16D-C1` | `price.eta_alarm_threshold <= 1 / (1 + price.v_prior + price.levy_lambda)` and `price.eta_alarm_threshold > 1 / (1 + price.v_cap + price.levy_lambda)`; `price.eta_alarm_threshold > 0` | error (first part), warning (second) |
+| `S16D-C2` | `verify.gold_rate_floor > 0` (extends `C2`) | warning |
+| `S16D-C3` | `reservation.max_horizon_days + admission.max_window_days <= credit.lifetime_days` and `<= credit.lifetime_days_accelerated`, applied only if credit held in escrow keeps its lot expiry (S6 must confirm [V]) | warning |
+| `S16D-C4` | `reservation.min_lead_s >= reservation.free_cancel_notice_s` | error |
+| `S16D-C5` | `admission.min_window_s >= admission.window_step_s` and `admission.window_step_s >= 1` | error |
+| `S16D-C6` | `job.max_upload_bytes >= admission.max_job_cells * cell.envelope.max_input_chars * 3` | error |
+| `S16D-C7` | `api.max_body_bytes >= cell.envelope.max_submission_bytes` | error |
+| `S16D-C8` | `price.quote_ttl_s <= change.notice_days_price * 86400` and `admission.waitlist_quote_ttl_s <= change.notice_days_price * 86400` | error |
+| `S16D-C9` | `change.notice_days_default >= 1` and `change.notice_days_price >= change.notice_days_default` | error |
+| `S16D-C10` | `trust.cap_multiplier.restricted <= trust.cap_multiplier.new <= trust.cap_multiplier.established <= trust.cap_multiplier.trusted`; `trust.audit_multiplier.restricted >= trust.audit_multiplier.new >= trust.audit_multiplier.established >= trust.audit_multiplier.trusted`; `trust.established_min_cells <= trust.trusted_min_cells`; `verify.new_donor_blanket_cells <= trust.established_min_cells` | error (the last part is a warning) |
+| `S16D-C11` | `verify.duplicate_min_chars >= verify.duplicate_shingle_chars` | error |
+| `S16D-C12` | `verify.adapt.clean_streak <= verify.reliability_window_obs` | error |
+| `S16D-C13` | `retention.ip_hash_ttl_days >= 1` | error |
+| `S16D-C14` | `price.v_window_days <= retention.event_raw_days` and `inflation.throughput_window_days <= retention.event_raw_days`, if those windows read raw events (S13 and S6 confirm [V]) | warning |
+| `S16D-C15` | `appeal.window_days + appeal.reviewer_sla_days <= retention.job_payload_days` and `appeal.window_days <= retention.moderation_days` | warning |
+| `S16D-C16` | `ratelimit.device_new_members_per_day <= ratelimit.invite_tree_new_members_per_day`; `ratelimit.device_new_members_per_day <= ratelimit.ip_hash_new_members_per_day`; `ratelimit.public_rpm <= ratelimit.member_api_rpm <= ratelimit.admin_api_rpm`; `ratelimit.member_leases_per_hour <= ratelimit.member_submissions_per_hour`; `lease.max_active_per_member <= ratelimit.member_leases_per_hour` | warning |
+| `S16D-C17` | `grant.max_per_invite_tree_per_day <= grant.max_per_day`; `grant.max_per_invite_tree_per_day <= ratelimit.invite_tree_new_members_per_day`; `growth.referral.min_newcomer_verified_cells >= grant.required_verified_cells` | error (first part), warning (others) |
+| `S16D-C18` | `mint.per_member_daily_cap_credits * 30 <= mint.monthly_cap_credits`; `reserve.ceiling_credits >= grant.max_per_day * grant.starter_credits` | warning |
+| `S16D-C19` | count of active AdminUser >= max(`launch.min_signoffs`, `policy.loosen_min_approvers`, `ledger.reversal_min_approvers`, `appeal.ban_min_reviewers`, `template.min_reviewers_new`) (generalises `C19`) | warning |
+| `S16D-C20` | `security.two_person_actions` always contains `parameter.loosen` | error |
+| `S16D-C21` | `team.min_public_members >= analytics.min_cohort_k` and `team.min_public_members <= team.max_members` | warning |
+| `S16D-C22` | `ui.requester.appeal_note_max_chars <= appeal.reason_max_chars`; `ui.requester.progress_poll_s <= ui.status_poll_max_s` | error |
+| `S16D-C23` | `ledger.invariant_check_interval_s <= ledger.full_recompute_interval_s <= ledger.checkpoint_interval_s`; `ops.job_lock_ttl_s <= ops.job_max_runtime_s`; `admission.reforecast_interval_s >= metrics.rollup_interval_s` | warning |
+| `S16D-C24` | `verify.timing_min_s < cell.envelope.expected_time_s` | warning |
 
-Worked check of the initial defaults against every constraint [D]: `C1` 0.5; `C2` 0.01 <= 0.05 <= 0.20 and 0.02 <= 0.10 <= 0.50; `C3` 1200 >= 120; `C4` 14 <= 60 twice; `C5` 1000 >= 3; `C6` 0.05 and 0.10 <= 0.50; `C7` 43,200 <= 1,209,600; `C8` 350 >= 300 x 1.15 = 345; `C9` 43,200 and 1,209,600 are multiples of 43,200; `C10` 3 <= 14 and 7 <= 14; `C11` 86,400 <= 2,592,000; `C12` 86,400 >= 1800; `S9-C1` 32,768 >= 18,000; `S9-C2` 128 = 4 x 32; `C13` skipped (Phase 0); `C14` 600 <= 1200, 120 <= 1200; `C15` 2,592,000 <= 7,776,000 and 1800 <= 28,800; `C16` 0.70 <= 0.80 <= 0.95 and 10 <= 100; `C17` 10 <= 1000, 7 <= 14; `C18` 30 >= 1; `C19` `["G0","G1"]`; `C20` 2 >= 1, 7 >= 7. All pass (`AC-param-02`).
+Worked check of the initial defaults against every constraint [D]: `C1` 0.5; `C2` 0.01 <= 0.05 <= 0.20 and 0.02 <= 0.10 <= 0.50; `C3` 1200 >= 120; `C4` 14 <= 60 twice; `C5` 1000 >= 3; `C6` 0.05 and 0.10 <= 0.50; `C7` 43,200 <= 1,209,600; `C8` 350 >= 300 x 1.15 = 345; `C9` 43,200 and 1,209,600 are multiples of 43,200; `C10` 3 <= 14 and 7 <= 14; `C11` 86,400 <= 2,592,000; `C12` 86,400 >= 1800; `S9-C1` 32,768 >= 18,000; `S9-C2` 128 = 4 x 32; `C13` skipped (Phase 0); `C14` 600 <= 1200, 120 <= 1200; `C15` 2,592,000 <= 7,776,000 and 1800 <= 28,800; `C16` 0.70 <= 0.80 <= 0.95 and 10 <= 100; `C17` 10 <= 1000, 7 <= 14; `C18` 30 >= 1; `C19` `["G0","G1"]`; `C20` 2 >= 1, 7 >= 7. All pass (`AC-param-02`). `S16D-C1`..`S16D-C24` at the defaults (arithmetic in 16d 16.D.3): 22 pass; `S16D-C3` fails in the accelerated arm (30 + 14 = 44 > 14) and `S16D-C21` fails while `team.min_public_members` is 5 against `analytics.min_cohort_k` 10; both are warnings, so the seed is accepted and the warning is recorded. `S16D-C3` stays a warning until S6 confirms whether escrowed credit keeps its lot expiry; if it does, `reservation.max_horizon_days` and the accelerated arm are an owner decision before the `PreRegistration` lock (D-05; default meanwhile: escrow counts toward K, `ff.job.reservations` stays off for the arm) [V].
 
 ## 16.4 Cell envelope
 
@@ -522,7 +546,7 @@ function write_parameter(actor, name, new_value, effective_from, reason, batch):
     insert AdminAction; emit parameter.changed via the outbox; bump config_epoch when it takes effect
 ```
 
-A batch is atomic and validated as one future configuration, so an edit that is valid only together with another (for example `credit.lifetime_days` and `credit.lifetime_days_accelerated`) is accepted as a batch and refused as two single edits when the first alone breaks a constraint. Warnings (`C8`, `C13`) are returned in the response and recorded in the log entry. [D]
+A batch is atomic and validated as one future configuration, so an edit that is valid only together with another (for example `credit.lifetime_days` and `credit.lifetime_days_accelerated`) is accepted as a batch and refused as two single edits when the first alone breaks a constraint. Warnings (`C8`, `C13`) are returned in the response and recorded in the log entry. A relation that mentions `credit.lifetime_days` is evaluated against both `credit.lifetime_days` and `credit.lifetime_days_accelerated` while `ff.experiment.expiry_arm` is on. [D]
 
 **Classification** [A]: numeric and duration values use the direction of 16.2.2; booleans and enums use the stated end; lists use set inclusion (a longer `service.required_regions` or `security.two_person_actions` is a tightening, a longer `optin.default_*` or `service.terms_copy_allowed_types` is a loosening); a parameter with several members changed at once is `loosen` if any member loosens.
 
@@ -548,7 +572,7 @@ The FD's parameter table is the list that must be configurable and justified. Ea
 
 | FD§4.9 parameter | Row(s) here | Initial configurable default | Basis |
 | --- | --- | --- | --- |
-| Cell envelope | `cell.envelope.max_input_chars`, `.max_output_chars`, `.max_submission_bytes`, `.expected_time_s` | 4000, 6000, 32,768, 120 | FD§3.2 estimate [H]; replaced by `CAL` |
+| Cell envelope | `cell.envelope.max_input_chars`, `.max_output_chars`, `.max_submission_bytes`, `.expected_time_s` | 4000, 6000, 32,768, 120 | 4000, 6000, 32,768: [A] initial safe default, no derivation (FD§4.1: measured in Phase 0), replaced by `CAL`; 120: FD§3.2 estimate [H], replaced by `CAL` |
 | E, credit expiry | `credit.lifetime_days`, `credit.lifetime_days_accelerated` | 60 and 14 | FD§4.5 proposal and example arm |
 | K, member cap | `credit.member_cap_credits` | 350 | 1.25 x 240 x 1.15, rounded to 50 |
 | v, verification overhead | `price.v_prior`, `price.v_cap`, `price.v_window_days`, `price.v_min_sample_cells` (v itself is measured) | 0.10, 0.50, 28 days, 100 cells | FD§3.3 illustrative input as prior only |
@@ -557,11 +581,11 @@ The FD's parameter table is the list that must be configurable and justified. Ea
 | s, audit rate | `verify.audit_rate_s`, `_floor`, `_max` | 0.10, 0.02, 0.50 | `P1M`; the floor keeps sampling above zero (FD§4.4) |
 | φ, redeemable share | `admission.phi` (and `admission.forecast_haircut`, `admission.horizon_discount_per_day`) | 0.50, 0.00, 0.00 | FD§3.3 illustrative; `P1M` |
 | G, starter grant | `grant.starter_credits`, `grant.starter_lifetime_days` | 3, 14 | FD§4.6 |
-| Mint cap | `mint.monthly_cap_credits`, `mint.per_member_daily_cap_credits` | 4800, 30 | derived (16.5) |
-| Reserve ceiling | `reserve.ceiling_credits` | 1000 | `P1M` |
+| Mint cap | `mint.monthly_cap_credits`, `mint.per_member_daily_cap_credits` | 4800, 30 | derived (16.5); `mint.per_member_daily_cap_credits` is not an FD§4.9 row |
+| Reserve ceiling | `reserve.ceiling_credits` | 1000 | `P1M`; not an FD§4.9 row (FD§4.2: a published ceiling) |
 | Lease timeout | `lease.timeout_s` | 1200 | 10 x 120 s, `CAL` |
 
-Checked against the rows named in the cell and in the other parts; the FD§4.9 table itself was not re-read line by line for this cross-check [V]: C-001 re-checks it at assembly (`ISS-169`).
+Checked against the rows named in the cell and in the other parts; the FD§4.9 table (10 rows) was re-read line by line in `spec/16d-parameter-consistency.md` 16.D.7, which maps each row to its canonical name or names (no FD parameter maps to two names); C-001 still re-checks it at assembly (`ISS-169`).
 
 ## 16.19 Calibration plan
 
@@ -584,7 +608,7 @@ A default is replaced only by the named evidence, recorded as a `CalibrationReco
 | Id | Given | When | Then |
 | --- | --- | --- | --- |
 | `AC-param-01` | a name not in this table | it is seeded, written or read in a policy or job path | the store refuses it with `VALIDATION_FAILED`; CI fails on a code reference to an unknown name |
-| `AC-param-02` | the seeded defaults | the seed check runs | every row satisfies its range and every constraint of 16.3, and the derived defaults recompute to the stored values |
+| `AC-param-02` | the seeded defaults | the seed check runs | every row satisfies its range and every constraint of 16.3, including `S16D-C1`..`S16D-C24` (the warning-kind failures `S16D-C3` in the arm and `S16D-C21` at the default 5 are returned and recorded, not refused), and the derived defaults recompute to the stored values |
 | `AC-param-03` | an operator lowers `admission.phi` | the write is accepted | `change_class` is `tighten`, `effective_from` is now, and the log entry is public within `change.tighten_publish_within_s` |
 | `AC-param-04` | an operator raises `admission.phi` | the write is made without a second approver or with `effective_from` earlier than now + 14 days | it is refused; with a second approver and 14 days of notice it is accepted as `loosen` |
 | `AC-param-05` | two pending versions that are each valid but together break `C7` | the second is written | it is refused naming `C7`; as one batch with a fix it is accepted |
