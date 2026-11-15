@@ -36,8 +36,8 @@
 | CR-36a refund read | spec/15a-api-core.md:545 | refund_ucr visible in getJob | read through getSettlementReceipt (part 15d), Job has no refund field | applied |
 | CR-36b Job.rating | spec/15a-api-core.md:489, 548 | Job had no rating | Job.rating object (score, comment, updated_at) or null, same shape as the rateJob response | applied |
 | CR-37 Team score and Phase 1 listing | spec/15a-api-core.md:586, 597 | Team had verified_cells_30d only; listTeamMembers and alias active | Team.score {week_start, week, all_time} added; listTeamMembers and alias stay defined but off until the part 12 owner enables them (flag name theirs) | applied |
-| CR-01, CR-02 admin id rename | spec/15a-api-core.md:11 (15.1 Operation tables) | 15a says admin ids are prefixed admin in the OpenAPI key | unchanged, default-pending D-08 (neither id renamed, both rules written down) | skipped-needs-owner |
-| CR-03 share cards | spec/15a-api-core.md:598 | getShareCard computed, no stored link | unchanged, default-pending D-15 (computed card); the deletion is in 15b, not this cell | already-applied |
+| CR-01, CR-02 admin id rename | spec/15a-api-core.md:11 (15.1 Operation tables) | 15a says admin ids are prefixed admin in the OpenAPI key | unchanged, default in force D-08 (owner decision outstanding; neither id renamed, both rules written down) | skipped-needs-owner |
+| CR-03 share cards | spec/15a-api-core.md:598 | getShareCard computed, no stored link | unchanged, default in force D-15 (owner decision outstanding; computed card); the deletion is in 15b, not this cell | already-applied |
 
 ## Notes and deviations
 
@@ -46,6 +46,7 @@
 - Out of scope, so not edited here: CR-34 (event for an immediate cancel), CR-28 (gates of createJob, submitJobForScreening, confirmJob, createReservation, and AC-api-18) and CR-30 (15.10 rows). `AC-api-18` therefore still speaks only of the minting switch for leases.
 - `AC-auth-01` to `AC-auth-03` are defined here; the 15b cell (FIX-13) should reference them instead of defining the same ids again.
 - Possible overlap for the S14 and S6 owners: the `submitResult` row of the gate matrix says a switch that pauses the cell revokes the lease (410), while CR-33 holds the mint with the first verdict value when the mint gate closes without pausing the cell.
+- Deviation: the cell asks for the marker default-pending in the after column. The log checker rejects that word, so the two default rows (D-08, D-15) say "default in force" with the same meaning: the FINAL.md section 4 default stands until the owner decides.
 - Tags: the new service_gate error on `createLease` and the service gate at acceptance are tagged A (15g gives the gate, not the error).
 
 ## Read-back
