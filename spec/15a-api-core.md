@@ -75,7 +75,7 @@ Schema blocks list `field: type`. A response object named in the text (for examp
 
 **Rules** [D]
 
-1. **Strict requests.** An unknown field, a duplicate JSON key, a wrong type, or a number where an `ucr` string is required is `400 VALIDATION_FAILED`. The response lists every field error at once in `details.fields` as `{path, code, message}` with `code` in `required`, `type`, `format`, `range`, `length`, `enum`, `unknown_field`, `not_allowed`. Responses are lenient: clients ignore unknown fields (0.11.1).
+1. **Strict requests.** An unknown field, a duplicate JSON key, a wrong type, or a number where an `ucr` string is required is `400 VALIDATION_FAILED`. The response lists every field error at once in `details.fields` as `{path, code, message}` with `code` in `required`, `type`, `format`, `range`, `length`, `enum`, `unknown_field`, `not_allowed`, `secret_pattern`. An unknown query parameter is `400 VALIDATION_FAILED` as well, with `details.fields[0].code` = `unknown_field` and `details.fields[0].path` the parameter name, as for bodies. Responses are lenient: clients ignore unknown fields (0.11.1).
 2. **Not found, not forbidden.** A resource that belongs to another member, or that is not visible to the caller under the opt-in rule `R8`, is `404 NOT_FOUND`. Existence is never confirmed by a different status or message. An unknown route or method is `404 NOT_FOUND`, reason `route_not_found`.
 3. **Server time only.** No request field carries a client clock value that the server trusts; client-reported timings are not accepted at all (timing anomalies are computed from `issued_at` and `received_at`, `S9.*`).
 4. **Money and ratios** are `*_ucr` strings and `*_ppm` integers; the display decimal is a client concern (0.6.1).
@@ -89,8 +89,8 @@ Schema blocks list `field: type`. A response object named in the text (for examp
 
 | Scheme | Credential | Notes |
 | --- | --- | --- |
-| `member` | `Authorization: Bearer <token>`; token is 256 bits from the OS CSPRNG, base64url (43 characters), opaque; the server stores only its SHA-256 (0.6.4) | Obtained only from `createSession`. Never in a URL, query, body or cookie. An admin token here is `401 AUTH_INVALID`, reason `wrong_scheme` |
-| `none` | nothing | `createIdentityChallenge`, `createMember`, `checkInvite`, `createSession`, `recoverMember`, `redeemDeviceLink` only; each is rate-limited per IP hash and per device hash |
+| `member` | `Authorization: Bearer <token>`; token is 256 bits from the OS CSPRNG, base64url (43 characters), opaque; the server stores only its SHA-256 (0.6.4) | Obtained only from `createSession`. Never in a URL, query, body or cookie. An admin token here is `401 AUTH_INVALID`, reason `wrong_scheme`; the reverse holds as well: a member token on an `admin` route is the same `401` with the same reason, never `403` or `404`, and neither case is stored under an idempotency key (the sibling file states the rule for its routes) |
+| `none` | nothing | `createIdentityChallenge`, `createMember`, `checkInvite`, `createSession`, `recoverMember`, `redeemDeviceLink` only; each is rate-limited per IP hash and per device hash. An `Authorization` header sent to a `none` operation is ignored: it is not evaluated, not logged (`S15.3` rule 5), and the response is identical to the response without it (the two dual-scheme bootstrap rows of the sibling file are the only exception and state their own precedence) |
 
 **Challenge and signature (API view)** [D][A]
 
@@ -121,8 +121,9 @@ A challenge is 256 random bits, stored only as SHA-256, bound to its purpose, si
                   same body hash  -> replay stored 2xx or deterministic 4xx, Idempotent-Replayed: true
                   other body hash -> 422 IDEMPOTENCY_KEY_MISMATCH
                   still running  -> 409 IDEMPOTENCY_IN_PROGRESS (+ Retry-After)
- 7 gates        launch.* switch -> 403 LAUNCH_GATE_CLOSED; kill switch -> 503 KILL_SWITCH_ENGAGED;
-                member status and recovery cooldown -> 403 FORBIDDEN
+ 7 gates        launch.* switch -> 403 LAUNCH_GATE_CLOSED; kill switch (the four published keys) -> 503 KILL_SWITCH_ENGAGED;
+                kill.member.<mem_id> -> 403 FORBIDDEN (account_frozen); member status and recovery cooldown -> 403 FORBIDDEN;
+                member step-up missing or invalid -> 401 AUTH_INVALID (step_up_required, step_up_invalid)
  8 validate     schema, enums, sizes -> 400 VALIDATION_FAILED / 413
  9 resolve      absent, not owned or not visible -> 404 NOT_FOUND
 10 precondition If-Match -> 412 PRECONDITION_FAILED
@@ -184,6 +185,7 @@ Member   { id: id<mem>, status: enum<member_status>, trust_tier: enum<trust_tier
            digits: enum<digits>, calendar: enum<calendar>, time_zone: text<64>/null,
            email: { state: "none"/"unconfirmed"/"confirmed", masked: text<64>/null },
            email_notifications: { credit_expiry: bool },
+           client_events_enabled: bool,
            recovery: { cooldown_until: ts/null, recoveries_90d: int },
            security_notices: [ { kind: "key_rotated"/"device_linked"/"recovered"/"recovery_key_rotated", at: ts } ],
            created_at: ts }                                              ETag = row_version
@@ -195,7 +197,7 @@ Device   { id: id<dev>, link_state: "pending"/"awaiting_approval"/"linked"/"deni
 Invite   { id: id<inv>, state: "active"/"redeemed"/"expired"/"revoked", created_at: ts, expires_at: ts, redeemed_at: ts/null }
 ```
 
-`trust_tier` is the 0.9.4 state set; the reliability estimate behind it is not exposed by this part [A]. `last_seen_on` is a coarse date, never a timestamp (metadata minimization, FD Principle 8). The key and invite state names are convention additions.
+`trust_tier` is the 0.9.4 state set; the reliability estimate behind it is not exposed by this part [A]. `last_seen_on` is a coarse date, never a timestamp (metadata minimization, FD Principle 8). The key and invite state names are convention additions. `client_events_enabled` is an additive field that part 15f needs (client events, 15.E.11); it is read-only here (`updateMe` does not accept it) [A][V: review for high-risk members].
 
 **Schemas** (errors beyond the common set of `S15.9` are listed per operation)
 
@@ -360,12 +362,12 @@ The two cap checks at lease time use "potential earnings" so a member cannot hol
 ### 15.6.3 Reports
 
 ```
-createReport  req { subject_kind: "cell"/"lease"/"template"/"job"/"result", subject_id: id<cel>/id<lse>/id<tpl>/id<job>/id<sub>,
+createReport  req { subject_kind: "cell"/"lease"/"template"/"job"/"result"/"team", subject_id: id<cel>/id<lse>/id<tpl>/id<job>/id<sub>/id<tem>,
                     category: enum<report_category>, note: text<500>? }
               201 Report { id: id<rpt>, state: "open"/"triaged"/"actioned"/"dismissed", category, created_at: ts }
 ```
 
-`report_category` (convention addition): `prohibited_content`, `sensitive_data`, `injection_attempt`, `link_or_action_request`, `wrong_declaration`, `abusive_or_unsafe`, `other`. A volunteer may report any card they hold a lease for; a requester may report a `result` of their own job. The reported party never sees the reporter; reports count toward `template.autopause_report_count` within `template.autopause_window_s` (event `template.paused`, `S8.*`); a report never changes the reporter's tier. Limit: `report.max_per_member_per_day` per UTC day (`RL-REPORT`). [D]
+`report_category` (convention addition): `prohibited_content`, `sensitive_data`, `injection_attempt`, `link_or_action_request`, `wrong_declaration`, `abusive_or_unsafe`, `other`. A volunteer may report any card they hold a lease for; a requester may report a `result` of their own job. A `result` is named by an `id<sub>` or, when the caller owns the job, by the `id<cel>` of its cell (a requester never sees an `id<sub>`); a `team` is named by an `id<tem>` of a team the caller can read, otherwise `404 NOT_FOUND` (`S15.3` rule 2). The reported party never sees the reporter; reports count toward `template.autopause_report_count` within `template.autopause_window_s` (event `template.paused`, `S8.*`); a report never changes the reporter's tier. Limit: `report.max_per_member_per_day` per UTC day (`RL-REPORT`). [D]
 
 ### 15.6.4 Submission (paste-back)
 
@@ -591,7 +593,7 @@ createReferral 201 { referral: Referral, code: text<32> }                       
 - **Teams** need `ff.growth.v4_teams` and trust tier at least `team.create_min_tier`; at most `team.max_members` members (`CAP_EXCEEDED`, `team_full`); joining needs the join code and an unexpired `active` member. Aliases are chosen per team, not unique, and are not linked to any other identifier. A member who sets `visible: false` is counted but never listed. `listed: true` allows the team name and its total to appear on public surfaces only while `member_count >= team.min_public_members` (`S12.*`). A team never shows per-member contribution except for `visible` members. [D]
 - **Share card** (`ff.growth.v3_share_card`). `getShareCard` is computed on request and returns only a verified-cell total and badges; it contains no member id, no handle, no location, no date of joining and no time series (`contains_personal_data` is always `false`). The client renders the image locally; the server stores no image and no share link, so there is nothing to track or revoke. [D]
 - **Referral** (`ff.growth.v5_referral`). A referral is an invite with a bonus attached: `createReferral` also creates the `Invite` (same guards as `createInvite`) and counts toward `growth.referral.max_per_referrer_per_30d` (`CAP_EXCEEDED`, `referral_limit`). Redemption is the `invite_code` of `createMember`; the referral becomes `activated` when the newcomer has `growth.referral.min_newcomer_verified_cells` verified cells, and `paid` after `growth.referral.hold_s`, when the referrer receives `growth.referral.bonus_referrer_credits` and the newcomer `growth.referral.bonus_newcomer_credits`, each as a `grant` entry from the Reserve; if the Reserve is at `grant.reserve_floor_credits` the state stays `activated` with `pending_reason` `reserve_floor`. The referrer sees counts and states only, never who the newcomer is. Anti-farming limits (`ratelimit.invite_tree_new_members_per_day`, the invite tree caps, `grant.max_per_device`) apply unchanged. [D]
-- **Feature flags.** `getFeatures` lets the client render only what the server enabled; a client must not call an endpoint whose flag is off. A call to a disabled mechanic is `403 FORBIDDEN`, reason `feature_disabled`, `details.flag`. [D]
+- **Feature flags.** `getFeatures` lets the client render only what the server enabled; a client must not call an endpoint whose flag is off. `getFeatures` also reflects the global client-event parameter of part 15f (15.E.11; its name is 15f's), so a client sends no client events while it is off [A][V: review for high-risk members]. A call to a disabled mechanic is `403 FORBIDDEN`, reason `feature_disabled`, `details.flag`. [D]
 
 ## 15.9 Error model and error-code catalogue
 
@@ -840,7 +842,7 @@ With a balance of 300 credits this leaves 24, as in FD§3.3; a balance below 276
 
 Given / When / Then, each testable against the generated contract suite (`BM0`). `AC-api-01` and `AC-api-03` are stated in `S15.5`.
 
-- `AC-api-02` Given an unauthenticated caller who sends an oversized, unknown-field body to a member route while over the IP-hash limit, When the request arrives, Then the response is `413` for the size, and with a valid size `429`, and with no limit hit `401 AUTH_REQUIRED`, never `400` before `401` (pipeline steps 1, 3, 4, 8).
+- `AC-api-02` Given an unauthenticated caller who sends an oversized, unknown-field body to a member route while over the IP-hash limit, When the request arrives, Then the response is `413` for the size, and with a valid size `429`, and with no limit hit `401 AUTH_REQUIRED`, never `400` before `401` (pipeline steps 1, 3, 4, 8); and given a valid member token on an operation that needs member step-up (`S15c` 15.B.4) without a valid step-up, When the request arrives, Then `401 AUTH_INVALID` with reason `step_up_required` is answered at step 7, after steps 1 to 6 and before body validation (step 8).
 - `AC-api-04` Given a queued cell visible to two members, When both call `createLease` with different `Idempotency-Key` values at the same time, Then exactly one gets `201` and the other `409 LEASE_CONFLICT` reason `cell_not_queued`, and exactly one `cell.leased` event exists.
 - `AC-api-05` Given a successful `createLease`, When the same request is repeated with the same key and body, Then the response is `201`, identical including `nonce`, with `Idempotent-Replayed: true` and no second lease; with a different body it is `422 IDEMPOTENCY_KEY_MISMATCH`.
 - `AC-api-06` Given an accepted submission, When `submitResult` is repeated with the same lease, nonce and body under a new key, Then the stored outcome is returned, `Idempotent-Replayed: true`, and the member's balance is unchanged; with a different `output_text` it is `409 submission_exists`.
@@ -857,6 +859,9 @@ Given / When / Then, each testable against the generated contract suite (`BM0`).
 - `AC-api-17` Given any 2xx or error response in this part, Then it contains no other member's `mem_` id, no `vol_` handle, no IP address and no token except in the operations listed in `S15.10`.
 - `AC-api-18` Given `launch.member_jobs_enabled` is `false`, When `createJob` with `submit` or `confirmJob` is called, Then `403 LAUNCH_GATE_CLOSED` with `details.switch` = `launch.member_jobs_enabled`; given `launch.minting_enabled` is `false`, Then Commons cells are not offered and a direct lease is `403 LAUNCH_GATE_CLOSED`.
 - `AC-api-19` Given a request body with an unknown field, a duplicate key, or `amount_ucr` sent as a number, When any operation is called, Then `400 VALIDATION_FAILED` with every offending path in `details.fields`.
+- `AC-auth-01` Given a valid admin session token, When it is sent to any member operation of S15a to S15d, Then `401 AUTH_INVALID` with `details.reason` `wrong_scheme` and nothing is stored.
+- `AC-auth-02` Given a valid member bearer token, When it is sent to any `/v1/admin/*` operation other than the four bootstrap operations, Then `401 AUTH_INVALID` with `details.reason` `wrong_scheme` and nothing is stored; sent to a `none` operation it is ignored and the response is identical to the response without it.
+- `AC-auth-03` Given the generated OpenAPI document, When the `security` entry of every operation is read, Then each operation has exactly one scheme except the two dual rows of the sibling file (`createCredentialChallenge`, `registerAdminCredential`), and the `/v1/admin/*` prefix never carries `member`.
 
 ## Issues raised
 
