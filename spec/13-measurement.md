@@ -168,14 +168,14 @@ A third class that contains a member identifier does not exist; member-linked co
 | `ui.service_opened` | Open-in-service button pressed (prefill or copy-only link) | refs: `lease_id`, `service_id` | `entity_ref` | ev |
 | `ui.paste_started` | Paste-back field first receives input | refs: `lease_id` | `entity_ref` | ev |
 | `ui.variant_exposed` | A growth or experiment variant is first rendered to the member (S12.*) | dims: `experiment_code`, `arm_key` | `none` | ev; exposure counts in `MetricSnapshot` |
-| `ui.landing_viewed` | Public landing page loaded (count only; never deduplicated by visitor) | dims: `locale`, `device_class` | `none` | ev |
+| `ui.landing_viewed` | Public landing page loaded (count only; never deduplicated by visitor); not sent through the API, S15.E.11 defines no public ingestion endpoint, so this count comes from aggregate counters at the front-end host | dims: `locale`, `device_class` | `none` | ev |
 
 No client event can carry free text, a prompt, an output, a URL, a clipboard content or a timestamp from the device. Events `ui.prompt_copied` and `ui.service_opened` record that a button was pressed; they do not read the clipboard, the provider page or any provider session (ground rule 2 of the brief). [D]
 
 ### 13.3.5 Ingestion
 
 - **Server events.** Background job `metrics.projector` reads the outbox in order, strips the actor id, maps fields per 13.3.4, validates against the JSON Schema of `(name, event_version)`, and inserts into `events`. A row that fails validation is not inserted; it increments `hamyar_metrics_events_rejected_total` and writes a log line (no payload). The projector is idempotent: `(outbox_id)` is stored in a side table `metrics_projector_offsets`, so replay inserts nothing twice. [D]
-- **Client events.** A member-scheme batch endpoint accepts at most `api.max_body_bytes` of JSON containing up to 50 events [A] (limit stated here because S15.* has no parameter for it; see `## Issues raised`). The server stamps `occurred_at`; it drops any event whose `lease_id` does not belong to the authenticated member (drop, not error, so the endpoint reveals nothing); it applies `ratelimit.member_api_rpm`; it ignores the batch silently when `analytics.client_events_enabled` or the member's `client_events_enabled` is false. `Idempotency-Key` is optional here (S0.11.5). Loss of client events never blocks the UI and never changes a ledger or cell state. [D]
+- **Client events.** The member-scheme batch endpoint `recordClientEvents` (`POST /v1/client-event-batches`, S15.E.11, which answers 204 in every valid case) accepts at most `api.max_body_bytes` of JSON containing up to 50 events [A] (limit stated here because S15.* has no parameter for it; see `## Issues raised`). The server stamps `occurred_at`; it drops any event whose `lease_id` does not belong to the authenticated member (drop, not error, so the endpoint reveals nothing); it applies `ratelimit.member_api_rpm`; it ignores the batch silently when `analytics.client_events_enabled` or the member's `client_events_enabled` is false. `Idempotency-Key` is optional here (S0.11.5). Loss of client events never blocks the UI and never changes a ledger or cell state. [D]
 - **Deduplication.** `ui.card_opened` may repeat per lease (each return is informative); all other `ui.*` events keep only the first row per `(lease_id, name)` within the lease lifetime. [D]
 
 ## 13.4 Metric source views and data model additions
@@ -607,7 +607,7 @@ Table `pre_registrations` (entity `PreRegistration`, prefix `prr_`, retention `p
 | `phase` | enum `phase0`, `phase1`, `phase2` | Which phase it governs |
 | `version` | int | 1 for the first row of a `name`; each amendment is a new row with `version + 1` |
 | `amends_id` | text, nullable | The `prr_` it amends |
-| `status` | enum | `draft`, `lock_requested`, `locked`, `abandoned` |
+| `status` | enum | `draft`, `locked`, `abandoned`; a pending lock is an `AdminApproval` (S15.E.3), not a row status. Rows `draft -> lock_requested`, `lock_requested -> draft` and `lock_requested -> locked` of 13.7.2 are re-read as: initiation of `lockPreRegistration`, withdrawal or expiry of that approval, and execution by `approveApproval` |
 | `content` | jsonb | The document of 13.7.5 |
 | `content_hash` | text, nullable | `sha256:<hex>` of the RFC 8785 canonical form of `content` (S0.6.4); set at `lock_requested` |
 | `chain_hash` | text, nullable | `sha256(prev_chain_hash ":" content_hash ":" locked_at_rfc3339)`; `prev_chain_hash` is that of the previously locked pre-registration of any phase, or the SHA-256 of the ASCII string `hamyar-prereg-genesis` for the first |
@@ -623,7 +623,7 @@ Table `pre_registrations` (entity `PreRegistration`, prefix `prr_`, retention `p
 | (none) | `draft` | `prereg.created` | `perm.prereg.edit` | Row created; `content` validated against the JSON Schema only as a draft |
 | `draft` | `lock_requested` | `prereg.lock_requested` | First approver has `perm.prereg.lock` and has passed the step-up re-authentication of S10.*; all lock guards (13.7.3) pass | `content_hash` computed and shown; `lock_approvals[0]` stored; `content` becomes read-only |
 | `lock_requested` | `draft` | (none; `AdminAction` kind `prereg.lock_withdrawn`) | The first approver withdraws, or the two-person approval window of S10.* expires | Approvals cleared; `content_hash` cleared; `content` editable again |
-| `lock_requested` | `locked` | `prereg.locked` | A different admin with `perm.prereg.lock` approves the identical `content_hash`; all guards re-run | `locked_at` set; `chain_hash` computed; `ChangeLogEntry` published with `content_hash`, `chain_hash`, `locked_at`, `phase`, `version` (not the content); evidence attached to the gate item (13.7.6) |
+| `lock_requested` | `locked` | `prereg.locked` | A different admin with `perm.prereg.lock` approves the identical `content_hash`; all guards re-run | `locked_at` set; `chain_hash` computed; `ChangeLogEntry` of kind `preregistration_lock` published with `content_hash`, `chain_hash`, `locked_at`, `scope` and the content (S15.32.1 publishes the content so that anyone can recompute the hash); evidence attached to the gate item (13.7.6) |
 | `draft` | `abandoned` | `prereg.abandoned` | `perm.prereg.edit`, never locked | Terminal; row kept |
 | `locked` | `locked` | `prereg.evaluated` | System, per 13.7.7 | Evaluation snapshots written; no change to the row |
 | (amendment) | new row `draft` | `prereg.amended` | `amends_id` points at a `locked` row | The amended row follows the same machine; the amended row stays `locked` |
@@ -870,7 +870,7 @@ Expected scale: collecting 30 runs per service for four or five services is 120 
 
 ### 13.9.3 Freezing as evidence
 
-A report is *frozen* by `POST /v1/admin/calibration-reports` (creates a report resource): the tool computes all statistics at that instant, writes them as `MetricSnapshot` rows (`metric_no = CAL-nn`, `visibility = internal`, `dims` with `service_id`), records the id range of the `calibration_records` used, and attaches the report id and a SHA-256 of its canonical JSON as evidence to the launch-gate item that S14.* designates for calibration data. Frozen reports are immutable; a later report supersedes (`supersedes_id`), never edits. [D]
+A report is *frozen* by `POST /v1/admin/calibration-reports` (creates a report resource): the tool computes all statistics at that instant, writes them as `MetricSnapshot` rows (`metric_no = CAL-nn`, `visibility = internal`, `dims` with `service_id`), records the id range of the `calibration_records` used, and returns the report id and `report_hash` (a SHA-256 of its canonical JSON); the operator attaches them as evidence to the launch-gate item that S14.* designates for calibration data with the launch evidence operation of S15.27 (`perm.launch.evidence`). Frozen reports are immutable; a later report supersedes (`supersedes_id`), never edits. [D]
 
 ### 13.9.4 Parameter proposals
 
@@ -920,21 +920,21 @@ Conventions of S0.11 apply: plural resource nouns, commands as `POST` creating a
 
 | Operation (camelCase id) | Method and path | Scheme | Permission |
 | --- | --- | --- | --- |
-| `recordClientEvents` | `POST /v1/events` | member | none (own leases only; 13.3.5) |
-| `listMetricSnapshots` | `GET /v1/admin/metric-snapshots` | admin | `perm.metrics.view`; `perm.metrics.view_small_cells` for `suppressed` values |
+| `recordClientEvents` | `POST /v1/client-event-batches` | member | none (own leases only; 13.3.5) |
+| `listMetricSnapshots` | `GET /v1/admin/metric-snapshots` | admin | `perm.metrics.view`; the `value` of a `suppressed` row is always `null` for every caller (no permission shows it; FIX-11) |
 | `createPreRegistration`, `updatePreRegistration` | `POST`, `PATCH /v1/admin/pre-registrations[/{prr_id}]` | admin | `perm.prereg.edit` |
-| `approvePreRegistrationLock` | `POST /v1/admin/pre-registrations/{prr_id}/lock-approvals` | admin, step-up | `perm.prereg.lock` |
-| `getPreRegistrationProof` | `GET /v1/public/pre-registrations/{prr_id}/proof` | none | Returns `content_hash`, `chain_hash`, `locked_at`, `phase`, `version` only |
+| `lockPreRegistration`, `approveApproval` | `POST /v1/admin/pre-registrations/{prr_id}/lock`, then `POST /v1/admin/approvals/{apv_id}/approvals` by a different admin | admin, step-up, two-person | `perm.prereg.lock`, `perm.approval.decide` |
+| `getPublicPreRegistration` | `GET /v1/public/pre-registrations/{prr_id}` | none | Returns the locked `PreRegistration` of S15.33.2 with `content_hash`, `locked_at`, `post_launch` and the additive `chain_hash`; `phase` is `scope`, `version` is the depth of the `supersedes_id` chain |
 | `listPreRegistrationEvaluations` | `GET /v1/admin/pre-registrations/{prr_id}/evaluations` | admin | `perm.metrics.view` |
-| `createDecisionReport` | `POST /v1/admin/decision-reports` | admin | `perm.metrics.export` |
-| `createExperiment`, `updateExperiment` | `POST`, `PATCH /v1/admin/experiments[/{exp_id}]` | admin | `perm.experiment.manage` |
-| `registerExperiment`, `startExperiment`, `stopExperiment` | `POST /v1/admin/experiments/{exp_id}/registrations`, `/starts`, `/stops` | admin; `startExperiment` two-person | `perm.experiment.manage` |
+| `createDecisionReport`, `listDecisionReports`, `getDecisionReport`, `getDecisionReportContent` | `POST`, `GET /v1/admin/decision-reports`; `GET /v1/admin/decision-reports/{dcr_id}`; `GET /v1/admin/decision-reports/{dcr_id}/content` | admin | `perm.metrics.export` (create, content), `perm.metrics.view` (lists, get) |
+| `createExperiment`, `updateExperiment` | `POST`, `PATCH /v1/admin/experiments[/{exp_id}]` | admin | `perm.experiment.edit` |
+| `registerExperiment`, `startExperiment`, `stopExperiment` | `POST /v1/admin/experiments/{exp_id}/registrations`, `/starts`, `/stops` | admin, step-up; two-person start is open (S15.E Issues raised, item 3) | `perm.experiment.run` |
 | `getExperimentBalance` | `GET /v1/admin/experiments/{exp_id}/balance` | admin | `perm.metrics.view`; counts only |
 | `createCalibrationRecords` | `POST /v1/admin/calibration-records` | admin | `perm.calibration.record` |
-| `getCalibrationStatistics`, `getCalibrationProposals` | `GET /v1/admin/calibration-statistics`, `/calibration-proposals` | admin | `perm.calibration.record` |
-| `createCalibrationReport` | `POST /v1/admin/calibration-reports` | admin | `perm.calibration.record` |
-| `createIncident`, `updateIncident`, `listIncidents` | `POST`, `PATCH`, `GET /v1/admin/incidents` | admin | `perm.incident.record` |
-| `createInterview`, `getInterviewCoverage` | `POST /v1/admin/interviews`, `GET /v1/admin/interview-coverage` | admin | `perm.interview.record` |
+| `getCalibrationSummary` (was `getCalibrationStatistics`), `getCalibrationProposals` | `GET /v1/admin/calibration/summary`, `GET /v1/admin/calibration-proposals` (path not reconciled here) | admin | `perm.calibration.read` |
+| `createCalibrationReport`, `listCalibrationReports`, `getCalibrationReport` | `POST`, `GET /v1/admin/calibration-reports`; `GET /v1/admin/calibration-reports/{clr_id}` | admin | `perm.calibration.write` (create), `perm.calibration.read` (lists, get) |
+| `createIncident`, `listIncidents`, `getIncident`, `updateIncident`, `startIncidentInvestigation`, `resolveIncident` | `POST`, `GET /v1/admin/incidents`; `GET`, `PATCH /v1/admin/incidents/{inc_id}`; `POST /v1/admin/incidents/{inc_id}/investigations`, `/resolutions` | admin | `perm.incident.record` (writes), `perm.metrics.view` (reads) |
+| `createInterview`, `getInterviewCoverage` | `POST /v1/admin/interviews`, `GET /v1/admin/interview-coverage` | admin | `perm.interview.record` (create), `perm.metrics.view` (coverage) |
 
 No endpoint returns events or operational rows per member. Error codes are those of S0.8.5; this part adds none. S10.* owns the role matrix; the permission names above are `perm.<area>.<action>` per S0.5 (`ISS-138`). [D]
 
