@@ -1,0 +1,21 @@
+id: C-070
+title: Fix undefined parameter name in spec/08b (audit_rate_floor_ppm)
+type: normal
+priority: 5
+lease_minutes: 30
+goal: 'check_params.py fails on main: spec/08b-verification.md section 8.29.1 writes the backticked name `verify.audit_rate_floor_ppm` as an example of the ppm convention, but no such parameter exists (S0.10.6 Table B defines `verify.audit_rate_floor`; the text itself says a _ppm name is not a separate parameter). Make ONE minimal in-place edit in 8.29.1: in the sentence that starts "In this section and in 8.24.2 a name with the suffix `_ppm`", replace the backticked example `verify.audit_rate_floor_ppm` by wording that names only the defined parameter, for example: "(for example the stored ppm value of the parameter `verify.audit_rate_floor`, written audit_rate_floor_ppm in the pseudocode)". Do not backtick any new verify.* name, do not rename anything, do not change the pseudocode, formulas, numbers or other sections. Then verify with python scripts/check_params.py that spec/08b-verification.md is no longer listed; if another file is still listed, log it with cell_signal feedback and stop.
+
+  '
+after:
+- C-009
+- C-049
+read:
+- docs/decisions.md
+allowed_paths:
+- spec/08b-verification.md
+outputs:
+- spec/08b-verification.md
+acceptance:
+- cmd: python scripts/check_params.py
+- cmd: python scripts/check_issues.py
+notes: 'Steward-created fix cell. Read only section 8.29.1 of spec/08b-verification.md (about lines 395-420) with read_files line ranges. Minimal edit only. Ground rules of docs/decisions.md bind you.'
