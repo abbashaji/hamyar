@@ -98,6 +98,8 @@ Source: the `action` cell of each log table (`logged-cross-part`, `logged-needs-
 
 A14 has no unfixed major finding.
 
+Note on dependencies: when this cell was resumed, its dependency C-056 (A15) was reported as superseded by C-062, which was not yet merged; if C-062 changes `spec/00-conventions.md`, the A15 rows of sections 1 and 2 may be stale. In the preflight of this cell `check_audit.py` first failed on the table headers and the verdict line (fixed in this file afterwards) and `check_params.py` failed on X-07; the result of `check_issues.py` and `check_refs.py api` is not known to this cell.
+
 **Contradictions between the audit logs and the register that no log notices.** These are not rows of any log table; they come from reading 02e Table A against the logs. [D]
 
 | # | Where | Contradiction | Severity (this cell) |
@@ -107,6 +109,7 @@ A14 has no unfixed major finding.
 | X-03 | A01 findings 6, 18 and 02e A4 | Credit after an overturn has four incompatible rules (`ISS-56`, `ISS-85` d, `ISS-62`, `ISS-17`, `ISS-118`); 02e keeps `appeal_restitution` off, so an overturned rejection after escrow close pays nothing. A15 #26 (no effect named) is the same hole in S0. | major (owner) |
 | X-04 | A06 #10 fixes 05b to 09 for nonce replay; 02e A14 and `ISS-151` | `ISS-151` (store the secret encrypted) and `ISS-98` (return null, rotate) disagree; 02e picks `ISS-98`. 15g `IG-07` finds the same fault in 15b `createAdminUser`. | major |
 | X-05 | A09 #38 and A10 | `ISS-117`, `ISS-118`, `ISS-119` are used by both 11c and 11d (02e B4); 2.9 rule 2 forbids reuse. A10 states 11c owns 117..119; A09 states 11d uses 117..119 too. Unresolved; `scripts/check_issues.py` is an acceptance check of this cell. | major |
+| X-07 | `scripts/check_params.py` (acceptance check of this cell, run in preflight) vs `spec/08b-verification.md` | The script reports one parameter name used and not defined in `spec/00-conventions.md` or `spec/16*.md`: `verify.audit_rate_floor_ppm` (08b). S0 and S16 define `verify.audit_rate_floor` (ratio). No audit log lists this name; A08, which audited 08b, did not catch it. The acceptance check of this cell fails until the S8 owner uses `verify.audit_rate_floor` in 08b, or S16 defines the ppm name. | major (build gate) |
 | X-06 | A06 reads `spec/05a-domain-model.md`; the file is `spec/05a-entities.md` | A06 did not check 05b and 09 field names against the real 05a. A05 read 05b only at lines 1-220 and 520-640. The 05a to 05b column conflicts (rows 13 to 16 above) are therefore known only from A05's partial read; the full extent is unknown. | major (unknown extent) |
 
 ## 4. Owner-only decisions, one list
