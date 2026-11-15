@@ -466,7 +466,7 @@ A kill switch is the fast, reversible brake (S0 0.9.8). Engaging is tightening: 
 | Key | Created | Effect visible through the API while engaged | Events produced and consumed |
 | --- | --- | --- | --- |
 | `kill.all_minting` | seeded, `released` | Operations that would post a `mint` (cell acceptance, grants that mint) answer `503 KILL_SWITCH_ENGAGED` or are held by the ledger service until release (the holding rule is S6.*, `ISS-156`); no new Commons cell leases are issued | `killswitch.engaged`; ledger service stops minting postings |
-| `kill.all_new_jobs` | seeded, `released` | `createJob`, quote acceptance, waitlist release and reservation activation answer `503 KILL_SWITCH_ENGAGED`; jobs already running continue | `killswitch.engaged`; job service stops admitting |
+| `kill.all_new_jobs` | seeded, `released` | `createJob` with `submit` true, `submitJobForScreening`, `confirmJob` (quote acceptance, also with a `reservation_id`) and `createReservation` answer `503 KILL_SWITCH_ENGAGED` (gate matrix of part a, S15.4); a waitlist release is held until the switch is released; jobs already running continue | `killswitch.engaged`; job service stops admitting |
 | `kill.template.<tpl_id>` | on first engage | New jobs naming the template are refused; its queued cells are paused (`cell.paused`), its leases revoked (`lease.revoked`), its running jobs paused (`job.paused`) | `template.paused` (S0 0.9.5) and the job and cell events listed |
 | `kill.service.<svc_id>` | on first engage | The service is shown as blocked in adapters; jobs requiring it are refused; its pinned cells are paused | `service.suspended` (S0 0.9.6) and the job and cell events |
 | `kill.member.<mem_id>` | on first engage | That member's leases, submissions, job creation and invitations answer `403 FORBIDDEN` with `details.copy_key = copy.member.account_frozen` (not 503: a retry would be misleading); reads and appeals still work | `killswitch.engaged`; lease service revokes the member's active leases. The member's `status` is NOT changed; use 15.29.6 for sanctions |
@@ -477,7 +477,7 @@ The in-flight handling of each cascade is owned by S7.* and S8.*; this table lis
 
 | op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `listKillSwitches` | `GET /v1/admin/kill-switches` | `admin` `perm.killswitch.read` | `?scope` (`all`, `template`, `service`, `member`), `?state` | list of `{switch_key, state, changed_at, reason_code}` (the two global keys always present; scoped keys only if ever touched) | - | n/a | cursor | `A-R` |
+| `listKillSwitches` | `GET /v1/admin/kill-switches` | `admin` `perm.killswitch.read` | `?scope` (`global`, `template`, `service`, `member`), `?state` | list of `{switch_key, state, changed_at, reason_code}` (the two global keys always present; scoped keys only if ever touched) | - | n/a | cursor | `A-R` |
 | `getKillSwitch` | `GET /v1/admin/kill-switches/{switch_key}` | `admin` `perm.killswitch.read` | - | `{switch_key, state, engaged_by, engaged_at, reason_code, reason, linked_report_id, linked_alarm_id, release_approval_id}` | `NOT_FOUND` (unknown scope id) | n/a | - | `A-R` |
 | `listKillSwitchHistory` | `GET /v1/admin/kill-switches/{switch_key}/history` | `admin` `perm.killswitch.read` | - | list of `KillSwitch` rows, newest first | - | n/a | cursor | `A-R` |
 | `engageKillSwitch` | `POST /v1/admin/kill-switches/{switch_key}/engagements` | `admin` `SU` `perm.killswitch.engage.<scope>` | `{reason_code (safety_incident, integrity_violation, provider_notice, policy_defect, abuse, capacity, other), reason, public_text?: {fa, en}, linked_report_id?, linked_alarm_id?}` | 201 `{switch, effects: {jobs_paused, cells_paused, leases_revoked}}` counted at commit; event `killswitch.engaged` | `STATE_CONFLICT` (`already_engaged`), `VALIDATION_FAILED` (`public_text` required for the four published scopes), `NOT_FOUND` (the template, service or member does not exist) | req | - | `A-W` |
@@ -502,7 +502,7 @@ The system itself engages switches in two cases and records `actor.principal_typ
 
 ### 15.29.1 Audit queue
 
-Audits compare an independent re-execution with the first (S0 0.9.4). The comparator runs automatically; a human decides only what it cannot.
+Audits compare an independent re-execution with the first (S0 0.9.8). The comparator runs automatically; a human decides only what it cannot.
 
 | op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -578,7 +578,7 @@ Acknowledging an alarm does not fix its cause; a critical `ledger` or `launch` a
 
 ### 15.29.6 Restrictions, suspensions, bans [D]
 
-Statuses and events are S0 0.9.1. Each action is a separate noun so every one has one audit row and one event. The member sees the outcome through a notice in the member inbox (part a), chosen from `reason_copy_key`, a fixed `copy.*` key; no free text reaches the member.
+Statuses and events are S0 0.9.4. Each action is a separate noun so every one has one audit row and one event. The member sees the outcome through the `FORBIDDEN` reason of part a and, once a member notice operation exists (part a defines none; gap logged in the A12 audit), a notice chosen from `reason_copy_key`, a fixed `copy.*` key; no free text reaches the member.
 
 | op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -719,7 +719,7 @@ Public endpoints are read-only except the verification `POST`. They are the code
 6. **Feature flags:** `ff.growth.v2_live_counter`, `ff.public.ledger_page`, `ff.growth.v3_share_card` and `ff.growth.v6_milestones` gate their endpoints; when off the answer is `404 NOT_FOUND`. Parameters, change log, metrics, pre-registrations and manifest verification are always on.
 7. **Language:** responses are language-neutral data and `copy.*` keys; texts the admin wrote carry `{fa, en}` and the client picks (S11.*).
 8. **Rate limits:** `PUB`, except verification (`PUB-V`).
-9. **Health** of the service itself (`/v1/health`) is defined in part a and BM0, not here.
+9. **Health** of the service itself is the endpoint named in S0 0.12 `BM0`; no S15 file specifies it yet (gap logged in the A12 audit).
 
 ### 15.33.2 Endpoint table
 
@@ -729,7 +729,7 @@ Public endpoints are read-only except the verification `POST`. They are the code
 | `getPublicLedgerSummary` | `GET /v1/public/ledger/summary` | `none` | - | see 15.33.3 | `NOT_FOUND` (flag off) | n/a | - | `PUB` |
 | `listPublicLedgerCheckpoints` | `GET /v1/public/ledger/checkpoints` | `none` | `?from`, `?to` | list of `{date, seq, checkpoint_hash}` | `NOT_FOUND` (flag off) | n/a | cursor | `PUB` |
 | `listPublicLedgerDaily` | `GET /v1/public/ledger/daily` | `none` | `?from`, `?to` (at most 366 days) | list of `{date, by_entry_type: [{entry_type, count, amount_ucr}]}` ascending by date | `NOT_FOUND` (flag off) | n/a | cursor | `PUB` |
-| `listPublicParameters` | `GET /v1/public/parameters` | `none` | `?area` | list of `{name, area, unit, value, version, effective_from, scheduled: {value, effective_from} or null}` for every parameter with `is_public = true` | - | n/a | cursor | `PUB` |
+| `listPublicParameters` | `GET /v1/public/parameters` | `none` | `?area` | list of `{name, area, unit, value, version, effective_from, scheduled: {value, effective_from} or null}` for every parameter with `public` = true | - | n/a | cursor | `PUB` |
 | `getPublicParameter` | `GET /v1/public/parameters/{name}` | `none` | - | same shape for one parameter | `NOT_FOUND` | n/a | - | `PUB` |
 | `listPublicParameterVersions` | `GET /v1/public/parameters/{name}/versions` | `none` | - | `{version, value, effective_from, change_class, changelog_entry_id}` newest first, withdrawn versions marked | `NOT_FOUND` | n/a | cursor | `PUB` |
 | `getPublicMetrics` | `GET /v1/public/metrics` | `none` | - | the latest published `MetricSnapshot`, see 15.33.4 | - | n/a | - | `PUB` |
@@ -749,13 +749,13 @@ Public endpoints are read-only except the verification `POST`. They are the code
 
 ```
 { "as_of": "2026-12-01T10:00:00Z",
-  "ledger_head": { "seq": "18422", "entry_hash": "sha256:..." },
+  "ledger_head": { "seq": 18422, "entry_hash": "sha256:..." },
   "totals": { "minted_ucr": "...", "granted_ucr": "...", "levied_ucr": "...", "expired_ucr": "...", "retired_ucr": "..." },
   "balances": { "reserve_ucr": "...", "escrow_open_ucr": "...", "members_total_ucr": "...", "issuance_ucr": "-...", "retired_ucr": "..." },
   "reserve_ceiling_ucr": "...",
   "identity_check": { "sum_of_all_balances_ucr": "0" },
   "invariants": { "status": "ok", "last_full_recompute_at": "..." },
-  "last_checkpoint": { "date": "2026-11-30", "seq": "18100", "checkpoint_hash": "sha256:..." } }
+  "last_checkpoint": { "date": "2026-11-30", "seq": 18100, "checkpoint_hash": "sha256:..." } }
 ```
 
 `ledger_head.seq` is the head at `as_of` (after the lag), not the live head. `identity_check` exists because the ledger is double-entry: signed balances of all accounts sum to zero (issuance holds the negative of everything minted; S0 0.8.5). `invariants.status` is `ok`, `violated` or `unknown`. The page shows aggregates and the daily checkpoint hashes only; it does not list individual entries or any member account, because a public feed of member-account movements with timestamps would be linkable to the people behind them. This is a decision and a trade-off: third parties can verify checkpoints and totals but cannot recompute the hash chain of member entries themselves (`ISS-155`) [D].
@@ -770,7 +770,7 @@ A share card is a frozen, anonymous, revocable summary a member can post anywher
 
 | op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `createShareCard` | `POST /v1/share-cards` | `member` | `{include_badge: bool, locale (fa or en)}` | 201 `{shc_id, token, url_path, card}`; the `token` (128 bits, CSPRNG, base64url) is shown once and stored only as a SHA-256 hash; event `sharecard.created`; `403 FORBIDDEN` when `ff.growth.v3_share_card` is off or the member is not `active` | `RATE_LIMITED` (at most `growth.share_card_max_active` live cards per member [A]) | req | - | member class of part a |
+| `createShareCard` | `POST /v1/share-cards` | `member` | `{include_badge: bool, locale (fa or en)}` | 201 `{shc_id, token, url_path, card}`; the `token` (128 bits, CSPRNG, base64url) is shown once and stored only as a SHA-256 hash; event `sharecard.created`; `403 FORBIDDEN` when `ff.growth.v3_share_card` is off or the member is not `active` | `CAP_EXCEEDED` (`share_card_limit`: at most `growth.share_card_max_active` live cards per member [A]) | req | - | member class of part a |
 | `listMyShareCards` | `GET /v1/share-cards` | `member` | - | list of `{shc_id, created_month, status}` (never the token) | - | n/a | cursor | member class of part a |
 | `revokeShareCard` | `DELETE /v1/share-cards/{shc_id}` | `member` | - | 204; the public URL answers `404` from then on; event `sharecard.revoked` | `NOT_FOUND` | req | - | member class of part a |
 
@@ -780,7 +780,7 @@ A share card is a frozen, anonymous, revocable summary a member can post anywher
 
 The provenance manifest travels with every export (FD§5.6; S0 0.6.3 `mfs_`). It records, per output, the job, the template version, the policy version, the cell and verification outcomes, the volunteer-attested service and region (attested, not proven), and a license and no-training flag. The export form omits the volunteer handle (requesters never see it) [A]; verification works on the export form (`ISS-156`).
 
-- `verifyManifest` recomputes `manifest_hash = SHA-256(RFC 8785 canonical JSON of manifest)` and looks it up. Optionally `deliverable_sha256` is compared with the deliverable hash recorded in the manifest.
+- `verifyManifest` recomputes `manifest_hash = SHA-256(RFC 8785 canonical JSON of the manifest without its `manifest_hash` field, as in part a 15.7.3)` and looks it up. Optionally `deliverable_sha256` is compared with the deliverable hash recorded in the manifest.
 - `lookupManifestHash` is the same lookup for someone who has only the hash.
 
 Response of both: `{verdict (match, mismatch, unknown), manifest_hash, recorded: {issued_on (UTC date), job_type, license, purpose, no_training, policy_version_number} or null, differences: [json_pointer], deliverable_check: {checked, matches} , limits_copy_key}`.
@@ -937,11 +937,27 @@ Every event has this envelope; the catalog below lists only the payload.
 
 Timers are produced by the `scheduler` and are events like any other: `quote_expired`, `waitlist_released`, `waitlist_expired`, `lease_expired`, `service.review_due`, `service.review_lapsed`, `parameter.activated`, `policy.version_activated` (for `loosen`), `admin.approval_expired`, the daily ledger checkpoint, the lot-expiry `expire` postings and `reserve` `retire` postings (S6.*). Names listed here that are not in S0 0.9 (`service.terms_copy_sealed`, `service.flags_recorded`, `policy.version_activated`, `policy.version_cancelled`, `parameter.activated`, `parameter.change_withdrawn`, `feature_flag.changed`, `launch.member_jobs_enabled_changed`, `launch.minting_enabled_changed`, `preregistration.locked`, `experiment.started`, `experiment.stopped`, `calibration.recorded`, `milestone.published`, `sharecard.*`, `alarm.*`, `admin.*`) are convention additions (`ISS-154`).
 
+### 15.34.6 Catalog: events proposed by part a [A]
+
+Part a (`S15.5` to `S15.8`) names these events as convention additions; they follow the envelope of 15.34.1 (`ISS-154`).
+
+| Event | Payload (besides envelope) | Producer | Consumers |
+| --- | --- | --- | --- |
+| `invite.created`, `invite.revoked` | `invite_id`, `member_id` | `identity_svc` | `analytics` |
+| `invite.redeemed` | `invite_id`, `new_member_id`, `tree_depth` | `identity_svc` | `analytics` |
+| `member.key_revoked` | `member_id`, `key_id`, `cause (member, rotation_grace_ended, recovery)` | `identity_svc` | `identity_svc` (ends the key's sessions), `analytics` |
+| `member.device_revoked` | `member_id`, `device_id` | `identity_svc` | `identity_svc` (ends the device's sessions) |
+| `offer.declined` | `cell_id`, `member_id`, `reason (decline_reason)` | `cell_svc` | `metrics_svc` |
+| `job.rated` | `job_id`, `score` | `job_svc` | `metrics_svc` |
+| `team.created`, `team.joined`, `team.left` | `team_id`, `member_id` | `identity_svc` | `analytics` |
+| `referral.issued`, `referral.redeemed`, `referral.activated`, `referral.voided` | `referral_id` | `identity_svc` | `analytics` |
+| `referral.paid` | `referral_id`, `entry_ids` | `identity_svc` | `ledger_svc` (posts the two `grant` entries), `analytics` |
+
 ## 15.35 Webhook-free by design [D]
 
 Hamyar sends nothing to its volunteers, requesters or any third party on its own initiative.
 
-- **No webhooks, no callbacks, no push, no e-mail or SMS to members, no server-sent streams.** Clients poll with `ETag` / `If-None-Match` (S0 0.11.7). The member inbox (part a) is a read model fed by `inbox_proj`; reading it is a pull.
+- **No webhooks, no callbacks, no push, no e-mail or SMS to members, no server-sent streams.** Clients poll with `ETag` / `If-None-Match` (S0 0.11.7). The member inbox is a read model fed by `inbox_proj`; reading it is a pull (part a defines no inbox operation yet; gap logged in the A12 audit).
 - **No outbound request to any address a user or admin typed.** A service's URL template, a milestone's `output_ref.url`, a terms copy's `source_ref` and every other address are stored text. The server does not fetch them, so there is no server-side request forgery surface and no way to make the platform scrape a provider.
 - **Why:** a volunteer's identity must not leak to a requester or provider through a callback URL (S0 0.7); a webhook sender is also an unbounded outbound-abuse surface for a tiny team. Operators are alerted through the Operator tools, which read `Alarm` (15.29.4) and the metrics of S4.*, not through messages the platform sends.
 - **Third-party consumers of public data** use the public endpoints (15.33), which are cacheable and need no registration.
@@ -1101,7 +1117,7 @@ Problems and gaps found while writing this part. Each resolution is already appl
 
 | id | severity | fd_ref | issue | resolution | status |
 | --- | --- | --- | --- | --- | --- |
-| `ISS-154` | major | FD§5.4 R10, FD§5.7 failure mode 10, FD§9 | S0 lacks names this part needs: (1) entities `AdminApproval` (`apv_`), `ShareCard` (`shc_`) and `Milestone` (`mls_`); (2) fields `TermsCopy.status`, `ParameterVersion.withdrawn_at`, `PreRegistration.status` and `content_hash`, `Experiment.status` and `fraction_source`; (3) `ChangeLogEntry.kind` values `kill_switch`, `launch_switch`, `feature_flag`, `preregistration_lock`, `milestone`, `note` and the field `amends_id`; (4) parameters `ratelimit.admin_write_cost` (int, initial configurable default 2), `ratelimit.admin_auth_attempts_per_hour` (10), `ratelimit.public_verify_cost` (5), `session.admin_stepup_ttl_s` (300), `security.approval_ttl_s` (86,400), `launch.require_locked_preregistration` (bool, true), `growth.share_card_max_active` (3), all owned by the areas of 0.10.5; (5) names added to `security.two_person_actions`: `policy.loosen`, `launch.switch_on`, `admin.enroll`, `admin.role_change`, `member.ban`, `preregistration.lock` and, when `service.min_approvers` > 1, `service.approve`; (6) the events listed at the end of 15.34.5 and the envelope field `config_epoch`; (7) `ff.growth.v4_teams` and `ff.job.reservations` exist in S0 but not in part-a examples | All applied as written in 15.21 to 15.34. `C-027` or the next convention edit should fold them into 0.7 to 0.10 without renaming | proposed |
+| `ISS-154` | major | FD§5.4 R10, FD§5.7 failure mode 10, FD§9 | S0 lacks names this part needs: (1) entities `AdminApproval` (`apv_`), `ShareCard` (`shc_`) and `Milestone` (`mls_`); (2) fields `TermsCopy.status`, `ParameterVersion.withdrawn_at`, `PreRegistration.status` and `content_hash`, `Experiment.status` and `fraction_source`; (3) `ChangeLogEntry.kind` values `kill_switch`, `launch_switch`, `feature_flag`, `preregistration_lock`, `milestone`, `note` and the field `amends_id`; (4) parameters `ratelimit.admin_write_cost` (int, initial configurable default 2), `ratelimit.admin_auth_attempts_per_hour` (10), `ratelimit.public_verify_cost` (5), `session.admin_stepup_ttl_s` (300), `security.approval_ttl_s` (86,400), `launch.require_locked_preregistration` (bool, true), `growth.share_card_max_active` (3), all owned by the areas of 0.10.5; (5) names added to `security.two_person_actions`: `policy.loosen`, `launch.switch_on`, `admin.enroll`, `admin.role_change`, `member.ban`, `preregistration.lock` and, when `service.min_approvers` > 1, `service.approve`; (6) the events listed at the end of 15.34.5 and the envelope field `config_epoch`; (7) the events that part a proposes (15.34.6) | All applied as written in 15.21 to 15.34. `C-027` or the next convention edit should fold them into 0.7 to 0.10 without renaming | proposed |
 | `ISS-155` | major | FD§5.3, FD§5.6, Principle 5 | Three transport and privacy decisions conflict with a literal reading of S0 or the FD: (1) the API is JSON only with `api.max_body_bytes` = 1,048,576, yet `service.terms_copy_max_bytes` = 5,242,880 and uploads "use `job.max_upload_bytes`" only for requester data; (2) S0 0.11.5 requires `Idempotency-Key` on every admin write, but replaying a stored login or credential response would store a session token or credential options; (3) Principle 5 makes the ledger public, but a per-entry public feed would let timing link a public movement to a member | (1) Terms copies are uploaded as base64 chunks of at most `floor(api.max_body_bytes * 3 / 4) - 1024` raw bytes and sealed by hash (15.23.2). (2) The three unauthenticated admin endpoints (`startAdminLogin`, `createAdminSession`, `createCredentialChallenge`) take the key as optional; every challenge is single use (15.21.3, 15.22). (3) The public ledger shows lagged aggregates, daily checkpoint hashes and an identity check, not per-entry data; third parties verify totals and checkpoints, and the full hash chain only by an auditor with admin read access (15.33.3) | proposed |
 | `ISS-156` | minor | FD§5.6, FD§8.3, FD§9 | Dependencies on parts this cell could not read: (1) part a (15a) section numbers, and whether it already defines share-card member operations; (2) S4.* component names and outbox row; (3) S10.* permission matrix, admin bootstrap and credential-loss procedure; (4) S6.* rule for deferred mint postings under `kill.all_minting` and for freezing on a critical invariant violation; (5) S13.* and S14.* placement of the "pre-registration locked" clause of the launch rule; (6) S5.*/S9.* export form of the manifest (volunteer handle omitted) and its hash; (7) S8.* template `definition` schema and S7.* rule `params` | Each is written as an [A] assumption with the smallest possible surface: section numbers start at 15.21; share-card operations are specified once, here (15.33.5), and part a should reference them; component names and `event_id` format are marked [A]; permission names are proposals; the freeze, the launch-rule clause and the manifest export form are isolated in 15.28.3, 15.27.3 and 15.33.6 so an owner can change them without touching any endpoint | proposed |
 
