@@ -32,7 +32,7 @@
 | CR-29c exempt operations | spec/15a-api-core.md:146, 361 | exemption unstated | extendLease, issueLeaseNonce, expandLeasePrompt exempt (matrix row and Lost nonce bullet) | applied |
 | CR-29d listOfferedCells and kill.member | spec/15a-api-core.md:334 | unchanged | not edited: 15g names kill.member as missing for both calls but states no list behavior, and the matrix says reads still work | skipped-needs-owner |
 | CR-31 RL-PUB equals PUB | spec/15a-api-core.md:702, 712 | RL-PUB vs part b PUB unrelated in text | RL-PUB is the same class as PUB, PUB-V is a sibling; contract tests key on details.class | applied |
-| CR-33 payment at acceptance | spec/15a-api-core.md:394 | acceptance posts the entry, no gate named | names the mint gate and service_gate continue; a closed gate keeps verdict pending, no ledger entry, no 503 or 403, mint held (tagged A, P: S6 owner) | applied |
+| CR-33 payment at acceptance | spec/15a-api-core.md:394 | acceptance posts the entry, no gate named | names the mint gate and service_gate continue; a closed gate leaves the submission verdict at its first value, no ledger entry, no 503 or 403, mint held (tagged A, P: S6 owner) | applied |
 | CR-36a refund read | spec/15a-api-core.md:545 | refund_ucr visible in getJob | read through getSettlementReceipt (part 15d), Job has no refund field | applied |
 | CR-36b Job.rating | spec/15a-api-core.md:489, 548 | Job had no rating | Job.rating object (score, comment, updated_at) or null, same shape as the rateJob response | applied |
 | CR-37 Team score and Phase 1 listing | spec/15a-api-core.md:586, 597 | Team had verified_cells_30d only; listTeamMembers and alias active | Team.score {week_start, week, all_time} added; listTeamMembers and alias stay defined but off until the part 12 owner enables them (flag name theirs) | applied |
@@ -45,7 +45,7 @@
 - `spec/15d` and `spec/15f` were not read (not in this cell's list). That is why CR-15b is skipped and why CR-19b names no parameter.
 - Out of scope, so not edited here: CR-34 (event for an immediate cancel), CR-28 (gates of createJob, submitJobForScreening, confirmJob, createReservation, and AC-api-18) and CR-30 (15.10 rows). `AC-api-18` therefore still speaks only of the minting switch for leases.
 - `AC-auth-01` to `AC-auth-03` are defined here; the 15b cell (FIX-13) should reference them instead of defining the same ids again.
-- Possible overlap for the S14 and S6 owners: the `submitResult` row of the gate matrix says a switch that pauses the cell revokes the lease (410), while CR-33 holds the mint as `pending` when the mint gate closes without pausing the cell.
+- Possible overlap for the S14 and S6 owners: the `submitResult` row of the gate matrix says a switch that pauses the cell revokes the lease (410), while CR-33 holds the mint with the first verdict value when the mint gate closes without pausing the cell.
 - Tags: the new service_gate error on `createLease` and the service gate at acceptance are tagged A (15g gives the gate, not the error).
 
 ## Read-back
@@ -67,7 +67,7 @@ After all edits every place was read again in the branch file.
 - CR-29b, line 334: the drop line now includes member-job cells and the service gate condition.
 - CR-29c, lines 146 and 361: a matrix row and the Lost nonce bullet both state the exemption.
 - CR-31, lines 702 and 712: RL-PUB row mentions `PUB-V`; the first bullet says tests key on `details.class`.
-- CR-33, line 394: the Payment bullet says the submission is stored with `verdict` `pending`.
+- CR-33, line 394: the Payment bullet says a closed gate leaves the submission at the first `verdict` value and holds the mint.
 - CR-36, lines 489, 545, 548: Job has a `rating` line; cancelJob points at `getSettlementReceipt`; the Rating bullet ends with `Job.rating`.
 - CR-37, lines 586 and 597: Team shows a `score` line; the Teams bullet says the listing and alias are off.
 - Skipped rows: line 517 (confirmJob guards) and line 334 are unchanged; line 11 (admin id rule) and line 598 (share card) are unchanged.
