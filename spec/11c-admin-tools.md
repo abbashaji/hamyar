@@ -27,7 +27,7 @@ This part specifies the admin side of Hamyar: twelve tools and three shared scre
 | 10 | Kill switches | 11.54 | `operator`; `reviewer` for template and service | `SCR-ops-13`, `SCR-ops-14` |
 | 11 | Member lookup (minimal data) | 11.55 | `reviewer`, `operator` | `SCR-rev-12` |
 | 12 | Release / Hand over (claims, lease release) | 11.56 | `reviewer`, `operator` | `SCR-ops-15`, `SCR-ops-16` |
-| shared | Admin home, approvals inbox, audit-trail viewer | 11.43, 11.44 | `reviewer`, `operator` | `SCR-ops-01`, `SCR-ops-02`, `SCR-ops-03` |
+| shared | Admin home, approvals inbox, audit-trail viewer | 11.42.4, 11.43 | `reviewer`, `operator` | `SCR-ops-01`, `SCR-ops-02`, `SCR-ops-03` |
 
 ### 11.41.2 Cross-cutting decisions
 
@@ -584,7 +584,7 @@ Every tile shows its value, the time it was computed, and the parameter it is co
 | --- | --- | --- |
 | Active donors | Distinct donors with at least one accepted cell in the last `admission.active_donor_window_days` | |
 | Verified throughput | Accepted cells per UTC day, trailing `inflation.throughput_window_days` | |
-| Forecast capacity | `floor(active_donors * cells_per_donor_per_day * window_days * phi_ppm * (1 - haircut) / 10^6)` for the quoted window; inputs and the S6.* output are both shown [A] | `admission.phi`, `admission.forecast_haircut`, `admission.forecast_window_days` |
+| Forecast capacity | `floor(active_donors * cells_per_donor_per_day * window_days * phi_ppm * (10^6 - haircut_ppm) / 10^12)` (integer form, no floating point) for the quoted window; inputs and the S6.* output are both shown [A] | `admission.phi`, `admission.forecast_haircut`, `admission.forecast_window_days` |
 | Committed and headroom | Committed cells (admitted jobs plus reservations in the window) and forecast capacity minus committed | |
 | Quote versus actual | For completed jobs, completion time divided by quoted window, and the share finished inside the quote | Phase 1 decision rule (a), FD§9 |
 | Queue depth | Queued cells by template, service requirement, purpose and sensitivity; age of the oldest | |
@@ -596,7 +596,7 @@ Every tile shows its value, the time it was computed, and the parameter it is co
 | Concentration | Share of accepted cells from the top 10 percent of donors (a Phase 1 measure, FD§9) | |
 | Alarms and switches | Open `Alarm` rows, engaged kill switches, effective launch state | |
 
-A breach turns the tile red and raises an `Alarm`; each tile links to the parameter in `SCR-ops-08` and to the matching kill switch with the tile as `context`. The dashboard changes nothing itself. Worked fixture (the FD§3.3 inputs, not measurements): 40 active donors, 8 cells per donor per day, a 2-day window, `phi` 500,000 ppm and haircut 0 give capacity `floor(40 * 8 * 2 * 500,000 / 10^6)` = 320 cells; committed 264 cells (S0.6.1) leave a headroom of 56 cells.
+A breach turns the tile red and raises an `Alarm`; each tile links to the parameter in `SCR-ops-08` and to the matching kill switch with the tile as `context`. The dashboard changes nothing itself. Worked fixture (the FD§3.3 inputs, not measurements): 40 active donors, 8 cells per donor per day, a 2-day window, `phi` 500,000 ppm and haircut 0 give capacity `floor(40 * 8 * 2 * 500,000 * (10^6 - 0) / 10^12)` = 320 cells; committed 264 cells (S0.6.1) leave a headroom of 56 cells.
 
 ### 11.52.3 Bottleneck banner (carried over from the Panel concept) [D][A]
 
