@@ -286,7 +286,7 @@ A check is a deterministic function `(extracted, cell, template) -> pass \| fail
 
 | `type` | Does | Params | Default `reason` | Required for |
 | --- | --- | --- | --- | --- |
-| `size_bounds` | Raw and extracted length within bounds | `min_chars`, `max_chars` (shares of 8.5.2) | `reject.size_exceeded`, `reject.length_out_of_bounds` | all |
+| `size_bounds` | Raw and extracted length within bounds | `min_chars`, `max_chars` (or `min_chars_share_ppm`, `max_chars_share_ppm`; shares of 8.5.2) | `reject.size_exceeded`, `reject.length_out_of_bounds` | all |
 | `output_flag_scan` | Links, instruction-like text, requests for action, code to run (pattern sets owned by `S9.*`) | `pattern_sets` | none: `on_fail` = `quarantine` (`screen.output_url_action`) | all |
 | `refusal_pattern` | Matches refusal and apology phrasings on raw text | `pattern_set` | `reject.refusal_pattern` | all |
 | `extract_result` | 8.5.4 | none | `reject.schema_invalid`, `reject.echo_token_mismatch` | all |
@@ -296,7 +296,7 @@ A check is a deterministic function `(extracted, cell, template) -> pass \| fail
 | `glossary_adherence` | For each glossary entry whose source term occurs in a segment, the target term occurs in the translated segment | `match` (`nfc_casefold`, `token_boundary`), `min_ppm` | `reject.glossary_violation` | translation |
 | `grounded_span` | Declared fields must occur in the input after the stated normalization, else be null | `fields`, `normalize` (`nfc`, `digits`) | `reject.grounding_failed` | extraction, conversion |
 | `numbers_grounded` | Every numeral in the output occurs in the input after digit normalization | `normalize` | `reject.grounding_failed` | summarization |
-| `script_ratio` | Share of letters in a Unicode script within bounds | `script`, `min_ppm`, `max_ppm` | `reject.language_mismatch` | text outputs |
+| `script_ratio` | Share of letters in a Unicode script within bounds, measured on the translated or generated text only (segment markers `[[id]]`, JSON keys and delimiter lines are removed first because they are ASCII letters) | `script`, `min_ppm`, `max_ppm`, or `by_target` (map from output language to those three) | `reject.language_mismatch` | text outputs |
 | `orthography_variants` | Counts Arabic-variant yeh (U+064A) and kaf (U+0643) in Persian output | `max_ppm` | none: `on_fail` = `note` | `fa` outputs |
 | `length_ratio` | Output length over input length within bounds | `min_ppm`, `max_ppm` | `reject.length_out_of_bounds` | translation, summarization |
 | `static_parse` | Parses code without executing it | `language` | `reject.schema_invalid` | code |
@@ -332,7 +332,7 @@ All thresholds are template data (`initial configurable default`, `calibration_s
 A task may ask the volunteer to do nothing except copy the prompt, press Send, copy the answer and paste it back (R3, ground rule 3). The platform enforces this in four places [D]:
 
 1. **Schema constant.** `volunteer_steps` is a constant (LR-01).
-2. **Prompt lint LR-10** on the template text with slots removed, case-insensitive, for every variant. A match blocks `template.review_requested`: `https?://`, `www\.`, a bare domain of the form `[a-z0-9-]+\.[a-z]{2,}`, and the words "open", "visit", "click", "download", "install", "attach", "upload", "sign in", "log in", "password", "api key", "credential", "run", "execute", "browse", "search the web"; Persian equivalents live in the lint data and need review [V: Persian lint list reviewed by a Persian-fluent reviewer; stored with the lint data under review]. Templates are written to avoid these words rather than to exempt them; there is no exemption mechanism.
+2. **Prompt lint LR-10** on the template text with slots removed, case-insensitive, for every variant (the listed words match as whole words, on token boundaries, so "truncated" does not trip "run"). A match blocks `template.review_requested`: `https?://`, `www\.`, a bare domain of the form `[a-z0-9-]+\.[a-z]{2,}`, and the words "open", "visit", "click", "download", "install", "attach", "upload", "sign in", "log in", "password", "api key", "credential", "run", "execute", "browse", "search the web"; Persian equivalents live in the lint data and need review [V: Persian lint list reviewed by a Persian-fluent reviewer; stored with the lint data under review]. Templates are written to avoid these words rather than to exempt them; there is no exemption mechanism.
 3. **Input screening** of every data slot for the same classes (`S9.*`, `screen.max_urls_per_input`, `screen.url_action`).
 4. **Output flagging** (`output_flag_scan`): an answer containing links, code to run or requests for action is quarantined, not shown as a result (FD§5.5).
 
@@ -481,7 +481,7 @@ Translate a long public or openly licensed text, segment by segment, using one r
 | `glossary_subset` | glossary | upload_split | `prompt` | `GLOSSARY` | `budget_share_ppm` 250,000, `max_items` 40 (initial template values, `CAL`) |
 | `source_segments` | rows | upload_split | `prompt` | `SOURCE` | `budget_share_ppm` 750,000; ids `s01`, `s02`, ... assigned by the splitter |
 
-`split`: `strategy` = `paragraph_pack`, `unit_budget_share_ppm` = 750,000, `id_prefix` = `s`: paragraphs, and sentences when a paragraph exceeds the unit budget, are packed in order up to `unit_max_chars`. There is no free-text instruction slot; every option is an enum (R4) [D].
+`split`: `strategy` = `paragraph_pack`, `unit_budget_share_ppm` = 750,000, `id_prefix` = `s`: paragraphs, and sentences when a paragraph exceeds the unit budget, are packed in order up to `unit_max_chars`. There is no free-text instruction slot; every option is an enum (R4) [D]. The `source_segments` rows are rendered as `[[id]] text` (marker, one space, segment text), not as `id<TAB>text`, so that the markers the prompt and `marked_segments_match` refer to are present in the data block; this overrides the generic `rows` rendering of 8.4.1 for this slot [D].
 
 ### 8.10.3 Prompt skeleton (variant `en`, canonical)
 
@@ -728,7 +728,7 @@ Summarize one public passage into a fixed structure: one sentence, a small list 
 | `passage` | text | upload_split | `prompt` | `PASSAGE` | `multiline`; `budget_share_ppm` 900,000 |
 | `part_label` | system | system | `prompt` | none | `part k of n` when a document was split, else empty |
 
-`split`: `strategy` = `paragraph_pack`, `unit_budget_share_ppm` = 900,000, applied per uploaded document so a passage never spans two documents.
+`split`: `strategy` = `paragraph_pack`, `unit_budget_share_ppm` = 900,000, applied per uploaded document so a passage never spans two documents. `summary_language` renders as the language name (`English`, `Persian (Farsi)`; Persian names in the `fa` variant) from the template's `system` value table, as `register` does in 8.10.4, not as the code `en` or `fa` [A].
 
 ### 8.12.3 Prompt skeleton (`en`)
 
@@ -790,7 +790,7 @@ checks:
   - { id: c05, type: json_schema,      on_fail: reject }
   - { id: c06, type: grounded_span,    on_fail: reject, reason: reject.grounding_failed, params: { fields: [entities], normalize: [nfc] } }
   - { id: c07, type: numbers_grounded, on_fail: reject, reason: reject.grounding_failed, params: { normalize: [digits] } }
-  - { id: c08, type: script_ratio,     on_fail: reject, calibration_source: CAL, params: { by_language: { fa: { script: Arabic, min_ppm: 700000 }, en: { script: Latin, min_ppm: 700000 } } } }
+  - { id: c08, type: script_ratio,     on_fail: reject, calibration_source: CAL, params: { by_target: { fa: { script: Arabic, min_ppm: 700000 }, en: { script: Latin, min_ppm: 700000 } } } }
   - { id: c09, type: length_ratio,     on_fail: reject, calibration_source: CAL, params: { min_ppm: 10000, max_ppm: 1000000 } }
   - { id: c10, type: orthography_variants, on_fail: note }
 comparator:
@@ -1120,7 +1120,7 @@ Given / When / Then, in addition to `AC-template-01` to `AC-template-08` above. 
 - `AC-template-16` (sandbox off). Given `ff.template.code_change_sandbox` is off, When a reviewer tries to approve `code_change_tests`, Then it is refused; When `code_change_tests_rs` passes review, Then it can be approved and its deliverable carries the label "tests not run by the platform".
 - `AC-template-17` (runner outage). Given the runner is unavailable, When `test_run` is evaluated, Then the check result is `inconclusive`, the submission is not rejected and no credit moves.
 - `AC-template-18` (no pre-approval). Given a fresh install seeded from this spec, When the template list is read, Then every seed `TemplateVersion` is `draft`, `Template.active_version_id` is null and the job wizard offers no template.
-- `AC-template-19` (no volunteer-side execution). Given any approved template variant, When the volunteer card is built from it, Then the only actions offered are copy prompt, open in service where the adapter supports it, and paste back; no action runs, installs or downloads anything.
+- `AC-template-19` (no volunteer-side execution). Given any approved template variant, When the volunteer card is built from it, Then the only actions offered are copy prompt and paste back (press Send and copy answer are the volunteer's own steps, shown as instructions), plus, only where the adapter supports it and `prefilled_link_use` is `yes` [V], a plain open-the-service link that the volunteer chooses to follow and that is not part of the prompt text; no action runs, installs or downloads anything.
 - `AC-template-20` (promise wording). Given any user-facing string of a template, When the linter scans it, Then "guarantee" and its Persian equivalents are absent (LR-09).
 
 ## 8.17 Names, parameters and conventions added by this file
