@@ -31,7 +31,7 @@
 | A15 | C-056 [A] | `spec/00-conventions.md`, `spec/00-decisions.md` | READY WITH LOGGED ITEMS | 50 (+11 untabled minor) | 30 | 17 | 3 |
 | **Total** | | 31 files | all 15: READY WITH LOGGED ITEMS | **397** (+25 untabled) | **273** | **86** | **38** |
 
-Reading the table. 273 of 397 tabled findings were fixed in place (69 percent); 124 were only logged (86 cross-part, 38 needs-owner). No blocking finding is left unfixed: the six blocking findings (A03 findings 1 to 4, A05 finding 1, and none other) were all fixed. The 25 untabled minor items (A06 8, A12 6, A15 11) were fixed by nobody. Every log ends with the same verdict, so the per-part verdicts say nothing about whether the parts agree with each other; that is what sections 2 and 3 are about. Files with no audit log: `spec/02b..02d`, `02f` (registers), `spec/15c..15g`, `spec/16b..16d` (reconciliation files, inputs here), and any S5 to S16 file not named above.
+Reading the table. 273 of 397 tabled findings were fixed in place (69 percent); 124 were only logged (86 cross-part, 38 needs-owner). No blocking finding is left unfixed: the five blocking findings (A03 findings 1 to 4 and A05 finding 1, and no other) were all fixed. The 25 untabled minor items (A06 8, A12 6, A15 11) were fixed by nobody. Every log ends with the same verdict, so the per-part verdicts say nothing about whether the parts agree with each other; that is what sections 2 and 3 are about. Files with no audit log: `spec/02b..02d`, `02f` (registers), `spec/15c..15g`, `spec/16b..16d` (reconciliation files, inputs here), and any S5 to S16 file not named above.
 
 ## Findings
 
@@ -86,3 +86,116 @@ Every blocking or major finding that is not fixed, as the logs report it. No blo
 | 45 | blocking | spec/02-issues.md (ISS-12 row, no line) | [02e 2.E.1, 2.E.2 A1 / C-060] `ISS-12` (severity blocking, status `proposed`, owner decision `OD-08`): the platform never executes submitted content. `ISS-41`, `ISS-81`, `ISS-91` still allow an isolated runner, and the flag has two names (`ff.verify.sandboxed_tests` in S4, `ff.template.code_change_sandbox` in S8a); 02e says S4, S8a and S9 must drop the runner and `test_run`. Whether they did is checked in section 3 | logged-needs-owner |
 | 46 | blocking | spec/02-issues.md (ISS-11 row, no line) | [02e 2.E.1 / C-060] `ISS-11` (severity blocking, status `proposed`, turns on `OD-04`): only `commons_capable` services count toward minting and `launch.min_approved_services`; three predicates for an approved service coexist (02e A8: ISS-11, ISS-23, ISS-71, ISS-72, ISS-77) | logged-needs-owner |
 | 47 | major | spec/06a-ledger.md, spec/06b-admission.md, spec/08b-verification.md, spec/18-testing.md (no lines) | [02e A2, A3 / C-060] Who pays when verification costs more than the pool: ISS-16 (hard pool, job stops), ISS-61 (draw on the levy) and ISS-85 (c) disagree; the quote basis of the pool before any measurement exists is undefined (ISS-16 floors against ISS-85 v_prior). The register wins but its claim is called doubtful in 02e | logged-needs-owner |
+
+## 3 Reconciliation edits that are not yet applied in the part files
+
+The edit lists of `spec/15c` to `15f` ("Edits required in citing parts"), the `## Corrections required` of `spec/15g` (CR-01 to CR-09 and CR-11 to CR-44; the file defines no CR-10) and of `spec/16d` (CR-01 to CR-25) all say a later cell applies them. Each was checked by reading the cited line (or the nearest lines, where the file had drifted) in the part file, on the branch of this cell (main plus nothing). Status words: **NOT APPLIED** (the old text the edit names is still there); **APPLIED** (the new text is there); **PARTLY CLOSED** (an audit log reports a fix of the same defect, or one side of a two-sided edit is done; not re-read here beyond the stated lines); **NOT LOCATED** (the cited line is not within a few lines of where it was; the status is unknown); **NOT CHECKED** (not read in this cell). For the verdict, NOT LOCATED and NOT CHECKED count as not applied: no reader has seen them applied.
+
+| Source | Edits listed | Checked and NOT APPLIED | APPLIED or PARTLY CLOSED | NOT LOCATED or NOT CHECKED |
+| --- | --- | --- | --- | --- |
+| `15c` (27 edits) | 27 | 19 | 0 | 8 |
+| `15d` (list read from line 400 of 460 only) | not counted | 8 (`11b:147` to `11b:151`, `12:29`, `12:35`, `12:38`) | 0 | the rest of the list: `12:466`, `12:511`, the 12.9.2 rows, the 11b rows and screen prose before `11b:147` |
+| `15e` (list read from line 285 of 332 only) | not counted | 17 (`11c:502` to `11c:509`, `11c:647` to `11c:652`, `11c:700`, `11c:701`, `13:921`) | 0 | the rest: `11c:266`, `457` to `461`, `555`, `557`, `615`, `751`, `752`, `793` to `801`, the `AC-*` rows |
+| `15f` (15 edits E1 to E15) | 15 | 7 (E5, E6, E9, E10, E11, E12, E13) | 0 | 8 (E1 to E4, E7, E8, E14, E15) |
+| `15g` (43 CR ids) | 43 | 7 | 6 | 30 |
+| `16d` (25 CRs) | 25 | 6 | 3 | 16 |
+
+Result. 64 individual edits were checked at the cited place and found unapplied; none was found applied as written; 9 are partly closed by audit fixes. At least 67 listed edits were not located or not checked, plus the unread parts of the `15d`, `15e` and `15f` lists. The reconciliation work is therefore not applied: the part files still cite paths, operation ids, permission names, field names and parameter ranges that S15 and S16 define differently. `scripts/check_refs.py api` cannot show this: `15g` (hand-off 15d O12, accepted there as a known limit) says the script counts a path as defined if it appears anywhere in `spec/15*.md`, including the overlay text of `15c` to `15g` itself. A green `check_refs` is therefore not evidence that citing parts and API files agree.
+
+### 3.1 `15c` edit list (27 edits)
+
+| # | Where | Status and what was seen |
+| --- | --- | --- |
+| 1 | `10a:62-69` challenge shape and purposes | NOT APPLIED: still `challenge_id \|\| nonce`, the 13 purpose names and `POST /v1/auth-challenges` |
+| 2 | `10a:79` registration | NOT APPLIED: still `POST /v1/auth-challenges {purpose: 'register_device'}` |
+| 3 | `10a:228`, `10a:712` recovery | NOT APPLIED at 228 (`POST /v1/auth-challenges {purpose: 'recover'}`); 712 not read |
+| 4 | `10a:479-480` admin sign-in | NOT APPLIED: `POST /v1/admin/auth-challenges`, `POST /v1/admin/sessions {assertion}` |
+| 5 | `10a:727` admin ops table | NOT APPLIED: `createAdminAuthChallenge` row present |
+| 6 | `10a:728`, 10.18.2 events | NOT APPLIED: `createAdminAction`, `createAdminActionApproval`, `admin_action.proposed` present |
+| 7 | `10a:194-195`, `722` device-link offer | NOT APPLIED: `POST /v1/device-link-offers`, `{offer_id, link_secret` present |
+| 8 | `10a:199`, `205`, `723` claim and approval | NOT APPLIED: `/v1/device-link-offers/{offer_id}/claims` present |
+| 9 | `10a:222` | NOT CHECKED at 222; the same path `GET /v1/members/me/keys` remains in the 10.18.1 table |
+| 10 | `10a:167` key rotation | NOT APPLIED: `POST /v1/members/me/keys {device_pub...` |
+| 11 | `10a:718` | NOT APPLIED: `createMemberKey` row present |
+| 12 | `10a:719` | NOT APPLIED: `createKeyRevocation` row present |
+| 13 | `10a:720` | NOT APPLIED: `createRecoveryKey` row present |
+| 14 | `10a:138-139` recovery key effect | NOT APPLIED: "New key `active` and unconfirmed; old key `retiring`" present |
+| 15 | `07:1065` | NOT APPLIED: `getOptIns`, `setOptIns` `PUT /v1/me/opt-ins` present |
+| 16 | `07:1062` | NOT APPLIED: `previewPolicy` `POST /v1/policy-previews` present |
+| 17 | `07:1070` | NOT LOCATED: no `getSupplyGauge` row in `07:1058-1072` |
+| 18 | `06b:523` | NOT LOCATED: `confirmJobQuote` row not in `06b:519-531` |
+| 19 | `10a:78`, `110`, `114`, `578`, `62` labels | NOT APPLIED at 78, 110 and 62 (`hamyar/v1/...` still used); 114 and 578 not read |
+| 20 | `07:1063` | NOT APPLIED: `getCurrentPolicy` `GET /v1/policy` present |
+| 21 | `11b:120` | NOT APPLIED: `getPolicyProfile` `GET /v1/policy-versions/current` present |
+| 22 | `06b:173` | NOT APPLIED: `shows "<k" for both counts` present |
+| 23 | `06b:524` | NOT LOCATED |
+| 24 | `04:583` | NOT LOCATED: text not in `04:578-588` |
+| 25 | 15b 15.33.1 rule 9 | NOT CHECKED (A12 finding 24 reworded the health references) |
+| 26 | `10a:592` | NOT CHECKED |
+| 27 | wherever cited (lease extension, nonce, validations, approvals paths) | NOT CHECKED |
+
+### 3.2 `15d`, `15e`, `15f` rows that were checked
+
+| Source | Cited place | Status |
+| --- | --- | --- |
+| 15d | `11b:147` `getDeliverable`, `148` `downloadDeliverableFile`, `149` `getManifest`, `150` `createJobRating`/`getJobRating`, `151` `createAppeal`/`getAppeal` | NOT APPLIED: all five rows unchanged |
+| 15d | `12:29` public ledger row, `12:35` `getShareCardPayload`, `12:38` `listEffectiveFlags` / `GET /v1/flags` | NOT APPLIED: all three rows unchanged |
+| 15e | `11c:502` to `509` ledger rows (`ledger-accounts`, `ledger-entries`, `ledger-transactions`, `credit-lots`, `invariant-checks`, `ledger-verifications`, `ledger-checkpoints`, `createLedgerReversal` with `ApprovalRequest`) | NOT APPLIED: eight rows unchanged |
+| 15e | `11c:647` to `652` launch rows (`launch-gates`, `launch-gate-items`, `createLaunchSignoff`, `createLaunchSwitchOff`, `launch-status`) | NOT APPLIED: six rows unchanged |
+| 15e | `11c:700`, `701` kill-switch engagement and release | NOT APPLIED: `/v1/admin/kill-switch-engagements` still defined |
+| 15e, 15g CR-12 | `13:921` | NOT APPLIED: `perm.metrics.view_small_cells` still named, against 15e's decision that it does not exist |
+| 15f | E5 (`approvePreRegistrationLock`), E6 (`getPreRegistrationProof`), E9, E10 (`perm.experiment.manage`), E11, E12 (`getCalibrationStatistics`), E13 | NOT APPLIED: unchanged in `13:923-932` |
+
+### 3.3 `15g` corrections (43 ids)
+
+| CR ids | File and place | Change | Status |
+| --- | --- | --- | --- |
+| CR-01, CR-02 | S0 0.5; 15b 15.23.1, 15.24, 15.29.2, 15.29.3, 15.30.1; 11b, 11c, 13, 15d, 15e | admin duplicates of 11 ids take the suffix `Admin` | NOT APPLIED, and a different rule is in force: `15b:17-24` (A12 finding 15) prefixes `admin` in the OpenAPI key (`adminListServices`). Two collision rules now exist (decision D-08 below) |
+| CR-03 | 15b 15.33.5, 15.33.2, 15.34.4, `AC-public-05` | delete the stored share cards | NOT APPLIED: A12 finding 25 still logs the contradiction; depends on D-15 |
+| CR-04, CR-05 | 15a 15.4; 15b 15.21.1, 15.22.1; S0 0.11.2 | `wrong_scheme` rule, four admin bootstrap exceptions, `AC-auth-01..03` | NOT CHECKED |
+| CR-06, CR-07 | 15b 15.21.3 rule 4, 15.22.4 | `X` on four login operations, admin idempotency scope, no secret in `AdminApproval.result` | PARTLY CLOSED: A12 finding 17 (enrollment code no longer stored in the result) and 21 (`createStepUpChallenge` key); the rest NOT CHECKED |
+| CR-08 | 15a 15.9 | add reasons and `details` keys of ER-01..ER-11 | NOT CHECKED |
+| CR-09, CR-34 | S0 0.9; 15b 15.34 | add events EV-01..EV-12 and `job.cancelled` | PARTLY CLOSED: A12 finding 18 added 15.34.6 for eleven part-a events; EV-05 to EV-07 and `job.cancelled` NOT CHECKED |
+| CR-11 | 15b 15.32.1, 15.32.2 | `content_hash`, `lock_pending`, status `registered` | NOT CHECKED |
+| CR-12 | 15e 15.D.4.6, 15f, `13:921` | one `listMetricSnapshots`, no small-cell permission | NOT APPLIED (`13:921`) |
+| CR-13 | 15f, part 13 | drop `ui.variant_exposed`; exposure via `recordExperimentExposure`; `preregistration.locked`; `calibration-proposals` | NOT APPLIED for `calibration-proposals` (`13:931` unchanged); rest NOT CHECKED |
+| CR-14 | 15d row 17, `11b:120` | use `getPublicPolicy` | NOT APPLIED (`11b:120`) |
+| CR-15, CR-16, CR-19, CR-36, CR-37 | 15a 15.3, 15.7.3, 15.8 | unknown query parameters, `createReport` subjects, `client_events_enabled`, `Job.rating`, `Team.score` | NOT CHECKED |
+| CR-17, CR-18, CR-42, CR-43 | 15b | `lockTeam`, `unlockTeam`, `AdminAction` hashes, member-read `context_id`, `perm.claim.takeover` | NOT CHECKED |
+| CR-20, CR-21 | 15b 15.27.1, 15.27.2 | S14 fields on evidence and sign-off; chunked evidence upload | NOT CHECKED |
+| CR-22 | 15b 15.27.3, 15.28.3 | `changeLaunchSwitch` uses `evaluate_switch`, authorization, cascade | NOT CHECKED |
+| CR-23 | S14.7 | three S15b-only blockers | NOT CHECKED |
+| CR-24 | 15b 15.23.4, 15.27.2 | `approvalGuard` flags, `reopenGateItem` to `review_due` | NOT CHECKED |
+| CR-25 | S14.9, `AC-launch-52`; 15a 15.9 | member-key refusal is `FORBIDDEN` `account_frozen` | NOT APPLIED on the S14 side (`14:624` still lists only `LAUNCH_GATE_CLOSED` or `KILL_SWITCH_ENGAGED`); 15a side closed by A12 finding 6 |
+| CR-26 | S0 `KillSwitch.reason_code`; S14.4.5 | add `legal_hold`; map reason codes | NOT CHECKED |
+| CR-27 | 15b 15.28.1 | delete "grants that mint" | NOT CHECKED |
+| CR-28 | 15a 15.7.2, 15.7.4; S14.9 | gates on `createJob`, `submitJobForScreening`, `createReservation`, `confirmJob` | PARTLY CLOSED: A12 finding 4 added a gate matrix to 15a 15.4 and `createReservation` gates; S14.9 and `AC-api-18` NOT CHECKED |
+| CR-29, CR-33 | 15a 15.6.2, 15.6.4 | lease and acceptance gates; held mint leaves `pending` | NOT CHECKED |
+| CR-30 | 15a 15.10 | `R` and `O` rows | PARTLY CLOSED: A12 finding 3 fixed `joinTeam`, `revokeReferral` and added `deleteUpload`, `expandLeasePrompt`, `checkJobPolicy`; `revokeInvite`, `checkInvite`, IG-09, IG-10 NOT CHECKED |
+| CR-31 | 15a 15.12 | `RL-PUB` equals `PUB` | NOT CHECKED |
+| CR-32 | 15b 15.33.1 rule 9, rule 6, 15.21.4 | `GET /v1/public/health` | NOT CHECKED |
+| CR-35 | 15b 15.29.2, 15.34.3 | `job_svc` consumes `appeal.overturned` | NOT CHECKED |
+| CR-38, CR-39 | 15b `createCalibrationRecord`, `MetricSnapshot` | optional fields; bundle is a snapshot kind | NOT CHECKED |
+| CR-40, CR-41 | S14.9.2 | drop invite redemption from "admit"; name the Commons authoring path | NOT CHECKED |
+| CR-44 | S0 0.8.2, S10 matrix | permission mapping S14 to S15b | NOT CHECKED |
+
+### 3.4 `16d` corrections (25)
+
+| CR | File and place | Status |
+| --- | --- | --- |
+| CR-01 | `16-parameters.md` 16.15 eta label | NOT APPLIED: "Minimum eta (Reserve inflow versus spend)" unchanged (`16-parameters.md:438`) |
+| CR-02 | `C13`, mint cap rows, S0 Table A | NOT APPLIED: `C13` still multiplies `admission.phi_ppm` (`16-parameters.md:92`); A13 finding 1 fixed the divisor only |
+| CR-03 | `admission.min_window_s`, `admission.window_step_s` ranges | PARTLY CLOSED: min window now `> 0` (A13 finding 13); the step range `1..86,400` and the lower bound at the step are not applied (`16-parameters.md:180-182`) |
+| CR-04 | `retention.ip_hash_ttl_days` `0..30` to `1..30` | NOT APPLIED (`16-parameters.md:313`) |
+| CR-05 | `C2` gold floor `> 0` | NOT APPLIED (`16-parameters.md:78`: only the audit floor) |
+| CR-06 | `change.notice_days_default`, `change.notice_days_price` `0..90` to `1..90` | NOT APPLIED (`16-parameters.md:391-392`) |
+| CR-07 | `change.notice_days_price` text adds `reservation.*` | APPLIED in S16 (`16-parameters.md:392`); S0 Table A row NOT CHECKED |
+| CR-08 | `team.min_public_members` 5 to 10 | NOT APPLIED in S0 Table C (`00-conventions.md:776`); S16 16.14 row NOT CHECKED; owner decision D-13 |
+| CR-20 | S14 text at 14:600 and 14:603 | PARTLY CLOSED: `calibration.min_samples_per_service` 20 to 30 fixed by A03 finding 20; the secret-rotation name is still logged (A03 finding 29) |
+| CR-09 to CR-19, CR-21 to CR-25 | S, P, B, C (see the table in `16d`) | NOT CHECKED (16 CRs) |
+
+Two parameter ranges that A03 finding 27 asked to correct are also still open on main: `launch.min_signoffs` is `1..5` and `launch.min_approved_services` is `0..20` in both `00-conventions.md:761-762` and `16-parameters.md:389-390`. S14 enforces the floors in code only (A03 findings 8, 9); the parameter definitions still allow a launch with one sign-off and with no approved service.
+
+### 3.5 `02e` register conflicts
+
+`spec/02e-issues-summary.md` (C-060) lists 18 conflicts of substance (A1 to A18) and 8 clashes of names (B1 to B8) and edits nothing; its 2.E.5 hands the part edits to later audit cells. This cell could not re-check them against S4, S5b, S6a, S6b, S7, S8a, S8b, S9, S11 and S15a. The audit logs show: A7 (K and the cap rule, `T-prop-16`) closed by A14 finding 2; A2 (who pays when verification outruns the pool) still open (A08 finding 14, section 2 rows 24 and 47); B4 (heading and id collisions) still open (rows 10 and 27); B5 (`OD` ids) still open (row 40); B7 (alias parameter names such as `ui.first_load_budget_bytes`) closed in part by A09 finding 5; every other row NOT CHECKED. Nothing in `02e` was found applied.
