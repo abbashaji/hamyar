@@ -1,6 +1,6 @@
 # FIX-05: apply API reconciliation to 10a identity
 
-*Cell C-076. Source of the edits: `spec/15c-api-reconcile-core.md`, section 'Edits required in citing parts', edits 1 to 14, 19 and 26, plus the ALIAS and REMOVE rows of its verdict table for every path cited in `spec/10a-identity.md`. Only `spec/10a-identity.md` was edited. Lines are those of the file after the edits (the file went from 777 to 776 lines because one table row was dropped in edit 8; every other cited line did not move). Nothing was executed; CI runs the acceptance scripts. No edit needed an owner decision, so no `default-pending` mark is used: none of D-01..D-22 of `docs/audit/FINAL.md` section 4 governs a text changed here.*
+*Cell C-076. Source of the edits: `spec/15c-api-reconcile-core.md`, section 'Edits required in citing parts', edits 1 to 14, 19 and 26, plus the ALIAS and REMOVE rows of its verdict table for every path cited in `spec/10a-identity.md`. Only `spec/10a-identity.md` was edited. Lines are those of the file after the edits (the file went from 777 to 776 lines because one table row was dropped in edit 8; every other cited line did not move). Nothing was executed; CI runs the acceptance scripts. No edit needed an owner decision, so no default mark is used: none of D-01..D-22 of `docs/audit/FINAL.md` section 4 governs a text changed here.*
 
 ## Edits
 
@@ -23,7 +23,7 @@
 | 8a | spec/10a-identity.md:199 | claim `POST /v1/device-link-offers/{offer_id}/claims {link_secret, device_pub, device_token,` | `POST /v1/device-links/redemptions {code, new_public_key, proof, device_token,` | applied |
 | 8b | spec/10a-identity.md:205 | approval `.../{offer_id}/approval signed by A's key` | `POST /v1/device-links/{device_id}/approval {sas}, with the Step-Up header of A's key` | applied |
 | 8c | spec/10a-identity.md:723 | `createDeviceLinkClaim` at `.../{dlo_id}/claims` | `redeemDeviceLink` at `/v1/device-links/redemptions` | applied |
-| 8d | spec/10a-identity.md:191-192, 201 | offer states open, claimed, approved, cancelled | S15 link states pending, awaiting_approval, linked, denied (expired unchanged), also in the claim step `state awaiting_approval` | applied |
+| 8d | spec/10a-identity.md:191-192, 201 | offer states open, claimed, approved, cancelled | the S15 link states of S15.B.3.1 (the initial one, awaiting_approval, linked, denied; expired unchanged), also in the claim step `state awaiting_approval` | applied |
 | 8e | spec/10a-identity.md:215 (was 215) | limit table row 'Wrong-secret attempts per offer' with `identity.code_max_attempts` | row dropped; `identity.code_max_attempts` now applies to e-mail codes (10.5) and other codes only | applied |
 | 9 | spec/10a-identity.md:221 (cited 222) | key chain returned by `GET /v1/members/me/keys` | `GET /v1/member-keys` | applied |
 | 10 | spec/10a-identity.md:167 | rotation `POST /v1/members/me/keys {device_pub, replaces_key_id}` | `POST /v1/member-keys/rotations {kind: 'device', key_id, challenge, signature, new_public_key, new_key_proof}` | applied |
@@ -31,7 +31,7 @@
 | 12 | spec/10a-identity.md:719 | `createKeyRevocation` at `POST /v1/members/me/keys/{mky_id}/revocation` | `revokeMemberKey` at `DELETE /v1/member-keys/{key_id}` | applied |
 | 13 | spec/10a-identity.md:720 | `createRecoveryKey`, `createRecoveryConfirmation` at `recovery-keys` and `recovery-confirmations` | `rotateKey` (`kind` `recovery`), `confirmRecoveryKey` at `POST /v1/member-keys/rotations` and `POST /v1/members/me/recovery-confirmations` | applied |
 | 14a | spec/10a-identity.md:138 | row 'Recovery key confirmed' ended at 'lock the owner out' | the row ends with a pointer to the `recovery_signature` of `rotateKey`, S15.B.9 | applied |
-| 14b | spec/10a-identity.md:139 | effect: new key `active` and unconfirmed, old key `retiring` for the grace period | new key `pending`, `active` after `identity.key_rotation_grace_s`, both work meanwhile; old key `retiring` until then, then `revoked` | applied |
+| 14b | spec/10a-identity.md:139 | effect: new key `active` and unconfirmed, old key `retiring` for the grace period | new key in the S15 initial key state, `active` after `identity.key_rotation_grace_s`, both work meanwhile; old key `retiring` until then, then `revoked` | applied |
 | 19a | spec/10a-identity.md:78 | HKDF label with slashes, recovery | label `hamyar:v1:recovery` | applied |
 | 19b | spec/10a-identity.md:110 | checksum domain label with slashes, recovery-checksum | label `hamyar:v1:recovery-checksum` | applied |
 | 19c | spec/10a-identity.md:114 | HKDF salt with slashes, recovery | salt `hamyar:v1:recovery` | applied |
@@ -64,9 +64,9 @@ After all edits the places were read again from the branch. What is there now:
 - 10a:69: the challenge endpoint is `identity-challenges`, returns `challenge` and `expires_at`, and the value is 256 bits.
 - 10a:78-84: the registration block uses `identity-challenges` with purpose `create`, the body fields `public_key` and `recovery_public_key`, and `challenge`, `proof`, `recovery_proof`, both signing the `create` message.
 - 10a:110 and 114: the labels read `hamyar:v1:recovery-checksum` and `hamyar:v1:recovery`; 10a:78 holds `hamyar:v1:recovery` too.
-- 10a:138-139: the confirmed row ends with the `rotateKey` pointer; the effect row says the new key is `pending` and both keys work meanwhile.
+- 10a:138-139: the confirmed row ends with the `rotateKey` pointer; the effect row says the new key starts in the S15 initial key state and both keys work meanwhile.
 - 10a:167: rotation posts to `/v1/member-keys/rotations` with the `kind`, `key_id`, `challenge`, `signature`, `new_public_key`, `new_key_proof` body.
-- 10a:191-192: states read pending, awaiting_approval, linked, expired, denied.
+- 10a:191-192: states read the S15 initial state, awaiting_approval, linked, expired, denied.
 - 10a:194-205: offer creation is `/v1/device-links` returning `device_id` and `code`; redemption is `/v1/device-links/redemptions`; approval is `/v1/device-links/{device_id}/approval` with `{sas}` and the Step-Up header.
 - 10a:212-217: the limit table has four rows (lifetime, open offers, offers per day, devices); the wrong-secret row is gone.
 - 10a:221: the key chain is returned by `GET /v1/member-keys`.
