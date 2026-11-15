@@ -1,0 +1,25 @@
+id: C-065
+title: 'Audit A15 part 2: conventions 0.8-0.9 (enums, states)'
+type: normal
+priority: 5
+supersedes:
+- C-062
+after:
+- C-064
+goal: |
+  INDEPENDENT adversarial reviewer, part 2 of 3 of audit A15. Audit ONLY the sections 0.8 and 0.9 of spec/00-conventions.md (find the headings '## 0.8' and '## 0.9'; read in chunks of at most 300 lines). Checklist: enumerations equal the FD taxonomy: P0-P3, L0-L3, S0-S3, M0-M2 meanings, pairings and statuses (FD 5.3); roles; flag answers yes/no/unknown; ledger account and entry types; state names equal FD 3.4 plus the stated extensions; every state machine has complete events and no unreachable or dead-end state without a reason; names consistent with sections 0.5-0.7 (read those only as needed). FIX each defect you can with a minimal in-place edit (apply_changes old->new; keep every ID, endpoint, parameter and state name). Defects needing another file or an owner decision are LOGGED. Write docs/audit/A15-part2.md with '## Checked', '## Findings' (table columns exactly: # | severity (blocking/major/minor) | file:line | defect | action (fixed / logged-cross-part / logged-needs-owner)) and '## Not verified'. Number findings from 1. No verdict line. Cap: fix at most 10 defects; log the rest as a count with the top 3.
+read:
+- docs/decisions.md
+- docs/source/prompt.md
+- docs/source/Hamyar - Founding Document.md
+- spec/00-conventions.md
+allowed_paths:
+- docs/audit/A15-part2.md
+- spec/00-conventions.md
+outputs:
+- docs/audit/A15-part2.md
+acceptance:
+- cmd: python scripts/check_spec.py spec/00-conventions.md --min-lines 855 --min-tags 1
+- cmd: python scripts/check_spec.py docs/audit/A15-part2.md --min-lines 12 --min-tags 0
+notes: |
+  Audit cell. Critical reader, not polite. Ground rules of docs/decisions.md bind you. Never rename existing IDs, parameter names, endpoints or states. Minimal in-place edits only; never shorten sections. Do not paste file contents into chat.

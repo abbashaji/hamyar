@@ -1,0 +1,27 @@
+id: C-064
+title: 'Audit A15 part 1: conventions 0.1-0.7'
+type: normal
+priority: 5
+supersedes:
+- C-062
+after:
+- C-000
+- C-027
+- C-059
+goal: |
+  INDEPENDENT adversarial reviewer, part 1 of 3 of audit A15. Audit ONLY the sections 0.1 to 0.7 of spec/00-conventions.md (find the headings '## 0.1' .. '## 0.7'; read them in chunks of at most 300 lines; do not read the rest of the file except what you need to resolve a reference). Task statement: docs/source/prompt.md; source of truth: the Founding Document (FD). Look for concrete defects: wrong arithmetic (recompute the integer micro-credit and ppm example against FD 3.3 if it lies in your sections), contradiction inside the file or with the FD, missing prompt scope B content (the entity list must equal the prompt scope B list), ground-rule violation, untestable criterion, unlabeled number, invented provider or legal fact, ID format collision or ordering problems, time and hashing decisions that are unsound. FIX each defect you can with a minimal in-place edit (apply_changes old->new, never whole-file rewrites; keep every ID, endpoint, parameter and state name). Defects needing a change in another file, or an owner decision, are LOGGED, not worked around. Write docs/audit/A15-part1.md with '## Checked' (bullets: what you examined and found correct), '## Findings' (table columns exactly: # | severity (blocking/major/minor) | file:line | defect | action (fixed / logged-cross-part / logged-needs-owner)) and '## Not verified'. Number findings from 1. No verdict line. Do not praise or pad. Cap: fix at most 10 defects; log the rest as a count with the top 3.
+read:
+- docs/decisions.md
+- docs/source/prompt.md
+- docs/source/Hamyar - Founding Document.md
+- spec/00-conventions.md
+allowed_paths:
+- docs/audit/A15-part1.md
+- spec/00-conventions.md
+outputs:
+- docs/audit/A15-part1.md
+acceptance:
+- cmd: python scripts/check_spec.py spec/00-conventions.md --min-lines 855 --min-tags 1
+- cmd: python scripts/check_spec.py docs/audit/A15-part1.md --min-lines 12 --min-tags 0
+notes: |
+  Audit cell. Be a critical reader, not a polite one. Ground rules of docs/decisions.md bind you: no invented provider facts, no automation of volunteer accounts, human presses Send, 'declared' not 'guaranteed', numbers are formulas or labeled initial configurable defaults, mark [V]/[H]/[A]/[D]/[P]. Never rename existing IDs, parameter names, endpoints or states. Minimal in-place edits only; never shorten sections. Do not paste file contents into chat.

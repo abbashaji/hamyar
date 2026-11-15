@@ -1,0 +1,21 @@
+id: C-067
+title: 'Audit A15 final log (merge of parts 1-3)'
+type: normal
+priority: 5
+supersedes:
+- C-062
+after:
+- C-066
+goal: |
+  Assemble the final audit log docs/audit/A15.md from docs/audit/A15-part1.md, A15-part2.md and A15-part3.md. Do not re-audit and do not edit spec files. Structure: '## Checked' (merge the three Checked lists, grouped by part, deduplicated), '## Findings' (ONE table, columns exactly: # | severity (blocking/major/minor) | file:line | defect | action (fixed / logged-cross-part / logged-needs-owner); renumber 1..n, keep part order, copy rows faithfully), '## Not verified' (merged), then a last line 'Verdict: READY' or 'Verdict: READY WITH LOGGED ITEMS' or 'Verdict: NOT READY' (NOT READY if any blocking finding is unfixed; READY WITH LOGGED ITEMS if any logged finding remains). Must be at least 30 lines. Do not use the words that mark placeholders; no padding.
+read:
+- docs/audit/A15-part1.md
+- docs/audit/A15-part2.md
+- docs/audit/A15-part3.md
+allowed_paths:
+- docs/audit/A15.md
+outputs:
+- docs/audit/A15.md
+acceptance:
+- cmd: python scripts/check_audit.py docs/audit/A15.md
+notes: 'Merge cell only. Last line of the file must be the Verdict line.'

@@ -1,0 +1,28 @@
+id: C-066
+title: 'Audit A15 part 3: conventions 0.10-0.13 and decisions'
+type: normal
+priority: 5
+supersedes:
+- C-062
+after:
+- C-065
+goal: |
+  INDEPENDENT adversarial reviewer, part 3 of 3 of audit A15. Audit ONLY sections 0.10 to 0.13 (and any later sections) of spec/00-conventions.md, plus the whole of spec/00-decisions.md. Read in chunks of at most 300 lines. Checklist: every FD parameter is named in the parameter table and every number is a formula or labeled 'initial configurable default'; parameter naming scheme consistent (area.name) and with names used in 0.5-0.9; the 'ten decisions' list in spec/00-decisions.md is honest about challenges to the owner's instructions, with no claim without basis; milestone names consistent; the file list and owner-cells table in 0.13 matches the files that exist in spec/ (the repo also has spec/02b..02f, 15c..15g, 16b..16d added by reconciliation cells: add them to 0.13 only if the table has an obvious place; otherwise log it). FIX each defect you can with minimal in-place edits (apply_changes old->new; keep every ID, endpoint, parameter and state name). Defects needing another file or an owner decision are LOGGED. Write docs/audit/A15-part3.md with '## Checked', '## Findings' (table columns exactly: # | severity (blocking/major/minor) | file:line | defect | action (fixed / logged-cross-part / logged-needs-owner)) and '## Not verified'. Number findings from 1. No verdict line. Cap: fix at most 10 defects; log the rest as a count with the top 3.
+read:
+- docs/decisions.md
+- docs/source/prompt.md
+- docs/source/Hamyar - Founding Document.md
+- spec/00-conventions.md
+- spec/00-decisions.md
+allowed_paths:
+- docs/audit/A15-part3.md
+- spec/00-conventions.md
+- spec/00-decisions.md
+outputs:
+- docs/audit/A15-part3.md
+acceptance:
+- cmd: python scripts/check_spec.py spec/00-conventions.md --min-lines 855 --min-tags 1
+- cmd: python scripts/check_spec.py spec/00-decisions.md --min-lines 21 --min-tags 1
+- cmd: python scripts/check_spec.py docs/audit/A15-part3.md --min-lines 12 --min-tags 0
+notes: |
+  Audit cell. Critical reader, not polite. Ground rules of docs/decisions.md bind you. Never rename existing IDs, parameter names, endpoints or states. Minimal in-place edits only; never shorten sections. Do not paste file contents into chat.
