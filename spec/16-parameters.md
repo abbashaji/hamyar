@@ -158,7 +158,7 @@ Owner `operator`. Binding: the quote stores the snapshot ids and the values it u
 | `price.v_window_days` | days | 7..90 | 28 | `N` | `P1M`: stability of v | S6.* |
 | `price.v_min_sample_cells` | int | 1..100000 | 100 | `N` | `P1M`: variance of v | S6.* |
 | `price.publish_period_days` | days | 1..90 | 30 (FD§4.3 "monthly") | `N` | `FND` | S6.*, S12.* |
-| `price.eta_alarm_threshold` | ratio | 0..1 | 0.80 (FD§4.3 suggested starting point, arbitrary) | `N` | `FND` (pre-registered, 16.15) | S6.*, S13.* |
+| `price.eta_alarm_threshold` | ratio | (0,1]; fail-closed floor: 0 would make the alarm unreachable (FD Principle 5/8, 16d F-01) | 0.80 (FD§4.3 suggested starting point, arbitrary) | `N` | `FND` (pre-registered, 16.15) | S6.*, S13.* |
 | `price.quote_ttl_s` | duration_s | 60..86400; `C12` | 1800 | `N` | `OPS`: share of quotes confirmed after expiry | S6.*, S6.27 |
 | `price.v_rounding` | enum | constant | `ceil` | `C` | `CON` | S0 0.6.1, S6.* |
 
@@ -310,7 +310,7 @@ Owner `operator`; measurement `SEC` (the G1 threat-model decision) unless stated
 | `session.admin_idle_ttl_s` | duration_s | 60..86400; `C15` | 1800 | `T↓` | `SEC` | S10.*, S15.* |
 | `session.admin_abs_ttl_s` | duration_s | 600..86400; `C15` | 28,800 | `T↓` | `SEC` | S10.*, S15.* |
 | `retention.raw_ip_stored` | bool | constant | false | `C` | `CON` | S10.*, S0 0.6.4 |
-| `retention.ip_hash_ttl_days` | days | 0..30 | 1 | `T↓` | `SEC` | S10.* |
+| `retention.ip_hash_ttl_days` | days | 1..30; fail-closed floor: 0 would silently switch off the per-IP-hash join limit (FD Principle 5/8, 16d F-06) | 1 | `T↓` | `SEC` | S10.* |
 | `retention.session_days` | days | 1..365 | 90 | `T↓` | `SEC` | S10.* |
 | `retention.request_log_days` | days | 0..90 | 7 | `T↓` | `SEC` | S4.*, S10.* |
 | `retention.ops_log_days` | days | 0..365 | 30 | `T↓` | `SEC` | S4.* |
@@ -386,10 +386,10 @@ Owner `operator`; `launch.*` needs `launch.min_signoffs` distinct admins and the
 | `launch.member_jobs_enabled` | bool | as above | false | `T→false` | flipped by sign-off | S14.*, S6.* |
 | `launch.minting_enabled` | bool | as above | false | `T→false` | flipped by sign-off | S14.*, S6.* |
 | `launch.required_gate_ids` | json | subset of G0..G5 containing G0 and G1; `C19` | `["G0","G1"]` (FD§8.3 exit rule) | `T↑` (more ids) | `FND` | S14.* |
-| `launch.min_signoffs` | int | 1..5; `C19` | 2 distinct admins [A]; an owner decision if the team has one person (`ISS-168`) | `T↑` | `FND` | S14.* |
-| `launch.min_approved_services` | int | 0..20 | 1 (FD§8.3 exit rule; or a documented fallback) | `T↑` | `FND` | S14.*, S7.* |
-| `change.notice_days_default` | days | 0..90; `C20` | 7 (FD Principle 5) | `T↑` | `FND` | S0 R10, all parts |
-| `change.notice_days_price` | days | 0..90 | 14 (for `price.*`, `admission.*`, `reservation.*`, `credit.*`) | `T↑` | `FND` | S6.* |
+| `launch.min_signoffs` | int | 2..5; `C19`; fail-closed floor: one sign-off is no two-person gate (FD Principle 5/8, 16d F-14, A03 finding 27) | 2 distinct admins [A]; an owner decision if the team has one person (`ISS-168`) | `T↑` | `FND` | S14.* |
+| `launch.min_approved_services` | int | 1..20; fail-closed floor: 0 would pass the G0 count with no approved service (FD Principle 5/8, 16d 16.D.8.1, A03 finding 27) | 1 (FD§8.3 exit rule; or a documented fallback) | `T↑` | `FND` | S14.*, S7.* |
+| `change.notice_days_default` | days | 1..90; `C20`; fail-closed floor: 0 would remove the advance notice of a loosening (FD Principle 5/8, 16d F-07) | 7 (FD Principle 5) | `T↑` | `FND` | S0 R10, all parts |
+| `change.notice_days_price` | days | 1..90; fail-closed floor: 0 would remove the advance notice of a loosening (FD Principle 5/8, 16d F-07) | 14 (for `price.*`, `admission.*`, `reservation.*`, `credit.*`) | `T↑` | `FND` | S6.* |
 | `change.tighten_publish_within_s` | duration_s | 0..604800 | 86,400 (tightening is immediate, its public log entry follows within a day) | `T↓` | `FND` | S7.*, 16.17 |
 | `ledger.invariant_check_interval_s` | duration_s | 5..3600 | 60 (sampled checks; the per-commit check is a constant) | `T↓` | `OPS` | S6.*, S4.* |
 | `ledger.full_recompute_interval_s` | duration_s | 60..86400 | 3600 | `T↓` | `OPS` | S6.* |

@@ -593,7 +593,7 @@ The list below is the FULL set of parameter names; names are stable and C-022 co
 | `price.v_window_days` | days | 28 | 7..90 | `P1M` stability of v |
 | `price.v_min_sample_cells` | int | 100 | 1..100000 | `P1M` variance of v |
 | `price.publish_period_days` | days | 30 (FD§4.3 "monthly") | 1..90 | `FND` |
-| `price.eta_alarm_threshold` | ratio | 0.80 (FD§4.3 suggested, arbitrary) | 0..1 | `FND` (pre-registered) |
+| `price.eta_alarm_threshold` | ratio | 0.80 (FD§4.3 suggested, arbitrary) | (0,1] | `FND` (pre-registered) |
 | `price.quote_ttl_s` | duration_s | 1800 | 60..86400 | `OPS` |
 | `price.v_rounding` | enum | `ceil` | constant | `CON` |
 | `admission.phi` (φ) | ratio | 0.50 (FD§3.3 illustrative) | 0 < x < 1; C1 | `P1M` throughput and deposit-to-withdrawal ratio |
@@ -637,8 +637,8 @@ The list below is the FULL set of parameter names; names are stable and C-022 co
 | `ledger.allow_negative_balance` | bool | false | constant | `CON` |
 | `job.max_overrun_ratio` | ratio | 2.0 (a job stops with partial settlement at 2 x its quoted window) | >= 1 | `P1M` |
 | `job.max_upload_bytes` | int | 4,194,304 (300 cells x 4,000 chars x up to 3 bytes of UTF-8 is about 3.6 MB) | 1..104857600 | `TEC` |
-| `change.notice_days_default` | days | 7 (FD Principle 5) | 0..90 | `FND` |
-| `change.notice_days_price` | days | 14 (for `price.*`, `admission.*`, `credit.*`) | 0..90 | `FND` |
+| `change.notice_days_default` | days | 7 (FD Principle 5) | 1..90 | `FND` |
+| `change.notice_days_price` | days | 14 (for `price.*`, `admission.*`, `credit.*`) | 1..90 | `FND` |
 | `change.tighten_publish_within_s` | duration_s | 86,400 (tightening is immediate, its public log entry follows within a day) | 0..604800 | `FND` |
 
 **Table B: verify, lease, cell, trust, invite, ratelimit, identity, session, retention, policy, screen, service, template, optin, appeal, report**
@@ -714,7 +714,7 @@ The list below is the FULL set of parameter names; names are stable and C-022 co
 | `session.admin_idle_ttl_s` | duration_s | 1800 | 60..86400 | `SEC` |
 | `session.admin_abs_ttl_s` | duration_s | 28,800 | 600..86400 | `SEC` |
 | `retention.raw_ip_stored` | bool | false | constant | `CON` |
-| `retention.ip_hash_ttl_days` | days | 1 | 0..30 | `SEC` |
+| `retention.ip_hash_ttl_days` | days | 1 | 1..30 | `SEC` |
 | `retention.session_days` | days | 90 | 1..365 | `SEC` |
 | `retention.request_log_days` | days | 7 | 0..90 | `SEC` |
 | `retention.ops_log_days` | days | 30 | 0..365 | `SEC` |
@@ -759,8 +759,8 @@ The list below is the FULL set of parameter names; names are stable and C-022 co
 | `launch.member_jobs_enabled` | bool | false | as above | flipped by sign-off |
 | `launch.minting_enabled` | bool | false | as above | flipped by sign-off |
 | `launch.required_gate_ids` | json | `["G0","G1"]` (FD§8.3 exit rule) | subset of G0..G5 that always contains G0 and G1 | `FND` |
-| `launch.min_signoffs` | int | 2 distinct admins [A]; an owner decision if the team has one person | 1..5 | `FND` |
-| `launch.min_approved_services` | int | 1 (FD§8.3 exit rule; or a documented fallback) | 0..20 | `FND` |
+| `launch.min_signoffs` | int | 2 distinct admins [A]; an owner decision if the team has one person | 2..5 | `FND` |
+| `launch.min_approved_services` | int | 1 (FD§8.3 exit rule; or a documented fallback) | 1..20 | `FND` |
 | `analytics.third_party_trackers` | bool | false | constant | `CON` |
 | `analytics.cookies_enabled` | bool | false | constant | `CON` |
 | `analytics.min_cohort_k` | int | 10 (cohorts smaller than this are suppressed in aggregates) | 1..1000 | `SEC` |
