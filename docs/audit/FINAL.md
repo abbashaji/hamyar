@@ -148,3 +148,48 @@ Consolidated from every `logged-needs-owner` row of A01 to A15 (38 rows), the 39
 | O-31 | S0 owner confirms the `Admin` suffix rename of 11 colliding operation ids (the only rename 15g asks for) and the `legal_hold` kill-switch reason | 15g CR-01, CR-26 | none | before the OpenAPI document is generated |
 
 Not an owner decision, though the logs file it as one: A07 #23 (`hamyar_config_epoch_count` naming) is a naming fix for the S4 owner; A09 #28 to #29 are S16 naming.
+
+## 3. Corrections and edits required in citing parts that are not applied
+
+Sources: `## Corrections required` of 16d (CR-01 to CR-25, 25 rows) and of 15g (CR-01 to CR-44, 33 numbers used); the edit lists at the end of 15c to 15f are cited by 15g as already specified there and were not re-audited by 15g. Status is decided by reading the cited place in the part file at base 8074eac. `not applied` = the old text is still there; `applied` = the new text is there; `not yet checked` = the place has not been read by this cell. Line numbers are those of the file as read. [D]
+
+### 3.1 16d corrections (16d CR-nn)
+
+| CR | Place | Required change | Status | Evidence |
+| --- | --- | --- | --- | --- |
+| 01 | P 16.15 row 1 | relabel eta as 1/(1+v+lambda) | not yet checked | 16.15 table starts at line 436 of `spec/16-parameters.md` |
+| 02 | P 16.3 `C13`; P 16.5 row `mint.monthly_cap_credits`; S Table A | use min(phi, 1 - phi) | **not applied** | P `C13` (line 92) still multiplies `admission.phi_ppm`; P line 140 still reads `x phi 0.5`; the divisor fix of A13 #1 is in, CR-02 is not |
+| 03 | P 16.7 `admission.min_window_s`, `admission.window_step_s`; S Table A | positive window floor and step range | **not applied** | P lines 181 and 183: `> 0; C7, C9` and `divides 86,400; C9` |
+| 04 | P 16.11 `retention.ip_hash_ttl_days`; S Table B | range `1..30` | **not applied** | P line 313: `0..30` |
+| 05 | P 16.3 `C2`; S 0.10.3 `C2` | add `verify.gold_rate_floor > 0` | **not applied** (P) | P line 79 adds `> 0` for the audit floor only; S not yet checked |
+| 06 | P 16.13; S Table A | notice ranges `1..90` | **not applied** (P) | P lines 392 and 393: `0..90`; S not yet checked |
+| 07 | P 16.13; S Table A | `reservation.*` in `change.notice_days_price` | applied in P (by A13 #12) | P line 393 lists `reservation.*`; S Table A not yet checked |
+| 08 | P 16.14; S Table C | `team.min_public_members` 5 to 10 | not yet checked | A11 #7 and 16d F-10 both say 5 |
+| 09 | P 16.5; S Table A | state cut as floor(cap x (1 - ratio)) | **not applied** | P line 145 reads `0.25 (cut applied when the threshold is passed)` |
+| 10 | P 16.18 | basis of size defaults, rows not in FD 4.9 | not yet checked | |
+| 11 | S 0.10.3, 0.10.5 | `tighten_direction` enum, `public` default, operator exceptions, `abuse` area | not yet checked | A13 #16 (logged) says the two vocabularies still differ |
+| 12 | P 16.16, 16.17.5 | public and hidden lists | not yet checked | |
+| 13 | `spec/16b-parameters-a.md` | new rows for generic two-person lifetime, four S10a names, `abuse.admin_lookup_rate` | not yet checked | A12 #29 and 02e B3 say the names are undefined |
+| 14 | C 16.C.3, 16.C.2 | appeal note range, warning range | not yet checked | |
+| 15 | P 16.12 `template.autopause_report_count` | distinct reporting members | not yet checked | |
+| 16 | P 16.16 `ops.rpo_s` | `[V]` on the archive interval | not yet checked | |
+| 17 | P 16.8 `verify.duplicate_min_chars` | `>= verify.duplicate_shingle_chars` | not yet checked | |
+| 18 | P 16.3 | add `S16D-C1..C24` | **not applied** in the rows read | P 16.3 rows read (lines 78 to 100) end at `C20`; rows after line 100 not read |
+| 19 | P 16.3, 16.17.2 | evaluate lifetime relations for both lifetimes | not yet checked | |
+| 20 | S14 at 14:603 and 14:600 | 20 to 30; secret-rotation alias | not yet checked | A03 #20 says `calibration.min_samples_per_service` was aligned to 30; the rotation name is A03 #29, logged |
+| 21 | P 16.6 `price.eta_alarm_threshold` | range `> 0 .. 1` | not yet checked | |
+| 22 | C 16.C.2 `ui.draft.ttl_s` | state baseline | not yet checked | |
+| 23 | P 16.16 `security.two_person_actions` | always contains `parameter.loosen` | not yet checked | A03 #27 logs the related S0 gap |
+| 24 | P 16.3 | record `S16D-C3` as warning | not yet checked | |
+| 25 | C 16.C.8 | add `admission.redeemable_capacity_cells_per_day` | not yet checked | |
+
+Result of the checks made so far: of 25 corrections, 6 were checked in `spec/16-parameters.md`; 5 of them are not applied (02, 03, 04, 05, 06, 09: six rows, five distinct places plus CR-09) and 1 is applied (07, by an audit fix, not by the 16d correction). 19 are not yet checked.
+
+### 3.2 15g corrections (15g CR-nn) and the 15c to 15f edit lists
+
+Not yet checked by this cell: none of the 44 correction lines of 15g and none of the edit lists of 15c to 15f has been compared with the part files. Two audit logs say something about the same places and are the only evidence so far:
+
+- A12 #15 made the 11 colliding operation ids unique without renaming, by prefixing the admin ids with `admin` in the OpenAPI key. 15g `CR-01` asks for the suffix `Admin` on the admin operation id itself. If A12's rule is in the files, `CR-01` and `CR-02` are not applied and the two rules conflict (15g `P6`: no rename except `CR-01`). Check at `spec/15b-api-admin.md` line 20.
+- A12 #6 aligned `kill.member` to 403 `account_frozen` in 15a and 15b, which is 15g `G-11` for those two files; 15g `CR-25` (S14 and `AC-launch-52`) and the step-7 limit in 15a 15.4 are separate edits and are not evidenced.
+
+The 15g corrections to check, grouped by file (numbers are 15g's): S0 (`CR-01`, `CR-05`, `CR-09`, `CR-26`, `CR-44`); S14 (`CR-23`, `CR-25`, `CR-26`, `CR-28`, `CR-40`, `CR-41`); 15a (`CR-04`, `CR-08`, `CR-28`, `CR-29`, `CR-30`, `CR-31`, `CR-33`, `CR-03` (keep), `CR-15`, `CR-16`, `CR-19`, `CR-36`, `CR-37`, `CR-02`); 15b (`CR-01`, `CR-02`, `CR-03`, `CR-04`, `CR-05`, `CR-06`, `CR-07`, `CR-11`, `CR-12`, `CR-20`, `CR-21`, `CR-22`, `CR-24`, `CR-27`, `CR-35`, `CR-32`, `CR-36`, `CR-09`, `CR-34`, `CR-18`, `CR-17`, `CR-42`, `CR-43`); 15c to 15f and parts 11 and 13 (`CR-13`, `CR-12`, `CR-14`, `CR-38`, `CR-39`).
