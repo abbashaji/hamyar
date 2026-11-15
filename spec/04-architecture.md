@@ -604,7 +604,7 @@ An `Alarm` row has an `alarm_key`, severity (`critical`, `major`, `warning`), th
 
 Automatic brake [D][A]: on `alarm.ledger_invariant_violated` the system itself, as principal `system`, engages `kill.all_minting` and `kill.all_new_jobs`; releasing them needs two operators and a passing full recompute. Reason: fail closed on integrity. Risk: a false positive halts the system, which the founders may prefer to decide by hand (S3.*). The brake is performed by the checker's own transaction, not by the event consumer, so it does not depend on the relay.
 
-Request correlation: `request_id` is generated at the edge, echoed in `X-Request-Id`, and passed as `causation_id`. Traces, if used, carry no payload attributes. `/v1/public/health` returns liveness and `build_id` only; detailed readiness is an admin operation (S15.*).
+Request correlation: `request_id` is generated at the edge, echoed in `X-Request-Id`, and passed as `causation_id`. Traces, if used, carry no payload attributes. `/v1/public/health` returns liveness and `build_id` only; detailed readiness is read from `getLedgerHead`, `getCapacitySnapshot` and `listAlarms` (S15b); there is no separate readiness endpoint.
 
 ## 4.12 Backup and recovery
 
