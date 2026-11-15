@@ -362,10 +362,11 @@ Two-person handling: an `audit.accept` or `quarantine.release` creates an `Appro
 
 | `op` | Method and path | Notes |
 | --- | --- | --- |
-| `listAuditQueueItems`, `getAuditQueueItem` | `GET /v1/admin/audit-queue-items[/{id}]` | Metadata only; ids are the underlying `aud_`, `sub_` or `rpt_` ids |
-| `getAuditQueueItemEvidence` | `GET .../{id}/evidence` | Logged read (`submission.view`) |
-| `createGoldView` | `POST .../{id}/gold-views` | Reason required; logged read (`gold.view_answer`) |
-| `decideAuditQueueItem` | `POST .../{id}/decisions` | Body `{outcome, reason_code, reason_text}`; `202` with an `ApprovalRequest` for `CT3` outcomes |
+| `listAudits`, `getAudit` | `GET /v1/admin/audits[/{aud_id}]` | Metadata only; ids are the underlying `aud_` ids |
+| `listQuarantinedSubmissions` | `GET /v1/admin/quarantined-submissions` | Metadata only; ids are the underlying `sub_` ids |
+| `getAuditContent`, `getQuarantinedSubmissionContent` | `GET /v1/admin/audits/{aud_id}/content`, `GET /v1/admin/quarantined-submissions/{sub_id}/content` | Logged read (`submission.view`) for both |
+| `resolveAudit` | `POST /v1/admin/audits/{aud_id}/resolutions` | Body `{outcome, reason_code, reason_text}`; `200` for one admin with step-up, no approval |
+| `releaseQuarantinedSubmission`, `rejectQuarantinedSubmission` | `POST /v1/admin/quarantined-submissions/{sub_id}/releases`, `POST /v1/admin/quarantined-submissions/{sub_id}/rejections` | `200` for one admin with step-up, no approval |
 
 | AC | Given | When | Then |
 | --- | --- | --- | --- |
@@ -453,17 +454,18 @@ When reports on a template reach `template.autopause_report_count` inside `templ
 
 | `op` | Method and path | Notes |
 | --- | --- | --- |
-| `listAbuseItems`, `getAbuseItem` | `GET /v1/admin/abuse-items[/{id}]` | `id` is an `rpt_` or `alm_` id |
-| `triageAbuseItem`, `dismissAbuseItem`, `recordAbuseItemAction` | `POST .../{id}/triages`, `.../dismissals`, `.../actions` | `If-Match` |
-| `restrictMember`, `suspendMember`, `banMember`, `reinstateMember`, `liftMemberRestriction` | `POST /v1/admin/members/{mem_id}/restrictions`, `.../suspensions`, `.../bans`, `.../reinstatements`, `.../restriction-lifts` | Body carries `context`; `banMember` returns `202` |
-| `stopJob` | `POST /v1/admin/jobs/{job_id}/stop-requests` | `CT2` |
-| `voidCell` | `POST /v1/admin/cells/{cel_id}/voidings` | `CT2` |
-| `createCellOverturn` | `POST /v1/admin/cell-overturns` | Body `{cell_ids, reason}`; `202` |
+| `listReports`, `getReport` | `GET /v1/admin/reports[/{rpt_id}]` | `id` is an `rpt_` id |
+| `listAlarms`, `getAlarm` | `GET /v1/admin/alarms[/{alm_id}]` with `?category=abuse` | `id` is an `alm_` id; the screen merges the two streams |
+| `triageReport`, `closeReport`, `acknowledgeAlarm` | `POST /v1/admin/reports/{rpt_id}/triages`; `POST /v1/admin/reports/{rpt_id}/outcomes` with `outcome` `dismissed` or `actioned` (and `linked_admin_action_ids`); `POST /v1/admin/alarms/{alm_id}/acknowledgements` | No `If-Match` |
+| `restrictMember`, `suspendMember`, `banMember`, `reinstateMember`, `liftMemberRestriction` | `POST /v1/admin/members/{mem_id}/restrictions`, `.../suspensions`, `.../bans`, `.../reinstatements`, `.../restriction-lifts` | Body carries `reason_code`, `reason`, `reason_copy_key`, `linked_ids`, `ends_at?` (15.29.6); `banMember` returns `202` |
+| `stopJob` | `POST /v1/admin/jobs/{job_id}/stop-requests` | `CT2`; `perm.job.stop`, step-up, defined in 15.D.4.3 |
+| `voidCell` | `POST /v1/admin/cells/{cel_id}/voidings` | `CT2`; `perm.cell.void`, step-up, body `{reason_code, reason, linked_ids}`, defined in 15.D.4.3 |
+| `createCellOverturn` | `POST /v1/admin/cell-overturns` | Body `{cell_ids, reason_code, reason, linked_ids}`; `202` with an `AdminApproval` (15.D.4.3) |
 
 | AC | Given | When | Then |
 | --- | --- | --- | --- |
 | `AC-abuse-01` | `template.autopause_report_count` = 3 (fixture) and three reports on one template inside the window | The third arrives | The queue shows one row with count 3 and a `killswitch.engaged` for `kill.template.<id>` with principal `system` exists |
-| `AC-abuse-02` | A `suspendMember` call with no `context` | Sent | `422 UNPROCESSABLE`; a refused `AdminAction` is written |
+| `AC-abuse-02` | A `suspendMember` call with no `context` | Sent | `422 UNPROCESSABLE`; no `AdminAction` row and no event (a refused `AdminAction` is written only for authorization failures, 15.34.1) |
 | `AC-abuse-03` | A ban initiated by reviewer A | A confirms | `202`, member status unchanged; the ban executes only after distinct admin B approves |
 | `AC-abuse-04` | Any response of the abuse and appeal APIs | Checked against the schema | No field contains a reporter's `mem_` or `vol_` id |
 | `AC-abuse-05` | A `createCellOverturn` for accepted cells | Approved by a second admin | For each cell `cell.overturned`, a ledger `reversal` and a `rework` cell (S0 `ISS-05`) exist, or the whole request is rejected by the guard of 11.50.3 |
