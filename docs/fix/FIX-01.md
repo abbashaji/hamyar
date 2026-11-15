@@ -22,7 +22,7 @@
 ## Notes for the owner
 
 - **D-01 made explicit.** A floor of 2 on `launch.min_signoffs` means that with one admin no launch gate can be signed, no switch can be opened and no kill switch released. This is intended and is not softened here. The team needs at least two independent admins before Phase 1, or the owner decides otherwise in D-01 (FINAL.md section 4). The default meanwhile is the one this edit applies.
-- **D-22.** The range `1..30` on `retention.ip_hash_ttl_days` follows 16d CR-04 and the cell's authorization. Whether a value of 0 should ever be allowed is still an owner decision; this edit marks it default-pending.
+- **D-22.** The range `1..30` on `retention.ip_hash_ttl_days` follows 16d CR-04 and the cell's authorization. Whether a value of 0 should ever be allowed is still an owner decision; this edit applies the D-22 default and marks it in the table.
 - **Reasons in S16 only.** The reason clauses were added to the S16 rows and not to S0, as the cell asks. The notation `(0,1]` replaces 16d CR-21's `> 0 .. 1; S16D-C1`; the constraint id `S16D-C1` was not cited because S16 16.3 does not carry it until 16d CR-18 is applied (FIX-02).
 - **Not touched (outside this cell).** The S0 row text of `change.notice_days_price` still lists `price.*`, `admission.*`, `credit.*` without `reservation.*` (16d CR-07, S0 side, assigned to FIX-03).
 
