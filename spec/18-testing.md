@@ -139,6 +139,7 @@ Variants run with the same oracle: pool not a whole number of cells (`v_ppm` = 1
 | `T-unit-25` | Invite and rate limits | `invite.max_active_per_member`, `invite.tree_max_members`, `invite.tree_max_depth`, `ratelimit.device_new_members_per_day`, `ratelimit.ip_hash_new_members_per_day`, `ratelimit.invite_tree_new_members_per_day` each accept at the limit and refuse at limit + 1 with `RATE_LIMITED` or `CAP_EXCEEDED` as `S10.*` says | `BM4` |
 | `T-unit-26` | Manifest | A provenance manifest contains exactly the fields of FD§5.6 as in `S9.*`, hashes match the stored bytes, the volunteer appears only as a `vol_` handle, and the no-training flag is present for `P0` and `P1` jobs where `S12.*` requires it | `BM6` |
 | `T-unit-27` | Grant and referral rules | A starter grant needs `grant.required_verified_cells` verified cells; limits `grant.max_per_device`, `grant.max_per_invite_tree_per_day`, `grant.max_per_day` hold; a grant never takes the Reserve below `grant.reserve_floor_credits`; referral bonuses need `growth.referral.min_newcomer_verified_cells` and wait `growth.referral.hold_s` | `BM7` |
+| `T-unit-28` | Capacity forecast | D counts only donors with a verified cell inside `admission.active_donor_window_days`; c is verified cells per active donor per day over `admission.forecast_window_days`; the haircut `x (10^6 - haircut_ppm) / 10^6` applies last and rounds down; D = 40, c = 8, 2-day window, `admission.phi` 0.5, haircut 0 gives 320 (`T-unit-02`); with no data the result follows `S6.*` [V] | `BM7` |
 
 ## 18.4 Property-based tests (ledger, admission control, parameters)
 
@@ -362,6 +363,7 @@ The flag matrix (`T-policy-03`) additionally runs every gating flag key of `S0.8
 | `T-adv-21` | Ledger tampering: the application role tries `UPDATE` and `DELETE` on ledger tables; an operator edits a balance column; a restored backup with an altered entry | Privileges refuse; a column edit breaks reconciliation (`T-prop-05`) and the hash chain (`T-prop-10`) within `ledger.invariant_check_interval_s` and raises `ledger.invariant_violated` and an `Alarm`; the daily checkpoint hash disagrees | `AC-ledger-12` | `BM1` |
 | `T-adv-22` | Information leakage: responses and timing for existing versus non-existing ids of other members, other members' jobs and leases; error bodies; list endpoints | Same status and body shape (`NOT_FOUND`); no `mem_` id of another member appears anywhere; no total counts by default | `AC-ident-08` | `BM4` |
 | `T-adv-23` | Resource exhaustion: oversized uploads, zip-like archives, regular-expression-heavy input, many simultaneous large requests from one member | Parser and regex time limits; per-member and global limits; other members' latency stays inside the `T-load-09` budget | `AC-api-04` | `BM5`, `BM9` |
+| `T-adv-24` | Permission matrix: each role (donor, requester, reviewer, operator, and a member holding several) calls every route of the matrix of `S10.*`, including routes of roles it does not hold, before and after a role change | Allowed calls succeed; every other call is refused with the shape of `T-adv-22`; a role change applies on the next request; refusals are counted by the rate limiter | `AC-ident-11` | `BM4` |
 
 ## 18.8 Injection and XSS tests
 
@@ -498,6 +500,7 @@ Every journey is run by a scripted client against a deployed build, using the st
 | `T-e2e-20` | Log scan | After all journeys, every log line, metric label and trace attribute is scanned: no personal data, no raw IP, no token, no submitted text; ids and hashes only | `BM9` |
 | `T-e2e-21` | Human-review channel (experimental arm `ff.channel.human_review`) | A review cell is executed by a member with no provider account; review cells have their own gold cells; accepted review cells mint like any Commons cell (`ISS-03`) | `BM6` |
 | `T-e2e-22` | Service adapter | An entry with `adapter.supports_prefill` shows an open-in-service button built from `adapter.prefill_url_template` and never exceeds `adapter.max_url_chars`; an entry with `adapter.copy_only` shows copy only; no provider name or URL pattern exists in source code (a grep test over the repository); changing the registry changes the buttons with no deploy | `BM8` |
+| `T-e2e-23` | Phase 0 calibration tool: a founder records cells per day per service, seconds per cell, refusal and failure rates and copy-paste errors for several services | Each value is a `CalibrationRecord` with service, date, source and sample size; no ledger entry and no credit is created (`ISS-19`); the aggregate view shows counts with sample size; nothing recorded here is a claim about real members | `BM9` |
 
 ## 18.12 Simulation harness
 
@@ -709,12 +712,12 @@ Every major feature of the prompt (scopes A to J) maps to criteria below, and ev
 
 | Scope | Feature | Criteria | First `BM` |
 | --- | --- | --- | --- |
-| A | Anonymous identity, recovery, optional e-mail, key rotation, device linking, rate limits, invite trees, permissions, sessions, data minimization | `AC-ident-01`..`AC-ident-10` | `BM4` |
+| A | Anonymous identity, recovery, optional e-mail, key rotation, device linking, rate limits, invite trees, permissions, sessions, data minimization | `AC-ident-01`..`AC-ident-11` | `BM4` |
 | A | Admin login, two-person actions, admin audit trail | `AC-admin-01`..`AC-admin-03` | `BM2` |
 | B | Domain model, state machines, events, outbox, races | `AC-fsm-01`..`AC-fsm-06` | `BM1` (ledger side), `BM6` |
 | C | Ledger and invariants, mint, caps, expiry, Reserve, grants, reversal | `AC-ledger-01`..`AC-ledger-12` | `BM1` |
 | C | Pricing, round-trip efficiency, parameter changes | `AC-price-01`..`AC-price-03` | `BM2`, `BM7` |
-| C | Admission control, quotes, waitlist, reservations | `AC-admit-01`..`AC-admit-06` | `BM7` |
+| C | Admission control, quotes, waitlist, reservations | `AC-admit-01`..`AC-admit-07` | `BM7` |
 | D | Policy engine, rules `R1`..`R10`, opt-ins | `AC-policy-01`..`AC-policy-06` | `BM3` |
 | D | Service registry and gate | `AC-registry-01`..`AC-registry-05` | `BM3` |
 | D | Injection defenses, template wrapping, screening, output flagging | `AC-inj-01`..`AC-inj-04` | `BM5`, `BM6` |
@@ -727,7 +730,7 @@ Every major feature of the prompt (scopes A to J) maps to criteria below, and ev
 | F | Persian, RTL, numerals, calendars, accessibility, low bandwidth | `AC-i18n-01`..`AC-i18n-08` | `BM8` |
 | G | Public surfaces, counters, referral, teams, share cards | `AC-public-01`..`AC-public-08` | `BM8` |
 | G | Growth experiments behind flags | `AC-growth-01`..`AC-growth-03` | `BM8` |
-| H | Measurement, pre-registration, calibration, analytics privacy | `AC-measure-01`..`AC-measure-05` | `BM9` |
+| H | Measurement, pre-registration, calibration, analytics privacy | `AC-measure-01`..`AC-measure-06` | `BM9` |
 | I | Threat model, secrets, privacy, takedown, hosting swap, disclosure | `AC-sec-01`..`AC-sec-06` | `BM4`..`BM9` |
 | J | API, errors, idempotency, pagination, rate limits, auth schemes | `AC-api-01`..`AC-api-05` | `BM0` |
 | J | Background jobs, observability, backup, configuration | `AC-jobs-01`..`AC-jobs-05` | `BM0`..`BM9` |
@@ -749,6 +752,7 @@ Every major feature of the prompt (scopes A to J) maps to criteria below, and ev
 | `AC-ident-08` | Any caller | They request an object they may not see, or call a route of the other scheme | The result is `NOT_FOUND`, `FORBIDDEN` or `AUTH_INVALID` with identical shape for existing and non-existing objects, and a member never receives another member's `mem_` id | `T-adv-15`, `T-adv-22` |
 | `AC-ident-09` | A member session | It is idle or old beyond its TTL | It expires (`AUTH_EXPIRED`), a refresh follows the rules of `S10.*`, and admin sessions are shorter than member sessions | `T-unit-24` |
 | `AC-ident-10` | Any request | Logs, metrics and the database are inspected | No raw IP address is stored anywhere; only a keyed IP hash with its retention class exists | `T-e2e-19`, `T-e2e-20` |
+| `AC-ident-11` | A donor, a requester, a reviewer and an operator, each holding only their own roles | Each calls every route of the permission matrix of `S10.*` | A call outside the caller's permissions is refused with the same shape for hidden objects, a call inside succeeds, and a role change applies on the next request | `T-adv-24`, `T-e2e-17` |
 | `AC-admin-01` | An operator | They sign in | They use a passkey on the admin origin; there is no shared password and no member credential works | `T-adv-15`, `T-inj-04` |
 | `AC-admin-02` | Any two-person action (`ledger.reversal`, `launch.signoff`, `parameter.loosen`, `killswitch.release`, bans) | One admin tries alone, with two sessions, or as the author | The action is refused and recorded; with a second distinct admin it succeeds | `T-adv-14`, `T-prop-14` |
 | `AC-admin-03` | Any admin write | It is performed | Exactly one `AdminAction` exists with actor, role, target, reason and before and after hashes, and it cannot be edited | `T-unit-09`, `T-e2e-18` |
@@ -779,6 +783,7 @@ Every major feature of the prompt (scopes A to J) maps to criteria below, and ev
 | `AC-admit-04` | A member reserving capacity | They reserve, activate or let it expire | Reserved share per day stays under `reservation.capacity_share_cap`, escrow is held at booking, activation moves it into the job, expiry returns it | `T-prop-21`, `T-sim-15` |
 | `AC-admit-05` | A member with running jobs | They submit another | The cap `admission.max_concurrent_jobs_per_member` holds and the refusal says why | `T-prop-20` |
 | `AC-admit-06` | An admitted job | It is cancelled before any cell starts | Committed cells and balance return exactly to their previous values | `T-prop-22`, `T-e2e-04` |
+| `AC-admit-07` | Verified throughput and donor activity over `admission.forecast_window_days` and `admission.active_donor_window_days` | Forecast capacity is computed | D and c come from verified cells only, a donor inactive beyond the window is not counted, the haircut applies, and the same data give the same forecast | `T-unit-28`, `T-prop-18` |
 | `AC-policy-01` | The rules `R1`..`R10` | A job is evaluated | Rules are rows of a versioned `PolicyVersion`; a changed row changes behavior with no code change; one outcome with the first failing rule's reasons | `T-policy-01`, `T-policy-02`, `T-policy-05`, `T-prop-29` |
 | `AC-policy-02` | The 192 combinations with an all-yes service | They are evaluated | Exactly 12 are accepted, 108 rejected by `R1`, 42 by `R2`, 9 by `R6`, 21 by the allowlist check, under the `P3` pairing of `ISS-186`; if `S7.*` pairs `P3` otherwise the counts are recomputed from the oracle and this row is edited in the same change | `T-policy-01` |
 | `AC-policy-03` | A job accepted under `PolicyVersion` n | The policy changes | Acceptance re-checks under the stamped version (`R9`); a tightening can refuse acceptance; a loosening is not retroactive | `T-policy-06` |
@@ -873,6 +878,7 @@ Every major feature of the prompt (scopes A to J) maps to criteria below, and ev
 | `AC-measure-03` | The credit-lifetime experiment | It starts | Members are assigned to arms by the logged randomization (`T-e2e-13`) and both arms are reported | `T-sim-06`, `T-e2e-13` |
 | `AC-measure-04` | A parameter default | It is replaced | The change log cites a measurement code of `S0.10.4`, never a simulation run (`S18.12.8`) | `T-unit-09`, `T-sim-19` |
 | `AC-measure-05` | Analytics | They run | No third-party tracker, no raw IP, cohorts below `analytics.min_cohort_k` suppressed, retention per `S10.*` | `T-e2e-19`, `T-e2e-20`, `T-rtl-06` |
+| `AC-measure-06` | A founder on their own account in Phase 0 | They record cells per day per service, seconds per cell, refusal and failure rates and copy-paste errors in the calibration tool | Each is stored as a `CalibrationRecord` with service, date and source, creates no ledger entry and no member credit (`ISS-19`), and appears in the aggregate view with its sample size | `T-e2e-23` |
 | `AC-sec-01` | Each threat class of FD§6 (forged results, credit farming, fake accounts and invite-tree abuse, malicious requesters and inputs, prompt injection against volunteers, XSS and injection, ledger tampering, insider and operator risk, account takeover, de-anonymization, compelled disclosure, denial of service, reviewer capture) | The traceability table of `S18.16` is checked | Each has at least one automated test or an accepted residual risk with an owner in `S10.*` | `S18.16` |
 | `AC-sec-02` | Every secret named in `S10.*` | It is rotated | Old values stop working and events record it | `T-e2e-15` |
 | `AC-sec-03` | The system's data | It is inventoried | Every table and column has a class and retention; none holds a provider credential, session or chat text | `T-e2e-19` |
@@ -902,6 +908,36 @@ Every major feature of the prompt (scopes A to J) maps to criteria below, and ev
 | `AC-sim-04` | The harness | It is started against a non-simulation database | It refuses | `T-sim-20` |
 | `AC-sim-05` | A sweep | It is run | Invalid points are skipped and reported, size is bounded, aggregation is labelled across seeds | `T-sim-18` |
 
+### 18.14.6 Supporting criteria for tests not named in a row above
+
+Rule 1 of `S18.1` needs every test to support at least one criterion. These tests are not named in the rows above; each supports the criteria listed here. Audit A14. [D]
+
+| Test | Supports |
+| --- | --- |
+| `T-unit-03` | `AC-api-01` |
+| `T-unit-04` | `AC-ledger-05` |
+| `T-unit-05`, `T-prop-27` | `AC-ledger-12`, `AC-reqx-04` |
+| `T-prop-01`..`T-prop-04` | `AC-ledger-02` |
+| `T-prop-08` | `AC-ledger-03` |
+| `T-prop-11` | `AC-api-02`, `AC-fsm-04` |
+| `T-prop-15`, `T-fsm-10` | `AC-fsm-03` |
+| `T-prop-18`, `T-load-03`, `T-sim-14` | `AC-admit-01` |
+| `T-fsm-02`, `T-fsm-11` | `AC-fsm-01`, `AC-fsm-02` |
+| `T-fsm-08` | `AC-fsm-01`, `AC-ops-08` |
+| `T-policy-09` | `AC-inj-04` |
+| `T-inj-03`, `T-inj-06` | `AC-return-06` |
+| `T-inj-05` | `AC-reqx-04` |
+| `T-inj-07` | `AC-return-03` |
+| `T-inj-08` | `AC-i18n-04` |
+| `T-rtl-13` | `AC-i18n-01` |
+| `T-load-01`, `T-load-04` | `AC-jobs-01` |
+| `T-load-02` | `AC-public-01` |
+| `T-load-07` | `AC-jobs-04` |
+| `T-load-09` | `AC-api-04` |
+| `T-sim-04`, `T-sim-16` | `AC-sim-02` |
+| `T-sim-08` | `AC-return-01` |
+| `T-sim-11` | `AC-return-02` |
+
 ## 18.15 Definition of Done per milestone
 
 S17.* details the dependencies and work of each milestone; this section fixes which tests and criteria must be green for the milestone to be done. Milestone names follow `S0.12`. [D]
@@ -920,16 +956,16 @@ S17.* details the dependencies and work of each milestone; this section fixes wh
 
 | Milestone | Tests that must be green | Criteria that must pass | S17 reference |
 | --- | --- | --- | --- |
-| `BM0` `foundation` | `T-unit-03`, `T-unit-04`, `T-unit-05`, `T-unit-10`..`T-unit-13`, `T-prop-27`, `T-prop-28`, `T-fsm-09` (generic), `T-inj-02`, `T-inj-03` (API half), `T-inj-06`, `T-inj-13` | `AC-api-01`..`AC-api-05`, `AC-jobs-02`, `AC-gate-01` | `S17.*` BM0 |
-| `BM1` `ledger_and_invariants` | `T-unit-01`, `T-unit-06`, `T-unit-07`, `T-prop-01`..`T-prop-15`, `T-prop-24`, `T-fsm-01` and `T-fsm-11` for the ledger-side machines, `T-adv-12`, `T-adv-21`, `T-e2e-01` (ledger only), mutation run on the ledger | `AC-ledger-01`, `AC-ledger-02`, `AC-ledger-04`..`AC-ledger-06`, `AC-ledger-09`, `AC-ledger-11`, `AC-ledger-12`, `AC-fsm-01`, `AC-fsm-02`, `AC-fsm-06` | `S17.*` BM1 |
+| `BM0` `foundation` | `T-unit-03`, `T-unit-04`, `T-unit-05`, `T-unit-10`..`T-unit-13`, `T-prop-27`, `T-prop-28`, `T-adv-04`, `T-fsm-09` (generic), `T-inj-02`, `T-inj-03` (API half), `T-inj-06`, `T-inj-13` | `AC-api-01`..`AC-api-05`, `AC-jobs-02`, `AC-gate-01` | `S17.*` BM0 |
+| `BM1` `ledger_and_invariants` | `T-unit-01`, `T-unit-06`, `T-unit-07`, `T-prop-01`..`T-prop-08`, `T-prop-10`..`T-prop-15`, `T-prop-24`, `T-fsm-01` and `T-fsm-11` for the ledger-side machines, `T-adv-12`, `T-adv-21`, `T-e2e-01` (ledger only), mutation run on the ledger | `AC-ledger-01`, `AC-ledger-02`, `AC-ledger-04`..`AC-ledger-06`, `AC-ledger-09`, `AC-ledger-11`, `AC-ledger-12`, `AC-fsm-01`, `AC-fsm-02`, `AC-fsm-06` | `S17.*` BM1 |
 | `BM2` `admin_gates_and_config` | `T-unit-08`, `T-unit-09`, `T-prop-26`, `T-fsm-08`, `T-adv-14`, `T-adv-15`, `T-inj-04`, `T-e2e-06`, `T-e2e-11` (admin parts) | `AC-admin-01`..`AC-admin-03`, `AC-price-03`, `AC-ops-05`, `AC-ops-07`, `AC-ops-08`, `AC-gate-01`..`AC-gate-04`, `AC-measure-02`, `AC-jobs-05` | `S17.*` BM2 |
-| `BM3` `registry_and_policy` | `T-policy-01`..`T-policy-13`, `T-prop-29`, `T-fsm-06`, `T-inj-01` (API half), `T-rtl-11` (policy keys) | `AC-policy-01`..`AC-policy-06`, `AC-registry-01`..`AC-registry-05`, `AC-ops-02` | `S17.*` BM3 |
-| `BM4` `identity_and_access` | `T-unit-14`, `T-unit-18`, `T-unit-23`..`T-unit-25`, `T-fsm-04`, `T-adv-15`..`T-adv-17`, `T-adv-19`, `T-adv-22`, `T-e2e-07`, `T-e2e-19` | `AC-ident-01`..`AC-ident-10`, `AC-sec-03` | `S17.*` BM4 |
-| `BM5` `templates_and_commons_jobs` | `T-unit-17`, `T-fsm-02` (Commons paths), `T-fsm-05`, `T-policy-09`, `T-policy-10`, `T-inj-07`, `T-inj-09`, `T-inj-10`, `T-inj-12`, `T-inj-14`, `T-adv-20`, `T-e2e-10` | `AC-tpl-01`..`AC-tpl-03`, `AC-inj-01`, `AC-inj-02`, `AC-inj-04`, `AC-ops-01` | `S17.*` BM5 |
-| `BM6` `execution_and_verification` | `T-unit-15`, `T-unit-16`, `T-unit-19`, `T-unit-20`, `T-unit-26`, `T-prop-08`, `T-prop-09`, `T-prop-25`, `T-fsm-03`, `T-fsm-07`, `T-fsm-10`, `T-adv-01`..`T-adv-09`, `T-adv-13`, `T-adv-18`, `T-inj-11`, `T-e2e-03`, `T-e2e-08`, `T-e2e-11`, `T-e2e-21` | `AC-verify-01`..`AC-verify-09`, `AC-return-01`..`AC-return-06`, `AC-inj-03`, `AC-fsm-03`, `AC-fsm-04`, `AC-ledger-03`, `AC-ops-03` | `S17.*` BM6 |
-| `BM7` `member_jobs_and_credit_economy` | `T-unit-02`, `T-unit-21`, `T-unit-22`, `T-unit-27`, `T-prop-07`, `T-prop-16`..`T-prop-23`, `T-fsm-02` (member-job paths), `T-adv-10`, `T-adv-11`, `T-adv-17`, `T-e2e-01`, `T-e2e-04`, `T-e2e-05`, `T-e2e-09`, `T-inj-05`, `T-sim-03` (ledger only) | `AC-admit-01`..`AC-admit-06`, `AC-price-01`, `AC-price-02`, `AC-ledger-07`, `AC-ledger-08`, `AC-ledger-10`, `AC-fsm-05`, `AC-registry-04`, `AC-public-07` | `S17.*` BM7 |
+| `BM3` `registry_and_policy` | `T-policy-01`..`T-policy-08`, `T-policy-11`..`T-policy-13`, `T-prop-29`, `T-fsm-06`, `T-inj-01` (API half), `T-rtl-11` (policy keys) | `AC-policy-01`..`AC-policy-06`, `AC-registry-01`..`AC-registry-05`, `AC-ops-02` | `S17.*` BM3 |
+| `BM4` `identity_and_access` | `T-unit-14`, `T-unit-18`, `T-unit-23`..`T-unit-25`, `T-fsm-04`, `T-adv-15`..`T-adv-17`, `T-adv-19`, `T-adv-22`, `T-adv-24`, `T-e2e-07`, `T-e2e-19` | `AC-ident-01`..`AC-ident-11`, `AC-sec-03` | `S17.*` BM4 |
+| `BM5` `templates_and_commons_jobs` | `T-unit-17`, `T-fsm-02` (Commons paths), `T-fsm-05`, `T-policy-09`, `T-policy-10`, `T-inj-07`, `T-inj-09`, `T-inj-10`, `T-inj-12`, `T-inj-14`, `T-adv-20`, `T-adv-23`, `T-e2e-10` | `AC-tpl-01`..`AC-tpl-03`, `AC-inj-01`, `AC-inj-02`, `AC-inj-04`, `AC-ops-01` | `S17.*` BM5 |
+| `BM6` `execution_and_verification` | `T-unit-15`, `T-unit-16`, `T-unit-19`, `T-unit-20`, `T-unit-26`, `T-prop-08`, `T-prop-09`, `T-prop-25`, `T-fsm-03`, `T-fsm-07`, `T-fsm-10`, `T-adv-01`..`T-adv-09`, `T-adv-13`, `T-adv-18`, `T-inj-11`, `T-rtl-05` (normalization part), `T-e2e-03`, `T-e2e-08`, `T-e2e-11`, `T-e2e-21` | `AC-verify-01`..`AC-verify-09`, `AC-return-01`..`AC-return-06`, `AC-inj-03`, `AC-fsm-03`, `AC-fsm-04`, `AC-ledger-03`, `AC-ops-03` | `S17.*` BM6 |
+| `BM7` `member_jobs_and_credit_economy` | `T-unit-02`, `T-unit-21`, `T-unit-22`, `T-unit-27`, `T-unit-28`, `T-prop-07`, `T-prop-16`..`T-prop-23`, `T-fsm-02` (member-job paths), `T-adv-10`, `T-adv-11`, `T-adv-17`, `T-e2e-01`, `T-e2e-04`, `T-e2e-05`, `T-e2e-09`, `T-inj-05`, `T-sim-03` (ledger only) | `AC-admit-01`..`AC-admit-07`, `AC-price-01`, `AC-price-02`, `AC-ledger-07`, `AC-ledger-08`, `AC-ledger-10`, `AC-fsm-05`, `AC-registry-04`, `AC-public-07` | `S17.*` BM7 |
 | `BM8` `experiences_and_public` | `T-rtl-01`..`T-rtl-14`, `T-inj-01` (DOM), `T-inj-03` (front end), `T-inj-08`, `T-e2e-02`, `T-e2e-12`, `T-e2e-13`, `T-e2e-16`..`T-e2e-18`, `T-e2e-22`, `T-policy-12` | `AC-volx-01`..`AC-volx-09`, `AC-reqx-01`..`AC-reqx-05`, `AC-i18n-01`..`AC-i18n-08`, `AC-public-01`..`AC-public-06`, `AC-public-08`, `AC-growth-01`..`AC-growth-03`, `AC-adapter-01`..`AC-adapter-03`, `AC-ops-04`, `AC-ops-06` | `S17.*` BM8 |
-| `BM9` `measurement_simulation_hardening` | `T-load-01`..`T-load-09`, `T-sim-01`..`T-sim-20`, `T-e2e-14`, `T-e2e-15`, `T-e2e-19`, `T-e2e-20`, mutation run on ledger and policy | `AC-measure-01`, `AC-measure-03`..`AC-measure-05`, `AC-sec-01`, `AC-sec-02`, `AC-sec-04`..`AC-sec-06`, `AC-jobs-01`, `AC-jobs-03`, `AC-jobs-04`, `AC-sim-01`..`AC-sim-05`; pre-build checklist (`S19.*`) closed | `S17.*` BM9 |
+| `BM9` `measurement_simulation_hardening` | `T-load-01`..`T-load-09`, `T-sim-01`..`T-sim-20`, `T-e2e-14`, `T-e2e-15`, `T-e2e-19`, `T-e2e-20`, `T-e2e-23`, mutation run on ledger and policy | `AC-measure-01`, `AC-measure-03`..`AC-measure-06`, `AC-sec-01`, `AC-sec-02`, `AC-sec-04`..`AC-sec-06`, `AC-jobs-01`, `AC-jobs-03`, `AC-jobs-04`, `AC-sim-01`..`AC-sim-05`; pre-build checklist (`S19.*`) closed | `S17.*` BM9 |
 
 ## 18.16 Traceability
 
