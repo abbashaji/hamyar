@@ -24,7 +24,7 @@
 Writing rules for all parts: [D]
 
 1. One tag per bracket. Combine by adjacency: `[H][V]`. Place the tag directly after the claim it qualifies.
-2. Every number is either derived by a formula shown next to it or labeled exactly `initial configurable default` (and then it must exist in the parameter table, 0.10).
+2. Every number is either derived by a formula shown next to it or labeled exactly `initial configurable default` (and then it must exist in the parameter table, 0.10). Algorithm constants fixed by a `[D]` decision (the credit scale, hash and key sizes, identifier formats) are exempt and are stated in 0.6, not in the parameter table.
 3. No statistic is invented. Simulation output is never evidence about human behavior (prompt K).
 4. User-facing promises say "declared", never "guaranteed" (FD Principle 11). Legal conclusions are never drawn; they are `[V]` for counsel.
 5. An unverified claim is never written as a fact; it is tagged or removed.
@@ -64,6 +64,8 @@ An Issue is a problem, gap or unimplementable rule found in the FD (or in an ins
 
 C-001 consolidates all tables into S2.* (grouped by severity, each with the parts that apply the resolution) and may add its own issues in `ISS-21`..`ISS-29`. A part applies its own proposed resolution until C-001 records a different one. [D]
 
+A convention gap (0.1) is reported as an Issue row with `fd_ref` = `none`, `severity` = `minor`, the missing name in `issue` and its definition in `resolution`. A file whose block is exhausted MUST NOT take an id from another block: it reports its remaining convention gaps in one row under its last id, one name per line in `resolution`. [D]
+
 ## 0.5 Other document ID schemes
 
 | Scheme | Format | Owner part | Example |
@@ -96,7 +98,7 @@ C-001 consolidates all tables into S2.* (grouped by severity, each with the part
 | Per-cell price | `p_ucr = 1,000,000 + v_ppm + lambda_ppm`. It equals p expressed in ppm because the credit scale equals the ppm scale; this identity is the reason for scale 10^6 [A] |
 | Job escrow | `escrow_ucr = N * p_ucr` for N primary cells: integer times integer, no rounding |
 | Components | primary pay `N * 1,000,000`; verification pool `N * v_ppm`; levy `N * lambda_ppm`; their sum is `escrow_ucr` exactly |
-| Rounding | only where a ratio is measured: `v_ppm = ceil(10^6 * verification_cells / accepted_primary_cells)` (rounded up so the pool is never under-funded); `eta_ppm = floor(10^12 / p_ucr)`. Displayed balances round down, displayed prices round up |
+| Rounding | only where a ratio is measured: `v_ppm = ceil(10^6 * verification_cells / accepted_primary_cells)` (rounded up so the pool is never under-funded; `verification_cells` = audit + gold + rework cells and `accepted_primary_cells` = accepted primary cells, both of the same job type over the trailing window, FD§4.3); `eta_ppm = floor(10^12 / p_ucr)`. Displayed balances round down; displayed prices and cost ratios (v, λ) round up; displayed η rounds down, so no display overstates what a member receives or understates what a member pays |
 | Donor earn | exactly 1,000,000 ucr per accepted cell of any kind (FD§4.3) |
 | Whole-credit parameters | stored in ucr (a grant of 3 credits is 3,000,000) |
 | Range | int64 holds about 9.2 x 10^12 credits; every invariant check uses exact integer equality with zero tolerance |
@@ -114,7 +116,7 @@ C-001 consolidates all tables into S2.* (grouped by severity, each with the part
 | Levy | 240 x 50,000 | 12,000,000 ucr = 12 credits |
 | Donor payout | (240 + 24) cells x 1,000,000 | 264,000,000 ucr = 264 credits |
 | Closing identity | 264,000,000 + 12,000,000 | 276,000,000 = escrow; refund 0 |
-| Round-trip efficiency | `floor(10^12 / 1,150,000)` | 869,565 ppm, displayed 0.870 (FD: about 0.87) |
+| Round-trip efficiency | `floor(10^12 / 1,150,000)` | 869,565 ppm, displayed 0.869 (rounded down; FD: about 0.87) |
 | Admission | capacity = `floor(40 x 8 x 2 x 500,000 / 10^6)` = 320 cells; committed = 240 + 24 = 264 | 264 <= 320, admitted with a 2-day quote |
 | Time value | 240 cells / 8 per day | 30 days for one account versus a 2-day window |
 
@@ -125,15 +127,15 @@ If the verification pool is not a whole number of cells, `floor` applies and the
 - **Storage:** UTC `timestamptz` only; no local time is stored. API: RFC 3339 with `Z` (`2026-11-11T09:30:00Z`). Durations are integer seconds (suffix `_s`); `_days` parameters mean exactly 86,400 s each, with no calendar arithmetic.
 - **Day and month boundaries** for rate limits, the monthly mint cap and daily jobs are UTC calendar boundaries [A]; screens show the local-time equivalent next to any cap or reset.
 - **Authority:** server time only. Client clocks are never trusted; `expires_at` of leases, nonces, quotes and lots is computed and stored server-side. Ledger order is the per-ledger sequence number `seq`, never a timestamp.
-- **Lot expiry:** `expires_at = earned_at + credit.lifetime_days * 86,400 s`, evaluated with the parameter version in force at `earned_at` (changes are prospective only, FD Principle 5).
-- **Display:** converted on the client. Locale `fa` defaults to the Jalali (Solar Hijri) calendar and Persian numerals as a user option; locale `en` defaults to Gregorian; detail views show both calendars (FD§10). Conversion uses the platform calendar support where present [V: support on the target phones] with a bundled arithmetic fallback. The server never stores, accepts or emits Jalali strings; exports use Gregorian ISO dates.
+- **Lot expiry:** `expires_at = earned_at + credit.lifetime_days * 86,400 s`, evaluated with the parameter version in force at `earned_at`; here `credit.lifetime_days` stands for the lifetime that applies to the lot: `credit.lifetime_days_accelerated` for a member assigned to the accelerated-expiry arm, and `grant.starter_lifetime_days` for a starter grant (0.8.5) (changes are prospective only, FD Principle 5).
+- **Display:** converted on the client. Locale `fa` defaults to the Jalali (Solar Hijri) calendar and, per `i18n.digits_default_fa`, Persian numerals (the member can switch to Latin digits); locale `en` defaults to Gregorian and Latin digits; detail views show both calendars (FD§10). Conversion uses the platform calendar support where present [V: support on the target phones] with a bundled arithmetic fallback. The server never stores, accepts or emits Jalali strings; exports use Gregorian ISO dates.
 - **Time zone:** the device zone by default, overridable by an IANA zone chosen in settings, never inferred from an IP address (privacy). Offset and daylight-saving rules for any country come from the tz database and are not hardcoded [V].
 
 ### 0.6.3 Identifiers [D]
 
 - Format: `<prefix>_<ulid>`: a 3-letter lowercase prefix, an underscore, a 26-character ULID in lowercase Crockford base32. Regex: `^[a-z]{3}_[0-9a-hjkmnp-tv-z]{26}$`. Examples: `mem_01j9z6x4k7q2m8v5t3r1w0c9ab`, `job_...`, `cel_...`.
 - Generated server-side only, monotonic within a process; sortable by creation time; opaque to clients (never parsed for meaning). Prefixes are unique across the system (table in 0.7).
-- The time part of a ULID is not a secret; it adds nothing beyond `created_at`. Identifiers of other members are never shown: public surfaces and provenance use `vol_` handles (0.6.4), not `mem_` ids. [D]
+- The time part of a ULID is not a secret; it adds nothing beyond `created_at`. Identifiers of other members are never shown, and public surfaces show neither `mem_` ids nor `vol_` handles; provenance records use `vol_` handles (0.6.4), which requesters never see. [D]
 - Natural keys: `ParameterName` (0.10), `policy_rule_id` (`R1`..`R10`), `flag_key` (0.8.3), invariant ids. These are stable strings, not ULIDs.
 - `request_id` uses the prefix `req_` and is not an entity.
 
@@ -143,13 +145,13 @@ If the verification pool is not a whole number of cells, `floor` applies and the
 | --- | --- | --- |
 | Content hash (inputs, outputs, terms copies) | SHA-256 over the raw bytes, lowercase hex, written `sha256:<hex>` | Terms copies are stored as bytes plus hash |
 | Structured-data hash (manifests, request bodies) | SHA-256 over RFC 8785 canonical JSON | One canonicalizer for the whole system |
-| Ledger tamper evidence | `entry_hash = SHA-256(prev_hash \|\| canonical(entry))` per ledger, with a daily published checkpoint hash | Detects edits; does not replace access control (S6.*, S10.*) |
+| Ledger tamper evidence | `entry_hash = SHA-256(prev_hash \|\| canonical(entry))` per ledger, with a published checkpoint hash every `ledger.checkpoint_interval_s` (initial configurable default 86,400 s) | Detects edits; does not replace access control (S6.*, S10.*) |
 | Provenance volunteer handle | `vol_<32 hex>` = first 128 bits of `HMAC-SHA-256(key = secret.volunteer_handle_key[version], data = member_id)` | Requesters never see it; rotating the key unlinks old handles by design |
 | Session and lease tokens, nonces | 256-bit CSPRNG values, stored only as SHA-256 hashes; lease nonce 128 bits (`lease.nonce_bytes` = 16) | High-entropy secrets need no slow hash |
 | Member authentication | Public-key keypair generated on the device; server stores public keys (`MemberKey`); signature scheme Ed25519 [A] | Detailed in S10.*; there are no passwords |
 | Admin authentication | WebAuthn passkeys per `AdminUser`; no shared password, separate origin and session store [A] | Detailed in S10.* |
 | Low-entropy secrets | Not used. If a future feature needs one, use Argon2id with parameters held in configuration | |
-| IP addresses | Raw IPs are not stored; rate-limit counters use `HMAC-SHA-256(secret.ip_hash_key[version], ip)` with retention `retention.ip_hash_ttl_days` | Safety principle for members in Iran (FD Principle 8) |
+| IP addresses | Raw IPs are not stored; rate-limit counters use `HMAC-SHA-256(secret.ip_hash_key[version], ip)` with retention `retention.ip_hash_ttl_days` | Safety principle for members in Iran (FD Principle 8). The IPv4 space is small, so anyone holding the key can recompute which IPs were seen inside the retention window; this is declared, not hidden, and the short TTL and key custody are the only limit (S10.*) |
 | Randomness | OS CSPRNG only | |
 
 ## 0.7 Entities, ID prefixes and table naming
@@ -157,7 +159,7 @@ If the verification pool is not a whole number of cells, `floor` applies and the
 **Naming rules** [D]
 
 - Entity names are `UpperCamelCase`, singular, exactly as below. Tables are `snake_case` plural of the entity name. Columns are singular `snake_case`.
-- Every table has `id` (text primary key, format 0.6.3), `created_at` (timestamptz) and, if mutable, `updated_at` and an integer `row_version` for optimistic concurrency. `LedgerEntry` and every other append-only table has no `updated_at` and no delete path.
+- Every table has `id` (text primary key, format 0.6.3; the one exception is `parameters`, whose primary key is the natural key `name` (0.6.3, 0.10.3) with `id` kept as a unique column [A]), `created_at` (timestamptz) and, if mutable, `updated_at` and an integer `row_version` for optimistic concurrency. `LedgerEntry` and every other append-only table has no `updated_at` and no delete path.
 - Foreign keys are `<entity_snake>_id` (`member_id`, `template_version_id`). Timestamps end `_at`, durations `_s`, amounts `_ucr`, ratios `_ppm`, content hashes `_hash`, booleans start `is_` or `has_`, enums are text columns with a `CHECK` against the enum names in 0.8.
 - No soft-delete flag on ledger, registry, policy, parameter or change-log tables; corrections are new rows (`reversal`, new version).
 - No table stores a raw IP address, an e-mail address in clear text, a provider credential, a session of a provider, or the text of a volunteer's chat page (FD Principle 3 and 8). [D]
@@ -166,7 +168,7 @@ If the verification pool is not a whole number of cells, `floor` applies and the
 
 | Class | Meaning |
 | --- | --- |
-| `permanent` | Never deleted. Contains no personal data by construction |
+| `permanent` | Never deleted. Contains no personal data by construction: a row that refers to a person holds only an opaque `mem_` or `adm_` id, which stays after a `member_bound` closure |
 | `member_bound` | Kept while the member is not `closed`; on closure the row is deleted or reduced to an opaque `mem_` id |
 | `job_bound` | Payload fields purged `retention.job_payload_days` after the job reaches a terminal state; hashes and manifests stay |
 | `moderation` | Kept `retention.moderation_days` after resolution, then reduced to counts |
@@ -240,7 +242,7 @@ If the verification pool is not a whole number of cells, `floor` applies and the
 | `InvariantCheck` | `invariant_checks` | `ivc_` | `ops` | Result of one run of a ledger invariant |
 | `Alarm` | `alarms` | `alm_` | `ops` | A raised alarm and its acknowledgement |
 
-Every prefix above is unique and exactly three letters; `req_` (request ids) is the only other prefix in use. [D]
+Every prefix above is unique and exactly three letters; the only other prefixes in use are `req_` (request ids, a ULID after the underscore) and `vol_` (provenance handles, 32 hexadecimal characters, 0.6.4); neither names an entity. [D]
 
 ## 0.8 Enumerations
 
