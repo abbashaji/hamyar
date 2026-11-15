@@ -602,19 +602,19 @@ Every non-2xx response is `{ "error": { "code": string, "message": string, "deta
 | Code | HTTP | Client action | `details` keys | `details.reason` values |
 | --- | --- | --- | --- | --- |
 | `MALFORMED_REQUEST` | 400 | fix, do not retry | - | `invalid_json`, `body_not_object`, `bad_header` |
-| `VALIDATION_FAILED` | 400 | fix, do not retry | `fields: [{path, code, message}]` | `field_invalid`, `unknown_field`, `missing_field`, `idempotency_key_missing`, `cursor_invalid`, `cursor_expired`, `limit_out_of_range`, `option_not_selectable` |
+| `VALIDATION_FAILED` | 400 | fix, do not retry | `fields: [{path, code, message}]` (`code` as in `S15.3` rule 1) | `field_invalid`, `unknown_field`, `missing_field`, `idempotency_key_missing`, `cursor_invalid`, `cursor_expired`, `limit_out_of_range`, `option_not_selectable`, `prefill_requires_flag`, `hash_mismatch`, `missing_chunks`, `op_not_previewable`, `consent_not_recorded`, `fractions_sum`, `block_size_over_limit`, `override_invalid` |
 | `AUTH_REQUIRED` | 401 | log in | - | `no_credentials` |
-| `AUTH_INVALID` | 401 | log in again | - | `credentials_invalid`, `wrong_scheme`, `challenge_invalid`, `key_pending` |
+| `AUTH_INVALID` | 401 | log in again | - | `credentials_invalid`, `wrong_scheme`, `challenge_invalid`, `key_pending`, `step_up_required`, `step_up_invalid`, `assertion_invalid` |
 | `AUTH_EXPIRED` | 401 | new challenge or session | - | `session_idle_expired`, `session_absolute_expired`, `challenge_expired` |
-| `FORBIDDEN` | 403 | show message | `until?`, `flag?` | `member_suspended`, `member_banned`, `recovery_cooldown`, `recovery_quota`, `tier_too_low`, `feature_disabled`, `account_frozen` |
-| `LAUNCH_GATE_CLOSED` | 403 | show "not open yet" | `switch` (`launch.members_may_join`, `launch.member_jobs_enabled`, `launch.minting_enabled`) | - |
+| `FORBIDDEN` | 403 | show message | `until?`, `flag?`, `service_id?` | `member_suspended`, `member_banned`, `recovery_cooldown`, `recovery_quota`, `tier_too_low`, `feature_disabled`, `account_frozen`, `service_gate_regressed`, `second_admin_required`, `approver_not_distinct` |
+| `LAUNCH_GATE_CLOSED` | 403 | show "not open yet" | `switch` (`launch.members_may_join`, `launch.member_jobs_enabled`, `launch.minting_enabled`) | `members_not_open`, `jobs_not_open`, `minting_not_open` |
 | `NOT_FOUND` | 404 | stop | - | `route_not_found` (others carry none: absent, not owned and not visible look the same) |
-| `STATE_CONFLICT` | 409 | reload, then decide | `state?` | `job_state_invalid`, `quote_expired`, `quote_changed`, `not_cancellable`, `upload_attached`, `max_extensions_reached`, `expansion_required`, `submission_exists`, `last_active_key`, `key_state_invalid`, `invite_state_invalid`, `reservation_state_invalid` |
+| `STATE_CONFLICT` | 409 | reload, then decide | `state?` | `job_state_invalid`, `quote_expired`, `quote_changed`, `not_cancellable`, `upload_attached`, `max_extensions_reached`, `expansion_required`, `submission_exists`, `last_active_key`, `key_state_invalid`, `invite_state_invalid`, `reservation_state_invalid`, `not_pending`, `expired`, `guard_failed`, `last_credential`, `last_operator`, `already_engaged`, `not_engaged`, `release_guard_failed`, `service_not_recordable`, `copy_not_sealed`, `copy_other_service`, `already_reversed`, `would_overdraw_lot`, `outside_policy`, `experiment_running`, `notice_too_short`, `already_running`, `open_work`, `balance_changed`, `appeal_decided`, `appeal_window_closed`, `not_appealable`, `job_terminal`, `already_stopping`, `use_overturn`, `held_by_other`, `lock_pending`, `not_registered`, `incident_resolved`, `supersedes_not_latest`, `no_records` |
 | `LEASE_CONFLICT` | 409 | reload offers | - | `cell_not_queued` |
-| `ALREADY_EXISTS` | 409 | treat as done or stop | - | `public_key_exists`, `starter_grant_claimed`, `membership_exists` |
+| `ALREADY_EXISTS` | 409 | treat as done or stop | - | `public_key_exists`, `starter_grant_claimed`, `membership_exists`, `appeal_exists`, `report_exists` |
 | `IDEMPOTENCY_IN_PROGRESS` | 409 | retry same key after `Retry-After` | - | - |
 | `LEASE_EXPIRED` | 410 | release and re-offer | `lease_id` | `lease_expired`, `nonce_invalid`, `lease_released`, `lease_revoked` |
-| `PRECONDITION_FAILED` | 412 | re-read, retry | - | `etag_mismatch` |
+| `PRECONDITION_FAILED` | 412 | re-read, retry | - | `etag_mismatch`, `version_stale` |
 | `PAYLOAD_TOO_LARGE` | 413 | shorten | `limit_bytes` | `body_too_large`, `submission_too_large`, `upload_too_large` |
 | `UNSUPPORTED_MEDIA_TYPE` | 415 | fix | - | - |
 | `POLICY_REJECTED` | 422 | edit declarations | `reasons: ["policy.<rule>.<slug>"]`, `job_id?`, `findings?` | - |
@@ -622,11 +622,13 @@ Every non-2xx response is `{ "error": { "code": string, "message": string, "deta
 | `CAP_EXCEEDED` | 422 | wait or reduce | `parameter`, `limit`, `current`, `resets_at?` | `active_lease_limit`, `member_credit_cap`, `daily_earn_cap`, `job_too_large`, `concurrent_jobs`, `waitlist_limit`, `reservation_limit`, `reservation_horizon`, `reservation_capacity_share`, `invite_limit`, `invite_tree_full`, `invite_tree_depth`, `grant_per_device`, `grant_per_tree_day`, `grant_daily_limit`, `referral_limit`, `team_full` |
 | `NO_CAPACITY` | 422 | choose another window | `requote?` | `capacity_changed`, `date_full` |
 | `IDEMPOTENCY_KEY_MISMATCH` | 422 | use a new key | - | - |
-| `UNPROCESSABLE` | 422 | fix | - | `invite_required`, `invite_unusable`, `invite_requirement_unmet`, `service_not_eligible`, `grant_requirement_unmet`, `reserve_floor`, `glossary_invalid` |
+| `UNPROCESSABLE` | 422 | fix | - | `invite_required`, `invite_unusable`, `invite_requirement_unmet`, `service_not_eligible`, `grant_requirement_unmet`, `reserve_floor`, `glossary_invalid`, `no_semantic_change`, `contains_loosening`, `contains_tightening`, `mixed_change`, `public_text_required`, `immutable_constant`, `use_launch_endpoints`, `not_a_parameter`, `duplicate_name`, `no_change`, `prereg_required`, `prereg_not_locked`, `output_ref_required`, `criterion_not_reached`, `blocking_finding`, `no_evaluation_yet`, `job_incomplete` |
 | `RATE_LIMITED` | 429 | wait `Retry-After` | `class`, `limit`, `reset_s`, `scope?` | - |
 | `INTERNAL` | 500 | retry with same key, backoff | - | - |
 | `UNAVAILABLE` | 503 | retry with same key, backoff | - | - |
 | `KILL_SWITCH_ENGAGED` | 503 | show notice | `switch` (`kill.all_minting`, `kill.all_new_jobs`, `kill.template.<tpl_id>`, `kill.service.<svc_id>`) | - |
+
+**Reasons and keys added by the audit round** (`ER-01` to `ER-11` of `15.G.5`) [D][A]. Besides the keys of the table, part b and the overlays use these optional `details` keys on the rows `STATE_CONFLICT`, `VALIDATION_FAILED` and `FORBIDDEN`: `missing`, `blockers`, `guards`, `constraints`, `counts`, `balance_ucr`, `state`, `until`, `service_id`, `reasons`. `POLICY_REJECTED` `details.reasons` also carries slugs not yet in S0 0.8.4 or S7: `policy.R9.policy_version_stale`, `policy.R3.reviewer_rejected`, `policy.R3.prohibited_category`, `no_eligible_service` [P: S7 owner]. `LAUNCH_GATE_CLOSED` reasons are the S14 `reasons` mapped to `details.reason`. `KILL_SWITCH_ENGAGED` `details.switch` lists the four published keys only: `kill.member.<mem_id>` is never published and its refusal is `FORBIDDEN` `account_frozen` (part b 15.28.1). `RATE_LIMITED` is the code of rate limits only; a count cap is `CAP_EXCEEDED` (`ER-10`). Every reason added here has the key `copy.api_error.<code lowercase>.<reason>`; S11 owns the text.
 
 Examples of the exact shape:
 
