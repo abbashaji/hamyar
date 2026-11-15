@@ -8,7 +8,7 @@
 
 **Inheritance.** S0 0.11.1 to 0.11.7 (transport, surfaces, error model, authentication, `Idempotency-Key`, cursors, concurrency and rate-limit headers) are binding and are not restated except where this part makes them concrete. Where this part and S0 disagree, S0 wins and the disagreement is an issue, never a silent variant. Names (entities, ids, enums, states, events, parameters) are used exactly as in S0. [D]
 
-**Operation tables.** Every endpoint has one row; `op` ids are lowerCamelCase (0.5) and are the keys of the generated OpenAPI 3.1 document that `BM0` conformance tests check (`S17.*`) [A].
+**Operation tables.** Every endpoint has one row; `op` ids are lowerCamelCase (0.5) and are the keys of the generated OpenAPI 3.1 document that `BM0` conformance tests check (`S17.*`); admin operation ids are prefixed `admin` there (`S15.21.1`) because several coincide with member ids [A].
 
 | Column | Meaning |
 | --- | --- |
@@ -106,7 +106,7 @@ A challenge is 256 random bits, stored only as SHA-256, bound to its purpose, si
 
 - Lifetimes: idle `session.member_idle_ttl_s`, absolute `session.member_abs_ttl_s`; idle expiry slides on use (coalesced writes). Expiry returns `401 AUTH_EXPIRED`, reason `session_idle_expired` or `session_absolute_expired`.
 - At most `session.max_active_per_member` live sessions per member (convention gap); the oldest idle one is revoked when exceeded.
-- A session ends when: the member logs out; its key is revoked or its rotation grace (`identity.key_rotation_grace_s`) ends; the member recovers (all sessions); the member is `closed`; `kill.member.<mem_id>` is engaged.
+- A session ends when: the member logs out; its key is revoked or its rotation grace (`identity.key_rotation_grace_s`) ends; the member recovers (all sessions); the member is `closed`.
 - `suspended` and `banned` members can still authenticate, read their own data, revoke sessions and (sibling file) file appeals; every operation marked **active only** below returns `403 FORBIDDEN`, reason `member_suspended` or `member_banned`. `closed` members cannot authenticate (`credentials_invalid`).
 
 **Pipeline order** [D]. When several errors apply, the lowest step wins; this order is part of the contract and is tested (`AC-api-02`).
@@ -143,7 +143,7 @@ Replays are counted as requests at step 5 but do not pay the write weight (`rate
 | `createLease` on a Commons cell | `launch.minting_enabled` | `kill.all_minting`, `kill.template.<tpl_id>`, `kill.service.<svc_id>` |
 | `createLease` on a member-job cell | - | `kill.template.<tpl_id>`, `kill.service.<svc_id>` |
 | `submitResult` | - (a lease already issued stays submittable; a switch that pauses its cell revokes the lease first, 0.9.3, so the call is `410 LEASE_EXPIRED` reason `lease_revoked`) | - |
-| every operation of a member with `kill.member.<mem_id>` engaged | - | sessions of that member end (`S15.4`), so the call is `401` |
+| leases, submissions, job creation and invitations of a member with `kill.member.<mem_id>` engaged | - | `403 FORBIDDEN`, reason `account_frozen` (not 503; part b 15.28.1); reads and appeals still work |
 
 ## 15.5 Identity endpoints
 
@@ -604,7 +604,7 @@ Every non-2xx response is `{ "error": { "code": string, "message": string, "deta
 | `AUTH_REQUIRED` | 401 | log in | - | `no_credentials` |
 | `AUTH_INVALID` | 401 | log in again | - | `credentials_invalid`, `wrong_scheme`, `challenge_invalid`, `key_pending` |
 | `AUTH_EXPIRED` | 401 | new challenge or session | - | `session_idle_expired`, `session_absolute_expired`, `challenge_expired` |
-| `FORBIDDEN` | 403 | show message | `until?`, `flag?` | `member_suspended`, `member_banned`, `recovery_cooldown`, `recovery_quota`, `tier_too_low`, `feature_disabled` |
+| `FORBIDDEN` | 403 | show message | `until?`, `flag?` | `member_suspended`, `member_banned`, `recovery_cooldown`, `recovery_quota`, `tier_too_low`, `feature_disabled`, `account_frozen` |
 | `LAUNCH_GATE_CLOSED` | 403 | show "not open yet" | `switch` (`launch.members_may_join`, `launch.member_jobs_enabled`, `launch.minting_enabled`) | - |
 | `NOT_FOUND` | 404 | stop | - | `route_not_found` (others carry none: absent, not owned and not visible look the same) |
 | `STATE_CONFLICT` | 409 | reload, then decide | `state?` | `job_state_invalid`, `quote_expired`, `quote_changed`, `not_cancellable`, `upload_attached`, `max_extensions_reached`, `expansion_required`, `submission_exists`, `last_active_key`, `key_state_invalid`, `invite_state_invalid`, `reservation_state_invalid` |
