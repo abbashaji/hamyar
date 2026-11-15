@@ -1,0 +1,16 @@
+id: C-063
+title: Retire C-059 (conventions already delivered by C-027)
+type: normal
+priority: 1
+supersedes:
+- C-059
+goal: |
+  C-059 was a mistaken replacement for C-000. The conventions and decisions were already written by C-027 and must NOT be rewritten. Write only docs/audit/C-059-retired.md: three or more lines stating that spec/00-conventions.md and spec/00-decisions.md are owned by C-027, that C-000 and C-059 are retired, and that no spec file was changed. Do not edit any other file.
+read: []
+allowed_paths:
+- docs/audit/C-059-retired.md
+outputs:
+- docs/audit/C-059-retired.md
+acceptance:
+- cmd: python scripts/check_spec.py docs/audit/C-059-retired.md --min-lines 3 --min-tags 0
+notes: 'Marker cell only. Do not touch spec/**.'
