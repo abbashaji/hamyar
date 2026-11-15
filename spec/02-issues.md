@@ -276,7 +276,7 @@ Each entry has the same four parts: what the FD says and where it fails; why it 
 
 1. A Commons job has no `requester_member_id` and carries a public `sponsor_label` (default `Hamyar`). The label stands where the requester pseudonym would stand in the job metadata (2.8).
 2. Authoring needs the permission `perm.job.create_commons`, held by operators. The author writes the declarations, and a second admin must approve the job (`commons.job_approve`, added to `security.two_person_actions`) before any cell is created.
-3. A Commons job is always `P1`, license `L1` or `L2`, sensitivity `S0` and requirement `M0` or `M1`. Sensitivity `S1` is excluded because publishing private material openly contradicts the definition of `S1` (FD§5.3).
+3. A Commons job is always `P1`, license `L1` or `L2`, sensitivity `S0` and requirement `M0` or `M1`. Sensitivity `S1` is excluded because `S1` means the requester accepts that a stranger will read the material (FD§5.3), and a Commons job has no requester to accept that.
 4. Outputs are published only to the `publication_target` recorded on the job. Until the owner has chosen an archive (S3.2), outputs stay in the deliverable and nothing is published.
 5. A sponsor label naming an outside party needs the same approval. No money moves in Phase 1 (FD§0.2) [P].
 
