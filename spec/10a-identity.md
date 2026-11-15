@@ -224,11 +224,11 @@ The 6-digit SAS (short authentication string) lets the person check that the key
 
 ```
 client (new device, no session): person types the recovery key; normalize; verify checksum locally
-  ch   = POST /v1/auth-challenges {purpose: 'recover'}
+  ch   = POST /v1/identity-challenges {purpose: 'recover'}
   new_dk, new_rs -> new_rk generated as in 10.3.3
-  body = {recovery_pub, new_device_pub, new_recovery_pub, device_token, platform_class, key_storage}
-  POST /v1/recoveries body + {challenge_id, recovery_signature (old recovery key),
-        device_signature (new_dk), new_recovery_signature (new_rk)}
+  body = {recovery_public_key, new_public_key, new_recovery_public_key, device_token, platform_class, key_storage}
+  POST /v1/recoveries body + {challenge, recovery_signature (old recovery key),
+        proof (new_dk), new_recovery_proof (new_rk)}
 server:
   1. rate limits: ratelimit.recovery_attempts_per_day per IP hash and per device token
   2. verify challenge and all three signatures; find MemberKey(kind recovery, state active|retiring)
@@ -476,8 +476,8 @@ Legend: `Y` allowed when the conditions hold; `2P` allowed only with two-person 
 | Credentials per admin | At least `security.admin_min_credentials` active (a primary and an offline backup) | A lost authenticator must not lock an admin out |
 
 ```
-sign-in:  POST /v1/admin/auth-challenges  -> {challenge (32 random bytes, single use, ttl identity.challenge_ttl_s)}
-          POST /v1/admin/sessions {assertion}
+sign-in:  POST /v1/admin/auth/challenges  -> {challenge_id, public_key_options, expires_at}   (single use, ttl session.admin_stepup_ttl_s)
+          POST /v1/admin/sessions {challenge_id, assertion}
   server: exact origin and rpIdHash match; UP and UV flags set; signature valid for the stored public key;
           challenge matches and is unused; if sign_count is non-zero it must be greater than the stored one,
           else the credential is locked, the alarm admin.credential_cloned is raised and no session is issued;
@@ -589,7 +589,7 @@ IpHasher.hash(ip):                       # runs once, in edge middleware, before
 
 ### 10.14.3 Closure, export, deletion [D]
 
-`member.closed` (member-initiated, or after `retention.member_inactive_days`) deletes `MemberKey`, `Device` (except grant memory), `Session`, e-mail, `SecurityNotice`, `OptIn` and invite edges, and reduces the `Member` row to the opaque `mem_` id, as S0.7 requires. Ledger and provenance rows are `permanent` by design and contain no personal data; provenance carries `vol_` handles, not `mem_` ids (S0.6.4). Closure is irreversible and cannot be recovered. `GET /v1/members/me/export` returns the member's own rows in JSON. The interface states that closure does not rewrite the public ledger or published provenance.
+`member.closed` (member-initiated, or after `retention.member_inactive_days`) deletes `MemberKey`, `Device` (except grant memory), `Session`, e-mail, `SecurityNotice`, `OptIn` and invite edges, and reduces the `Member` row to the opaque `mem_` id, as S0.7 requires. Ledger and provenance rows are `permanent` by design and contain no personal data; provenance carries `vol_` handles, not `mem_` ids (S0.6.4). Closure is irreversible and cannot be recovered. `GET /v1/members/me/export` returns the member's own rows in JSON, one `section` per request (S15.B.5.2). The interface states that closure does not rewrite the public ledger or published provenance.
 
 ## 10.15 Member safety in a high-risk context
 
@@ -709,27 +709,27 @@ Names and paths are proposals for `S15.*`, which is authoritative; methods and p
 
 | `op` | Request | Auth | Permission | Idem |
 | --- | --- | --- | --- | --- |
-| `createAuthChallenge` | `POST /v1/auth-challenges` | none | `perm.identity.create_challenge` | no |
+| `createIdentityChallenge` | `POST /v1/identity-challenges` | none | `perm.identity.create_challenge` | no |
 | `createMember` | `POST /v1/members` | none | `perm.identity.create_member` | yes |
 | `createSession` | `POST /v1/sessions` | none | `perm.identity.start_session` | no |
 | `deleteSession` | `DELETE /v1/sessions/{ses_id}` | member | `perm.session.revoke_own` | no |
 | `createSessionRevocation` | `POST /v1/members/me/session-revocations` | member (X5) | `perm.session.revoke_own` | yes |
 | `getMe`, `exportMe` | `GET /v1/members/me`, `GET /v1/members/me/export` | member | `perm.identity.view_own`, `perm.identity.export_own_data` | no |
-| `listMemberKeys`, `createMemberKey` | `GET`, `POST /v1/members/me/keys` | member (X5 for POST) | `perm.identity.manage_keys` | POST yes |
-| `createKeyRevocation` | `POST /v1/members/me/keys/{mky_id}/revocation` | member (X5) | `perm.identity.manage_keys` | yes |
-| `createRecoveryKey`, `createRecoveryConfirmation` | `POST /v1/members/me/recovery-keys`, `POST /v1/members/me/recovery-confirmations` | member (X5) | `perm.identity.manage_keys` | yes |
+| `listMemberKeys`, `rotateKey` | `GET /v1/member-keys`, `POST /v1/member-keys/rotations` | member (X5 for POST) | `perm.identity.manage_keys` | POST yes |
+| `revokeMemberKey` | `DELETE /v1/member-keys/{key_id}` | member (X5) | `perm.identity.manage_keys` | yes |
+| `rotateKey` (`kind` `recovery`), `confirmRecoveryKey` | `POST /v1/member-keys/rotations`, `POST /v1/members/me/recovery-confirmations` | member (X5) | `perm.identity.manage_keys` | yes |
 | `createRecovery` | `POST /v1/recoveries` | none | `perm.identity.start_recovery` | yes |
-| `createDeviceLinkOffer`, `createDeviceLinkApproval` | `POST /v1/device-link-offers`, `POST /v1/device-link-offers/{dlo_id}/approval` | member (X5) | `perm.identity.link_device` | yes |
-| `createDeviceLinkClaim` | `POST /v1/device-link-offers/{dlo_id}/claims` | none | `perm.identity.link_device` (by secret) | no |
+| `createDeviceLink`, `approveDeviceLink` | `POST /v1/device-links`, `POST /v1/device-links/{device_id}/approval` | member (X5) | `perm.identity.link_device` | yes |
+| `redeemDeviceLink` | `POST /v1/device-links/redemptions` | none | `perm.identity.link_device` (by secret) | no |
 | `putMemberEmail`, `deleteMemberEmail` | `PUT`, `DELETE /v1/members/me/email` | member (X5) | `perm.identity.set_email` | yes |
 | `closeMember` | `POST /v1/members/me/closure` | member (X5) | `perm.identity.close_account` | yes |
 | `createInvite`, `deleteInvite` | `POST /v1/invites`, `DELETE /v1/invites/{inv_id}` | member | `perm.invite.issue`, `perm.invite.revoke_own` | yes |
-| `createAdminAuthChallenge`, `createAdminSession` | `POST /v1/admin/auth-challenges`, `POST /v1/admin/sessions` | none | none (WebAuthn) | no |
-| `createAdminAction`, `createAdminActionApproval` | `POST /v1/admin/actions`, `POST /v1/admin/actions/{act_id}/approvals` | admin | by action (10.11) | yes |
+| `startAdminLogin`, `createAdminSession` | `POST /v1/admin/auth/challenges`, `POST /v1/admin/sessions` | none | none (WebAuthn) | no |
+| `approveApproval` | `POST /v1/admin/approvals/{apv_id}/approvals` | admin | by action (10.11); a two-person action is started by the concrete operation, which answers `202` with an `AdminApproval` | yes |
 
 ### 10.18.2 Events and metrics [A]
 
-Events (S0.5 format, stored in the outbox): `member.created`, `member.key_rotated`, `member.key_revoked`, `member.device_linked`, `member.recovered`, `member.recovery_confirmed`, `member.email_set`, `member.email_removed`, `member.closed`, `invite.issued`, `invite.redeemed`, `invite.expired`, `invite.revoked`, `invite.strike_recorded`, `invite.tree_frozen`, `invite.tree_unfrozen`, `session.issued`, `session.revoked`, `device_link.offered`, `device_link.claimed`, `device_link.approved`, `device_link.cancelled`, `device_link.expired`, `admin.signed_in`, `admin.credential_added`, `admin.credential_locked`, `admin_action.proposed`, `admin_action.approved`, `admin_action.executed`, `admin_action.expired`. Events carry `actor` as principal type plus opaque id and never an IP, key or token.
+Events (S0.5 format, stored in the outbox): `member.created`, `member.key_rotated`, `member.key_revoked`, `member.device_linked`, `member.recovered`, `member.recovery_confirmed`, `member.email_set`, `member.email_removed`, `member.closed`, `invite.issued`, `invite.redeemed`, `invite.expired`, `invite.revoked`, `invite.strike_recorded`, `invite.tree_frozen`, `invite.tree_unfrozen`, `session.issued`, `session.revoked`, `device_link.offered`, `device_link.claimed`, `device_link.approved`, `device_link.cancelled`, `device_link.expired`, `admin.signed_in`, `admin.credential_added`, `admin.credential_locked`, `admin.approval_requested`, `admin.approval_granted`, `admin_action.executed` (the original operation's own event, S15.B.3.1), `admin.approval_expired`. Events carry `actor` as principal type plus opaque id and never an IP, key or token.
 
 Metrics (no id or IP in any label): `hamyar_identity_registrations_total`, `hamyar_identity_recoveries_total`, `hamyar_identity_recovery_failures_total`, `hamyar_identity_key_chain_invalid_total`, `hamyar_ratelimit_denied_total` (label: scope), `hamyar_session_revocations_total`, `hamyar_admin_pending_approvals_total`. Alarms (`Alarm`): `identity.key_chain_invalid`, `admin.credential_cloned`, a spike in `hamyar_identity_recovery_failures_total`.
 
