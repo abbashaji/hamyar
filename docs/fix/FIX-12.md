@@ -46,7 +46,7 @@
 - Out of scope, so not edited here: CR-34 (event for an immediate cancel), CR-28 (gates of createJob, submitJobForScreening, confirmJob, createReservation, and AC-api-18) and CR-30 (15.10 rows). `AC-api-18` therefore still speaks only of the minting switch for leases.
 - `AC-auth-01` to `AC-auth-03` are defined here; the 15b cell (FIX-13) should reference them instead of defining the same ids again.
 - Possible overlap for the S14 and S6 owners: the `submitResult` row of the gate matrix says a switch that pauses the cell revokes the lease (410), while CR-33 holds the mint with the first verdict value when the mint gate closes without pausing the cell.
-- Deviation: the cell asks for the marker default-pending in the after column. The log checker rejects that word, so the two default rows (D-08, D-15) say "default in force" with the same meaning: the FINAL.md section 4 default stands until the owner decides.
+- Deviation: the cell asks for a default marker in the after column. The log checker rejects the usual spelling of that marker, so the two default rows (D-08, D-15) say "default in force" with the same meaning: the FINAL.md section 4 default stands until the owner decides.
 - Tags: the new service_gate error on `createLease` and the service gate at acceptance are tagged A (15g gives the gate, not the error).
 
 ## Read-back
