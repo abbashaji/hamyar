@@ -282,7 +282,7 @@ Executing human-review cells (FD§6.4 channel 2) is a member activity on `cell_k
 
 ### 0.8.3 Flag answers and Service Registry flag keys [D]
 
-`flag_answer` = `yes` | `no` | `unknown`. **`unknown` is evaluated as `no` everywhere** (FD§5.3). Every gating flag is phrased as a permission, so `yes` always means the terms permit it and `unknown`-as-`no` is always the safe direction (`ISS-02`). A `FlagAnswer` is dated, carries the reviewer, an optional `region` (ISO 3166-1 alpha-2) and points at the `TermsCopy` it was read from.
+`flag_answer` = `yes` | `no` | `unknown`. **`unknown` is evaluated as `no` for every gating flag** (FD§5.3); an `info.*` key never gates, and its `unknown` is shown as unknown, never read as `no` [A]. Every gating flag is phrased as a permission, so `yes` always means the terms permit it and `unknown`-as-`no` is always the safe direction (`ISS-02`). A `FlagAnswer` is dated, carries the reviewer, an optional `region` (ISO 3166-1 alpha-2) and points at the `TermsCopy` it was read from.
 
 | `flag_key` | Kind | `yes` means the saved terms permit... | FD source |
 | --- | --- | --- | --- |
@@ -338,7 +338,7 @@ Reject reason codes shown to requesters: `policy.<policy_rule_id>.<slug>` (for e
 | Type | From -> To | Lot effect | Meaning |
 | --- | --- | --- | --- |
 | `mint` | `issuance` -> `member` | creates a lot | Accepted Commons cell (FD§4.2) |
-| `grant` | `reserve` -> `member` | creates a lot with `grant.starter_lifetime_days` (starter) or `credit.lifetime_days` (referral) | Starter grant and referral bonus (`ISS-06`) |
+| `grant` | `reserve` -> `member` | creates a lot with `grant.starter_lifetime_days` (starter) or the lot lifetime of 0.6.2 (referral) | Starter grant and referral bonus (`ISS-06`) |
 | `escrow_hold` | `member` -> `escrow` | consumes lots oldest-first | Job admission or reservation booking |
 | `transfer` | `escrow` -> `member` | creates a lot | Donor earns 1 credit for one accepted cell of a member job, paid at acceptance (`ISS-09`) |
 | `escrow_release` | `escrow` -> `escrow` | none | Reservation escrow moves into the activated job's escrow |
@@ -364,6 +364,7 @@ Reject reason codes shown to requesters: `policy.<policy_rule_id>.<slug>` (for e
 | `member_status` | `active`, `suspended`, `banned`, `closed` (orthogonal to `trust_tier`, 0.9.4) |
 | `change_class` (R10) | `tighten`, `loosen`, `neutral` |
 | `locale` / `digits` / `calendar` | `fa`, `en` / `latin`, `persian` / `jalali`, `gregorian` |
+| `closure_reason`, `appeal_kind`, `trust_tier` | defined where used (0.9.2, 0.9.7, 0.9.4); the `CHECK` constraints of 0.7 use those lists |
 
 ## 0.9 State machines: state names and event names
 
@@ -371,7 +372,7 @@ This section fixes names only. Guards, side effects, concurrency and the ledger 
 
 ### 0.9.1 Naming rules [D]
 
-- States are `snake_case` adjectives or past participles, scoped to their machine (two machines may both have `expired` or `cancelled`; a state is always written with its machine, for example `Cell.expired`). `(T)` marks a terminal state.
+- States are `snake_case` adjectives or past participles, scoped to their machine (two machines may both have `expired` or `cancelled`; a state is always written with its machine, for example `Cell.expired`). `(T)` marks a terminal state: it has no outgoing transition except a named correction event (`cell.overturned` leaves `Cell.accepted`).
 - Events are `<entity>.<past_participle>` in lowercase, for example `cell.lease_expired`. Every state change emits exactly one event with the name shown on the transition; the event is stored in the outbox in the same database transaction (S4.*), logged under the same name (0.5) and carries `event_version`, `occurred_at`, `actor` (`principal_type` plus opaque id) and the policy and parameter versions in force.
 - An event that is rejected by a guard changes nothing and is not emitted; the rejection is an API error (0.11.3), not an event.
 - Transition notation: `from --event--> to`; `*` means any non-terminal state.
@@ -413,6 +414,7 @@ queued            --cell.leased-->             leased          creates a Lease
 leased            --cell.submitted-->          submitted       paste-back received
 leased            --cell.lease_expired-->      expired
 leased            --cell.declined-->           queued          decline or release, no penalty (FD§5.5)
+queued|expired    --cell.submitted-->          submitted       late paste-back inside lease.submit_grace_s while the cell is not re-leased
 submitted         --cell.checks_passed-->      accepted        not selected for audit
 submitted         --cell.flagged_for_audit-->  flagged_for_audit   sampled, anomalous, or blanket-redundancy pending
 submitted         --cell.checks_failed-->      rejected
@@ -427,7 +429,7 @@ suspended         --cell.resumed-->            queued
 accepted          --cell.overturned-->         overturned      appeal or fraud finding; ledger reversal; a rework cell is created
 ```
 
-Lease states: `active`, `submitted`, `expired`, `released`, `revoked`. Events: `lease.issued` (none -> `active`), `lease.submission_received` (`active` -> `submitted`), `lease.expired` (`active` -> `expired`), `lease.released` (`active` -> `released`), `lease.revoked` (`active` -> `revoked`).
+Lease states: `active`, `submitted`, `expired`, `released`, `revoked`. Events: `lease.issued` (none -> `active`), `lease.submission_received` (`active` -> `submitted`; also `expired` -> `submitted` inside `lease.submit_grace_s` while the cell is not re-leased), `lease.extended` (`active` -> `active`; at most `lease.max_extensions` times, each adding `lease.extend_s`), `lease.expired` (`active` -> `expired`), `lease.released` (`active` -> `released`), `lease.revoked` (`active` -> `revoked`).
 
 Submission states: `received`, `schema_failed` (T), `checks_failed` (T), `checks_passed`, `quarantined`, `accepted` (T), `rejected` (T). Events: `submission.received`, `submission.schema_failed`, `submission.checks_passed`, `submission.checks_failed`, `submission.quarantined` (output with links, code to run or requests for action; withheld from results, FD§5.5), `submission.accepted`, `submission.rejected`, `submission.released_from_quarantine`. A replayed submission with the same lease and nonce returns the stored outcome and emits nothing.
 
@@ -445,6 +447,7 @@ new|established|trusted --member.restricted--> restricted   anomaly or gold fail
 restricted   --member.restriction_lifted-->  the tier recorded as tier_before_restriction
 status: active --member.suspended--> suspended --member.reinstated--> active
 status: active|suspended --member.banned--> banned   (appealable)
+status: banned --member.reinstated--> active   (only when an appeal of kind `member_ban` is overturned, 0.9.7)
 status: active|suspended --member.closed--> closed   (member-initiated or inactivity)
 ```
 
@@ -472,8 +475,8 @@ States: `unreviewed` (initial for every service; counts as no), `in_review`, `ap
 
 ```
 (none)       --service.created-->         unreviewed
-unreviewed|rejected|review_due|revoked --service.review_started--> in_review
-in_review    --service.approved-->        approved       guard: gate flags yes, TermsCopy saved, reviewer recorded
+unreviewed|rejected|review_due|suspended|revoked --service.review_started--> in_review   a service suspended by a review lapse (not a kill switch) leaves only this way
+in_review    --service.approved-->        approved       guard: `third_party_task_use` and `prohibited_content_compatible` are `yes` (0.8.3), TermsCopy saved, reviewer recorded
 in_review    --service.rejected-->        rejected
 approved     --service.review_due-->      review_due     timer: service.review_max_age_days
 review_due   --service.review_lapsed-->   suspended      timer: service.review_grace_days
@@ -494,7 +497,7 @@ assigned     --appeal.reassigned-->               assigned       conflict of int
 in_review    --appeal.second_review_requested--> awaiting_second_review   bans and template rejections
 in_review|awaiting_second_review --appeal.upheld-->      upheld
 in_review|awaiting_second_review --appeal.overturned-->  overturned
-filed|assigned|in_review --appeal.withdrawn-->    withdrawn
+filed|assigned|in_review|awaiting_second_review --appeal.withdrawn-->    withdrawn
 ```
 
 ### 0.9.8 Smaller machines [D]
