@@ -207,7 +207,7 @@ function pick_gold_item(tv, member):
 
 - Each item is retired when `exposure_count` reaches `verify.gold_max_exposures` (initial configurable default 20, 8.37). Each member sees an item at most once, ever.
 - Retirement rate (items per day) = `g x cells_per_day / verify.gold_max_exposures`. Illustrative inputs from the FD§3.3 example (40 donors x 8 cells a day = 320 cells a day, g = 0.05): 16 gold exposures a day and 0.8 items retired a day, about 24 a month per 320 cells a day. The library must be fed at this rate or the template pauses (8.24.1). These are not measurements.
-- `gold_pool_low` alarm when the active pool of a template covers fewer than 7 days of the current retirement rate (derived: 7 x rate; 7 is the `admission.active_donor_window_days` default reused as a look-ahead).
+- `gold_pool_low` alarm when the active pool of a template covers fewer than `admission.active_donor_window_days` days (default 7) of the current retirement rate (derived: that many days x rate; the parameter is reused as a look-ahead).
 - Reference answers are authored or approved by reviewers (a cost counted in `OPS`); a donor's result is never promoted to a reference without reviewer approval.
 
 ### 8.24.5 Leak detection [D][H]
@@ -265,7 +265,7 @@ function resolve_gold(sub):
 
 ```
 function resolve_group(execs):                    # n = len(execs), n in 2..verify.blanket_redundancy_n (at most 5)
-  G = agreement_graph(execs); need = floor(n/2) + 1
+  G = agreement_graph(execs); need = floor(n/2) + 1   # n = PLANNED group size (3 for primary + audit + third, verify.blanket_redundancy_n for blanket), not the number of executions returned so far
   C = maximum_cliques(G)                          # brute force is enough for n <= 5
   if len(C) == 1 and len(C[0]) >= need: return MAJORITY(C[0], minority = execs - C[0])
   return NO_MAJORITY
@@ -275,7 +275,7 @@ function resolve_group(execs):                    # n = len(execs), n in 2..veri
 | --- | --- | --- | --- | --- |
 | Primary in majority | `cell.audit_passed`, accepted, its output is delivered | accepted, paid 1 credit each | rejected `reject.audit_mismatch`, unpaid, single attempt used up (`exhausted`) | majority PASS, minority FAIL |
 | Primary in minority | `cell.audit_failed`, rejected with `reject.audit_mismatch`, then requeued as a fresh attempt | accepted, paid; their outputs are **not** reused for the requeued attempt [A] | rejected as above | same |
-| `NO_MAJORITY` | `cell.audit_failed`, rejected with `reject.audit_mismatch` and `details.inconclusive = true`; requeued; appealable | every execution that passed P1 is accepted and paid (nobody was outvoted) | none | **none**: inconclusive is not an observation |
+| `NO_MAJORITY` | `cell.audit_failed`, rejected with `reject.audit_mismatch` and `details.inconclusive = true`; requeued; appealable | every execution that passed P1 except the primary is accepted and paid (nobody was outvoted); the primary is rejected, unpaid, and earns on its requeued attempt (8.32: nothing is paid twice for one cell) | none | **none**: inconclusive is not an observation |
 | Slot exhausted | `cell.audit_passed` with outcome `inconclusive` and `audit_coverage_gap` if the reason was `sampled`; otherwise held for an operator (8.22.3) | executions that passed P1 are paid | none | none |
 
 Reusing a majority pair's output for the requeued primary would save one attempt but needs a Cell transition that S0.9.3 does not define; it is not specified [A]. Cost of the waste is visible in v (8.31). [D]
@@ -295,7 +295,7 @@ Blanket redundancy executes **every** copy up front, in parallel, instead of sam
 | Integrity rework | A `rework` cell whose overturned cell had `overturn_reason = integrity` |
 | New reviewer | The first `verify.new_donor_blanket_cells` review cells of a member in scope `review` (8.27) |
 
-- Group size `n = verify.blanket_redundancy_n` (default 3). Copy 2 is a cell of kind `audit`, copies 3..n are kind `third`; every copy's `verification_method` is `blanket_redundancy`. The group is resolved by `resolve_group` (8.25.2) once at least `floor(n/2) + 1` executions passed P1; remaining outstanding copies are cancelled and are not paid. [D]
+- Group size `n = verify.blanket_redundancy_n` (default 3). Copy 2 is a cell of kind `audit`, copies 3..n are kind `third`; every copy's `verification_method` is `blanket_redundancy`. The group is resolved by `resolve_group` (8.25.2) as soon as `floor(n/2) + 1` executions agree (the remaining outstanding copies are then cancelled and not paid), or when all n copies have passed P1 or ended; if fewer agree at that point the result is `NO_MAJORITY`. Two returned copies that disagree never end a group of 3 early. [D]
 - A blanket group **replaces** the random audit draw for that cell. The primary stays `flagged_for_audit` with reason `blanket_redundancy_pending` until it resolves. [D]
 - Assignment follows 8.25.3, and at least `n - 1` copies go to members of tier `established` or `trusted` when available, so new executors do not mainly verify each other. [D][A]
 - **Cost.** A blanket group adds `n - 1` paid verification cells per accepted primary. Expected cost share is in 8.31; blanket redundancy on a whole template makes `v >= n - 1 = 2.0` for that template, which `price.v_cap` (0.50) cannot price (`ISS-85`). No template is `high` by default in Phase 1 [A]. The new-executor rule costs `(n - 1) x verify.new_donor_blanket_cells` verification cells per new donor, charged to the jobs those cells belong to.
@@ -383,7 +383,7 @@ Consequences derived from the defaults (a = b = 1, tail 0.10, window 50), stated
 
 ### 8.29.1 Rates [D]
 
-All rates are integer ppm (S0.6.1). Let `f` = `adapt_factor_ppm` of the member in the scope of the cell, `tier_mult` = `trust.audit_multiplier.<tier>` in ppm.
+All rates are integer ppm (S0.6.1). In this section and in 8.24.2 a name with the suffix `_ppm` (for example `verify.audit_rate_floor_ppm`) denotes the stored ppm value of the S0 parameter without the suffix; it is not a separate parameter. Let `f` = `adapt_factor_ppm` of the member in the scope of the cell, `tier_mult` = `trust.audit_multiplier.<tier>` in ppm.
 
 ```
 f_lo = ceil(verify.audit_rate_floor_ppm * 1_000_000 / verify.audit_rate_s_ppm)        # = 200_000 at defaults
@@ -411,7 +411,7 @@ function on_observation(state, outcome, selection):       # called for every cou
 Initial `adapt_factor_ppm` = 1,000,000. Derived properties at the defaults (step-down 0.80, clean streak 20, step-up 2.00):
 
 - From factor 1.0 to the lower limit 0.2 takes `ceil(ln 0.2 / ln 0.8)` = 8 steps = **160 consecutive clean observations**. At about 0.15 observations per cell this is about 1,070 cells (derived, illustrative).
-- A single FAIL doubles the factor; from the lower limit it takes 3 failures to reach 1.0 (0.2, 0.4, 0.8, then 1.6).
+- A single FAIL doubles the factor; from the lower limit it takes 3 failures to exceed 1.0 (0.2, 0.4, 0.8, then 1.6).
 - Fixtures: factor 1,000,000 with 20 clean observations gives 800,000 and, for tier `established` (1.0), `audit_rate` 80,000 ppm; then one FAIL gives 1,600,000 and 160,000 ppm. For tier `trusted` (0.5) at the lower limit the product is 10,000 ppm, below the floor, so the rate is 20,000 (`AC-verify-10`). For tier `restricted` (3.0) and factor 2.0 the product is 600,000, so the rate is capped at 500,000 (`AC-verify-12`).
 
 ### 8.29.3 Floor guarantee and what it buys [D]
@@ -621,7 +621,7 @@ Ids are `AC-verify-nn` (S0.0.5). Layers name where the test lives; `T-*` ids are
 | `AC-verify-13` | A job whose pool is exhausted, member `audit_rate` 80,000 | Draws `u` = 15,000 and `u` = 50,000 | `pi` = 20,000: `u` = 15,000 creates an audit, `u` = 50,000 does not; `sampling_pi_ppm` = 20,000 is stored in both cases | `unit` |
 | `AC-verify-14` | Primary A and audit B with comparator `match` | The audit resolves | `audit.matched`; A `cell.audit_passed`; A and B each paid 1,000,000 `ucr`; both PASS | `fsm` |
 | `AC-verify-15` | A, B, C with agreement pairs (A,C) only | The third execution is submitted | `audit.resolved`; majority {A, C}; B rejected `reject.audit_mismatch`, unpaid, `exhausted`; observations A PASS, C PASS, B FAIL | `fsm` |
-| `AC-verify-16` | A, B, C with no matching pair | The third execution is submitted | `NO_MAJORITY`; A rejected with `details.inconclusive = true` and requeued; A, B, C paid; no observations | `fsm` |
+| `AC-verify-16` | A, B, C with no matching pair | The third execution is submitted | `NO_MAJORITY`; A rejected with `details.inconclusive = true` and requeued; B and C paid 1,000,000 `ucr` each, A unpaid until its requeued attempt is accepted (8.32); no observations | `fsm` |
 | `AC-verify-17` | A new member's first submission, `verify.blanket_redundancy_n` = 3 | `choose_plan` runs | Plan BLANKET; three executions assigned to three members, distinct invite trees and device groups, none in the requester's tree; `blanket_remaining` decreases on resolution only | `fsm` |
 | `AC-verify-18` | A template with `risk_class = high` | Any primary cell is submitted | Plan BLANKET regardless of tier and of `u` | `policy` |
 | `AC-verify-19` | Stratum: `n_acc` 597, 59 audited and accepted, `pi` 0.10, `r` 60, `k` 3, `inc` 2 | `FA` is computed | Point 45,227 ppm; interval 26,048 to 128,192 ppm; status `watch` against 50,000 | `unit` |
@@ -636,7 +636,7 @@ Ids are `AC-verify-nn` (S0.0.5). Layers name where the test lives; `T-*` ids are
 | `AC-verify-28` | `elapsed_s` below `verify.timing_min_s` | `verify_submission` runs | `flagged_for_audit` with reason `anomaly` for every `u`; the factor steps up; the observation is excluded from the false-accept estimator | `adv` |
 | `AC-verify-29` | Two consecutive gold fails, then the second is overturned | Events are processed | `member.restricted` after the second fail; `member.restriction_lifted` after the overturn | `fsm` |
 | `AC-verify-30` | A member's full record stream | The nightly rebuild runs | The rebuilt `verification_state` equals the stored state; any difference raises an alarm | `prop` |
-| `AC-verify-31` | Floors g = 0.01, s = 0.02, mu = 0.10, `price.v_prior` 0.10, `price.levy_lambda` 0.05 | The parameter editor saves | No warning (0.0321 <= 0.15); raising `verify.audit_rate_floor` to 0.10 raises the `C9` warning | `policy` |
+| `AC-verify-31` | Floors g = 0.01, s = 0.02, mu = 0.10, `price.v_prior` 0.10, `price.levy_lambda` 0.05 | The parameter editor saves | No warning (0.0321 <= 0.15); raising `verify.audit_rate_s` to 0.20 and `verify.audit_rate_floor` to 0.14 (0.0101 + 0.154 = 0.1641 > 0.15, C2 still holds) raises the `C9` warning, while raising only the floor to 0.10 gives 0.1201 and no warning | `policy` |
 
 ## 8.39 Worked example (all numbers illustrative; none measured)
 
