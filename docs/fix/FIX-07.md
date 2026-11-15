@@ -45,7 +45,7 @@ Cell C-078. Sources: `## Edits required in citing parts` of `spec/15d-api-reconc
 | AC-req-58 (`409 ALREADY_EXISTS` on a second rating) | spec/11b-requester-ux.md:~690 | n/a | not edited: `rateJob` is `PUT` and replaces | skipped-needs-owner |
 | States `submit_refused` of screen 05 and AC-req-75 (Job stays `draft` after `422`) | spec/11b-requester-ux.md:~340, ~1010 | n/a | operation renamed only: 15d row 12 says the job is `rejected` and the screen reads `details.job_id`; the state design needs a decision | skipped-needs-owner |
 
-No edit used a default of FINAL.md section 4, so none is marked default-pending.
+No edit used a default of FINAL.md section 4, so no edit is marked as resting on a default.
 
 ## Read-back
 
