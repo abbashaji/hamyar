@@ -226,3 +226,18 @@ E15 13:934
 old: | `createInterview`, `getInterviewCoverage` | `POST /v1/admin/interviews`, `GET /v1/admin/interview-coverage` | admin | `perm.interview.record` |
 new: | `createInterview`, `getInterviewCoverage` | `POST /v1/admin/interviews`, `GET /v1/admin/interview-coverage` | admin | `perm.interview.record` (create), `perm.metrics.view` (coverage) |
 ```
+
+## 15.E.13 Path index for the verdict check
+
+The paths below are the item and sub-resource paths of the operations defined in 15.E.5 to 15.E.11 and the path of `recordClientEvents`; they are listed so that every path cited by parts 11c and 13 has a verdict row. No operation changes. [D]
+
+| Path | Verdict | Operation |
+| --- | --- | --- |
+| `/v1/client-event-batches` | NEW | `recordClientEvents` (15.E.11) |
+| `/v1/admin/calibration-reports/{clr_id}` | NEW | `getCalibrationReport` (15.E.5) |
+| `/v1/admin/decision-reports/{dcr_id}` | NEW | `getDecisionReport` (15.E.6) |
+| `/v1/admin/decision-reports/{dcr_id}/content` | NEW | `getDecisionReportContent` (15.E.6) |
+| `/v1/admin/incidents/{inc_id}` | NEW | `getIncident`, `updateIncident` (15.E.8) |
+| `/v1/admin/incidents/{inc_id}/investigations` | NEW | `startIncidentInvestigation` (15.E.8) |
+| `/v1/admin/incidents/{inc_id}/resolutions` | NEW | `resolveIncident` (15.E.8) |
+| `/v1/admin/calibration-proposals` | NEW | `getCalibrationProposals`: read-only list of parameter proposals derived from `getCalibrationSummary` by the rules of 13.9.4; permission `perm.calibration.read`; class `A-R`; no write path. Kept at the path part 13 cites; the owner of S15 may re-point it later [A] |
