@@ -104,7 +104,7 @@ All foreign keys are `ON DELETE RESTRICT ON UPDATE RESTRICT`; no cascade exists.
 
 | Never stored in any table, column, log or event | Why | Where the nearest permitted thing lives |
 | --- | --- | --- |
-| A raw IP address | FD Principle 8; `retention.raw_ip_stored` = false (constant) | A keyed hash with a TTL: `devices.creation_ip_hash` and the rate-limit counters (S5.3.3) |
+| A raw IP address | FD Principle 8; `retention.raw_ip_stored` = false (constant) | A keyed hash with a TTL, held only in the volatile rate-limit counters, never in a table or a backup (S5.3.3, 10a 10.14.2) |
 | A clear-text e-mail address | S0.7 naming rules; `identity.email_optional` = true | Field-encrypted ciphertext plus a keyed lookup hash on `members` |
 | A provider credential, cookie, session, API key or account identifier | Ground rule 3 | Nothing. A volunteer reports only the service and a model label, as text |
 | The text of a volunteer's chat page, a chat share-link, a clipboard capture, a screenshot | Ground rule 3; the panel's automatic chat-link capture was removed (FD§10) | `submissions.output_text` holds only what the volunteer pasted back into the form |
@@ -121,7 +121,7 @@ Provenance (FD§5.6) records "a salted-hash volunteer ID that requesters never s
 | Item | Decision |
 | --- | --- |
 | Salt scope | One system-wide secret per key version `v`. It is not per job, per requester or per template |
-| Stored in | `submissions.volunteer_handle` with `handle_key_version`, and in the internal manifest (S5.8.8). Computed on read, never stored, for `vol_` shown on public pages (S5.9.2) |
+| Stored in | `submissions.volunteer_handle` with `handle_key_version`, and in the internal manifest (S5.8.8). Never computed for a public page: public surfaces are aggregates and show no `vol_` handle (10b 10.13.1 item 11 and 10.13.3); the handle is read only from `submissions.volunteer_handle` and the internal manifest, by verifier and admin paths |
 | Never exposed to | Any requester surface, including the exported manifest (the export is a redacted rendering, `ISS-53`) |
 | Linkability | Within one key version all of a member's handles are linkable to each other by anyone holding the data, but not to `member_id` without the key. The platform needs this linkage: detection of one donor acting as both primary and auditor, and copy detection |
 | Rotation | Rotating the key creates version `v+1`; old handles stay as written and become unlinkable to new ones. Rotation before any public exposure is required (`security.rotate_before_public_exposure`) |
@@ -133,13 +133,12 @@ Provenance (FD§5.6) records "a salted-hash volunteer ID that requesters never s
 | Column | Computed as | Key (secret, S10.* owns the list) [A] | Kept for |
 | --- | --- | --- | --- |
 | `devices.device_token_hash` | HMAC-SHA-256 of a random 256-bit token the client keeps in its own storage | `secret.device_hash_key[v]` | `retention.session_days` after last use |
-| `devices.creation_ip_hash` | HMAC-SHA-256 of the client IP at identity creation | `secret.ip_hash_key[v]` | `retention.ip_hash_ttl_days` (default 1 day), then set to NULL |
 | `members.email_lookup_hash` | HMAC-SHA-256 of the lower-cased address | `secret.email_lookup_key[v]` | while the member is not `closed` |
 | `members.email_ciphertext` | AES-256-GCM field encryption of the address | `secret.email_encryption_key[v]` | as above |
 | `sessions.token_hash`, `leases.nonce_hash`, `invites.code_hash` | SHA-256 of a 128- or 256-bit CSPRNG value (no key needed, S0.6.4) | none | their TTLs |
 | `submissions.volunteer_handle` | S5.3.2 | `secret.volunteer_handle_key[v]` | with the submission row (a hash, so it stays after payload purge) |
 
-Rate-limit counters (per member, per IP hash, per invite tree) are infrastructure state keyed by these hashes with a TTL equal to their window; they live in the cache or in a `rate_counters` table that is not a domain entity, and they hold no payload (S4.*, S10.*). [A]
+The creation-time IP hash is not a column of any table of this model (FIX-17, audit A04 finding 15). Rate-limit counters (per member, per IP hash, per invite tree) are infrastructure state keyed per UTC day or window by the daily-rolling hash (`secret.ip_hash_key`, 10a 10.14.2), with a TTL no longer than their window and never beyond `retention.ip_hash_ttl_days`; they live only in the volatile `CounterStore`, not in a relational table and not in backups, and they hold no member id and no payload (S4.*, 10a 10.14.2 item 2, 10b 10.13.2). Data-minimization consequence [A]: the per-day limits keyed by IP hash or by invite tree (the daily IP limits and `ratelimit.invite_tree_new_members_per_day`) use the volatile counter only, so they cannot be audited or replayed from the database and a counter-store restart resets them; limits that read stored columns (`grant.max_per_device` through `devices.grants_claimed`, `ratelimit.device_new_members_per_day` through `members.creating_device_id`, `invite.tree_*` through the tree columns) are unaffected. [A]
 
 ### 5.3.4 What a database dump reveals [D]
 
@@ -147,7 +146,7 @@ A full dump reveals pseudonymous `mem_` ids; public keys; day-granular activity;
 
 ## 5.4 Entity catalogue, mutability and retention
 
-One row per entity of S0.7 (57 rows). `Class` is S5.2.3. `Retention` is the S0.7 class, with exceptions marked [A] in `ISS-51`. The last column says how a correction is modelled, because no `IMM` or `CHN` row is ever edited. [D]
+One row per entity of S0.7 (57 rows), plus the two additions of S5.4.1 (`StateTransition` and the `mint_headroom` store) that S0.7 does not list yet [A] (FIX-16, audit A05 finding 18). `Class` is S5.2.3. `Retention` is the S0.7 class, with exceptions marked [A] in `ISS-51`. The last column says how a correction is modelled, because no `IMM` or `CHN` row is ever edited. [D]
 
 | Entity | Section | Class | Retention | A correction is modelled as |
 | --- | --- | --- | --- | --- |
@@ -209,6 +208,85 @@ One row per entity of S0.7 (57 rows). `Class` is S5.2.3. `Retention` is the S0.7
 | `InvariantCheck` | S5.13.7 | `IMM` | `ops` (exception [A]) | none; checkpoint and `violated` rows are exempt from purging |
 | `Alarm` | S5.13.8 | `MUT` | `ops` | state machine (`open`, `acknowledged`, `resolved`) |
 
+### 5.4.1 Additions used by `spec/05b-state-machines.md` and `spec/09-result-return.md` [A]
+
+Two stores are written by the machines of S5.21 to S5.29 and are listed neither in S0.7 nor in the catalogue above (audit A05 finding 18). They are added here so that the model has a table for each; S0.7 must gain the `StateTransition` row at the next convention edit (S0.7 would then list 58 entities) [A]. Neither stores a personal datum.
+
+**`StateTransition` · `state_transitions` · `stt_` · `IMM` · retention = class of the parent entity (column `retention_class`).** Durable, ordered history of every transition of every machine of S5.21 to S5.28 (05b 5.21.2 item 2 and 5.21.3). Needed by 05b (every `transition()` writes one row), by the appeal evidence snapshot (APT-01) and by the sequence check CK-07 (05b 5.29.10).
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `entity_type`, `entity_id` | text, text | NN | polymorphic reference to the machine's entity (S5.5 rule 3); validated against the id prefix by the writer, no FK |
+| `entity_seq` | int64 | NN, `>= 1` | 1, 2, 3 per entity; a gap is a defect (CK-07) |
+| `from_state` | text | null only for the creating transition | |
+| `to_state` | text | NN | |
+| `event_name` | text | NN | S0.9 event name |
+| `event_id` | text | NN, unique | the outbox event written in the same transaction |
+| `reason_code` | text | null | `policy.<rule>.<slug>`, `reject.*` or a closure code |
+| `policy_version_id` | id `plv_` | null, FK | policy in force |
+| `parameter_versions` | json | NN | ids of the `ParameterVersion` rows the guard read |
+| `actor_type`, `actor_id` | text, text | NN, null | `principal_type` of S0.8.2; `actor_id` is an opaque `mem_`, `adm_` or worker name, never a `vol_` handle or an IP |
+| `occurred_at` | ts | NN | database clock |
+| `details` | json | null | no personal data, never the content of a submission |
+| `retention_class` | text | NN, one of `job_bound`, `member_bound`, `moderation`, `permanent` | the class of the parent entity at write time |
+
+**Unique** `(entity_type, entity_id, entity_seq)` (05b 5.29.5, L2); `event_id`. **Indexes** `(occurred_at)`; `(retention_class, created_at)` (retention job). **Retention** per `retention_class`; the only delete path is the `retention_svc` purge of S5.15.4, which must name this table in the `IMM` exemption of S5.2.3 [A]; there is no update path. **Written by** the single `transition()` function only. **Not stored** any content, volunteer handle or IP.
+
+```sql
+CREATE TABLE state_transitions (
+  id text PRIMARY KEY CHECK (is_id(id,'stt')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  entity_type text NOT NULL,
+  entity_id text NOT NULL,
+  entity_seq bigint NOT NULL CHECK (entity_seq >= 1),
+  from_state text,
+  to_state text NOT NULL,
+  event_name text NOT NULL,
+  event_id text NOT NULL UNIQUE,
+  reason_code text,
+  policy_version_id text REFERENCES policy_versions(id),
+  parameter_versions jsonb NOT NULL,
+  actor_type text NOT NULL,                 -- principal_type of S0.8.2
+  actor_id text,
+  occurred_at timestamptz NOT NULL,
+  details jsonb,
+  retention_class text NOT NULL CHECK (retention_class IN ('job_bound','member_bound','moderation','permanent')),
+  UNIQUE (entity_type, entity_id, entity_seq)
+);
+CREATE INDEX state_transitions_time ON state_transitions (occurred_at);
+CREATE INDEX state_transitions_retention ON state_transitions (retention_class, created_at);
+-- Trigger state_transitions_no_mutation: BEFORE UPDATE OR TRUNCATE raises immutable_row; DELETE only for retention_svc.
+```
+
+**`mint_headroom` (05b 5.29.3 and 5.29.6 write it as `mint_headroom`, and also as `mint_budget` and `MintBudget`; one table, `mint_budget` is a documented alias) · `DER` · infrastructure counter, no id prefix (like `ledger_heads`).** The store for the Commons mint caps `mint.monthly_cap_credits` and `mint.per_member_daily_cap_credits`: a lease reserves, an acceptance converts the reservation into minted amount, every other exit releases it (GU-12). Needed by 05b 5.29.3 (lease), CT-02, CT-04 to CT-18 (release) and 5.29.6 (consume), and by the reconciliation check CK-05 owned by S6.*.
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `scope` | text | NN, `month` or `member_day` | one row per UTC month, one per member and UTC day |
+| `period` | text | NN | UTC `YYYY-MM` for `month`, `YYYY-MM-DD` for `member_day` |
+| `member_id` | id `mem_` | NN iff `member_day`, FK | |
+| `cap_ucr` | ucr | NN, `>= 0` | the cap in force when the row is created, in `ucr` (a later parameter change applies to the next period) |
+| `reserved_ucr`, `minted_ucr` | ucr | NN, default 0, `>= 0` | `DER`; `minted_ucr + reserved_ucr <= cap_ucr` (CHECK) is what makes the conditional update of 05b 5.29.3 safe |
+
+**Unique** `(period) WHERE scope = 'month'`; `(member_id, period) WHERE scope = 'member_day'`. **Retention** `month` rows `permanent` (an aggregate, no member id); `member_day` rows `member_bound` (deleted with the member's data on closure, S5.6.1; S6.* may purge them earlier). **Lock order** after the `Cell` lock and before the `Escrow` lock (05b 5.29.2). **Not stored** which cell or donor a reservation belongs to (it is derived from the cells in `leased`, `submitted` and `flagged_for_audit`; CK-05 compares the two).
+
+```sql
+CREATE TABLE mint_headroom (
+  scope text NOT NULL CHECK (scope IN ('month','member_day')),
+  period text NOT NULL,                       -- UTC 'YYYY-MM' (month) or 'YYYY-MM-DD' (member_day)
+  member_id text REFERENCES members(id),
+  cap_ucr bigint NOT NULL CHECK (cap_ucr >= 0),
+  reserved_ucr bigint NOT NULL DEFAULT 0 CHECK (reserved_ucr >= 0),
+  minted_ucr bigint NOT NULL DEFAULT 0 CHECK (minted_ucr >= 0),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  row_version int NOT NULL DEFAULT 1,
+  CHECK ((scope = 'member_day') = (member_id IS NOT NULL)),
+  CHECK (minted_ucr + reserved_ucr <= cap_ucr)
+);
+CREATE UNIQUE INDEX mint_headroom_month ON mint_headroom (period) WHERE scope = 'month';
+CREATE UNIQUE INDEX mint_headroom_member_day ON mint_headroom (member_id, period) WHERE scope = 'member_day';
+```
+
 ## 5.5 Entity-relationship summary
 
 Notation: `A 1--* B` means one `A` has many `B` (the foreign key is on `B`); `0..1` marks an optional parent. Arrows show the direction of the foreign key. [D]
@@ -258,9 +336,9 @@ CONFIGURATION, LAUNCH, MEASUREMENT
 
 **Reference rules** [D]
 
-1. The ledger is reached from business entities only through `LedgerTransaction.natural_key` and `Cell.credit_txn_id`, `Escrow.closing_txn_id`, `Referral.bonus_*_txn_id`. No business table stores an amount that it also posts; the amount lives in `LedgerEntry`, and business columns that echo it are caches checked by the invariants.
+1. The ledger is reached from business entities only through `LedgerTransaction.idempotency_key` (alias `natural_key`, S5.9.3) and `Cell.credit_txn_id`, `Escrow.closing_txn_id`, `Referral.bonus_*_txn_id`. No business table stores an amount that it also posts; the amount lives in `LedgerEntry`, and business columns that echo it are caches checked by the invariants.
 2. `AdminAction` is the audit trail for every privileged write. Approvals (template, service, ledger reversal, launch sign-off) are `AdminAction` rows that reference the approved row and its content hash, not columns edited on the approved row (S5.15).
-3. Polymorphic references (`subject_type`, `subject_id`) exist only on `AdminAction`, `Report`, `Appeal`, `Event`, `Alarm` and `ChangeLogEntry`. Every other relationship is a real foreign key. Polymorphic ids are validated by the writing service against the prefix of the id (S0.6.3).
+3. Polymorphic references (`subject_type`, `subject_id`) exist only on `AdminAction`, `Report`, `Appeal`, `Event`, `Alarm`, `ChangeLogEntry` and `StateTransition` (`entity_type`, `entity_id`, S5.4.1). Every other relationship is a real foreign key. Polymorphic ids are validated by the writing service against the prefix of the id (S0.6.3).
 
 ## 5.6 Identity and access entities
 
@@ -278,7 +356,7 @@ A pseudonymous identity. Holds the `donor` and `requester` capabilities (S0.8.2)
 | `locale`, `digits`, `calendar` | enum | NN while `status <> 'closed'`; NULL on a closed tombstone (DDL `CHECK`) | defaults from `i18n.*`; member can change |
 | `time_zone` | text | null | IANA name chosen by the member; never inferred from an IP |
 | `creating_device_id` | id `dev_` | null, FK | the device that created the identity; used for `ratelimit.device_new_members_per_day` |
-| `invite_id` | id `inv_` | null, FK (deferred) | the invite redeemed, if any |
+| `invite_id` | id `inv_` | null, FK (deferred) | the invite redeemed, if any; with `Invite.issuer_member_id` it is the edge that 10a calls `Member.invited_by_member_id` (alias, 10a names canonical); set to NULL by the edge-clearing sweep of S5.6.5 [A] |
 | `invite_root_member_id`, `invite_depth` | id `mem_`, int | root null for a founder; depth >= 0 | denormalized tree position for `invite.tree_*` limits |
 | `team_id`, `team_joined_at` | id `tem_`, ts | null | a member is in at most one team [A] |
 | `email_ciphertext`, `email_key_version`, `email_lookup_hash`, `email_verified_at` | bytes, int, bytes32, ts | all null or `ciphertext` and `lookup_hash` both set | optional e-mail (FD§3.2); S5.3.3 |
@@ -292,7 +370,7 @@ A pseudonymous identity. Holds the `donor` and `requester` capabilities (S0.8.2)
 
 **Keys** PK `id`; FKs as above. **Unique** `email_lookup_hash` (where not null). **Indexes** `(status, trust_tier)`; `(team_id)`; `(invite_root_member_id)`; `(creating_device_id, created_at)`; `(last_active_day)`.
 **Stored** status, tier, display preferences, tree position, counters, optional e-mail ciphertext. **Not stored** name, nickname, IP, country, user-agent, provider identifiers, recovery key (only the public key derived from it, in `member_keys`), password.
-**Closure.** On `closed` the retention job deletes the rows of `member_keys`, `sessions`, `invites` (issued), `opt_ins`, `badge_awards`, `referrals`, and sets every nullable column above to NULL and every other column to its default (`trust_tier` = `new` with `tier_before_restriction` NULL, counters and `invite_depth` = 0, `locale`, `digits` and `calendar` NULL), keeping `id`, `created_at`, `status`, `closed_at` and `row_version`; `status_changed_at` and `updated_at` keep their closure-time values. The row is a tombstone so permanent rows that hold the opaque `mem_` id stay valid and point at nothing personal. Credit left on a closed member's lots moves to the Reserve through `expire` entries (S6.* owns the rule) [A]. [D]
+**Closure.** On `closed` the retention job deletes the rows of `member_keys`, `sessions`, `invites` (issued), `opt_ins`, `badge_awards`, `referrals`, and sets every nullable column above to NULL and every other column to its default (`trust_tier` = `new` with `tier_before_restriction` NULL, counters and `invite_depth` = 0, `locale`, `digits` and `calendar` NULL), keeping `id`, `created_at`, `status`, `closed_at` and `row_version`; `status_changed_at` and `updated_at` keep their closure-time values. The row is a tombstone so permanent rows that hold the opaque `mem_` id stay valid and point at nothing personal. Credit left on a closed member's lots moves to the Reserve through one `reserve_donation` transaction (`member` to `reserve`, key `closedonate:<mem_id>`, 05b MS-04); `expire` entries (S0.8.5) cover expired lots only; S6.* owns the rule [A]. [D]
 
 ### 5.6.2 `MemberKey` · `member_keys` · `mky_` · `MUT` · `member_bound`
 
@@ -321,11 +399,10 @@ A keyed-hash record of a client installation for rate limits, anti-farming and l
 | `hash_key_version` | int | NN | |
 | `status` | enum(`device_status`) | NN, default `active` | `blocked` after a farming finding (S10.*) |
 | `first_seen_day`, `last_seen_day` | day | NN | |
-| `creation_ip_hash`, `ip_hash_key_version`, `creation_ip_hash_expires_at` | bytes32, int, ts | all null or all set | expiry = creation + `retention.ip_hash_ttl_days` |
 | `grants_claimed` | int | NN, default 0 | counts toward `grant.max_per_device` (lifetime) |
 
-**Unique** `device_token_hash`. **Indexes** `(creation_ip_hash, created_at)` where not null; `(last_seen_day)`. **Retention.** After `retention.session_days` without use the row is purged: hashes are set to NULL; a row with `grants_claimed > 0` is kept as a tombstone `(id, grants_claimed)` while any non-closed member has it as `creating_device_id` so the lifetime grant limit cannot be reset by waiting [A].
-**Stored** keyed hashes, day-granular first and last use, a grant counter. **Not stored** raw IP, user-agent, screen size, fonts, canvas or audio fingerprints, hardware ids, anything beyond the list the threat model (S10.*) admits.
+**Unique** `device_token_hash`. **Indexes** `(last_seen_day)`. **Retention.** After `retention.session_days` without use the row is purged: hashes are set to NULL; a row with `grants_claimed > 0` is kept as a tombstone `(id, grants_claimed)` while any non-closed member has it as `creating_device_id` so the lifetime grant limit cannot be reset by waiting [A].
+**Stored** keyed hashes, day-granular first and last use, a grant counter. **Not stored** raw IP, any IP hash (the creation-time hash lives only in the volatile counter, S5.3.3), user-agent, screen size, fonts, canvas or audio fingerprints, hardware ids, anything beyond the list the threat model (S10.*) admits.
 
 ### 5.6.4 `Session` · `sessions` · `ses_` · `MUT` · `short`
 
@@ -344,12 +421,14 @@ A keyed-hash record of a client installation for rate limits, anti-farming and l
 
 | Field | Type | Null / constraint | Note |
 | --- | --- | --- | --- |
-| `issuer_member_id` | id `mem_` | NN, FK | issuing needs `invite.min_accepted_cells_to_issue` accepted cells |
+| `issuer_member_id` | id `mem_` | NN, FK; NULL once the edge is cleared (S5.6.5 edge clearing) | issuing needs `invite.min_accepted_cells_to_issue` accepted cells; alias of 10a `inviter_member_id` (10a name canonical) |
 | `code_hash` | bytes32 | NN | SHA-256 of a 128-bit code; the code is shown once to the issuer |
 | `status` | enum(`invite_status`) | NN, default `issued` | |
 | `expires_at` | ts | NN | `created_at + invite.ttl_days` |
-| `redeemed_by_member_id`, `redeemed_at` | id, ts | null, both set or both null | |
+| `redeemed_by_member_id`, `redeemed_at` | id, ts | null, both set or both null; after edge clearing `redeemed_by_member_id` is NULL and `redeemed_at` holds its UTC date | `redeemed_by_member_id` is the alias of 10a `invitee_member_id` (10a name canonical) |
 | `tree_root_member_id`, `tree_depth` | id, int | NN | the new member's position; depth <= `invite.tree_max_depth` |
+
+**Edge clearing** [A] (default-pending D-12; 10a 10.10, `invite.accountability_days`). That many days after the invitee's `Member.created_at`, the retention sweep sets `Member.invite_id`, `Invite.issuer_member_id` and `Invite.redeemed_by_member_id` of the redeemed invite to NULL and reduces `Invite.redeemed_at` to its UTC date; unredeemed invites keep their issuer. `tree_root_member_id`, `tree_depth`, `Member.invite_root_member_id` and `Member.invite_depth` stay, so after the window accountability is at tree level only and creation order inside a tree still permits partial inference (10a 10.15.2). If either side of the edge is banned inside the window, the edge is kept until `retention.moderation_days` after the resolution. Operators alone see edges while they exist (`perm.invite.view_tree_edges`, 10a 10.10).
 
 **Unique** `code_hash`; `redeemed_by_member_id`. **Indexes** `(issuer_member_id, status)` (for `invite.max_active_per_member`); `(tree_root_member_id)` (for `invite.tree_max_members`). **Stored** hash, tree position. **Not stored** the clear code, any note about the invitee, any contact detail.
 
@@ -512,7 +591,7 @@ A requester's request, or a Commons job. Machine S0.9.2. The declarations, the p
 | Field | Type | Null / constraint | Note |
 | --- | --- | --- | --- |
 | `state` | enum | NN, default `draft` | the 15 states of S0.9.2 |
-| `closure_reason` | enum | null; set with `job.stop_requested` | `policy_stopped`, `service_revoked`, `template_retired`, `operator_killed`, `overrun_timeout` |
+| `closure_reason` | enum | null; set with `job.stop_requested` | `policy_stopped`, `service_revoked`, `template_retired`, `operator_killed`, `overrun_timeout`, `cells_exhausted` (05b JT-15 and 5.22.1; not yet in S0.9.2, convention addition 4 of 05b [A]) |
 | `is_commons` | bool | NN | true for Commons jobs; the only jobs whose acceptance mints |
 | `requester_member_id` | id `mem_` | NN iff `is_commons` = false | |
 | `job_type` | enum | NN | |
@@ -537,6 +616,13 @@ A requester's request, or a Commons job. Machine S0.9.2. The declarations, the p
 | `reservation_id` | id `rsn_` | null | set when activated from a reservation |
 | `submitted_at`, `admitted_at`, `started_at`, `assembled_at`, `settled_at` | ts | null | |
 | `requester_rating` | int | null, 1..5 | rating of the outcome (prompt F); no free text, because free text can hold personal data |
+| `pause_causes` | arr of enum(`job_pause_cause`) | NN, default empty; non-empty iff `state = 'suspended'` (CHECK) | set of `kill_template`, `kill_service`, `kill_member`, `policy_tightened`, `template_paused`, `service_suspended`; JT-11 adds a member, JT-12 fires when the last member clears (05b 5.22, 5.22.2) |
+| `state_before_pause` | enum | set iff `state = 'suspended'`; `admitted` or `running` | the state JT-12 returns to |
+| `pause_started_at` | ts | set iff `state = 'suspended'` | start of the current pause; cleared by JT-12 |
+| `paused_total_s` | int | NN, default 0, `>= 0` | sum of closed pauses; extends the overrun deadline of JT-15 (a pause never causes `overrun_timeout`) |
+| `held_ucr` | ucr | null until `escrow_confirmed`; `= escrow_ucr` for a member job (CHECK); NULL for a Commons job | amount held at JT-09; the settlement identity of 05b 5.29.8 compares it with payouts + levy + refund |
+| `levy_reserved_ucr` | ucr | null until quote; `= primary_cell_count * lambda_ppm` (CHECK) | stamped at JT-04; `payable_ucr(job)` = escrow balance minus this (CT-01, 05b 5.29.7 E5) |
+| `quote_id` | text | null until quote; new value per quote (JT-04, JT-07) | opaque, no new id prefix; carried by `job.escrow_confirmed`; names the quote whose `parameter_versions` are honored at JT-09. Needed by 05b JT-09 and by S6.* and S15.* |
 
 **Keys** PK; FKs. **Indexes** `(requester_member_id, state)` (concurrency cap `admission.max_concurrent_jobs_per_member`); `(state, deadline_at)`; `(template_version_id)`; `(policy_version_id)`; `(quote_expires_at) WHERE state = 'quoted'` (timer `quote_expirer`); `(admitted_at) WHERE state IN ('admitted','running','suspended')` (overrun scan). **Checks** `is_commons = (requester_member_id IS NULL)`; every declared combination is in the stamped `PolicyVersion.allowlist` (verified by the writer, recorded by `policy_version_id`). **Defense in depth** a trigger refuses `state` to `quoted` or `admitted` unless every service the job could run on is `approved` with a current `TermsCopy` (S5.14.8). **Stored** declarations, quote, hashes. **Not stored** the uploaded content (that is `Upload`, purged), the requester's identity beyond the pseudonymous id, any rating text.
 
@@ -604,10 +690,11 @@ One prompt-and-response unit inside the envelope; the unit of credit. The row pe
 | `accepted_submission_id`, `accepted_at` | id, ts | NN iff `accepted` or `overturned` | |
 | `accept_policy_version_id` | id `plv_` | null until acceptance | R9 re-check result (policy in force at acceptance) |
 | `last_reject_code` | text | null | a `reject.*` code of S0.8.4 |
+| `acceptance_deferred_until` | ts | null; non-null only in `submitted` or `flagged_for_audit` (CHECK) | set by `G-accept` when it returns DEFER (05b 5.23.2); cleared when the sweep re-enqueues the acceptance (`job.resumed`, `template.resumed`, `member.reinstated`, `killswitch.released`); a deferred cell keeps its headroom reservation |
 | `credit_txn_id` | id `txn_` | null, unique | the `payout` (member job) or `mint` (Commons) transaction; set once, which makes double payment structurally impossible |
 | `payload_purged_at` | ts | null | |
 
-**Keys** PK; FKs to `jobs`, `template_versions`, `gold_cells`, `audits`, `cells` (self), `submissions`, `leases`, `ledger_transactions`. **Unique** `(job_id, ordinal) WHERE cell_kind = 'primary'`; `credit_txn_id`; `accepted_submission_id`. **Indexes** the queue `(priority_key) WHERE state = 'queued'` (a partial-index predicate cannot call `now()`, so the lease query applies `earliest_lease_at IS NULL OR earliest_lease_at <= now()` as a filter; the DDL of S5.14.2 is normative); `(job_id, state)`; `(subject_cell_id)`; GIN on `pinned_service_ids`. **Stored** envelope-bounded inputs and the rendered prompt until purge, hashes forever. **Not stored** the volunteer's identity on the cell (it is on the `Lease` and `Submission`), the cell's gold status in any column a volunteer API selects.
+**Keys** PK; FKs to `jobs`, `template_versions`, `gold_cells`, `audits`, `cells` (self), `submissions`, `leases`, `ledger_transactions`. **Unique** `(job_id, ordinal) WHERE cell_kind = 'primary'` (this partial index is the enforcing form of the L2 key `UNIQUE (job_id, ordinal, cell_kind)` of 05b 5.29.5: a plain composite key would not bind gold, audit, third, review and rework cells, whose `ordinal` is NULL and NULLs are distinct; a creation key for those cells is an open owner decision, audit A05 finding 20 [A]); `credit_txn_id`; `accepted_submission_id`. **Indexes** the queue `(priority_key) WHERE state = 'queued'` (a partial-index predicate cannot call `now()`, so the lease query applies `earliest_lease_at IS NULL OR earliest_lease_at <= now()` as a filter; the DDL of S5.14.2 is normative); `(job_id, state)`; `(subject_cell_id)`; GIN on `pinned_service_ids`; `(acceptance_deferred_until) WHERE acceptance_deferred_until IS NOT NULL` (sweep that re-enqueues deferred acceptances). **Stored** envelope-bounded inputs and the rendered prompt until purge, hashes forever. **Not stored** the volunteer's identity on the cell (it is on the `Lease` and `Submission`), the cell's gold status in any column a volunteer API selects.
 
 ### 5.8.2 `Lease` · `leases` · `lse_` · `MUT` · `job_bound`
 
@@ -622,13 +709,15 @@ Time-boxed hold of a cell by one member, bound to a nonce (FD§3.4, S0.9.3). Eve
 | `state` | enum | NN, default `active` | `active`, `submitted`, `expired`, `released`, `revoked` |
 | `nonce_hash` | bytes32 | NN | SHA-256 of a `lease.nonce_bytes` = 16 byte nonce; the nonce is returned once and never stored |
 | `issued_at`, `expires_at` | ts | NN, `expires_at > issued_at` | both server clock (S0.6.2) |
+| `hard_expires_at` | ts | NN, `>= expires_at` | `expires_at + lease.submit_grace_s`, stored at issue; a submission is valid up to and including it, the cell cannot be re-leased before it, and the reaper tests it (05b LT-01, 5.23.3, 5.29.4). S9.* 9.4.4 calls the same column `grace_until` (alias). An extension moves both `expires_at` and `hard_expires_at` |
 | `timeout_s_applied` | int | NN | `lease.timeout_s` in force; extensions add `lease.extend_s` up to `lease.max_extensions` |
-| `extensions_used` | int | NN, default 0 | |
+| `extensions` | int | NN, default 0, `>= 0`, `<= lease.max_extensions` (checked by the extension CAS) | canonical name (05b LT-01 and the extension CAS); `extensions_used` is a documented alias of this column [A] |
 | `optin_version` | int | NN | `opt_ins.version` at issue (R8 evidence) |
 | `policy_version_id` | id `plv_` | NN, FK | policy in force at issue |
 | `ended_at`, `end_reason` | ts, text | null | reason is one of `submitted`, `expired`, `declined`, `released`, `revoked_policy`, `revoked_service`, `revoked_job_cancelled`, `revoked_integrity` |
+| `release_reason` | text | null; set only when `state = 'released'` (CHECK); `declined` or `reported` | why the donor released the lease (05b CT-05, LT-04); a system revocation uses `revoked` and `end_reason`, not this column |
 
-**Unique** `(cell_id, attempt)`; **`(cell_id) WHERE state = 'active'`**, the race guard: at most one active lease per cell, enforced by the database, not only by application code. **Indexes** `(expires_at) WHERE state = 'active'` (reaper, `lease.reap_interval_s`); `(member_id) WHERE state = 'active'` (`lease.max_active_per_member`, checked under a row lock on the member). **Not stored** the nonce, IP, the service the volunteer opened.
+**Unique** `(cell_id, attempt)`; **`(cell_id) WHERE state = 'active'`**, the race guard: at most one active lease per cell, enforced by the database, not only by application code. **Indexes** `(hard_expires_at) WHERE state = 'active'` (reaper, `lease.reap_interval_s`; the reaper expires a lease only when `hard_expires_at < now()`, so this is the lookup column, not `expires_at`; 05b 5.29.4); `(member_id) WHERE state = 'active'` (`lease.max_active_per_member`, checked under a row lock on the member). **Not stored** the nonce, IP, the service the volunteer opened.
 
 ### 5.8.3 `Submission` · `submissions` · `sub_` · `IMS` · `job_bound`
 
@@ -641,14 +730,14 @@ One pasted-back result for one lease. Content columns are frozen at insert; only
 | `volunteer_handle`, `handle_key_version` | text, int | NN | `vol_` + 32 hex (S5.3.2); never in a requester surface |
 | `state` | enum | NN, default `received` | `received`, `schema_failed`, `checks_failed`, `checks_passed`, `quarantined`, `accepted`, `rejected` |
 | `output_text` | text | null after purge | what the volunteer pasted; stored as data, escaped on every display, never executed (FD§10) |
-| `output_hash` | hash | NN | SHA-256 of the raw bytes |
+| `output_hash` | hash | NN | SHA-256 of the raw bytes; 05b SBT-01 and CT-03 call it `content_hash` (documented alias, same value) |
 | `normalized_output_hash` | hash | NN | hash of whitespace- and case-normalized text; exact duplicate detection |
 | `output_simhash` | int64 | NN | locality-sensitive fingerprint for `verify.duplicate_similarity_threshold` [A] |
 | `output_chars`, `output_bytes` | int | NN, `output_bytes <= cell.envelope.max_submission_bytes` | |
 | `reported_service_id` | id `svc_` | null, FK | attested by the volunteer, not proven (FD§5.6) |
 | `reported_model_label` | text | null, <= 80 chars | free text, attested, escaped on display |
 | `submitted_at` | ts | NN | server clock |
-| `elapsed_s` | int | NN | `submitted_at - lease.issued_at`, computed server-side; basis for `verify.timing_min_s` |
+| `elapsed_s` | int | NN | `submitted_at - lease.issued_at`, computed server-side; basis for `verify.timing_min_s`; 05b SBT-01 calls it `time_to_submit_s` (documented alias, same value) |
 | `reject_code` | text | null | `reject.*` |
 | `quarantine_reason` | enum | null; NN iff `quarantined` | `output_url`, `code_to_run`, `action_request`, `other_flag` |
 | `checks_report` | json | null | per-check results; no copy of the output |
@@ -789,6 +878,7 @@ One balanced pair of legs, append-only, hash-chained (S0.8.5). Never updated, ne
 | `lot_effect` | enum(`lot_effect`) | NN | `create`, `consume`, `restore`, `none`, per the table in S0.8.5 |
 | `restores_entry_id` | id `lge_` | null, FK | for a `refund` that restores consumed lots: the `escrow_hold` entry it undoes in part |
 | `reverses_entry_id` | id `lge_` | null, FK, unique | for a `reversal` |
+| `entry_key` | text | NN, **unique** | `<idempotency_key>#<leg>` with the leg number 1, 2, ... in posting order (05b 5.29.5, L3: key plus leg number); a repeated leg is rejected by the database [A: the separator `#` is this part's choice] |
 | `job_id`, `cell_id` | id | null | references for explorers; the transaction is authoritative |
 | `prev_hash`, `entry_hash` | hash | NN | `entry_hash = SHA-256(prev_hash \|\| canonical(entry))` (S0.6.4); genesis `prev_hash` is `sha256:` followed by 64 zeros |
 
@@ -801,12 +891,12 @@ Atomic group of entries with one `txn_kind` (S0.8.5). [D]
 | Field | Type | Null / constraint | Note |
 | --- | --- | --- | --- |
 | `txn_kind` | enum(`ledger_txn_kind`) | NN | `mint`, `grant`, `hold`, `payout`, `settle`, `cancel`, `reservation_activate`, `expire`, `retire`, `reserve_donation`, `reversal` |
-| `natural_key` | text | NN, **unique** | the business idempotency key, for example `payout:<cell_id>`, `hold:<job_id>`, `settle:<job_id>`, `grant:starter:<member_id>`, `expire:<lot_id>`; a second post with the same key is a no-op that returns the first result |
+| `idempotency_key` | text | NN, **unique** | canonical name (05b 5.29.5, layer L3); `natural_key` is a documented alias of this column [A]. The business idempotency key, for example `payout:<cell_id>`, `hold:<job_id>`, `settle:<job_id>`, `grant:starter:<member_id>`, `expire:<lot_id>`; a second post with the same key is a no-op that returns the first result |
 | `member_id`, `job_id`, `cell_id` | id | null | |
 | `reversal_of_txn_id` | id `txn_` | null, FK, unique | |
 | `entry_count`, `total_ucr` | int, ucr | NN | checked against the entries at commit |
 | `actor_type`, `actor_ref` | enum, text | NN | `principal_type` and an opaque id |
-| `approval_action_ids` | arr of `act_` | NN, length 2 iff `txn_kind = 'reversal'` | two distinct admins (`ledger.reversal_min_approvers`) |
+| `approval_action_ids` | arr of `act_` | NN, length 2 iff `txn_kind = 'reversal'` | two distinct admins (`ledger.reversal_min_approvers`); an array cannot carry a foreign key, so a deferred constraint trigger `ledger_transactions_two_admins` checks on insert that both ids exist in `admin_actions`, have `action = 'ledger.reversal.approve'`, name the same subject and have distinct `admin_user_id` (audit A05 finding 27) |
 | `parameter_versions` | json | NN | versions in force (`credit.*`, `price.*`, `mint.*`) |
 
 **Indexes** `(txn_kind, created_at)`; `(cell_id)`; `(job_id)`.
@@ -1411,6 +1501,7 @@ CREATE TABLE cells (
   accept_policy_version_id text REFERENCES policy_versions(id),
   last_reject_code text CHECK (last_reject_code ~ '^reject\.[a-z_]+$'),
   credit_txn_id text UNIQUE REFERENCES ledger_transactions(id),
+  acceptance_deferred_until timestamptz,                           -- set by G-accept DEFER (05b 5.23.2)
   payload_purged_at timestamptz,
   CHECK ((cell_kind = 'primary') = (ordinal IS NOT NULL)),
   CHECK ((cell_kind = 'gold') = (gold_cell_id IS NOT NULL)),
@@ -1419,13 +1510,15 @@ CREATE TABLE cells (
   CHECK ((cell_kind = 'review') = (subject_submission_id IS NOT NULL)),
   CHECK ((state = 'leased') = (current_lease_id IS NOT NULL)),
   CHECK (state NOT IN ('accepted','overturned') OR accepted_submission_id IS NOT NULL),
-  CHECK (credit_txn_id IS NULL OR state IN ('accepted','overturned'))
+  CHECK (credit_txn_id IS NULL OR state IN ('accepted','overturned')),
+  CHECK (acceptance_deferred_until IS NULL OR state IN ('submitted','flagged_for_audit'))
 );
 CREATE UNIQUE INDEX cells_primary_ordinal ON cells (job_id, ordinal) WHERE cell_kind = 'primary';
 CREATE INDEX cells_queue ON cells (priority_key) WHERE state = 'queued';
 CREATE INDEX cells_job_state ON cells (job_id, state);
 CREATE INDEX cells_subject ON cells (subject_cell_id) WHERE subject_cell_id IS NOT NULL;
 CREATE INDEX cells_services ON cells USING gin (pinned_service_ids);
+CREATE INDEX cells_deferred ON cells (acceptance_deferred_until) WHERE acceptance_deferred_until IS NOT NULL;
 -- Trigger cells_frozen: purpose, license, sensitivity, service_requirement, pinned_service_ids,
 -- template_version_id, input_hash, rendered_prompt_hash, job_id and cell_kind never change after insert.
 ```
@@ -1447,17 +1540,21 @@ CREATE TABLE leases (
   issued_at timestamptz NOT NULL,
   expires_at timestamptz NOT NULL,
   timeout_s_applied int NOT NULL CHECK (timeout_s_applied > 0),
-  extensions_used int NOT NULL DEFAULT 0 CHECK (extensions_used >= 0),
+  hard_expires_at timestamptz NOT NULL,
+  extensions int NOT NULL DEFAULT 0 CHECK (extensions >= 0),      -- alias: extensions_used
   optin_version int NOT NULL,
   policy_version_id text NOT NULL REFERENCES policy_versions(id),
   ended_at timestamptz,
+  release_reason text CHECK (release_reason IN ('declined','reported')),   -- set only when state = 'released' (05b CT-05)
   end_reason text,   -- enum(submitted, expired, declined, released, revoked_policy, revoked_service, revoked_job_cancelled, revoked_integrity)
   CHECK (expires_at > issued_at),
+  CHECK (hard_expires_at >= expires_at),
+  CHECK (release_reason IS NULL OR state = 'released'),
   CHECK ((state = 'active') = (ended_at IS NULL)),
   UNIQUE (cell_id, attempt)
 );
 CREATE UNIQUE INDEX leases_one_active_per_cell ON leases (cell_id) WHERE state = 'active';   -- the race guard
-CREATE INDEX leases_reaper ON leases (expires_at) WHERE state = 'active';
+CREATE INDEX leases_reaper ON leases (hard_expires_at) WHERE state = 'active';   -- the reaper tests hard_expires_at (05b 5.29.4)
 CREATE INDEX leases_member_active ON leases (member_id) WHERE state = 'active';
 ```
 
@@ -1534,7 +1631,7 @@ CREATE TABLE ledger_transactions (
   created_at timestamptz NOT NULL DEFAULT now(),
   txn_kind text NOT NULL CHECK (txn_kind IN ('mint','grant','hold','payout','settle','cancel',
     'reservation_activate','expire','retire','reserve_donation','reversal')),
-  natural_key text NOT NULL UNIQUE,
+  idempotency_key text NOT NULL UNIQUE,     -- alias: natural_key (05b 5.29.5, L3)
   member_id text REFERENCES members(id), job_id text REFERENCES jobs(id), cell_id text REFERENCES cells(id),
   reversal_of_txn_id text UNIQUE REFERENCES ledger_transactions(id),
   entry_count int NOT NULL CHECK (entry_count >= 1),
@@ -1545,6 +1642,8 @@ CREATE TABLE ledger_transactions (
   parameter_versions jsonb NOT NULL,
   CHECK ((txn_kind = 'reversal') = (reversal_of_txn_id IS NOT NULL)),
   CHECK (txn_kind <> 'reversal' OR cardinality(approval_action_ids) = 2)
+  -- Constraint trigger ledger_transactions_two_admins (DEFERRABLE INITIALLY DEFERRED, on INSERT): both ids exist in admin_actions
+  -- with action 'ledger.reversal.approve', the same subject and distinct admin_user_id (no FK is possible on an array).
 );
 
 CREATE TABLE ledger_entries (
@@ -1562,6 +1661,7 @@ CREATE TABLE ledger_entries (
   lot_effect text NOT NULL CHECK (lot_effect IN ('create','consume','restore','none')),
   restores_entry_id text REFERENCES ledger_entries(id),
   reverses_entry_id text UNIQUE REFERENCES ledger_entries(id),
+  entry_key text NOT NULL UNIQUE,            -- '<idempotency_key>#<leg>' (05b 5.29.5, L3)
   job_id text REFERENCES jobs(id), cell_id text REFERENCES cells(id),
   prev_hash text NOT NULL CHECK (is_hash(prev_hash)),
   entry_hash text NOT NULL UNIQUE CHECK (is_hash(entry_hash)),

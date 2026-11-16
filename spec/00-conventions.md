@@ -390,13 +390,13 @@ quoted       --job.quote_expired-->        quote_expired
 quoted       --job.waitlisted-->           waitlisted     capacity cannot honor the window now
 waitlisted   --job.waitlist_released-->    quoted         re-quoted
 waitlisted   --job.waitlist_expired-->     cancelled
-quoted       --job.escrow_confirmed-->     admitted       escrow_hold posted; cells created and queued
+quoted       --job.escrow_confirmed-->     admitted       member job: escrow_hold posted; Commons job: confirmed by an admin, no hold and no Escrow (05b 5.22.3); cells created and queued
 admitted     --job.started-->              running        first cell leased
 admitted|running --job.paused-->           suspended      kill switch, template or service pause, policy tightening
 suspended    --job.resumed-->              admitted|running (the state it left)
 running      --job.all_cells_accepted-->   assembling
 assembling   --job.assembled-->            settling
-admitted|running|suspended --job.stop_requested--> settling   closure_reason: policy_stopped, service_revoked, template_retired, operator_killed, overrun_timeout
+admitted|running|suspended --job.stop_requested--> settling   closure_reason: policy_stopped, service_revoked, template_retired, operator_killed, overrun_timeout, cells_exhausted (no primary cell non-terminal and at least one exhausted; non-primary cells are cancelled, 05b 5.22.1)
 settling     --job.settled-->              completed      all primary cells accepted
 settling     --job.settled_partial-->      failed         not all accepted; refunds and payouts posted
 admitted|running|suspended --job.cancel_requested--> cancelling
@@ -421,7 +421,7 @@ submitted         --cell.checks_failed-->      rejected
 flagged_for_audit --cell.audit_passed-->       accepted
 flagged_for_audit --cell.audit_failed-->       rejected
 rejected|expired  --cell.requeued-->           queued          attempt + 1
-rejected|expired  --cell.attempts_exhausted--> exhausted
+rejected|expired  --cell.attempts_exhausted--> exhausted   a primary cell that ends here can never be accepted; the job then leaves through the early exit `job.stop_requested` with `cells_exhausted` (0.9.2)
 queued|leased     --cell.paused-->             suspended       a leased cell's lease is revoked first
 suspended         --cell.resumed-->            queued
 *                 --cell.cancelled-->          cancelled       job cancelled; lease revoked
@@ -432,6 +432,20 @@ accepted          --cell.overturned-->         overturned      appeal or fraud f
 Lease states: `active`, `submitted`, `expired`, `released`, `revoked`. Events: `lease.issued` (none -> `active`), `lease.submission_received` (`active` -> `submitted`; also `expired` -> `submitted` inside `lease.submit_grace_s` while the cell is not re-leased), `lease.extended` (`active` -> `active`; at most `lease.max_extensions` times, each adding `lease.extend_s`), `lease.expired` (`active` -> `expired`), `lease.released` (`active` -> `released`), `lease.revoked` (`active` -> `revoked`).
 
 Submission states: `received`, `schema_failed` (T), `checks_failed` (T), `checks_passed`, `quarantined`, `accepted` (T), `rejected` (T). Events: `submission.received`, `submission.schema_failed`, `submission.checks_passed`, `submission.checks_failed`, `submission.quarantined` (output with links, code to run or requests for action; withheld from results, FD§5.5), `submission.accepted`, `submission.rejected`, `submission.released_from_quarantine`. A replayed submission with the same lease and nonce returns the stored outcome and emits nothing.
+
+Submission transitions [D][A]. `checks_failed` means a check failed before acceptance (the cell becomes `rejected`); `rejected` means the checks passed and the cell was then rejected or voided afterwards. While a submission is `quarantined` the cell stays `submitted`: it has no state of its own, the output is withheld from results, and the quarantine is bounded by `screen.quarantine_max_age_days` (the age-out is `submission.checks_failed`), never by a job timeout. A quarantined submission never auto-releases.
+
+```
+(none)         --submission.received-->                   received
+received       --submission.schema_failed-->              schema_failed    output fails the template's output schema; the cell becomes rejected
+received       --submission.checks_passed-->              checks_passed    schema and automatic checks pass and output flagging finds nothing
+received       --submission.checks_failed-->              checks_failed    an automatic check, gold comparison or screening fails; the cell becomes rejected
+received       --submission.quarantined-->                quarantined      links, code to run or requests for action (FD§5.5); cell stays submitted
+quarantined    --submission.released_from_quarantine-->   received         a reviewer clears it; it returns to verification (gold, audit, automatic checks), not to checks_passed
+quarantined    --submission.checks_failed-->              checks_failed    a reviewer confirms the finding, or the age-out elapses; reject.forbidden_content; the cell requeues
+checks_passed  --submission.accepted-->                   accepted         the cell is accepted (cell.checks_passed or cell.audit_passed)
+checks_passed  --submission.rejected-->                   rejected         the cell is rejected after its checks passed (audit failed) or voided at the acceptance gate
+```
 
 ### 0.9.4 Member trust tier and status (owner S10.*, S8.*)
 
@@ -482,7 +496,7 @@ approved     --service.review_due-->      review_due     timer: service.review_m
 review_due   --service.review_lapsed-->   suspended      timer: service.review_grace_days
 approved|review_due --service.suspended--> suspended     kill switch
 suspended    --service.resumed-->         approved       only when the cause was a kill switch
-approved|review_due|suspended --service.revoked--> revoked   in-flight cells handled per S7.*
+approved|review_due|in_review|suspended --service.revoked--> revoked   in-flight cells handled per S7.*; the revocation carries `inflight_policy` (`drain` or `void`) and jobs pinned only to this service get `job.stop_requested` with `service_revoked`; from `in_review` the same effects apply, so a re-review that ends in revocation does not leave pinned jobs running
 ```
 
 ### 0.9.7 Appeal (owner S10.*, S8.*)
@@ -504,13 +518,30 @@ filed|assigned|in_review|awaiting_second_review --appeal.withdrawn-->    withdra
 
 | Machine | States | Events |
 | --- | --- | --- |
-| `Audit` (S8.*) | `pending`, `second_executed`, `matched` (T), `mismatched`, `third_pending`, `resolved` (T), `cancelled` (T) | `audit.created`, `audit.second_submitted`, `audit.matched`, `audit.mismatched`, `audit.third_requested`, `audit.third_submitted`, `audit.resolved`, `audit.cancelled` |
+| `Audit` (S8.*) | `pending`, `second_executed`, `matched` (T), `mismatched`, `third_pending`, `third_executed`, `resolved` (T), `cancelled` (T) | `audit.created`, `audit.second_submitted`, `audit.matched`, `audit.mismatched`, `audit.third_requested`, `audit.third_submitted`, `audit.resolved`, `audit.cancelled` |
 | `Escrow` (S6.*) | `open`, `settling`, `closed` (T) | `escrow.opened`, `escrow.settling_started`, `escrow.closed` |
 | `Reservation` (S6.*) | `held`, `activated` (T), `cancelled` (T), `expired` (T) | `reservation.held`, `reservation.activated`, `reservation.cancelled`, `reservation.expired` |
 | `Report` (S10.*) | `open`, `triaged`, `actioned` (T), `dismissed` (T) | `report.filed`, `report.triaged`, `report.actioned`, `report.dismissed` |
 | `LaunchGateItem` (S14.*) | `open`, `evidence_attached`, `signed_off`, `reopened` | `gate.evidence_attached`, `gate.signed_off`, `gate.reopened` |
 | Kill switch (S14.*) | `released`, `engaged` | `killswitch.engaged`, `killswitch.released` |
+| `Referral` (S6.*, S12.*) [A] | `held`, `released` (T), `revoked` (T) | `referral.created`, `referral.released`, `referral.revoked` |
+| `Alarm` (S4.*, S13.*) [A] | `raised`, `acknowledged` (T) | `alarm.raised`, `alarm.acknowledged` |
+| `Invite` (S10.*) [A] | `issued`, `redeemed` (T), `expired` (T), `revoked` (T) | `invite.issued`, `invite.redeemed`, `invite.expired`, `invite.revoked` |
 | Ledger and configuration events | not machines | `ledger.entry_committed`, `ledger.invariants_passed`, `ledger.invariant_violated`, `parameter.changed`, `policy.version_published`, `changelog.entry_published`, `launch.members_may_join_changed` |
+
+Transitions of the smaller machines [D][A] (the Audit third state and the three added machines are convention additions; the owning parts confirm the names at assembly):
+
+```
+Audit     (none) --audit.created--> pending --audit.second_submitted--> second_executed --audit.matched--> matched (T)
+Audit     second_executed --audit.mismatched--> mismatched --audit.third_requested--> third_pending --audit.third_submitted--> third_executed --audit.resolved--> resolved (T)
+Audit     pending|second_executed|mismatched|third_pending --audit.cancelled--> cancelled (T)
+Referral  (none) --referral.created--> held     the two-sided bonus is recorded and held for growth.referral.hold_s
+Referral  held --referral.released--> released (T)   hold elapsed; the two grant entries of the bonus are posted (0.8.5)
+Referral  held --referral.revoked--> revoked (T)     abuse finding or revokeReferral before release; nothing is posted
+Alarm     (none) --alarm.raised--> raised --alarm.acknowledged--> acknowledged (T)   an acknowledged alarm is not reopened; a new occurrence raises a new Alarm
+Invite    (none) --invite.issued--> issued     expires after invite.ttl_days
+Invite    issued --invite.redeemed--> redeemed (T) ; issued --invite.expired--> expired (T) ; issued --invite.revoked--> revoked (T)
+```
 
 ## 0.10 Configuration parameters
 
@@ -535,11 +566,11 @@ filed|assigned|in_review|awaiting_second_review --appeal.withdrawn-->    withdra
 | `default` | per type | The `initial configurable default`; never edited after publication |
 | `value`, `version` | per type, int | Current value; `version` increases by 1 per accepted change; every version is an immutable `ParameterVersion` |
 | `effective_from` | timestamptz | Changes are prospective: `effective_from >= now + notice_days` unless `change_class` = `tighten` (R10: tighten at once) |
-| `tighten_direction` | enum `up`, `down`, `none` | Which direction of change counts as tightening (for example `verify.audit_rate_s` is `up`, `admission.phi` is `down`) |
+| `tighten_direction` | enum `up`, `down`, `toward:<value>`, `none` | Which direction of change counts as tightening (for example `verify.audit_rate_s` is `up`, `admission.phi` is `down`) |
 | `notice_days` | int | Advance notice for `loosen` and `neutral` changes; default `change.notice_days_default`, or `change.notice_days_price` for the areas `price`, `admission` and `credit` |
 | `owner` | enum | `operator`, `reviewer` or `founders` (area table 0.10.5); only the owner role may edit; a `loosen` change also needs a second `operator` approval [A] |
 | `calibration_source` | enum | Measurement code from 0.10.4 plus a free-text pointer to the replacing measurement |
-| `public` | bool | Published on the parameter page and change log (default true except `security.*`) |
+| `public` | bool | Published on the parameter page and change log (default true except `security.*` and the rows listed in S16 16.17.5) |
 | `introduced_in` | text | `S<n>.<m>` of the part that defined it |
 
 Every accepted change writes one `ParameterVersion`, one `ChangeLogEntry` (public when `public`), one `AdminAction` and the event `parameter.changed`. Mutable resources use `ETag` and `If-Match` (0.11.7). A job, lot or lease keeps the parameter version it was created under where the spec says so (lot expiry, policy stamp, quote). [D]
@@ -593,7 +624,7 @@ The list below is the FULL set of parameter names; names are stable and C-022 co
 | `price.v_window_days` | days | 28 | 7..90 | `P1M` stability of v |
 | `price.v_min_sample_cells` | int | 100 | 1..100000 | `P1M` variance of v |
 | `price.publish_period_days` | days | 30 (FD§4.3 "monthly") | 1..90 | `FND` |
-| `price.eta_alarm_threshold` | ratio | 0.80 (FD§4.3 suggested, arbitrary) | 0..1 | `FND` (pre-registered) |
+| `price.eta_alarm_threshold` | ratio | 0.80 (FD§4.3 suggested, arbitrary) | (0,1] | `FND` (pre-registered) |
 | `price.quote_ttl_s` | duration_s | 1800 | 60..86400 | `OPS` |
 | `price.v_rounding` | enum | `ceil` | constant | `CON` |
 | `admission.phi` (φ) | ratio | 0.50 (FD§3.3 illustrative) | 0 < x < 1; C1 | `P1M` throughput and deposit-to-withdrawal ratio |
@@ -627,7 +658,7 @@ The list below is the FULL set of parameter names; names are stable and C-022 co
 | `mint.per_member_daily_cap_credits` | credits | 30 (three times the FD§3.2 habit of about 10 cells a day) | >= 1 | `P1M` |
 | `mint.requires_launch_gate` | bool | true | constant | `CON` |
 | `inflation.claim_ratio_threshold_weeks` | ratio | 6.0 (weeks of capacity) | > 0 | `FND`, `P1M` |
-| `inflation.mint_cap_cut_ratio` | ratio | 0.25 (cut applied when the threshold is passed) | 0 < x <= 1 | `FND` |
+| `inflation.mint_cap_cut_ratio` | ratio | 0.25 (cut applied when the threshold is passed; the cap after the cut = floor(cap x (1 - ratio))) | 0 < x <= 1 | `FND` |
 | `inflation.mint_utilization_alarm` | ratio | 0.90 | 0..1 | `OPS` |
 | `inflation.throughput_window_days` | days | 28 | 7..90 | `P1M` |
 | `ledger.invariant_check_interval_s` | duration_s | 60 (sampled checks; the per-commit check is a constant) | 5..3600 | `OPS` |
@@ -637,8 +668,8 @@ The list below is the FULL set of parameter names; names are stable and C-022 co
 | `ledger.allow_negative_balance` | bool | false | constant | `CON` |
 | `job.max_overrun_ratio` | ratio | 2.0 (a job stops with partial settlement at 2 x its quoted window) | >= 1 | `P1M` |
 | `job.max_upload_bytes` | int | 4,194,304 (300 cells x 4,000 chars x up to 3 bytes of UTF-8 is about 3.6 MB) | 1..104857600 | `TEC` |
-| `change.notice_days_default` | days | 7 (FD Principle 5) | 0..90 | `FND` |
-| `change.notice_days_price` | days | 14 (for `price.*`, `admission.*`, `credit.*`) | 0..90 | `FND` |
+| `change.notice_days_default` | days | 7 (FD Principle 5) | 1..90 | `FND` |
+| `change.notice_days_price` | days | 14 (for `price.*`, `credit.*`, `admission.*`, `reservation.*`) | 1..90; >= `change.notice_days_default`; S16D-C9 | `FND` |
 | `change.tighten_publish_within_s` | duration_s | 86,400 (tightening is immediate, its public log entry follows within a day) | 0..604800 | `FND` |
 
 **Table B: verify, lease, cell, trust, invite, ratelimit, identity, session, retention, policy, screen, service, template, optin, appeal, report**
@@ -714,7 +745,7 @@ The list below is the FULL set of parameter names; names are stable and C-022 co
 | `session.admin_idle_ttl_s` | duration_s | 1800 | 60..86400 | `SEC` |
 | `session.admin_abs_ttl_s` | duration_s | 28,800 | 600..86400 | `SEC` |
 | `retention.raw_ip_stored` | bool | false | constant | `CON` |
-| `retention.ip_hash_ttl_days` | days | 1 | 0..30 | `SEC` |
+| `retention.ip_hash_ttl_days` | days | 1 | 1..30 | `SEC` |
 | `retention.session_days` | days | 90 | 1..365 | `SEC` |
 | `retention.request_log_days` | days | 7 | 0..90 | `SEC` |
 | `retention.ops_log_days` | days | 30 | 0..365 | `SEC` |
@@ -759,8 +790,8 @@ The list below is the FULL set of parameter names; names are stable and C-022 co
 | `launch.member_jobs_enabled` | bool | false | as above | flipped by sign-off |
 | `launch.minting_enabled` | bool | false | as above | flipped by sign-off |
 | `launch.required_gate_ids` | json | `["G0","G1"]` (FD§8.3 exit rule) | subset of G0..G5 that always contains G0 and G1 | `FND` |
-| `launch.min_signoffs` | int | 2 distinct admins [A]; an owner decision if the team has one person | 1..5 | `FND` |
-| `launch.min_approved_services` | int | 1 (FD§8.3 exit rule; or a documented fallback) | 0..20 | `FND` |
+| `launch.min_signoffs` | int | 2 distinct admins [A]; an owner decision if the team has one person | 2..5 | `FND` |
+| `launch.min_approved_services` | int | 1 (FD§8.3 exit rule; or a documented fallback) | 1..20 | `FND` |
 | `analytics.third_party_trackers` | bool | false | constant | `CON` |
 | `analytics.cookies_enabled` | bool | false | constant | `CON` |
 | `analytics.min_cohort_k` | int | 10 (cohorts smaller than this are suppressed in aggregates) | 1..1000 | `SEC` |

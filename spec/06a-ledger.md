@@ -24,7 +24,7 @@ Reading rules [D]:
 | LD-02 | The five account types of S0 0.8.5. No entry type moves credit from one member to another; the only member-to-member effect is a `transfer` out of a job's escrow (and the restitution reversal of 6.6.3 after an escrow has closed) | [D] | FD§4.2 |
 | LD-03 | Donors are paid at acceptance, one `transfer` per accepted cell; settlement posts only the levy and the refund | [D] | ISS-09 |
 | LD-04 | Escrow is exactly N x `p_ucr` and is tracked in three bookkeeping budgets: primary, verification pool, levy | [D] | FD§4.3; FD§3.3 |
-| LD-05 | A verification cell is paid from the job's pool, then from the job's levy budget, never from mint or from the Reserve; the scheduler may not create a verification cell the budgets cannot pay | [D][A] | ISS-61 |
+| LD-05 | A verification cell is paid from the job's verification pool only, never from the levy budget, mint or the Reserve; the scheduler may not create a verification cell the pool cannot pay, and when verification cannot be paid the job stops (shortfall path, 6.7.2) [default-pending D-04, ISS-16] | [D][A] | ISS-61 |
 | LD-06 | Spending order is earliest expiry first; escrow drains its slices in the same order; a refund restores the original lots with their original expiry | [D] | FD§4.5; ISS-07; ISS-63 |
 | LD-07 | Every earning event creates its own lot; a lot expires after the lifetime fixed at `earned_at` | [D] | FD§4.5 |
 | LD-08 | K bounds 'owned' credit (unexpired balance plus the member's own open escrow) and is enforced by a headroom reservation at lease time, so acceptance never fails for lack of headroom | [D][A] | FD§4.5; ISS-63 |
@@ -294,11 +294,11 @@ function post_payout(cell, now):                          -- inside post('payout
     e = escrow_of(cell.job); assert e.state in ('open','settling')
     if cell.cell_kind == 'primary':
         assert e.paid_primary_ucr + 1_000_000 <= e.primary_budget_ucr ; e.paid_primary_ucr += 1_000_000
-    else:                                                 -- verification cell: pool first, then levy budget
-        from_pool = min(e.pool_budget_ucr - e.paid_pool_ucr, 1_000_000)
-        from_levy = 1_000_000 - from_pool
-        assert from_levy <= e.levy_budget_ucr - e.paid_levy_budget_ucr
-        e.paid_pool_ucr += from_pool ; e.paid_levy_budget_ucr += from_levy
+    else:                                                 -- verification cell: pool only, no levy draw (default-pending D-04)
+        assert e.paid_pool_ucr + 1_000_000 <= e.pool_budget_ucr
+        -- no levy draw: the shortfall path of 6.7.2 stops the job instead
+        -- the levy budget is never a source of a verification payout
+        e.paid_pool_ucr += 1_000_000
     moves = pick_slices(e.account, 1_000_000)
     entry = transfer(e.account -> account_of(cell.donor), 1_000_000)
     lot = new_lot(donor, 1_000_000, now, now + lifetime_days(donor) * 86400, 'transfer')
@@ -331,14 +331,14 @@ In `settling`, payouts for in-flight cells still post until the drain ends. The 
 
 ### 6.7.2 Verification budget [D][A]
 
-A verification cell (`cell_kind` in `gold`, `audit`, `third`, `review`, `rework`) is charged to a job through the cell field `charged_job_id` (required from `S5.*`, 6.17) and pays its donor exactly 1,000,000 ucr (FD§4.3). Its payment is drawn from the pool, and when the pool is spent, from the job's levy budget (code in 6.6.2). The scheduler may create a verification cell for job J only if
+A verification cell (`cell_kind` in `gold`, `audit`, `third`, `review`, `rework`) is charged to a job through the cell field `charged_job_id` (required from `S5.*`, 6.17) and pays its donor exactly 1,000,000 ucr (FD§4.3). Its payment is drawn from the pool only (code in 6.6.2); the levy budget never pays verification [default-pending D-04, ISS-16]. The scheduler may create a verification cell for job J only if
 
 ```
-free(J) = (pool_budget - paid_pool) + (levy_budget - paid_levy_budget)
+free(J) = pool_budget - paid_pool
 free(J) - 1_000_000 x in_flight_verification_cells(J) >= 1_000_000
 ```
 
-so a payout can never fail for lack of budget. When this is false the scheduler stops creating optional verification for J (gold insertion, sampled audits) and logs `ledger.verification_budget_exhausted`; automatic checks still run. A mandatory third execution (`verify.third_exec_on_mismatch`) that cannot be funded sends the contested cell back to `queued` as a new attempt instead (S8.* owns the cell side). The sampling floor (`verify.audit_rate_floor`, FD§4.4) is therefore a rate over funded verification: where a job's budget cannot fund the floor, that fact is published as `hamyar_ledger_verification_unfunded_total` and counted in the false-accept analysis (S8.*) [A]. No path creates credit to fund verification of a member job (ISS-61).
+so a payout can never fail for lack of budget. When this is false the scheduler creates no verification cell for J, logs `ledger.verification_budget_exhausted` and requests a stop of the job (`job.stop_requested`, 05b JT-15: escrow to `settling`, then `job.settled_partial`, JT-17); accepted cells stay paid and the unspent escrow is refunded. Mandatory verification events are never skipped: one the pool cannot pay is the shortfall that stops the job, and no levy draw, Reserve outflow or mint pays for it. The `closure_reason` value for this stop is not in the 05b JT-15 list; 05b owns it [default-pending D-04]. The sampling floor (`verify.audit_rate_floor`, FD§4.4) is therefore a rate over funded verification: where a job's budget cannot fund the floor, that fact is published as `hamyar_ledger_verification_unfunded_total` and counted in the false-accept analysis (S8.*) [A]. No path creates credit to fund verification of a member job (ISS-61).
 
 ### 6.7.3 Settlement and cancel algorithm [D]
 
@@ -502,7 +502,7 @@ function measure_v(t, T):                        -- T = measurement instant (pub
 | What happens below the minimum sample? | The prior `price.v_prior` applies and the snapshot says `basis = prior`. With the defaults this reproduces FD§3.3 (v = 0.10) before any data exists |
 | What if v_obs exceeds the cap? | The cap applies (`basis = capped`), the excess cost is absorbed by the levy through the rule of 6.7.2, and the alarm `ledger.v_cap_hit` is raised (severity `warn`); the cap protects requesters, the levy absorbs the difference, and publishing both makes the loss visible |
 | Overturned cells? | A cell that is `overturned` is no longer `accepted` at the next measurement and drops out of both counts |
-| Rounding | `div_ceil` (6.3.2); the pool is never smaller than measured cost |
+| Rounding | `div_ceil` (6.3.2); the pool is never smaller than measured cost. The v quoted to a requester is max(measured v, `price.v_prior`, the sampling floors of ISS-16: 0.02 + 0.01 = 0.03 at the defaults), because a pool that cannot pay verification stops the job (6.7.2) [default-pending D-04] |
 | Windows | The trailing window is fixed-length and half-open; it moves with each publication |
 | Limits | v measures cells, not cost in time or tokens (provider tokens are never the unit, FD§4.1); a template whose verification gets cheaper or dearer shows it only after the window turns over |
 
@@ -754,7 +754,7 @@ Where fractions arise. The price p = 1 + v + lambda has up to six decimal places
 | --- | --- | --- |
 | Escrow and refunds are fractional | Exact in ucr; shown exactly (6.3.2); a refund restores the exact fractional amount | No rounding to whole credits, which would move credit systematically between requester, donors and Reserve (S0 0.6.1) |
 | The pool N x v is rarely a whole number of cells (ISS-04) | The pool is a budget in ucr, not a count of cells; verification cells are paid 1 credit each from it; unspent pool is refunded at settlement | It does not promise N x v cells will be run; the number of verification cells is whatever sampling and the budget allow |
-| A small job's pool is below one cell (N = 7: 0.7 credit) | The next verification cell takes the pool and the remainder from the job's levy budget (6.7.2); if the budgets cannot pay, optional verification stops | It does not charge the requester extra after the quote, and it does not mint (ISS-61) |
+| A small job's pool is below one cell (N = 7: 0.7 credit) | No verification cell can be created from a pool below one cell, and the levy budget does not pay (6.7.2); if the floor or a mandatory event requires one, the job stops [default-pending D-04] | It does not charge the requester extra after the quote, and it does not mint (ISS-61) |
 | Balances below 1 credit (dust) | Kept as lots; usable in a job escrow, since escrow is in ucr; they expire and move to the Reserve like any lot | No sweeping of dust into the Reserve, no rounding up |
 | v is rounded up | The pool can exceed measured cost by less than 1 ppm per primary cell (under 1 ucr) | The requester is never under-charged relative to the published v |
 | FD§3.3 is whole-numbered | It is exact because 240 x 0.10 = 24 and 240 x 0.05 = 12; the model does not rely on that (6.15 and `AC-ledger-03` test non-integral cases) | |
@@ -783,7 +783,7 @@ All inputs are the FD's illustrative values, not measurements. This is `AC-ledge
 | 276 credits are escrowed | `escrow_ucr = 240 x 1,150,000`; parts 240 x 1,000,000, 240 x 100,000, 240 x 50,000 | 276,000,000 = 240,000,000 + 24,000,000 + 12,000,000 |
 | She keeps 24 | `escrow_hold` `M(Sara) -> E`, 276,000,000; `pick_lots` takes the 276 earliest-expiring lots: all 270 lots of `d0`..`d26` and 6 of the 10 lots of `d27` | `balance(Sara)` = 24,000,000 (4 lots of `d27`, 10 of `d28`, 10 of `d29`); `balance(E)` = 276,000,000; `K` headroom check passes (owned 300 <= 350) |
 | Admission: 40 x 8 x 2 x 0.5 = 320 >= 264 | Test double returns `admitted` with `2 days`; the real computation is `AC-admission-01` | Job reaches `admitted`; not asserted here |
-| 264 will be executed (240 primary + 24 verification and rework) | Pool 24,000,000 / 1,000,000 = 24 verification cells; `free(J)` = 24,000,000 + 12,000,000 at the start, so every one of the 24 is creatable | 24 cells of `cell_kind` `audit` accepted after the 240 `primary` cells; `paid_pool_ucr` = 24,000,000; `paid_levy_budget_ucr` = 0 |
+| 264 will be executed (240 primary + 24 verification and rework) | Pool 24,000,000 / 1,000,000 = 24 verification cells; `free(J)` = 24,000,000 at the start (the pool only; the levy budget is not a source), so every one of the 24 is creatable | 24 cells of `cell_kind` `audit` accepted after the 240 `primary` cells; `paid_pool_ucr` = 24,000,000; `paid_levy_budget_ucr` = 0 |
 | Donors earn 264 credits by transfer | 264 `transfer` entries `E -> M(donor)` of 1,000,000, cell `k` (k = 1..264) executed by donor index `(k - 1) mod 40`; each slice drain is earliest expiry first | Donors `D00`..`D23` hold 7,000,000 each, `D24`..`D39` hold 6,000,000 each; sum = 24 x 7 + 16 x 6 = 264 credits = 264,000,000 ucr; `balance(E)` = 12,000,000 |
 | 12 credits (lambda x 240) go to the Reserve | `settle`: `levy_due = 240 x 50,000 = 12,000,000`; `levy_available = 12,000,000 - 0`; `levy_posted` = 12,000,000; `refund = 12,000,000 - 12,000,000 = 0`, so no refund entry | `levy` entry `E -> R` of 12,000,000; `balance(R)` = 12,000,000; `balance(E)` = 0; escrow `closed` |
 | 264 + 12 = 276: nothing is created or lost | Closing identity (`INV-L07`): 240,000,000 + 24,000,000 + 0 + 12,000,000 + 0 = 276,000,000 = `funded_ucr` | Holds exactly |
@@ -817,7 +817,7 @@ Ids follow S0 0.5. The numbers `AC-ledger-01`..`16`, `T-unit-01`..`02`, `T-prop-
 | --- | --- | --- | --- |
 | `AC-ledger-01` | The fixture of 6.15 | The sequence of `T-unit-01` runs | Sara pays 276 credits, donors receive 264, the Reserve receives 12, Sara keeps 24, all invariants pass |
 | `AC-ledger-02` | A 240-cell job funded as above; 100 primary and 10 verification cells accepted | The job is stopped (`job.stop_requested`) and settled | Payouts 110,000,000; levy `100 x 50,000` = 5,000,000; refund 161,000,000 restores the unspent slices to their lots; escrow 0 |
-| `AC-ledger-03` | N = 7 (escrow 8,050,000, pool 700,000, levy budget 350,000) | (a) No verification cell; (b) one verification cell is accepted | (a) payouts 7,000,000, levy 350,000, refund 700,000. (b) the cell takes 700,000 from the pool and 300,000 from the levy budget; levy posted 50,000, refund 0; no mint, no Reserve outflow |
+| `AC-ledger-03` | N = 7 (escrow 8,050,000, pool 700,000, levy budget 350,000) | (a) No verification cell; (b) a verification cell is required (floor or mandatory event) | (a) payouts 7,000,000, levy 350,000, refund 700,000. (b) no verification cell is created (pool 700,000 < 1,000,000, no levy draw): `ledger.verification_budget_exhausted` is logged and the job stops; nothing is paid from the levy budget, no mint, no Reserve outflow; settlement posts the levy on accepted primary cells and refunds the unspent pool [default-pending D-04] |
 | `AC-ledger-04` | An admitted 240-cell job, no cell accepted | The requester cancels and the drain ends | `cancel` posts a refund of 276,000,000 and no levy; each lot is restored with its original `expires_at`; Sara's balance is 300,000,000 |
 | `AC-ledger-05` | Sara holds a 14-day grant lot, a 60-day lot earned earlier and a 60-day lot earned later | She funds a job needing more than the grant lot | Lots are consumed in order of `expires_at`; a lot with `expires_at <= now` is never consumed even if not yet swept |
 | `AC-ledger-06` | A job escrow includes a slice of a lot that expires while the job runs, and the member still holds the rest of that lot, which an earlier sweep has already expired | The job settles with a refund covering that slice after `expires_at` | The lot is restored with its original date and the next sweep posts a second `expire` entry (`expire:{lot_id}:1`) to the Reserve (ISS-07) |

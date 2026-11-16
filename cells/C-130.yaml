@@ -1,0 +1,20 @@
+id: C-130
+title: 'FIX-07a: add verdict row for /v1/public/policy to 15c (unblocks check_refs api 11b)'
+type: normal
+priority: 4
+lease_minutes: 30
+goal: |
+  One-line additive edit in spec/15c-api-reconcile-core.md, section 15.B.2 'Verdict table (every cited path)'. scripts/check_refs.py reads only the FIRST backticked /v1 path of a verdict row, so the row `/v1/policy` | NEW | `getPublicPolicy` at `/v1/public/policy` defines only /v1/policy and the real path /v1/public/policy (cited in 11b after 15c edit 21) counts as undefined. Fix: directly after that row insert a new row with exactly these cells: | `/v1/public/policy` | NEW | `getPublicPolicy` (15.B.8) |  . Keep the old row unchanged (do not rename or delete anything). Make the edit with apply_changes as a small old -> new edit (old = the full existing /v1/policy row line, new = that line, a newline, and the new row). Then write docs/fix/FIX-07a.md: one short paragraph saying what was changed and why, a line 'Row added: yes', and the last line 'Result: DONE'. Avoid the words pending, todo and tbd anywhere in the log. Re-read the edited place before submitting.
+after:
+- C-037
+read:
+- scripts/check_refs.py
+- spec/15c-api-reconcile-core.md
+allowed_paths:
+- spec/15c-api-reconcile-core.md
+- docs/fix/FIX-07a.md
+outputs:
+- docs/fix/FIX-07a.md
+acceptance:
+- cmd: python scripts/check_spec.py spec/15c-api-reconcile-core.md --min-lines 375 --min-tags 1
+notes: 'Fix cell written by the Steward. Edit only inside allowed_paths. Do not run anything; CI runs acceptance.'
