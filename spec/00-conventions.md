@@ -390,13 +390,13 @@ quoted       --job.quote_expired-->        quote_expired
 quoted       --job.waitlisted-->           waitlisted     capacity cannot honor the window now
 waitlisted   --job.waitlist_released-->    quoted         re-quoted
 waitlisted   --job.waitlist_expired-->     cancelled
-quoted       --job.escrow_confirmed-->     admitted       escrow_hold posted; cells created and queued
+quoted       --job.escrow_confirmed-->     admitted       member job: escrow_hold posted; Commons job: confirmed by an admin, no hold and no Escrow (05b 5.22.3); cells created and queued
 admitted     --job.started-->              running        first cell leased
 admitted|running --job.paused-->           suspended      kill switch, template or service pause, policy tightening
 suspended    --job.resumed-->              admitted|running (the state it left)
 running      --job.all_cells_accepted-->   assembling
 assembling   --job.assembled-->            settling
-admitted|running|suspended --job.stop_requested--> settling   closure_reason: policy_stopped, service_revoked, template_retired, operator_killed, overrun_timeout
+admitted|running|suspended --job.stop_requested--> settling   closure_reason: policy_stopped, service_revoked, template_retired, operator_killed, overrun_timeout, cells_exhausted (no primary cell non-terminal and at least one exhausted; non-primary cells are cancelled, 05b 5.22.1)
 settling     --job.settled-->              completed      all primary cells accepted
 settling     --job.settled_partial-->      failed         not all accepted; refunds and payouts posted
 admitted|running|suspended --job.cancel_requested--> cancelling
@@ -421,7 +421,7 @@ submitted         --cell.checks_failed-->      rejected
 flagged_for_audit --cell.audit_passed-->       accepted
 flagged_for_audit --cell.audit_failed-->       rejected
 rejected|expired  --cell.requeued-->           queued          attempt + 1
-rejected|expired  --cell.attempts_exhausted--> exhausted
+rejected|expired  --cell.attempts_exhausted--> exhausted   a primary cell that ends here can never be accepted; the job then leaves through the early exit `job.stop_requested` with `cells_exhausted` (0.9.2)
 queued|leased     --cell.paused-->             suspended       a leased cell's lease is revoked first
 suspended         --cell.resumed-->            queued
 *                 --cell.cancelled-->          cancelled       job cancelled; lease revoked
@@ -432,6 +432,20 @@ accepted          --cell.overturned-->         overturned      appeal or fraud f
 Lease states: `active`, `submitted`, `expired`, `released`, `revoked`. Events: `lease.issued` (none -> `active`), `lease.submission_received` (`active` -> `submitted`; also `expired` -> `submitted` inside `lease.submit_grace_s` while the cell is not re-leased), `lease.extended` (`active` -> `active`; at most `lease.max_extensions` times, each adding `lease.extend_s`), `lease.expired` (`active` -> `expired`), `lease.released` (`active` -> `released`), `lease.revoked` (`active` -> `revoked`).
 
 Submission states: `received`, `schema_failed` (T), `checks_failed` (T), `checks_passed`, `quarantined`, `accepted` (T), `rejected` (T). Events: `submission.received`, `submission.schema_failed`, `submission.checks_passed`, `submission.checks_failed`, `submission.quarantined` (output with links, code to run or requests for action; withheld from results, FD§5.5), `submission.accepted`, `submission.rejected`, `submission.released_from_quarantine`. A replayed submission with the same lease and nonce returns the stored outcome and emits nothing.
+
+Submission transitions [D][A]. `checks_failed` means a check failed before acceptance (the cell becomes `rejected`); `rejected` means the checks passed and the cell was then rejected or voided afterwards. While a submission is `quarantined` the cell stays `submitted`: it has no state of its own, the output is withheld from results, and the quarantine is bounded by `screen.quarantine_max_age_days` (the age-out is `submission.checks_failed`), never by a job timeout. A quarantined submission never auto-releases.
+
+```
+(none)         --submission.received-->                   received
+received       --submission.schema_failed-->              schema_failed    output fails the template's output schema; the cell becomes rejected
+received       --submission.checks_passed-->              checks_passed    schema and automatic checks pass and output flagging finds nothing
+received       --submission.checks_failed-->              checks_failed    an automatic check, gold comparison or screening fails; the cell becomes rejected
+received       --submission.quarantined-->                quarantined      links, code to run or requests for action (FD§5.5); cell stays submitted
+quarantined    --submission.released_from_quarantine-->   received         a reviewer clears it; it returns to verification (gold, audit, automatic checks), not to checks_passed
+quarantined    --submission.checks_failed-->              checks_failed    a reviewer confirms the finding, or the age-out elapses; reject.forbidden_content; the cell requeues
+checks_passed  --submission.accepted-->                   accepted         the cell is accepted (cell.checks_passed or cell.audit_passed)
+checks_passed  --submission.rejected-->                   rejected         the cell is rejected after its checks passed (audit failed) or voided at the acceptance gate
+```
 
 ### 0.9.4 Member trust tier and status (owner S10.*, S8.*)
 
@@ -482,7 +496,7 @@ approved     --service.review_due-->      review_due     timer: service.review_m
 review_due   --service.review_lapsed-->   suspended      timer: service.review_grace_days
 approved|review_due --service.suspended--> suspended     kill switch
 suspended    --service.resumed-->         approved       only when the cause was a kill switch
-approved|review_due|suspended --service.revoked--> revoked   in-flight cells handled per S7.*
+approved|review_due|in_review|suspended --service.revoked--> revoked   in-flight cells handled per S7.*; the revocation carries `inflight_policy` (`drain` or `void`) and jobs pinned only to this service get `job.stop_requested` with `service_revoked`; from `in_review` the same effects apply, so a re-review that ends in revocation does not leave pinned jobs running
 ```
 
 ### 0.9.7 Appeal (owner S10.*, S8.*)
@@ -504,13 +518,30 @@ filed|assigned|in_review|awaiting_second_review --appeal.withdrawn-->    withdra
 
 | Machine | States | Events |
 | --- | --- | --- |
-| `Audit` (S8.*) | `pending`, `second_executed`, `matched` (T), `mismatched`, `third_pending`, `resolved` (T), `cancelled` (T) | `audit.created`, `audit.second_submitted`, `audit.matched`, `audit.mismatched`, `audit.third_requested`, `audit.third_submitted`, `audit.resolved`, `audit.cancelled` |
+| `Audit` (S8.*) | `pending`, `second_executed`, `matched` (T), `mismatched`, `third_pending`, `third_executed`, `resolved` (T), `cancelled` (T) | `audit.created`, `audit.second_submitted`, `audit.matched`, `audit.mismatched`, `audit.third_requested`, `audit.third_submitted`, `audit.resolved`, `audit.cancelled` |
 | `Escrow` (S6.*) | `open`, `settling`, `closed` (T) | `escrow.opened`, `escrow.settling_started`, `escrow.closed` |
 | `Reservation` (S6.*) | `held`, `activated` (T), `cancelled` (T), `expired` (T) | `reservation.held`, `reservation.activated`, `reservation.cancelled`, `reservation.expired` |
 | `Report` (S10.*) | `open`, `triaged`, `actioned` (T), `dismissed` (T) | `report.filed`, `report.triaged`, `report.actioned`, `report.dismissed` |
 | `LaunchGateItem` (S14.*) | `open`, `evidence_attached`, `signed_off`, `reopened` | `gate.evidence_attached`, `gate.signed_off`, `gate.reopened` |
 | Kill switch (S14.*) | `released`, `engaged` | `killswitch.engaged`, `killswitch.released` |
+| `Referral` (S6.*, S12.*) [A] | `held` , `released` (T), `revoked` (T) | `referral.created`, `referral.released`, `referral.revoked` |
+| `Alarm` (S4.*, S13.*) [A] | `raised`, `acknowledged` (T) | `alarm.raised`, `alarm.acknowledged` |
+| `Invite` (S10.*) [A] | `issued`, `redeemed` (T), `expired` (T), `revoked` (T) | `invite.issued`, `invite.redeemed`, `invite.expired`, `invite.revoked` |
 | Ledger and configuration events | not machines | `ledger.entry_committed`, `ledger.invariants_passed`, `ledger.invariant_violated`, `parameter.changed`, `policy.version_published`, `changelog.entry_published`, `launch.members_may_join_changed` |
+
+Transitions of the smaller machines [D][A] (the Audit third state and the three added machines are convention additions; the owning parts confirm the names at assembly):
+
+```
+Audit     (none) --audit.created--> pending --audit.second_submitted--> second_executed --audit.matched--> matched (T)
+Audit     second_executed --audit.mismatched--> mismatched --audit.third_requested--> third_pending --audit.third_submitted--> third_executed --audit.resolved--> resolved (T)
+Audit     pending|second_executed|mismatched|third_pending --audit.cancelled--> cancelled (T)
+Referral  (none) --referral.created--> held     the two-sided bonus is recorded and held for growth.referral.hold_s
+Referral  held --referral.released--> released (T)   hold elapsed; the two grant entries of the bonus are posted (0.8.5)
+Referral  held --referral.revoked--> revoked (T)     abuse finding or revokeReferral before release; nothing is posted
+Alarm     (none) --alarm.raised--> raised --alarm.acknowledged--> acknowledged (T)   an acknowledged alarm is not reopened; a new occurrence raises a new Alarm
+Invite    (none) --invite.issued--> issued     expires after invite.ttl_days
+Invite    issued --invite.redeemed--> redeemed (T) ; issued --invite.expired--> expired (T) ; issued --invite.revoked--> revoked (T)
+```
 
 ## 0.10 Configuration parameters
 
