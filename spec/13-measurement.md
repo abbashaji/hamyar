@@ -27,6 +27,7 @@
 | Incidents, typed | `MET-13` | S13.6 | hourly |
 | Qualitative interviews (8-10) | `MET-14` | S13.6 | on record |
 | Accelerated-expiry arm outcomes (FD§4.5 arm, FD§9 setup) | `MET-15` | S13.8 | weekly |
+| Growth mechanics V1 to V6 (FD§9 Phase 2, S12.12) | `MET-16` to `MET-21` | S13.6.15 | daily |
 | Phase 0: cells per day per service, seconds per cell, refusal and failure, copy-paste error, automatic-check pass rate | `CAL-01`..`CAL-06` | S13.9 | on demand, frozen as evidence |
 
 **Build split** (S0.12). `BM2` builds the `PreRegistration` lock, the `Experiment` and `ExperimentAssignment` engine and the Phase 0 calibration tool, so the founders can measure while the rest is built. `BM9` builds the event projector, the metric views, the rollups, the dashboards and the activation of the expiry arm. Domain events are written to the outbox from `BM0` on (S4.*); the projector MUST read the outbox from its first row, and an outbox row MUST NOT be purged before it has been projected. [D]
@@ -784,7 +785,7 @@ The JSON Schema is stored with the code as `schemas/pre_registration.v1.json` [A
 | `population` | `{ default: "external", exclude_internal: true }` |
 | `return_basis` | `pilot_calendar` or `member_relative` (13.6.7) |
 | `measures[]` | `{ metric_id, definition_version, role: decision \| monitoring \| exploratory, population, window }` |
-| `thresholds[]` | `{ id: "TH-nn", metric_id, stat, comparator: gte \| gt \| lte \| lt, value, unit, min_sample, parameter_ref? , fixed_m? }`; `value` is in the metric's scale (ppm, seconds, count); `fixed_m` is the `m` of `first_m_large(m)` |
+| `thresholds[]` | `{ id: "TH-nn", metric_id, stat, comparator: gte \| gt \| lte \| lt, value, unit, min_sample, parameter_ref? , fixed_m?, key? }`; `value` is in the metric's scale (ppm, seconds, count); `fixed_m` is the `m` of `first_m_large(m)` |
 | `decision_rules[]` | `{ id: "DR-nn", expr, on_pass, on_fail, on_inconclusive }` |
 | `analysis_plan` | `{ interval: "wilson95", missing_data, exclusions[], estimator_notes }`; `exclusions[]` entries are `{ code, description }` fixed before day 1 |
 | `experiments[]` | `{ experiment_code: "EXP-nn", primary_outcome: "MET-..", analysis: "itt", min_exposed_per_arm?, analysis_window_s?, guardrail_metrics?, success_rule?, kill_rule?, decision_if_success?, decision_if_neither? }` (for growth mechanics the optional fields are those of S12.11.7; `success_rule` and `kill_rule` are `DR-nn` ids) |
@@ -820,6 +821,17 @@ The JSON Schema is stored with the code as `schemas/pre_registration.v1.json` [A
 ```
 
 The value `800000` for `TH-02` is the conventions default `price.eta_alarm_threshold` = 0.80 (S0.10.6, `FND`), not an FD figure. `TH-03` has `min_sample = 0` because an empty incident list is a valid pass. The `diagnose` list is capacity (`MET-10`, `MET-11`), verification (`MET-03`..`MET-06`) and friction (`MET-08`, `MET-09`, `MET-12`), the three causes FD§9 names for a failure of rule (a). [D]
+
+**Thresholds without a parameter seed (`TRIP-10`, `TRIP-11`, `TRIP-15`).** S19 tripwires name levels "locked in the `PreRegistration`" for which S16.15 lists no seed (audit A13 finding 6). Like `thr.week2_return_min`, these keys are not parameters: they exist only inside a lock record and cannot be loosened after the lock (`ISS-167`). Each is a `thresholds[]` entry with the next free `TH-nn` and its key in the optional field `key`. None has an initial default: the lock is refused while `value` is empty, and no number is proposed here (`FND`). [A]
+
+| `key` | Tripwire | `metric_id` and `stat` | `comparator` | `unit` | Source |
+| --- | --- | --- | --- | --- | --- |
+| `thr.exhausted_cell_share_max` | `TRIP-10` | `MET-02`, `exhausted_cell_share`: cells in state `Cell.exhausted` divided by primary cells of the member jobs admitted in the window, `round_half_up(1e6 * exhausted / primary)` | `lte` | ppm | cell states, S5.* |
+| `thr.fast_contribution_share_min` | `TRIP-11` | `MET-08`, `fast_share_ppm` (13.6.8; `first_only = false`) | `gte` | ppm | 13.6.8 |
+| `thr.copy_paste_error_max` | `TRIP-11` | `CAL-04`, copy-paste error rate over `cell_run` rows of the Phase 0 sample (13.9.2) | `lte` | ppm | 13.9.2 |
+| `thr.active_donors_min` | `TRIP-15` | `MET-07` cohort view: members with at least one submission in the pilot week (`act` of 13.6.7), `stat = active_donors_week` | `gte` | count | 13.6.7 |
+
+The return half of `TRIP-15` uses the existing `thr.week2_return_min` (`TH-04` of the template). S13 has no Phase 1 measure of the copy-paste error rate (only `CAL-04`, Phase 0): until one is defined, the second half of `TRIP-11` can only be read on the calibration sample. S16.15 needs the same four rows in its table; FIX-02 and FIX-04 do not cover them (see `docs/fix/FIX-11.md`). [D]
 
 ### 13.7.6 Link to the launch gate and the launch switch
 
@@ -1141,3 +1153,5 @@ Problems and gaps found while writing this part. Each resolution is applied in t
 | `ISS-139` | major | FD§4.5, FD§9 | The accelerated-expiry arm is compared by "share of credit expiring" (FD§9 setup, parameter table), but lots of the accelerated arm mature earlier, so a naive expired share compares different ages and favors neither arm correctly | The primary comparison is week-2 return; the credit comparison uses a fixed horizon (`spent_within_h_share`) and shows the matured expired share only beside it (13.8.6) | applied |
 
 Convention additions made by this part (not issues, listed so `C-001` can fold them back): the rows of `ISS-138`, the retention class and fields of 13.4, and the `AN-nn` rule ids.
+
+Additions and open points of FIX-11 (no new `ISS` id is assigned here) [A]: (1) metric ids `MET-16` to `MET-21` and the views `mv_assignment`, `mv_referral`, `mv_share`, `mv_milestone` (13.6.15); (2) the column `ExperimentAssignment.first_exposed_at`; (3) whether the actor-bearing outbox rows behind `mv_share` are kept until the rollup that closes their window has run is for S4.*; (4) the optional `thresholds[].key` and the four `thr.*` keys of 13.7.5, to be mirrored in S16.15; (5) guardrails that S12.12 names without a key (V2 share of exposures with `rendered` false, V3 reports, V4 members in teams below `team.min_public_members`) are not defined here; `rendered` is not an allowed dimension of 13.3.4; (6) the permission `perm.metrics.view_small_cells` was removed from the operation table 13.10.2 only; `AN-09` (13.2) still names it, see `docs/fix/FIX-11.md`; (7) the permissions `perm.experiment.manage` and `perm.calibration.record` named in `ISS-138` are partly replaced by `perm.experiment.edit`, `perm.experiment.run`, `perm.calibration.read` and `perm.calibration.write` in 13.10.2, and `perm.approval.decide` is added; the `ISS-138` list is not rewritten.
