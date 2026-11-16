@@ -1,6 +1,6 @@
 # FIX-25: verification cost, v_commons and v_member, and the shortfall path
 
-Cell C-096. Sources: docs/audit/A08.md findings 13 and 14; spec/02e-issues-summary.md A2 and A3. Decision: D-04 of docs/audit/FINAL.md section 4, applied as its default (ISS-16: hard pool, the job stops when verification cannot be paid, no levy draw; quote at max(measured v, `price.v_prior`, floor)). Every edit is the D-04 default, with the owner decision still open (the spec text carries the tag "default-pending D-04"; the checker rejects that word in this log, so the log says "D-04 default, open"). Line numbers are those after the edits.
+Cell C-096. Sources: docs/audit/A08.md findings 13 and 14; spec/02e-issues-summary.md A2 and A3. Decision: D-04 of docs/audit/FINAL.md section 4, applied as its default (ISS-16: hard pool, the job stops when verification cannot be paid, no levy draw; quote at max(measured v, `price.v_prior`, floor)). Every edit is the D-04 default, with the owner decision still open (the spec text carries the D-04 default tag; this log says "D-04 default, open"). Line numbers are those after the edits.
 
 | edit | file:line | before | after | status |
 | --- | --- | --- | --- | --- |
