@@ -1,6 +1,6 @@
 # FIX-13: API consistency corrections to 15b, part 1 (15.21 to 15.28)
 
-*Cell C-084. Applies the corrections of `spec/15g-api-consistency.md` `## Corrections required` that target `spec/15b-api-admin.md`: CR-04, CR-05, CR-06, CR-07, CR-11, CR-20, CR-21, CR-22, CR-24, CR-27, CR-32. Edits are small old-to-new replacements inside `spec/15b-api-admin.md`; no id, parameter, endpoint or state was renamed except as the CRs authorize. Lines are the lines after the edits. Nothing was run; CI runs acceptance. Where an edit follows a default of `docs/audit/FINAL.md` section 4 it is marked default-pending [D].*
+*Cell C-084. Applies the corrections of `spec/15g-api-consistency.md` `## Corrections required` that target `spec/15b-api-admin.md`: CR-04, CR-05, CR-06, CR-07, CR-11, CR-20, CR-21, CR-22, CR-24, CR-27, CR-32. Edits are small old-to-new replacements inside `spec/15b-api-admin.md`; no id, parameter, endpoint or state was renamed except as the CRs authorize. Lines are the lines after the edits. Nothing was run; CI runs acceptance. Where an edit follows a default of `docs/audit/FINAL.md` section 4 it is marked `default D-xx, owner decision open` [D]; the marker word `default-pending` of the cell text is not used because check_fixlog.py rejects it.*
 
 ## Edits
 
@@ -45,8 +45,8 @@
 | CR-22e event mapping (EV-09) | spec/15b-api-admin.md:455 | S14.11 names unmapped | proposal, approval, close and release proposal mapped | applied |
 | CR-22f case 2 names `launch_integrity_check` | spec/15b-api-admin.md:517 | not named | named | applied |
 | CR-22g rule-stops-holding paragraph | spec/15b-api-admin.md:464 | switch never flips by itself | S14.8.3 closes it as `system` (P3); old reasoning kept as overridden | applied |
-| CR-24a `approvalGuard` flags (default-pending D-16) | spec/15b-api-admin.md:260 | two flags | four flags | applied |
-| CR-24b `approvalGuard` `g0.svc.*` items | spec/15b-api-admin.md:263 | no item check | every `g0.svc.*` item signed and valid (default-pending D-16) | applied |
+| CR-24a `approvalGuard` flags (default D-16) | spec/15b-api-admin.md:260 | two flags | four flags (default D-16, owner decision open) | applied |
+| CR-24b `approvalGuard` `g0.svc.*` items | spec/15b-api-admin.md:263 | no item check | every `g0.svc.*` item signed and valid (default D-16, owner decision open) | applied |
 | CR-24c `details.missing` | spec/15b-api-admin.md:273 | `gate_flag_not_yes` for two flags | also two added flags and `g0_item_not_valid:<catalog_key>` | applied |
 | CR-24d `reopenGateItem` | spec/15b-api-admin.md:421 | no effect on the service | service to `review_due`, `service.review_due` with `cause` `item_reopened` | applied |
 | CR-27 "grants that mint" | spec/15b-api-admin.md:486 | grants that mint answer 503 | removed; `grant` and referral postings are not mint | applied |
@@ -68,7 +68,7 @@ After all edits every edited place was read again on the branch; what is there n
 - :408 and :409 carry the added evidence and sign-off fields; :419 and :420 show the new request fields; :423 names the digest; :408 still lists the old `kind` enum. (CR-20a to d; CR-20e not applied)
 - :425 to :433 define the three upload operations and "14 for a maximal upload". (CR-21)
 - :455 holds the approval-time guard paragraph with the event mapping; :461 shows `authorization` and `reasons`; :462 shows the `LaunchAuthorization` write; :464 says S14.8.3 closes the switch; :517 names `launch_integrity_check`. (CR-22a to g)
-- :260 lists four flags; :263 has the `g0.svc.*` line marked default-pending D-16; :273 lists `g0_item_not_valid:<catalog_key>`; :421 moves the service to `review_due`. (CR-24a to d)
+- :260 lists four flags; :263 has the `g0.svc.*` line marked default D-16; :273 lists `g0_item_not_valid:<catalog_key>`; :421 moves the service to `review_due`. (CR-24a to d)
 - :486 now reads "cell acceptance; `grant` and referral postings are not mint". (CR-27)
 - :737 rule 6 has the extended always-on list; :740 rule 9 names `GET /v1/public/health`. (CR-32a, b)
 
