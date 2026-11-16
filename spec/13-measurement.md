@@ -592,6 +592,118 @@ FD§9 asks for 8 to 10 interviews including reasons for stopping. The platform t
 
 Reporting: counts by `segment` against the target range stored in the pre-registration (`qualitative_plan.min_interviews` = 8, `max_interviews` = 10, FD§9), counts by `stop_reason_codes`, and the coverage flag `has_stopped_donor` (an interview set with no `stopped_donor` cannot report reasons for stopping). Counts under `analytics.min_cohort_k` are shown as ranges only in the admin report, never published. Cadence: on record. Known biases: interviewees are self-selected and reachable, which excludes members who left because of safety concerns and went silent; eight to ten interviews support hypothesis generation, not frequencies (S13.11). [D]
 
+### 13.6.15 Growth mechanic metrics `MET-16` to `MET-21` (V1 to V6)
+
+S12.12 names a primary metric key for each growth mechanic `V1` to `V6` and says that `S13.*` owns the definitions; before FIX-11 none of them was defined here (audit A11 finding 4). The keys below are the S12 keys, unchanged. They are the FD§9 Phase 2 measures; in Phase 1 the same queries run descriptively with `arm_key = 'all'` (no experiment, S12.12). Ids `MET-16` to `MET-21` are convention additions in the existing `MET-nn` family, so the `metric_no` forms of 13.5.4 and `?kind=met` of the metric-snapshot listing need no change. [D][A]
+
+**Conventions shared by `MET-16` to `MET-21`** [D]
+
+1. **Intent to treat.** The denominator is the members assigned to an arm (`mv_assignment`), not the members who saw the variant; `MET-18` is the one exception, as S12.12.3 defines it, and also reports the assigned-member variant.
+2. **Anchor.** `t_a` is `assigned_at` of the member's assignment for the experiment of that mechanic; with no experiment (`arm_key = 'all'`) it is `created_at`. Days are UTC calendar days (S0.6.2).
+3. **Stored form.** Every ratio is stored as integer ppm with a Wilson interval (13.5.3), `scale = ppm`, although the S12 key ends in `_ratio` (the S12 key is kept, not renamed). `n_members` counts distinct members behind the value, so `AN-06` and `AN-07` apply; with 30 to 50 members every split by arm is suppressed and only the `arm_key = 'all'` row is readable (S12.11.8, 13.11).
+4. **Right-censoring.** A member enters a denominator only when her window is closed (`t_a + window <= as_of`); the members still inside the window are reported as `censored_n`, never dropped silently and never counted as not returned.
+5. **Windows.** The 7 days of `MET-17` are part of its name, as the week is part of 13.5.1. Every other window is `experiments[].analysis_window_s` of the effective pre-registration (13.7.5). It has no initial default and is not invented here: while it is not pinned, the rows that need it are `no_data`. [A]
+6. **Added views** (inside the trust boundary, like those of 13.4.1; S5.* is authoritative for the base columns) [A]:
+
+| View | One row per | Columns |
+| --- | --- | --- |
+| `mv_assignment` | experiment assignment | `assignment_id`, `member_ref`, `experiment_code`, `arm_key`, `stratum_key`, `assigned_at`, `surface_key`, `first_exposed_at` (nullable) |
+| `mv_referral` | referral | `referral_id`, `referrer_ref`, `newcomer_ref`, `arm_key` (the referrer's), `state`, `block_reason`, `created_at`, `qualified_at`, `paid_ucr`, `clawed_back_ucr` |
+| `mv_share` | member and share event | `member_ref`, `rendered_at`, `shared_at` (from `sharecard.rendered` and `sharecard.shared`) |
+| `mv_milestone` | milestone | `milestone_key`, `published_at`, `withdrawn_at` |
+
+`first_exposed_at` is a column added to `ExperimentAssignment`, written when the server records `experiment.exposed`; it does for exposure what `leases.last_card_opened_at` does for `MET-08` (13.10.1), so exposure stays recomputable after the raw events expire. `mv_share` reads the actor-bearing outbox rows, which exist only inside the trust boundary; whether S4.* keeps them until the closing rollup has run is open (`## Issues raised`).
+
+### 13.6.16 `MET-16` V1: first verified cell after joining
+
+| Field | Value |
+| --- | --- |
+| Names | `hamyar_growth_v1_created_to_first_verified_cell_ratio`, `hamyar_growth_v1_time_to_first_verified_cell_seconds`, `hamyar_growth_v1_contribution_under_threshold_ratio` |
+| Definition | Over members created on or after `day0` (`population` per 13.5.2), grouped by `arm_key`. For a window `w` in seconds: `ratio_within(w)` = members with `first_accepted_at - created_at <= w`, divided by members with `created_at + w <= as_of` (convention 4). It is reported for `w` = 3,600; 86,400; 604,800 (the survival points of `MET-09`, units of time and not thresholds) and for `w = analysis_window_s` (convention 5); the pre-registered reading is the last. `first_accepted_at` is the first accepted cell of any kind, as in `MET-09` |
+| Secondary keys | `..._time_to_first_verified_cell_seconds` is `MET-09` (median, p90) grouped by `arm_key`. `..._contribution_under_threshold_ratio` is `MET-08` `fast_share` with `first_only = true`, grouped by `arm_key`, with the strict comparison `T < ui.fast_contribution_threshold_s` and the `time_source` split of `MET-08`. They add no new query, only the grouping by assignment. The landing-to-created figure is not a rate: `hamyar_growth_landing_requests_total` is shown beside it and never divided into it (`ISS-124`) |
+| Cadence | Daily; each value is final when its window is closed |
+| Known biases | `MET-09` biases apply: the first `verify.new_donor_blanket_cells` cells wait for other executions, so "verified" measures queue supply as well as the member. A fast path can raise the numerator with members who skip the explainer and are rejected later; read the S12.12.1 guardrails (`reject.timing_anomaly` and `reject.schema_invalid` among first cells, decline rate, copy-paste failures) beside it. Invited participants overstate conversion relative to an open beta [H]. With 30 to 50 members the value is a count, not an estimate |
+
+```sql
+SELECT COALESCE(a.arm_key, 'all') AS arm_key, w.w_s,
+       count(*) FILTER (WHERE m.created_at + w.w_s * interval '1 second' <= :as_of) AS eligible_n,
+       count(*) FILTER (WHERE m.created_at + w.w_s * interval '1 second' <= :as_of
+                          AND m.first_accepted_at - m.created_at <= w.w_s * interval '1 second') AS verified_n
+FROM mv_member m
+LEFT JOIN mv_assignment a ON a.member_ref = m.member_ref AND a.experiment_code = :exp
+CROSS JOIN (VALUES (3600), (86400), (604800), (:analysis_window_s)) AS w(w_s)
+WHERE m.created_at >= :day0 AND pop_ok_member GROUP BY 1, 2;
+-- ratio_ppm = round_half_up(verified_n * 1e6 / eligible_n); a NULL :analysis_window_s gives no row for that window (status no_data)
+```
+
+### 13.6.17 `MET-17` V2: day-7 return
+
+| Field | Value |
+| --- | --- |
+| Name | `hamyar_growth_v2_day7_return_ratio` |
+| Definition | Let `d_a` be the UTC calendar day of `t_a`. A member *returned by day 7* when at least one submission (`submitted_at` not null, any outcome, as in `MET-07`) falls in `[d_a + 1 d, d_a + 8 d)`, that is on calendar days 1 to 7 after the anchor day [A]. Value = returned members divided by assigned members with `d_a + 8 d <= as_of`, grouped by `arm_key`. Companion `exact_day = true`: a submission on calendar day 7 only, `[d_a + 7 d, d_a + 8 d)`; stricter and sparser. The choice between the two readings is made in the pre-registration through the pinned `stat` (`day7_return` or `day7_return_exact`) |
+| Cadence | Daily; final when `d_a + 8 d <= as_of` |
+| Known biases | The public counter page is visible to every member, so the arm without the in-app widget still sees the figure; the contrast is diluted toward zero (S12.12.2). The denominator is every assigned member, not only week-1 contributors, which differs from `MET-07`; members assigned late in the pilot are censored. A submission on the anchor day itself is day 0 and is not a return. Day-7 return measures staying, not satisfaction (`MET-07`) |
+
+```sql
+SELECT COALESCE(x.arm_key, 'all') AS arm_key,
+       count(*) FILTER (WHERE d_a + interval '8 days' <= :as_of) AS eligible_n,
+       count(*) FILTER (WHERE d_a + interval '8 days' <= :as_of AND EXISTS (
+           SELECT 1 FROM mv_attempt t WHERE t.member_ref = x.member_ref AND t.submitted_at IS NOT NULL
+             AND t.submitted_at >= d_a + interval '1 day' AND t.submitted_at < d_a + interval '8 days')) AS returned_n
+FROM (SELECT m.member_ref, date_trunc('day', COALESCE(a.assigned_at, m.created_at)) AS d_a, a.arm_key
+      FROM mv_member m LEFT JOIN mv_assignment a ON a.member_ref = m.member_ref AND a.experiment_code = :exp
+      WHERE m.created_at >= :day0 AND pop_ok_member) x GROUP BY 1;
+```
+
+### 13.6.18 `MET-18` V3: share taps and card arrivals
+
+| Field | Value |
+| --- | --- |
+| Names | `hamyar_growth_v3_share_tap_ratio`, `hamyar_growth_v3_card_source_arrivals_total` |
+| Definition (tap ratio) | An *exposed* member is an assignment for surface `result.share_offer` with `first_exposed_at` not null. The decision point is logged for both arms (S12.11), the control arm with `rendered = false`. A member *tapped* when she has a `sharecard.shared` with `shared_at` in `[first_exposed_at, first_exposed_at + analysis_window_s)`. Value = tapped divided by exposed members whose window is closed, by `arm_key`; the assigned-member variant (denominator all assigned, `variant = itt`) is stored beside it |
+| Definition (arrivals) | Count of members created with `join_source = 'card'` per non-overlapping week (`AN-08`); descriptive, not randomized (`ISS-124`). It carries `n_members`, so `AN-06` applies |
+| Cadence | Daily for the ratio; weekly for the arrivals |
+| Known biases | A tap is intent: the platform cannot know that anything was posted (S12.12.3). The card carries no per-member token, so an arrival cannot be tied to the member who shared; arrivals depend on the source tag surviving the link. Exposure follows a first accepted cell or a new badge, so exposed members are more engaged than the whole population; the `itt` variant keeps that visible. The share control in settings stays reachable to the control arm, so the contrast is the offer, not the ability |
+
+```sql
+SELECT a.arm_key,
+       count(*) FILTER (WHERE a.first_exposed_at IS NOT NULL AND a.first_exposed_at + (:analysis_window_s * interval '1 second') <= :as_of) AS exposed_n,
+       count(*) FILTER (WHERE a.first_exposed_at IS NOT NULL AND a.first_exposed_at + (:analysis_window_s * interval '1 second') <= :as_of AND EXISTS (
+           SELECT 1 FROM mv_share s WHERE s.member_ref = a.member_ref AND s.shared_at >= a.first_exposed_at
+             AND s.shared_at < a.first_exposed_at + (:analysis_window_s * interval '1 second'))) AS tapped_n
+FROM mv_assignment a WHERE a.experiment_code = :exp AND a.surface_key = 'result.share_offer' GROUP BY 1;
+```
+
+### 13.6.19 `MET-19` V4: week-2 return by arm
+
+| Field | Value |
+| --- | --- |
+| Name | `hamyar_growth_v4_week2_return_ratio` |
+| Definition | By `arm_key`, intent to treat: assigned members with `t_a + 14 d <= as_of` are the denominator; *returned* means at least one submission in `[t_a + 7 d, t_a + 14 d)`. Unlike `MET-07`, the cohort is not limited to week-1 contributors, because conditioning on a contribution made after assignment would break the randomization. Members who join a team by code stay in the arm they were assigned (the offer is randomized, not the joining, FD§6.2) |
+| Cadence | Daily; final when the window is closed |
+| Known biases | Members self-select into teams, so only the offer is causal. Team totals are public (S12.9), so contamination across arms is likely. Week-2 cohorts are tiny in a 30-day pilot (`ISS-131`, `MET-07`) |
+
+### 13.6.20 `MET-20` V5: referral activation, blocks and unrecovered credit
+
+| Field | Value |
+| --- | --- |
+| Names | `hamyar_growth_v5_referred_activation_ratio`, `hamyar_growth_v5_blocked_total`, `hamyar_growth_referral_unrecovered_ucr_total` |
+| Definition (activation) | Over `Referral` rows with `created_at` in the window, by `arm_key` (the referrer's arm; the newcomer inherits it, S12.12.5): `referral.qualified` divided by `referral.created`, as S12 states, counting only referrals whose window is closed, that is `created_at + growth.referral.qualify_window_days <= as_of`, or that already qualified. `qualified` is the state of the S12.10 machine (the newcomer reached `growth.referral.min_newcomer_verified_cells` verified cells inside that window; S12 wins if it defines it differently). A blocked referral stays in the denominator as not qualified. The pending ones are reported as `pending_n` |
+| Definition (guardrails) | `hamyar_growth_v5_blocked_total`: count of `referral.blocked` by `block_reason`, and its share of `referral.created` in ppm. `hamyar_growth_referral_unrecovered_ucr_total` (`scale = ucr`): `sum(paid_ucr) - sum(clawed_back_ucr)` over referrals with `referral.paid`, read from the S6.* ledger postings named in S12.10; this part defines no ledger kind |
+| Cadence | Daily; the activation value is final when the qualify window of the last referral in the period has closed |
+| Known biases | The randomization unit is the referrer, and one referrer can hold several referrals (`growth.referral.max_per_referrer_per_30d`), so the Wilson interval over referrals ignores clustering and is too narrow; read it with `n_members` (distinct referrers) and never as a test (`ci_unit = referral`). The arm with a bonus may recruit more farming than genuine activations, so blocks and unrecovered credit are read beside the ratio. The qualify window (default 30 days) is as long as the pilot, so most referrals are `pending_n` (13.11) [A] |
+
+### 13.6.21 `MET-21` V6: return after a published milestone
+
+| Field | Value |
+| --- | --- |
+| Name | `hamyar_growth_v6_return_after_milestone_ratio` |
+| Definition | For each member of an arm, the *first* `milestone.published` at or after her `assigned_at` is her one observation (later milestones are shown descriptively, so no member is counted twice). Anchor `T_m` is that milestone's `published_at`, the same instant for every arm: the arm decides only whether the in-app announcement (`inbox.milestone`) is shown. *Returned* means at least one submission in `[T_m, T_m + analysis_window_s)`. Value = returned divided by assigned members whose window is closed, by `arm_key` (intent to treat) |
+| Descriptive companion | Members active per UTC day and arrivals with `join_source = 'milestone'` around milestone dates, read as an interrupted time series and not as a causal estimate (S12.12.6). The model and the window around a milestone are written in the pre-registration under `analysis_plan.estimator_notes`; no number is fixed here |
+| Cadence | Daily; final when the window is closed |
+| Known biases | Public milestone pages cannot be hidden from the control arm, so the contrast is the in-app announcement only. A milestone that coincides with a large-job week or an invitation wave confounds the time series, not the assigned-arm comparison. A withdrawn milestone (`milestone.withdrawn`) is excluded from the observation and listed |
+
 ## 13.7 Pre-registration
 
 FD§9 requires the Phase 1 thresholds to be pre-registered before day 1 and calls its decision rules "arbitrary until you set them". This section makes the setting auditable: the thresholds and rules are written down, canonicalized, hashed, timestamped and locked by two admins before anyone outside the founders can join, and the evaluation later reads only what was locked. The values themselves are decisions for the founders (`FND`); this part provides the mechanism and a template, not the numbers. [D]
