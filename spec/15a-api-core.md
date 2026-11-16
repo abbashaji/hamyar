@@ -75,7 +75,7 @@ Schema blocks list `field: type`. A response object named in the text (for examp
 
 **Rules** [D]
 
-1. **Strict requests.** An unknown field, a duplicate JSON key, a wrong type, or a number where an `ucr` string is required is `400 VALIDATION_FAILED`. The response lists every field error at once in `details.fields` as `{path, code, message}` with `code` in `required`, `type`, `format`, `range`, `length`, `enum`, `unknown_field`, `not_allowed`. Responses are lenient: clients ignore unknown fields (0.11.1).
+1. **Strict requests.** An unknown field, a duplicate JSON key, a wrong type, or a number where an `ucr` string is required is `400 VALIDATION_FAILED`. The response lists every field error at once in `details.fields` as `{path, code, message}` with `code` in `required`, `type`, `format`, `range`, `length`, `enum`, `unknown_field`, `not_allowed`, `secret_pattern`. An unknown query parameter is `400 VALIDATION_FAILED` as well, with `details.fields[0].code` = `unknown_field` and `details.fields[0].path` the parameter name, as for bodies. Responses are lenient: clients ignore unknown fields (0.11.1).
 2. **Not found, not forbidden.** A resource that belongs to another member, or that is not visible to the caller under the opt-in rule `R8`, is `404 NOT_FOUND`. Existence is never confirmed by a different status or message. An unknown route or method is `404 NOT_FOUND`, reason `route_not_found`.
 3. **Server time only.** No request field carries a client clock value that the server trusts; client-reported timings are not accepted at all (timing anomalies are computed from `issued_at` and `received_at`, `S9.*`).
 4. **Money and ratios** are `*_ucr` strings and `*_ppm` integers; the display decimal is a client concern (0.6.1).
@@ -89,8 +89,8 @@ Schema blocks list `field: type`. A response object named in the text (for examp
 
 | Scheme | Credential | Notes |
 | --- | --- | --- |
-| `member` | `Authorization: Bearer <token>`; token is 256 bits from the OS CSPRNG, base64url (43 characters), opaque; the server stores only its SHA-256 (0.6.4) | Obtained only from `createSession`. Never in a URL, query, body or cookie. An admin token here is `401 AUTH_INVALID`, reason `wrong_scheme` |
-| `none` | nothing | `createIdentityChallenge`, `createMember`, `checkInvite`, `createSession`, `recoverMember`, `redeemDeviceLink` only; each is rate-limited per IP hash and per device hash |
+| `member` | `Authorization: Bearer <token>`; token is 256 bits from the OS CSPRNG, base64url (43 characters), opaque; the server stores only its SHA-256 (0.6.4) | Obtained only from `createSession`. Never in a URL, query, body or cookie. An admin token here is `401 AUTH_INVALID`, reason `wrong_scheme`; the reverse holds as well: a member token on an `admin` route is the same `401` with the same reason, never `403` or `404`, and neither case is stored under an idempotency key (the sibling file states the rule for its routes) |
+| `none` | nothing | `createIdentityChallenge`, `createMember`, `checkInvite`, `createSession`, `recoverMember`, `redeemDeviceLink` only; each is rate-limited per IP hash and per device hash. An `Authorization` header sent to a `none` operation is ignored: it is not evaluated, not logged (`S15.3` rule 5), and the response is identical to the response without it (the two dual-scheme bootstrap rows of the sibling file are the only exception and state their own precedence) |
 
 **Challenge and signature (API view)** [D][A]
 
@@ -121,8 +121,9 @@ A challenge is 256 random bits, stored only as SHA-256, bound to its purpose, si
                   same body hash  -> replay stored 2xx or deterministic 4xx, Idempotent-Replayed: true
                   other body hash -> 422 IDEMPOTENCY_KEY_MISMATCH
                   still running  -> 409 IDEMPOTENCY_IN_PROGRESS (+ Retry-After)
- 7 gates        launch.* switch -> 403 LAUNCH_GATE_CLOSED; kill switch -> 503 KILL_SWITCH_ENGAGED;
-                member status and recovery cooldown -> 403 FORBIDDEN
+ 7 gates        launch.* switch -> 403 LAUNCH_GATE_CLOSED; kill switch (the four published keys) -> 503 KILL_SWITCH_ENGAGED;
+                kill.member.<mem_id> -> 403 FORBIDDEN (account_frozen); member status and recovery cooldown -> 403 FORBIDDEN;
+                member step-up missing or invalid -> 401 AUTH_INVALID (step_up_required, step_up_invalid)
  8 validate     schema, enums, sizes -> 400 VALIDATION_FAILED / 413
  9 resolve      absent, not owned or not visible -> 404 NOT_FOUND
 10 precondition If-Match -> 412 PRECONDITION_FAILED
@@ -141,7 +142,8 @@ Replays are counted as requests at step 5 but do not pay the write weight (`rate
 | `createMember` | `launch.members_may_join` | - |
 | `createJob` with `submit` true, `submitJobForScreening`, `confirmJob`, `createReservation` | `launch.member_jobs_enabled` | `kill.all_new_jobs`, `kill.template.<tpl_id>` |
 | `createLease` on a Commons cell | `launch.minting_enabled` | `kill.all_minting`, `kill.template.<tpl_id>`, `kill.service.<svc_id>` |
-| `createLease` on a member-job cell | - | `kill.template.<tpl_id>`, `kill.service.<svc_id>` |
+| `createLease` on a member-job cell | `launch.member_jobs_enabled` | `kill.template.<tpl_id>`, `kill.service.<svc_id>` |
+| `extendLease`, `issueLeaseNonce`, `expandLeasePrompt` | - | - (continuing a lease already held is exempt, S14 rule 6) |
 | `submitResult` | - (a lease already issued stays submittable; a switch that pauses its cell revokes the lease first, 0.9.3, so the call is `410 LEASE_EXPIRED` reason `lease_revoked`) | - |
 | leases, submissions, job creation and invitations of a member with `kill.member.<mem_id>` engaged | - | `403 FORBIDDEN`, reason `account_frozen` (not 503; part b 15.28.1); reads and appeals still work |
 
@@ -184,6 +186,7 @@ Member   { id: id<mem>, status: enum<member_status>, trust_tier: enum<trust_tier
            digits: enum<digits>, calendar: enum<calendar>, time_zone: text<64>/null,
            email: { state: "none"/"unconfirmed"/"confirmed", masked: text<64>/null },
            email_notifications: { credit_expiry: bool },
+           client_events_enabled: bool,
            recovery: { cooldown_until: ts/null, recoveries_90d: int },
            security_notices: [ { kind: "key_rotated"/"device_linked"/"recovered"/"recovery_key_rotated", at: ts } ],
            created_at: ts }                                              ETag = row_version
@@ -195,7 +198,7 @@ Device   { id: id<dev>, link_state: "pending"/"awaiting_approval"/"linked"/"deni
 Invite   { id: id<inv>, state: "active"/"redeemed"/"expired"/"revoked", created_at: ts, expires_at: ts, redeemed_at: ts/null }
 ```
 
-`trust_tier` is the 0.9.4 state set; the reliability estimate behind it is not exposed by this part [A]. `last_seen_on` is a coarse date, never a timestamp (metadata minimization, FD Principle 8). The key and invite state names are convention additions.
+`trust_tier` is the 0.9.4 state set; the reliability estimate behind it is not exposed by this part [A]. `last_seen_on` is a coarse date, never a timestamp (metadata minimization, FD Principle 8). The key and invite state names are convention additions. `client_events_enabled` is an additive field that part 15f needs (client events, 15.E.11); it is read-only here (`updateMe` does not accept it) [A][V: review for high-risk members].
 
 **Schemas** (errors beyond the common set of `S15.9` are listed per operation)
 
@@ -328,7 +331,7 @@ listOfferedCells(member, filters, cursor):                       order: server p
       AND cell.service_requirement in optin.service_requirements
       AND (topics of the cell not sensitive OR in optin.topic_category_ids)
       AND exists s in optin.service_ids that satisfies the requirement (M0: any approved; M1: in pinned set; M2: open-weight entry)
-  drop: Commons cells while launch.minting_enabled = false or kill.all_minting is engaged; cells of a paused template or a suspended service;
+  drop: Commons cells while launch.minting_enabled = false or kill.all_minting is engaged; cells of a paused template or a suspended service; member-job cells while launch.member_jobs_enabled = false; cells for which no service in optin.service_ids passes service_gate(service, 'continue') of S14.3;
         cells of the member's own jobs; cells the member already executed or declined; audit cells whose first executor is the member
   drop: everything if member headroom or daily earn cap leaves no room (see createLease quotas)
   window = first `limit` after the cursor ; filters (service_id, template_id, job_type) can only narrow, never widen
@@ -339,7 +342,8 @@ The list carries card metadata only, never the prompt (limits bulk harvesting of
 ```
 createLease(member, cell_id, service_id):        req { service_id: id<svc> }
   201 { lease: Lease, cell: { id: id<cel>, card: CellCard }, work: WorkOrder, nonce: b64u<16> }   nonce appears here and in issueLeaseNonce only
-  pipeline gates:   member active; launch.minting_enabled for Commons cells; kill switches (template, service); exception to step 7: the Commons and kill checks run after the cell is resolved (step 9), so a cell the caller cannot see stays 404
+  pipeline gates:   member active; launch.minting_enabled and kill.all_minting for Commons cells; launch.member_jobs_enabled for member-job cells; kill switches (template, service); the member's kill.member (403 FORBIDDEN, account_frozen); exception to step 7: the Commons, member-job, kill-switch and service-gate checks run after the cell is resolved (step 9), so a cell the caller cannot see stays 404, while the kill.member check stays at step 7
+  service gate:     service_gate(service_id, 'continue') of S14.3 (gate flags, stale copy, review_due grace) fails -> 403 FORBIDDEN (service_gate_regressed, details.service_id) [A][P: S14 owner]
   visibility:       cell not visible under R8, own-job cell, already-executed cell            -> 404 NOT_FOUND
   service:          service_id not in optin.service_ids or not eligible for the requirement   -> 422 UNPROCESSABLE (service_not_eligible)
   quota:            active leases >= lease.max_active_per_member                              -> 422 CAP_EXCEEDED (active_lease_limit)
@@ -354,18 +358,18 @@ The two cap checks at lease time use "potential earnings" so a member cannot hol
 
 - **Mandatory expansion** (FD§5.5). When `requires_expansion` is `true`, `createLease` and `getLease` return `prompt: null`, `prompt_state: expansion_required`; `expandLeasePrompt` returns the prompt and records the expansion on the lease, and `submitResult` without it is `409 STATE_CONFLICT`, reason `expansion_required`. The server can prove the prompt was requested, not that it was read ("can see" is guaranteed, "has read" is not). `requires_expansion` is `true` for the member's first lease on a `template_id` and for any non-default category (`optin.sensitive_topics_default`, `P2`, `P3`); `ui.card.expand_required_first_use` is a constant `true`. [D][H: whether this reduces blind pasting is measured by `ui.comprehension_check_rate` experiments, `S13.*`]
 - **Adapter.** `work.service` is built server-side from the registry entry. `open_url` is the entry's `adapter.prefill_url_template` with `{prompt}` URL-encoded, present only if `adapter.supports_prefill` is `true`, `prefilled_link_use` is `yes` and the result is at most `adapter.max_url_chars` long; otherwise `open_url` is `null` and `copy_only` is `true`. The URL never contains the lease, nonce, cell id or any member identifier. The member presses Send in the service; the platform never reads that page [D][V: per service, `G0(c)`, `G2`].
-- **Lost nonce.** `issueLeaseNonce` mints a new nonce for an `active` lease and invalidates the previous one (a page reload must not strand a lease). `extendLease` adds `lease.extend_s` once per allowed extension (`lease.max_extensions`); beyond it `409 STATE_CONFLICT`, reason `max_extensions_reached`. An expired lease is `410 LEASE_EXPIRED`.
+- **Lost nonce.** `issueLeaseNonce` mints a new nonce for an `active` lease and invalidates the previous one (a page reload must not strand a lease). `extendLease` adds `lease.extend_s` once per allowed extension (`lease.max_extensions`); beyond it `409 STATE_CONFLICT`, reason `max_extensions_reached`. `extendLease`, `issueLeaseNonce` and `expandLeasePrompt` continue work already held and are exempt from every launch switch, kill switch and service gate of this section (no value is trapped, S14 rule 6). An expired lease is `410 LEASE_EXPIRED`.
 - **Decline is free** (FD§5.5, `lease.decline_cooldown_s` = 0). `releaseLease` takes `{ reason?: enum<decline_reason> }`, ends the lease (`released`), returns the cell to `queued` without raising `attempt`, and excludes that cell from this member's offers. `declineOffer` does the same for a card the member never leased (it records the decline for the demand-quality signal by category, never as a penalty). `decline_reason`: `not_interested`, `too_long`, `service_problem`, `content_concern`, `other` (convention addition). [D]
 
 ### 15.6.3 Reports
 
 ```
-createReport  req { subject_kind: "cell"/"lease"/"template"/"job"/"result", subject_id: id<cel>/id<lse>/id<tpl>/id<job>/id<sub>,
+createReport  req { subject_kind: "cell"/"lease"/"template"/"job"/"result"/"team", subject_id: id<cel>/id<lse>/id<tpl>/id<job>/id<sub>/id<tem>,
                     category: enum<report_category>, note: text<500>? }
               201 Report { id: id<rpt>, state: "open"/"triaged"/"actioned"/"dismissed", category, created_at: ts }
 ```
 
-`report_category` (convention addition): `prohibited_content`, `sensitive_data`, `injection_attempt`, `link_or_action_request`, `wrong_declaration`, `abusive_or_unsafe`, `other`. A volunteer may report any card they hold a lease for; a requester may report a `result` of their own job. The reported party never sees the reporter; reports count toward `template.autopause_report_count` within `template.autopause_window_s` (event `template.paused`, `S8.*`); a report never changes the reporter's tier. Limit: `report.max_per_member_per_day` per UTC day (`RL-REPORT`). [D]
+`report_category` (convention addition): `prohibited_content`, `sensitive_data`, `injection_attempt`, `link_or_action_request`, `wrong_declaration`, `abusive_or_unsafe`, `other`. A volunteer may report any card they hold a lease for; a requester may report a `result` of their own job. A `result` is named by an `id<sub>` or, when the caller owns the job, by the `id<cel>` of its cell (a requester never sees an `id<sub>`); a `team` is named by an `id<tem>` of a team the caller can read, otherwise `404 NOT_FOUND` (`S15.3` rule 2). The reported party never sees the reporter; reports count toward `template.autopause_report_count` within `template.autopause_window_s` (event `template.paused`, `S8.*`); a report never changes the reporter's tier. Limit: `report.max_per_member_per_day` per UTC day (`RL-REPORT`). [D]
 
 ### 15.6.4 Submission (paste-back)
 
@@ -387,7 +391,7 @@ submitResult  req { nonce: b64u<16>, reported_service_id: id<svc>, reported_mode
 - **Size.** A body or `output_text` above `cell.envelope.max_submission_bytes` is `413 PAYLOAD_TOO_LARGE`, reason `submission_too_large`, stores nothing and keeps the lease active. Within the byte limit but outside the envelope (`cell.envelope.max_output_chars`) the submission is stored and rejected with `reject.length_out_of_bounds`; the cell requeues (FD§3.4). [D]
 - **Attestation, not proof.** `reported_service_id` must be one of the member's `optin.service_ids`; it and `reported_model` are recorded as the volunteer's attestation for the manifest (FD§5.6, failure mode 7). The server never asks for, accepts or stores a chat link, screenshot or page content. [D]
 - **Processing order** (`S8.*`, `S9.*` own the algorithms): schema and size check; forbidden-content, link and instruction-pattern scan (quarantine); automatic checks; gold comparison; duplicate and timing heuristics against stored data; audit sampling. Cheap checks run before the response; a pending verdict resolves later and `getSubmission` returns the final verdict. Clients poll with backoff; the server may send `Retry-After` on a pending verdict. [D]
-- **Payment at acceptance** (`ISS-09`). On `accepted` the same transaction posts the ledger entry: a `mint` for a Commons cell, a `transfer` for a member-job cell, exactly 1,000,000 ucr (0.6.1), creating a `CreditLot` with `expires_at = earned_at + credit.lifetime_days x 86,400 s` under the parameter version at `earned_at` (0.6.2). Nothing in the response reveals the cell kind, an audit, a comparison or another donor's output. [D]
+- **Payment at acceptance** (`ISS-09`). On `accepted` the same transaction posts the ledger entry: a `mint` for a Commons cell, a `transfer` for a member-job cell, exactly 1,000,000 ucr (0.6.1), creating a `CreditLot` with `expires_at = earned_at + credit.lifetime_days x 86,400 s` under the parameter version at `earned_at` (0.6.2). The mint of a Commons cell is gated by `launch.minting_enabled`, `kill.all_minting` and the member's `kill.member.<mem_id>`, and acceptance of any cell also needs `service_gate(service, 'continue')` of S14.3. A closed gate never turns the call into `503` or `403`, because a lease legitimately issued is never trapped (S14 rule 6): the submission is stored with `verdict` `pending`, no ledger entry is posted, the mint is held until the gate reopens, and `getSubmission` keeps returning `pending` [A][P: `S6.*` owner]. Nothing in the response reveals the cell kind, an audit, a comparison or another donor's output. [D]
 - **Never executed, always escaped.** Submitted text is stored verbatim and returned only as a JSON string with `X-Content-Type-Options: nosniff`; nothing in this API interprets, renders or executes it. [D]
 
 `getSubmission` returns one `Submission`. `listSubmissions` (history) returns `Page<{ submission: Submission, card: { template_name: text<80>, purpose: enum<purpose>, origin: "commons"/"member" } }>`, filters `verdict`, `from`, `to` (`ts`), newest first.
@@ -482,6 +486,7 @@ Job          { id: id<job>, state: enum<job states of 0.9.2>, template: { id: id
                escrow: { id: id<esc>, held_ucr: ucr }/null, window: { window_s: dur_s, completes_by: ts/null }/null,
                waitlist: { position: int, expires_at: ts }/null, suspension_reason_key: copy_key/null,
                closure_reason: "policy_stopped"/"service_revoked"/"template_retired"/"operator_killed"/"overrun_timeout"/"requester_cancelled"/null,
+               rating: { score: int, comment: text<500>/null, updated_at: ts }/null,
                created_at: ts, updated_at: ts }                                  ETag = row_version
 Quote        { policy_version_id: id<plv>, parameter_versions: { "<parameter name>": int },
                primary_cells: int, v_ppm: ppm, lambda_ppm: ppm, p_ucr: ucr, eta_ppm: ppm,
@@ -537,10 +542,10 @@ Manifest    { id: id<mfs>, job_id: id<job>, deliverable_id: id<dlv>, manifest_ve
 ```
 
 - **Per-cell status map.** `JobCell.state` collapses the 0.9.3 cell states for the requester: `queued` = `queued`; `in_progress` = `leased`, `submitted`, `flagged_for_audit`, `rejected`, `expired`, `overturned`; the others map one to one. Only primary cells are listed (verification cells are visible only as `verification` counts), and no volunteer identity, handle or lease id is ever shown. `listJobCells` is ordered by `ordinal`. [D]
-- **Cancel.** `cancelJob` body `{ reason: text<200>? }`. State `draft`, `quoted` or `waitlisted`: `200`, job `cancelled` at once, nothing held. State `admitted`, `running` or `suspended`: `202`, job `cancelling` (unstarted cells `cancelled` (`cell.cancelled`) and refunded, in-flight cells finish under the pinned policy, `job.cancel_settled`), response `{ job, refund_ucr: ucr/null }` with `refund_ucr` known after settlement and visible in `getJob`. Any other state: `409 STATE_CONFLICT`, reason `not_cancellable`. What part of the levy and the pool remains payable on a partial run is `S6.*`. [D]
+- **Cancel.** `cancelJob` body `{ reason: text<200>? }`. State `draft`, `quoted` or `waitlisted`: `200`, job `cancelled` at once, nothing held. State `admitted`, `running` or `suspended`: `202`, job `cancelling` (unstarted cells `cancelled` (`cell.cancelled`) and refunded, in-flight cells finish under the pinned policy, `job.cancel_settled`), response `{ job, refund_ucr: ucr/null }` with `refund_ucr` known after settlement and read through `getSettlementReceipt` (part 15d; `Job` carries no refund field). Any other state: `409 STATE_CONFLICT`, reason `not_cancellable`. What part of the levy and the pool remains payable on a partial run is `S6.*`. [D]
 - **Results.** `listJobResults` (ordered by `ordinal`, `Page<ResultItem>`) and the deliverable are available in `completed` and `failed` (partial) jobs; before that `409 STATE_CONFLICT`, reason `job_state_invalid`. Quarantined and unaccepted cells are never included; a `partial` deliverable lists `missing_ordinals`. `getJobDeliverableContent` returns `{ media_type: string, encoding: "utf-8", content: string, content_hash: hash }` as `application/json` (never a raw file type, so nothing is rendered by a browser; the client saves it). `available_until` is the terminal time plus `retention.job_payload_days`; afterward `state` is `purged` and the content is gone while the hashes in the manifest remain. [D]
 - **Manifest** (FD§5.6). Contains the declared purpose, license and sensitivity, the policy profile and version, per-cell input and output hashes, the service and model *as reported by the volunteer* (attested, not proven), the verification method and result, and timestamps. It contains no volunteer handle (0.6.4: requesters never see it) and no member id. `no_training` is a contractual flag (`false` when the requester declared `P1`, `true` otherwise), not a technical control. `manifest_hash` is the SHA-256 of the RFC 8785 canonical JSON of the manifest without that field. [D][A]
-- **Rating.** `rateJob` body `{ score: int 1..5, comment: text<500>? }`, allowed in `completed` and `failed`, replaces an earlier rating; response `{ rating: { score, comment, updated_at } }`. A rating feeds template and job-type quality measures only and is never attached to a volunteer, so it cannot be used for retaliation. [D]
+- **Rating.** `rateJob` body `{ score: int 1..5, comment: text<500>? }`, allowed in `completed` and `failed`, replaces an earlier rating; response `{ rating: { score, comment, updated_at } }`. The same object is read back as `Job.rating` (`null` until rated). A rating feeds template and job-type quality measures only and is never attached to a volunteer, so it cannot be used for retaliation. [D]
 
 ### 15.7.4 Reservations (`ff.job.reservations`)
 
@@ -578,6 +583,7 @@ Growth mechanics are experiments behind flags (FD§6; `ff.growth.v1_fast_path` .
 ```
 Features   { flags: { "<ff name>": bool } }                                       only flags that affect the member's screens; no arm names
 Team       { id: id<tem>, name: text<40>, listed: bool, member_count: int, verified_cells_30d: int,
+             score: { week_start: date, week: int, all_time: int },
              my_membership: { role: "owner"/"member", alias: text<24>, visible: bool }/null, created_at: ts }
 createTeam req { name: text<40>, listed: bool?, alias: text<24>? }   201 { team: Team, join_code: text<32> }       the code appears once
 joinTeam   req { join_code: text<32>, alias: text<24>?, visible: bool? }   201 { team: Team }
@@ -588,10 +594,10 @@ Referral   { id: id<ref>, state: "issued"/"redeemed"/"activated"/"paid"/"expired
 createReferral 201 { referral: Referral, code: text<32> }                          the code appears once
 ```
 
-- **Teams** need `ff.growth.v4_teams` and trust tier at least `team.create_min_tier`; at most `team.max_members` members (`CAP_EXCEEDED`, `team_full`); joining needs the join code and an unexpired `active` member. Aliases are chosen per team, not unique, and are not linked to any other identifier. A member who sets `visible: false` is counted but never listed. `listed: true` allows the team name and its total to appear on public surfaces only while `member_count >= team.min_public_members` (`S12.*`). A team never shows per-member contribution except for `visible` members. [D]
+- **Teams** need `ff.growth.v4_teams` and trust tier at least `team.create_min_tier`; at most `team.max_members` members (`CAP_EXCEEDED`, `team_full`); joining needs the join code and an unexpired `active` member. Aliases are chosen per team, not unique, and are not linked to any other identifier. A member who sets `visible: false` is counted but never listed. `listed: true` allows the team name and its total to appear on public surfaces only while `member_count >= team.min_public_members` (`S12.*`). A team never shows per-member contribution except for `visible` members. `score` (weekly and all-time, as 12.9.2 reads in 15d) is added beside `verified_cells_30d`; `listTeamMembers` and every `alias` field stay defined here but are off until the part 12 owner enables them (the flag name is theirs): while off, `listTeamMembers` is a disabled mechanic (`403 FORBIDDEN`, `feature_disabled`, `details.flag`) and no alias is collected or shown [A][P: part 12 owner]. [D]
 - **Share card** (`ff.growth.v3_share_card`). `getShareCard` is computed on request and returns only a verified-cell total and badges; it contains no member id, no handle, no location, no date of joining and no time series (`contains_personal_data` is always `false`). The client renders the image locally; the server stores no image and no share link, so there is nothing to track or revoke. [D]
 - **Referral** (`ff.growth.v5_referral`). A referral is an invite with a bonus attached: `createReferral` also creates the `Invite` (same guards as `createInvite`) and counts toward `growth.referral.max_per_referrer_per_30d` (`CAP_EXCEEDED`, `referral_limit`). Redemption is the `invite_code` of `createMember`; the referral becomes `activated` when the newcomer has `growth.referral.min_newcomer_verified_cells` verified cells, and `paid` after `growth.referral.hold_s`, when the referrer receives `growth.referral.bonus_referrer_credits` and the newcomer `growth.referral.bonus_newcomer_credits`, each as a `grant` entry from the Reserve; if the Reserve is at `grant.reserve_floor_credits` the state stays `activated` with `pending_reason` `reserve_floor`. The referrer sees counts and states only, never who the newcomer is. Anti-farming limits (`ratelimit.invite_tree_new_members_per_day`, the invite tree caps, `grant.max_per_device`) apply unchanged. [D]
-- **Feature flags.** `getFeatures` lets the client render only what the server enabled; a client must not call an endpoint whose flag is off. A call to a disabled mechanic is `403 FORBIDDEN`, reason `feature_disabled`, `details.flag`. [D]
+- **Feature flags.** `getFeatures` lets the client render only what the server enabled; a client must not call an endpoint whose flag is off. `getFeatures` also reflects the global client-event parameter of part 15f (15.E.11; its name is 15f's), so a client sends no client events while it is off [A][V: review for high-risk members]. A call to a disabled mechanic is `403 FORBIDDEN`, reason `feature_disabled`, `details.flag`. [D]
 
 ## 15.9 Error model and error-code catalogue
 
@@ -600,19 +606,19 @@ Every non-2xx response is `{ "error": { "code": string, "message": string, "deta
 | Code | HTTP | Client action | `details` keys | `details.reason` values |
 | --- | --- | --- | --- | --- |
 | `MALFORMED_REQUEST` | 400 | fix, do not retry | - | `invalid_json`, `body_not_object`, `bad_header` |
-| `VALIDATION_FAILED` | 400 | fix, do not retry | `fields: [{path, code, message}]` | `field_invalid`, `unknown_field`, `missing_field`, `idempotency_key_missing`, `cursor_invalid`, `cursor_expired`, `limit_out_of_range`, `option_not_selectable` |
+| `VALIDATION_FAILED` | 400 | fix, do not retry | `fields: [{path, code, message}]` (`code` as in `S15.3` rule 1) | `field_invalid`, `unknown_field`, `missing_field`, `idempotency_key_missing`, `cursor_invalid`, `cursor_expired`, `limit_out_of_range`, `option_not_selectable`, `prefill_requires_flag`, `hash_mismatch`, `missing_chunks`, `op_not_previewable`, `consent_not_recorded`, `fractions_sum`, `block_size_over_limit`, `override_invalid` |
 | `AUTH_REQUIRED` | 401 | log in | - | `no_credentials` |
-| `AUTH_INVALID` | 401 | log in again | - | `credentials_invalid`, `wrong_scheme`, `challenge_invalid`, `key_pending` |
+| `AUTH_INVALID` | 401 | log in again | - | `credentials_invalid`, `wrong_scheme`, `challenge_invalid`, `key_pending`, `step_up_required`, `step_up_invalid`, `assertion_invalid` |
 | `AUTH_EXPIRED` | 401 | new challenge or session | - | `session_idle_expired`, `session_absolute_expired`, `challenge_expired` |
-| `FORBIDDEN` | 403 | show message | `until?`, `flag?` | `member_suspended`, `member_banned`, `recovery_cooldown`, `recovery_quota`, `tier_too_low`, `feature_disabled`, `account_frozen` |
-| `LAUNCH_GATE_CLOSED` | 403 | show "not open yet" | `switch` (`launch.members_may_join`, `launch.member_jobs_enabled`, `launch.minting_enabled`) | - |
+| `FORBIDDEN` | 403 | show message | `until?`, `flag?`, `service_id?` | `member_suspended`, `member_banned`, `recovery_cooldown`, `recovery_quota`, `tier_too_low`, `feature_disabled`, `account_frozen`, `service_gate_regressed`, `second_admin_required`, `approver_not_distinct` |
+| `LAUNCH_GATE_CLOSED` | 403 | show "not open yet" | `switch` (`launch.members_may_join`, `launch.member_jobs_enabled`, `launch.minting_enabled`) | `members_not_open`, `jobs_not_open`, `minting_not_open` |
 | `NOT_FOUND` | 404 | stop | - | `route_not_found` (others carry none: absent, not owned and not visible look the same) |
-| `STATE_CONFLICT` | 409 | reload, then decide | `state?` | `job_state_invalid`, `quote_expired`, `quote_changed`, `not_cancellable`, `upload_attached`, `max_extensions_reached`, `expansion_required`, `submission_exists`, `last_active_key`, `key_state_invalid`, `invite_state_invalid`, `reservation_state_invalid` |
+| `STATE_CONFLICT` | 409 | reload, then decide | `state?` | `job_state_invalid`, `quote_expired`, `quote_changed`, `not_cancellable`, `upload_attached`, `max_extensions_reached`, `expansion_required`, `submission_exists`, `last_active_key`, `key_state_invalid`, `invite_state_invalid`, `reservation_state_invalid`, `not_pending`, `expired`, `guard_failed`, `last_credential`, `last_operator`, `already_engaged`, `not_engaged`, `release_guard_failed`, `service_not_recordable`, `copy_not_sealed`, `copy_other_service`, `already_reversed`, `would_overdraw_lot`, `outside_policy`, `experiment_running`, `notice_too_short`, `already_running`, `open_work`, `balance_changed`, `appeal_decided`, `appeal_window_closed`, `not_appealable`, `job_terminal`, `already_stopping`, `use_overturn`, `held_by_other`, `lock_pending`, `not_registered`, `incident_resolved`, `supersedes_not_latest`, `no_records` |
 | `LEASE_CONFLICT` | 409 | reload offers | - | `cell_not_queued` |
-| `ALREADY_EXISTS` | 409 | treat as done or stop | - | `public_key_exists`, `starter_grant_claimed`, `membership_exists` |
+| `ALREADY_EXISTS` | 409 | treat as done or stop | - | `public_key_exists`, `starter_grant_claimed`, `membership_exists`, `appeal_exists`, `report_exists` |
 | `IDEMPOTENCY_IN_PROGRESS` | 409 | retry same key after `Retry-After` | - | - |
 | `LEASE_EXPIRED` | 410 | release and re-offer | `lease_id` | `lease_expired`, `nonce_invalid`, `lease_released`, `lease_revoked` |
-| `PRECONDITION_FAILED` | 412 | re-read, retry | - | `etag_mismatch` |
+| `PRECONDITION_FAILED` | 412 | re-read, retry | - | `etag_mismatch`, `version_stale` |
 | `PAYLOAD_TOO_LARGE` | 413 | shorten | `limit_bytes` | `body_too_large`, `submission_too_large`, `upload_too_large` |
 | `UNSUPPORTED_MEDIA_TYPE` | 415 | fix | - | - |
 | `POLICY_REJECTED` | 422 | edit declarations | `reasons: ["policy.<rule>.<slug>"]`, `job_id?`, `findings?` | - |
@@ -620,11 +626,13 @@ Every non-2xx response is `{ "error": { "code": string, "message": string, "deta
 | `CAP_EXCEEDED` | 422 | wait or reduce | `parameter`, `limit`, `current`, `resets_at?` | `active_lease_limit`, `member_credit_cap`, `daily_earn_cap`, `job_too_large`, `concurrent_jobs`, `waitlist_limit`, `reservation_limit`, `reservation_horizon`, `reservation_capacity_share`, `invite_limit`, `invite_tree_full`, `invite_tree_depth`, `grant_per_device`, `grant_per_tree_day`, `grant_daily_limit`, `referral_limit`, `team_full` |
 | `NO_CAPACITY` | 422 | choose another window | `requote?` | `capacity_changed`, `date_full` |
 | `IDEMPOTENCY_KEY_MISMATCH` | 422 | use a new key | - | - |
-| `UNPROCESSABLE` | 422 | fix | - | `invite_required`, `invite_unusable`, `invite_requirement_unmet`, `service_not_eligible`, `grant_requirement_unmet`, `reserve_floor`, `glossary_invalid` |
+| `UNPROCESSABLE` | 422 | fix | - | `invite_required`, `invite_unusable`, `invite_requirement_unmet`, `service_not_eligible`, `grant_requirement_unmet`, `reserve_floor`, `glossary_invalid`, `no_semantic_change`, `contains_loosening`, `contains_tightening`, `mixed_change`, `public_text_required`, `immutable_constant`, `use_launch_endpoints`, `not_a_parameter`, `duplicate_name`, `no_change`, `prereg_required`, `prereg_not_locked`, `output_ref_required`, `criterion_not_reached`, `blocking_finding`, `no_evaluation_yet`, `job_incomplete` |
 | `RATE_LIMITED` | 429 | wait `Retry-After` | `class`, `limit`, `reset_s`, `scope?` | - |
 | `INTERNAL` | 500 | retry with same key, backoff | - | - |
 | `UNAVAILABLE` | 503 | retry with same key, backoff | - | - |
 | `KILL_SWITCH_ENGAGED` | 503 | show notice | `switch` (`kill.all_minting`, `kill.all_new_jobs`, `kill.template.<tpl_id>`, `kill.service.<svc_id>`) | - |
+
+**Reasons and keys added by the audit round** (`ER-01` to `ER-11` of `15.G.5`) [D][A]. Besides the keys of the table, part b and the overlays use these optional `details` keys on the rows `STATE_CONFLICT`, `VALIDATION_FAILED` and `FORBIDDEN`: `missing`, `blockers`, `guards`, `constraints`, `counts`, `balance_ucr`, `state`, `until`, `service_id`, `reasons`. `POLICY_REJECTED` `details.reasons` also carries slugs not yet in S0 0.8.4 or S7: `policy.R9.policy_version_stale`, `policy.R3.reviewer_rejected`, `policy.R3.prohibited_category`, `no_eligible_service` [P: S7 owner]. `LAUNCH_GATE_CLOSED` reasons are the S14 `reasons` mapped to `details.reason`. `KILL_SWITCH_ENGAGED` `details.switch` lists the four published keys only: `kill.member.<mem_id>` is never published and its refusal is `FORBIDDEN` `account_frozen` (part b 15.28.1). `RATE_LIMITED` is the code of rate limits only; a count cap is `CAP_EXCEEDED` (`ER-10`). Every reason added here has the key `copy.api_error.<code lowercase>.<reason>`; S11 owns the text.
 
 Examples of the exact shape:
 
@@ -691,7 +699,7 @@ Limits are parameters (0.10), never constants in code. Windows are sliding-windo
 
 | Class | Applies to | Key | Limit | Parameter |
 | --- | --- | --- | --- | --- |
-| `RL-PUB` | `/v1/public/*` (sibling file) | IP hash | per minute | `ratelimit.public_rpm` |
+| `RL-PUB` | `/v1/public/*` (sibling file; the same class as `PUB` of part b 15.21.2, whose `PUB-V` is a sibling class with its own cost, not an alias) | IP hash | per minute | `ratelimit.public_rpm` |
 | `RL-BOOT` | `createIdentityChallenge`, `createMember`, `checkInvite`, `createSession`, `redeemDeviceLink` | IP hash and device hash | per minute | `ratelimit.public_rpm`; `createMember` also per day per device, per IP hash and per invite tree: `ratelimit.device_new_members_per_day`, `ratelimit.ip_hash_new_members_per_day`, `ratelimit.invite_tree_new_members_per_day` |
 | `RL-RECOVER` | `recoverMember` | IP hash and device hash | per day, successes and failures both count | `ratelimit.recovery_attempts_per_day` |
 | `RL-READ` | every member `GET` | member | per minute, cost 1 | `ratelimit.member_api_rpm` |
@@ -701,7 +709,7 @@ Limits are parameters (0.10), never constants in code. Windows are sliding-windo
 | `RL-UPLOAD` | `createUpload`, `createGlossary` | member | per rolling hour | `ratelimit.member_uploads_per_hour` |
 | `RL-REPORT` | `createReport` | member | per UTC day | `report.max_per_member_per_day` |
 
-- `RateLimit-Limit`, `RateLimit-Remaining` and `RateLimit-Reset` (seconds) describe the bucket with the least remaining share for that request; the `429` body names the binding class in `details.class` and repeats `limit` and `reset_s`; `Retry-After` is in whole seconds. [D]
+- `RateLimit-Limit`, `RateLimit-Remaining` and `RateLimit-Reset` (seconds) describe the bucket with the least remaining share for that request; contract tests key on `details.class`, so `RL-PUB` and `PUB` are one class and `PUB-V` another; the `429` body names the binding class in `details.class` and repeats `limit` and `reset_s`; `Retry-After` is in whole seconds. [D]
 - A request refused by a rate limit does not run any later pipeline step and consumes no idempotency record. A `429` is never stored (0.11.5), so retrying the same key after waiting is correct. [D]
 - Limits protect the service and are not a fairness mechanism between members; caps on credit and earnings are separate and surface as `CAP_EXCEEDED`. [D]
 
@@ -840,7 +848,7 @@ With a balance of 300 credits this leaves 24, as in FD§3.3; a balance below 276
 
 Given / When / Then, each testable against the generated contract suite (`BM0`). `AC-api-01` and `AC-api-03` are stated in `S15.5`.
 
-- `AC-api-02` Given an unauthenticated caller who sends an oversized, unknown-field body to a member route while over the IP-hash limit, When the request arrives, Then the response is `413` for the size, and with a valid size `429`, and with no limit hit `401 AUTH_REQUIRED`, never `400` before `401` (pipeline steps 1, 3, 4, 8).
+- `AC-api-02` Given an unauthenticated caller who sends an oversized, unknown-field body to a member route while over the IP-hash limit, When the request arrives, Then the response is `413` for the size, and with a valid size `429`, and with no limit hit `401 AUTH_REQUIRED`, never `400` before `401` (pipeline steps 1, 3, 4, 8); and given a valid member token on an operation that needs member step-up (`S15c` 15.B.4) without a valid step-up, When the request arrives, Then `401 AUTH_INVALID` with reason `step_up_required` is answered at step 7, after steps 1 to 6 and before body validation (step 8).
 - `AC-api-04` Given a queued cell visible to two members, When both call `createLease` with different `Idempotency-Key` values at the same time, Then exactly one gets `201` and the other `409 LEASE_CONFLICT` reason `cell_not_queued`, and exactly one `cell.leased` event exists.
 - `AC-api-05` Given a successful `createLease`, When the same request is repeated with the same key and body, Then the response is `201`, identical including `nonce`, with `Idempotent-Replayed: true` and no second lease; with a different body it is `422 IDEMPOTENCY_KEY_MISMATCH`.
 - `AC-api-06` Given an accepted submission, When `submitResult` is repeated with the same lease, nonce and body under a new key, Then the stored outcome is returned, `Idempotent-Replayed: true`, and the member's balance is unchanged; with a different `output_text` it is `409 submission_exists`.
@@ -857,6 +865,9 @@ Given / When / Then, each testable against the generated contract suite (`BM0`).
 - `AC-api-17` Given any 2xx or error response in this part, Then it contains no other member's `mem_` id, no `vol_` handle, no IP address and no token except in the operations listed in `S15.10`.
 - `AC-api-18` Given `launch.member_jobs_enabled` is `false`, When `createJob` with `submit` or `confirmJob` is called, Then `403 LAUNCH_GATE_CLOSED` with `details.switch` = `launch.member_jobs_enabled`; given `launch.minting_enabled` is `false`, Then Commons cells are not offered and a direct lease is `403 LAUNCH_GATE_CLOSED`.
 - `AC-api-19` Given a request body with an unknown field, a duplicate key, or `amount_ucr` sent as a number, When any operation is called, Then `400 VALIDATION_FAILED` with every offending path in `details.fields`.
+- `AC-auth-01` Given a valid admin session token, When it is sent to any member operation of S15a to S15d, Then `401 AUTH_INVALID` with `details.reason` `wrong_scheme` and nothing is stored.
+- `AC-auth-02` Given a valid member bearer token, When it is sent to any `/v1/admin/*` operation other than the four bootstrap operations, Then `401 AUTH_INVALID` with `details.reason` `wrong_scheme` and nothing is stored; sent to a `none` operation it is ignored and the response is identical to the response without it.
+- `AC-auth-03` Given the generated OpenAPI document, When the `security` entry of every operation is read, Then each operation has exactly one scheme except the two dual rows of the sibling file (`createCredentialChallenge`, `registerAdminCredential`), and the `/v1/admin/*` prefix never carries `member`.
 
 ## Issues raised
 
