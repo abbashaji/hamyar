@@ -535,11 +535,11 @@ filed|assigned|in_review|awaiting_second_review --appeal.withdrawn-->    withdra
 | `default` | per type | The `initial configurable default`; never edited after publication |
 | `value`, `version` | per type, int | Current value; `version` increases by 1 per accepted change; every version is an immutable `ParameterVersion` |
 | `effective_from` | timestamptz | Changes are prospective: `effective_from >= now + notice_days` unless `change_class` = `tighten` (R10: tighten at once) |
-| `tighten_direction` | enum `up`, `down`, `none` | Which direction of change counts as tightening (for example `verify.audit_rate_s` is `up`, `admission.phi` is `down`) |
+| `tighten_direction` | enum `up`, `down`, `toward:<value>`, `none` | Which direction of change counts as tightening (for example `verify.audit_rate_s` is `up`, `admission.phi` is `down`) |
 | `notice_days` | int | Advance notice for `loosen` and `neutral` changes; default `change.notice_days_default`, or `change.notice_days_price` for the areas `price`, `admission` and `credit` |
 | `owner` | enum | `operator`, `reviewer` or `founders` (area table 0.10.5); only the owner role may edit; a `loosen` change also needs a second `operator` approval [A] |
 | `calibration_source` | enum | Measurement code from 0.10.4 plus a free-text pointer to the replacing measurement |
-| `public` | bool | Published on the parameter page and change log (default true except `security.*`) |
+| `public` | bool | Published on the parameter page and change log (default true except `security.*` and the rows listed in S16 16.17.5) |
 | `introduced_in` | text | `S<n>.<m>` of the part that defined it |
 
 Every accepted change writes one `ParameterVersion`, one `ChangeLogEntry` (public when `public`), one `AdminAction` and the event `parameter.changed`. Mutable resources use `ETag` and `If-Match` (0.11.7). A job, lot or lease keeps the parameter version it was created under where the spec says so (lot expiry, policy stamp, quote). [D]
@@ -627,7 +627,7 @@ The list below is the FULL set of parameter names; names are stable and C-022 co
 | `mint.per_member_daily_cap_credits` | credits | 30 (three times the FD§3.2 habit of about 10 cells a day) | >= 1 | `P1M` |
 | `mint.requires_launch_gate` | bool | true | constant | `CON` |
 | `inflation.claim_ratio_threshold_weeks` | ratio | 6.0 (weeks of capacity) | > 0 | `FND`, `P1M` |
-| `inflation.mint_cap_cut_ratio` | ratio | 0.25 (cut applied when the threshold is passed) | 0 < x <= 1 | `FND` |
+| `inflation.mint_cap_cut_ratio` | ratio | 0.25 (cut applied when the threshold is passed; the cap after the cut = floor(cap x (1 - ratio))) | 0 < x <= 1 | `FND` |
 | `inflation.mint_utilization_alarm` | ratio | 0.90 | 0..1 | `OPS` |
 | `inflation.throughput_window_days` | days | 28 | 7..90 | `P1M` |
 | `ledger.invariant_check_interval_s` | duration_s | 60 (sampled checks; the per-commit check is a constant) | 5..3600 | `OPS` |
@@ -638,7 +638,7 @@ The list below is the FULL set of parameter names; names are stable and C-022 co
 | `job.max_overrun_ratio` | ratio | 2.0 (a job stops with partial settlement at 2 x its quoted window) | >= 1 | `P1M` |
 | `job.max_upload_bytes` | int | 4,194,304 (300 cells x 4,000 chars x up to 3 bytes of UTF-8 is about 3.6 MB) | 1..104857600 | `TEC` |
 | `change.notice_days_default` | days | 7 (FD Principle 5) | 1..90 | `FND` |
-| `change.notice_days_price` | days | 14 (for `price.*`, `admission.*`, `credit.*`) | 1..90 | `FND` |
+| `change.notice_days_price` | days | 14 (for `price.*`, `credit.*`, `admission.*`, `reservation.*`) | 1..90; >= `change.notice_days_default`; S16D-C9 | `FND` |
 | `change.tighten_publish_within_s` | duration_s | 86,400 (tightening is immediate, its public log entry follows within a day) | 0..604800 | `FND` |
 
 **Table B: verify, lease, cell, trust, invite, ratelimit, identity, session, retention, policy, screen, service, template, optin, appeal, report**
