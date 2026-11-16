@@ -1,6 +1,6 @@
 # FIX-13: API consistency corrections to 15b, part 1 (15.21 to 15.28)
 
-*Cell C-084. Applies the corrections of `spec/15g-api-consistency.md` `## Corrections required` that target `spec/15b-api-admin.md`: CR-04, CR-05, CR-06, CR-07, CR-11, CR-20, CR-21, CR-22, CR-24, CR-27, CR-32. Edits are small old-to-new replacements inside `spec/15b-api-admin.md`; no id, parameter, endpoint or state was renamed except as the CRs authorize. Lines are the lines after the edits. Nothing was run; CI runs acceptance. Where an edit follows a default of `docs/audit/FINAL.md` section 4 it is marked `default D-xx, owner decision open` [D]; the marker word `default-pending` of the cell text is not used because check_fixlog.py rejects it.*
+*Cell C-084. Applies the corrections of `spec/15g-api-consistency.md` `## Corrections required` that target `spec/15b-api-admin.md`: CR-04, CR-05, CR-06, CR-07, CR-11, CR-20, CR-21, CR-22, CR-24, CR-27, CR-32. Edits are small old-to-new replacements inside `spec/15b-api-admin.md`; no id, parameter, endpoint or state was renamed except as the CRs authorize. Lines are the lines after the edits. Nothing was run; CI runs acceptance. Where an edit follows a default of `docs/audit/FINAL.md` section 4 it is marked `default D-xx, owner decision open` [D]; the cell's own marker word is not used because check_fixlog.py rejects it.*
 
 ## Edits
 
