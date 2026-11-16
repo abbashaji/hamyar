@@ -316,6 +316,7 @@ The outcome is an `AdminAction` (`safety_review`: `passed` or `rejected`). A cha
 | `secret.ledger_checkpoint_signing_key` | Signs the daily checkpoint hash (S6.*) | Ed25519 key pair [A] | Checkpoint job only | `security.secret_rotation_days`; the new public key is announced in a `ChangeLogEntry` signed by the old key; old public keys stay published |
 | `secret.backup_encryption_key` | Encrypts backups | 256-bit random data key, wrapped by a key split between two custodians | Backup job (data key); custodians (wrapping) | `security.secret_rotation_days` for new backups; an old key lives until the last backup it protects expires (`retention.backup_days`) |
 | `secret.email_encryption_key` | Optional e-mail ciphertext [A] | 256-bit random | Identity code | `security.secret_rotation_days` with re-encryption of rows |
+| `secret.email_lookup_key` | Keyed lookup hash of the optional e-mail address (`email_lookup_hash`; one address maps to one member) [A] | 256-bit random | Identity code | `security.secret_rotation_days`; the hashes are recomputed together with the re-encryption of rows |
 | `secret.db_credentials.<role>` | Roles `app`, `ledger_append`, `readonly`, `migrate`, `backup` | Random, per role | Only the component using the role | `security.secret_rotation_days` |
 | `secret.blob_credentials` | Blob store access | Provider-specific | Blob adapter | `security.secret_rotation_days` |
 | `secret.mail_credentials` | Optional mail sending | Provider-specific | Mail adapter (off if unused) | `security.secret_rotation_days` |
@@ -681,7 +682,7 @@ All are convention additions (S0.1) and are reported under `## Issues raised`. D
 | Assumption | Overturned by |
 | --- | --- |
 | Device-group and invite-tree exclusion in audit assignment (`THR-04`) | Owner decision on whether device grouping is acceptable under S10.13.1 item 4 |
-| `secret.device_hash_key`, `secret.analytics_key`, `secret.email_encryption_key` and the Ed25519 checkpoint key | Identity file or S13.* choosing different mechanisms |
+| `secret.device_hash_key`, `secret.analytics_key`, `secret.email_encryption_key`, `secret.email_lookup_key` and the Ed25519 checkpoint key | Identity file or S13.* choosing different mechanisms |
 | Ports of S10.15.2 and their names | S4.* |
 | Two custodians for the backup key | Team size (one-person team: owner decision) |
 | `service.min_approvers` raised to 2 | Owner decision |
