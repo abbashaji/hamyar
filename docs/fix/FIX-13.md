@@ -27,7 +27,7 @@
 | CR-07c `createAdminUser` response row | spec/15b-api-admin.md:170 | code shown once to the approving admin | unchanged, already consistent with CR-07a | already-applied |
 | CR-11a `content_hash` on the lock request | spec/15b-api-admin.md:679 | `{reason}` | `{content_hash, reason}` with `hash_mismatch` | applied |
 | CR-11b hash bound to approvers and re-checked | spec/15b-api-admin.md:681 | hash defined only | step-up bound to it, re-checked at execution | applied |
-| CR-11c `lock_pending` | spec/15b-api-admin.md:678 | `locked` only | `lock_pending` while a lock approval is pending | applied |
+| CR-11c `lock_pending` | spec/15b-api-admin.md:678 | `locked` only | `lock_pending` while a lock approval is open | applied |
 | CR-11d status `registered` | spec/15b-api-admin.md:685 | `draft, running, stopped` | `draft, registered, running, stopped` | applied |
 | CR-11e `startExperiment` guard | spec/15b-api-admin.md:693 | re-read `fraction_source` at start | starts from `registered` only; no re-read; `not_registered` | applied |
 | CR-11f `AC-admin-25` | spec/15b-api-admin.md:1117 | prereg locked then start | `registerExperiment` needed; `not_registered`; `lock_pending` | applied |
