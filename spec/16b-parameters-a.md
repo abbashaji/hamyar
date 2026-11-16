@@ -197,6 +197,48 @@ Owner `operator`. Binding: read per request (S16 16.10); nothing is stamped. The
 
 Notes [D][A]: (1) At the defaults a member write costs 4 of 120 tokens, an admin write 2 of 300 and a verification 5 of 60 (`S16B-C11`). (2) `ratelimit.auth_failures_per_hour` (member) and `ratelimit.admin_auth_attempts_per_hour` (admin) are two limits on two surfaces and are not merged: the first counts failures, the second counts attempts. (3) `ratelimit.write_weight` bounds the rate of every member write that has no class of its own; the lease, submit, upload and report limits apply in addition (15a 15.12).
 
+### 16.B.11.3 Security and launch
+
+Owner `operator` (area table of S0 0.10.5); an edit of a `launch.*` row needs `launch.min_signoffs` distinct admins (16.2.3). All `security.*` rows are `public: no` (S16 16.17.5). Binding: a pending approval stores its own expiry when proposed; the other rows are read at the event. [D]
+
+| name | type | unit | validation | initial configurable default | owner role | change policy | prospective-only | calibration | used in |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `security.two_person_ttl_s` | duration_s | seconds a pending two-person approval stays open (generic; `launch.approval_window_s` is the launch flow's own) | 600..604,800 (the range of `launch.approval_window_s`, 16.B.6); `S16B-C12` | 86,400 (S10a; S15b `ISS-154` gives the same value under the alias `security.approval_ttl_s`; default-pending D-22) | operator | `T↓` | yes: each approval stores its `expires_at` when it is proposed | `SEC` | 10a:755; alias use 15b:1138 |
+| `security.admin_min_credentials` | int | passkeys an `AdminUser` must hold [A] | 1..5 | 2 (S10a) | operator | `T↑` [A] (more credentials is the tightening: no single lost device locks an admin out) | yes: read when a credential is removed or an admin is enrolled; no admin is removed by a change | `SEC` | 10a:756 |
+| `security.emergency_access_ttl_s` | duration_s | seconds an emergency access grant stays valid | 60..86400 | 3,600 (S10b) | operator | `T↓` | yes: each grant stores its `expires_at` | `SEC` | 10b:639 |
+| `security.reachability_check_interval_days` | days | days between two reachability checks of the service from the target network (10b 10.15.4) | 1..365 | 30 (S10b) | operator | `T↓` | yes: read when the next check is scheduled | `OPS`; the result of each check is [V] and never invented | 10b:640 |
+| `launch.require_locked_preregistration` | bool | whether opening a launch switch needs a locked `PreRegistration` (S13.7.6) | constant `true` in Phase 1 (FD§9 requires the lock before day 1; S14 14.7.1 tests it with no parameter read) [A] | true (S15b `ISS-154` says bool, true; default-pending D-17) | operator | `C` (S15b does not say it is editable; as a constant no edit can drop the FD§9 condition, and the owner may make it editable by a spec change) | not editable | `CON` | 14:461, 15b:1138 |
+
+Notes [D][A]: (1) `launch.require_locked_preregistration` follows the pattern of `mint.requires_launch_gate` (a constant `true`): 14.7.1 states the lock clause without reading a parameter, so an editable `false` would contradict S14 and the FD. (2) `security.admin_min_credentials` is read against the count of credentials per admin; its relation to `ISS-168` (one admin) is unchanged. (3) 16.17.5 already hides `security.*`; the four rows above need no new entry. [A]
+
+### 16.B.11.4 Growth, public, report and template
+
+Owners as stated in the row (S0 0.10.5: `founders` for thresholds, `operator` otherwise in `growth` and `public`; `reviewer` for `report` and `template`, as 10b states). Binding: read at the event; nothing is stamped. [D]
+
+| name | type | unit | validation | initial configurable default | owner role | change policy | prospective-only | calibration | used in |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `growth.share_card_max_active` | int | stored, revocable share cards a member may hold at once (15b 15.33.5) | 0..100 [A] | 3 (S15b `ISS-154`; default-pending D-15: if the stored cards of 15b are deleted in favor of the computed card of 15a, the row has no reader and stays unused) | operator | `T↓` | yes: read when a card is created; existing cards stay | `OPS`: cards per member | 15b:1138 |
+| `growth.badge.thresholds` | json | cell, day and review-cell counts at which a badge is awarded | an object with lists `cells`, `days`, `review_cells`; each list ascending positive integers | `{"cells": [1, 10, 100, 1000], "days": [7, 30, 100], "review_cells": [1, 10, 100]}` (S12) | founders (a threshold) | `N` [A] (no tightening direction: badges are recognition, not a limit) | yes: a badge already awarded is kept | `FND` | 12:666 |
+| `public.change_log_service_labels` | bool | whether the public change log shows service labels | bool | false (S12) | operator | `T→false` [A] (hiding the labels is the tightening) | yes: applies to entries published after the change | `CNS` and `SEC` | 12:668 |
+| `report.external_contact` | string | the contact a reporter outside the product can use (10b) | non-empty before launch; the launch gate item stays open while it is empty (10b) | empty string (S10b) | operator (S10b) | `N` | yes: read when the contact is shown | `CON` as S10b states [V]: set once by the operator before launch, which a constant cannot be; the S10 owner confirms the code | 10b:646 |
+| `report.reporter_identity_hidden` | bool | whether a reporter's identity is hidden from the reported member | constant | true (S10b) | operator | `C` | not editable | `CON` | 10b:647 |
+| `template.autopause_min_distinct_reporters` | int | distinct reporting members needed to pause a template automatically (16d `F-19`) | 1..1000; `S16B-C10` | 3 (S10b) | reviewer | `T↓` (fewer reporters pause sooner) | yes: read when a report is counted | `OPS` | 10b:648 |
+| `template.autopause_min_reporter_tier` | enum | lowest trust tier whose reports count toward an automatic pause | `new`, `established`, `trusted` | `established` (S10b) | reviewer | `T→new` [A] (counting reports from `new` members pauses sooner; the opposite end of `team.create_min_tier`) | yes: read when a report is counted | `OPS` | 10b:649 |
+
+Notes [D][A]: (1) `template.autopause_report_count` (S16 16.12) counts reports and `template.autopause_min_distinct_reporters` counts distinct members among them; both must hold for a pause (`S16B-C10`). (2) `growth.badge.thresholds` has no unit suffix because it is a json object of three lists; each list is checked ascending at write time. (3) `public.change_log_service_labels` is `CNS` and `SEC` because a label could name a provider. [V]
+
+### 16.B.11.5 Constraints added
+
+Evaluated on every write like `S16B-C1` to `S16B-C9` (16.B.9), against the configuration as it will be at `effective_from`. [D]
+
+| Id | Constraint | Kind |
+| --- | --- | --- |
+| `S16B-C10` | `template.autopause_min_distinct_reporters <= template.autopause_report_count` (10b: it must not exceed the count) | error |
+| `S16B-C11` | `ratelimit.write_weight <= ratelimit.member_api_rpm`; `ratelimit.admin_write_cost <= ratelimit.admin_api_rpm`; `ratelimit.public_verify_cost <= ratelimit.public_rpm` (a cost above its bucket would refuse every request of the class) | error |
+| `S16B-C12` | `launch.approval_window_s <= security.two_person_ttl_s` (the launch proposal must not outlive the generic approval default; 16d 16.D.5) | warning |
+
+Worked check of the initial defaults [D]: `S16B-C10` 3 <= 5; `S16B-C11` 4 <= 120, 2 <= 300, 5 <= 60; `S16B-C12` 86,400 <= 86,400 (equal, zero margin). All pass.
+
 ## Issues raised
 
 Found while completing the table. Each resolution is already applied in this file; C-001 consolidates them into S2.* and C-036 checks them against the whole table. Ids use the block `ISS-16001`..`ISS-16099` of this file [D].
