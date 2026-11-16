@@ -55,6 +55,16 @@ Result for the 38 cited paths: 23 ALIAS, 13 NEW, 1 REMOVE, and 1 split (`audit-q
 
 The 20 new operations: `previewAdminAction`, `startAdminActionVerification`, `listQuarantinedSubmissions`, `getQuarantinedSubmissionContent`, `releaseQuarantinedSubmission`, `rejectQuarantinedSubmission`, `getBottleneck`, `getOperationsSnapshot`, `overturnCells`, `voidCell`, `stopJob`, `listLeases`, `releaseLease`, `listAdminMetricSnapshots`, `createParameterChangeSet`, `runTemplateChecks`, `listWorkClaims`, `createWorkClaim`, `releaseWorkClaim`, `takeoverWorkClaim` (20 operations) [D].
 
+The five paths below are already defined in 15.D.4, where they appear only as `METHOD /v1/...` in the operation tables. These rows only list them, with a plain path and a NEW verdict, so that `scripts/check_refs.py` can see that part 11c cites defined paths. They change no operation and add none: the count of 20 stays [D].
+
+| Path | Verdict | Operation | Defined at |
+| --- | --- | --- | --- |
+| `/v1/admin/capacity/operations` | NEW | `getOperationsSnapshot` | 15.D.4.6 |
+| `/v1/admin/quarantined-submissions` | NEW | `listQuarantinedSubmissions` | 15.D.4.2 |
+| `/v1/admin/quarantined-submissions/{sub_id}/content` | NEW | `getQuarantinedSubmissionContent` | 15.D.4.2 |
+| `/v1/admin/quarantined-submissions/{sub_id}/releases` | NEW | `releaseQuarantinedSubmission` | 15.D.4.2 |
+| `/v1/admin/quarantined-submissions/{sub_id}/rejections` | NEW | `rejectQuarantinedSubmission` | 15.D.4.2 |
+
 ## 15.D.2 Rules shared by every new operation [D]
 
 1. **Inheritance.** Legend, universal errors, `Idempotency-Key`, cursors, `ETag` and rate-limit classes are those of 15.21 (`A-R`, `A-W`, `A-AUTH`). `Auth` is the `admin` scheme; `SU` and `2P` mean what 15.21.1 says. Nothing is restated.
