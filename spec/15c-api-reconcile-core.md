@@ -42,6 +42,7 @@
 | `/v1/members/me/recovery-keys` | ALIAS | `rotateKey` with `kind` = `recovery` |
 | `/v1/members/me/session-revocations` | NEW | `revokeAllSessions` (15.B.5) |
 | `/v1/policy` | NEW | `getPublicPolicy` at `/v1/public/policy` (15.B.8) |
+| `/v1/public/policy` | NEW | `getPublicPolicy` (15.B.8) |
 | `/v1/policy-previews` | ALIAS | `checkJobPolicy` |
 | `/v1/public/capacity` | NEW | `getPublicCapacity` (15.B.8) |
 | `/v1/public/health` | NEW | `getPublicHealth` (15.B.8) |

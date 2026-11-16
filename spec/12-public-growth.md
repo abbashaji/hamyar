@@ -26,16 +26,16 @@ This part specifies what the project shows the public and how it tests growth (p
 | Surface | Proposed operations and routes | Auth | Gate | Cache `max-age` no larger than | Screen |
 | --- | --- | --- | --- | --- | --- |
 | Live counter | `getPublicCounter` `GET /v1/public/counter` | `none` | `ff.growth.v2_live_counter` | `public.counter_refresh_s` | `SCR-pub-01` |
-| Public ledger | `listPublicLedgerCheckpoints`, `getPublicLedgerCheckpoint`, `listPublicLedgerFlows`: `GET /v1/public/ledger-checkpoints`, `GET /v1/public/ledger-checkpoints/{checkpoint_date}`, `GET /v1/public/ledger-flows` | `none` | `ff.public.ledger_page` | `public.counter_refresh_s` (a checkpoint by date is immutable: `ledger.checkpoint_interval_s`) | `SCR-pub-02` |
+| Public ledger | `listPublicLedgerCheckpoints` (one date: `from` = `to`), `listPublicLedgerDaily`: `GET /v1/public/ledger/checkpoints`, `GET /v1/public/ledger/daily` | `none` | `ff.public.ledger_page` | `public.counter_refresh_s` | `SCR-pub-02` |
 | Parameter page | `listPublicParameters`, `getPublicParameter`, `listPublicParameterVersions`: `GET /v1/public/parameters[/{name}[/versions]]` | `none` | none (served whenever the API is up) | `public.counter_refresh_s` | `SCR-pub-03` |
 | Change log | `listPublicChangeLog`, `getPublicChangeLogEntry`: `GET /v1/public/change-log[/{chg_id}]` | `none` | none | `public.counter_refresh_s` | `SCR-pub-04` |
 | Milestones | `listPublicMilestones`, `getPublicMilestone`: `GET /v1/public/milestones[/{milestone_key}]` | `none` | `ff.growth.v6_milestones` | `public.counter_refresh_s` | `SCR-pub-05`, `SCR-pub-06` |
 | Public teams | `listPublicTeams` `GET /v1/public/teams` | `none` | `ff.growth.v4_teams` | `public.counter_refresh_s` | `SCR-pub-07` |
 | Experiments | `listPublicExperiments` `GET /v1/public/experiments` | `none` | none | `public.counter_refresh_s` | `SCR-pub-08` |
-| Share card payload | `getShareCardPayload` `GET /v1/share-cards/preview` | `member` | `ff.growth.v3_share_card` | `no-store` | in-app, `S11.*` |
+| Share card payload | `getShareCard` `GET /v1/members/me/share-card` | `member` | `ff.growth.v3_share_card` | `no-store` | in-app, `S11.*` |
 | Teams (member) | S12.9 table | `member` | `ff.growth.v4_teams` | `no-store` | in-app, `S11.*` |
 | Referral | `createReferral` `POST /v1/referrals`, `listReferrals`, `getReferral` | `member` | `ff.growth.v5_referral` | `no-store` | in-app, `S11.*` |
-| Flags and exposure | `listEffectiveFlags` `GET /v1/flags`, `recordExperimentExposure` `POST /v1/experiment-exposures` | `member` | none | `no-store` | none |
+| Flags and exposure | `getFeatures` `GET /v1/members/me/features`, `recordExperimentExposure` `POST /v1/experiment-exposures` | `member` | none | `no-store` | none |
 
 All public routes are rate-limited by `ratelimit.public_rpm` per IP hash, carry an `ETag` (S0.11.7), and accept no query that selects one member. Public screens are `SCR-pub-nn` (role `pub`, S0.5), owned here; this part specifies their content and states (empty, suppressed, stale, error), `S11.*` specifies layout and typography.
 
@@ -351,8 +351,8 @@ Events: `team.created`, `team.joined`, `team.left`, `team.locked`, `team.unlocke
 | `createTeam` | `POST /v1/teams` | required |
 | `getTeam`, `listTeams` | `GET /v1/teams/{team_id}`, `GET /v1/teams` | n/a |
 | `joinTeam` | `POST /v1/teams/{team_id}/memberships` | required |
-| `leaveTeam` | `DELETE /v1/team-memberships/{membership_id}` (sets `left_at`; the row stays) | required |
-| `reportTeam` | `POST /v1/teams/{team_id}/reports` | required |
+| `leaveTeam` | `DELETE /v1/teams/{team_id}/memberships/me` (sets `left_at`; the row stays) | optional, honored if sent |
+| `reportTeam` | `POST /v1/reports` with `subject_kind` = `team`, `subject_id` = the team id | required |
 
 ## 12.10 Referral (V5)
 
@@ -426,7 +426,7 @@ Copy: `copy.growth.referral_terms` (S12.14): bonuses are declared, may be delaye
 
 ## 12.11 Experiment framework for V1-V6
 
-Owned here: how growth flags are evaluated and how members are randomized. Owned by `S13.*`: the event schema, metric definitions, analysis, and the `PreRegistration` store and lock. The expiry arm (`ff.experiment.expiry_arm`) uses the same assignment mechanism and is specified in `S13.*`. **Precedence (A11 #1):** where this section and `S13.8` differ on lifecycle states (`locked` here is `registered` there), event names (`experiment.assigned` is `experiment.member_assigned`; `experiment.exposed` is `ui.variant_exposed`, also written server-side with `source` `server`; `experiment.locked` is `experiment.registered`), the block algorithm (the permuted blocks of `S13.8.4` apply to `hash_blocked`) or the pre-registration fields, `S13.8` governs. Two things of this section stay in force: lazy assignment on the first `GET /v1/flags` for members who already exist when an experiment starts, and the stratifiers of 12.11.4 (13.8.1 lists them too).
+Owned here: how growth flags are evaluated and how members are randomized. Owned by `S13.*`: the event schema, metric definitions, analysis, and the `PreRegistration` store and lock. The expiry arm (`ff.experiment.expiry_arm`) uses the same assignment mechanism and is specified in `S13.*`. **Precedence (A11 #1):** where this section and `S13.8` differ on lifecycle states (`locked` here is `registered` there), event names (`experiment.assigned` is `experiment.member_assigned`; `experiment.exposed` is `ui.variant_exposed`, also written server-side with `source` `server`; `experiment.locked` is `experiment.registered`), the block algorithm (the permuted blocks of `S13.8.4` apply to `hash_blocked`) or the pre-registration fields, `S13.8` governs. Two things of this section stay in force: lazy assignment on the first `GET /v1/members/me/features` for members who already exist when an experiment starts, and the stratifiers of 12.11.4 (13.8.1 lists them too).
 
 ### 12.11.1 Experiment record [D][A]
 
@@ -463,7 +463,7 @@ function effective_variant(flag_key, member):
     return a.arm_key
 ```
 
-`ineligible_behavior` is `off` for a new feature and `on` for a feature already shipped; it is fixed at lock. `GET /v1/flags` returns the member's effective variants and is the only place assignment is created (lazily, on first evaluation after the experiment is `running`).
+`ineligible_behavior` is `off` for a new feature and `on` for a feature already shipped; it is fixed at lock. `GET /v1/members/me/features` (`getFeatures`) returns the member's effective flags as booleans, with no arm names, and is the only place assignment is created (lazily, on first evaluation after the experiment is `running`).
 
 | Operator action | Class (S0.8.6) | Rule |
 | --- | --- | --- |
@@ -508,7 +508,7 @@ Allowed stratifiers, all known at assignment time and none personal or location-
 ### 12.11.5 Exposure and analysis [D]
 
 - `experiment.assigned` records that a member was randomized. `experiment.exposed` records that the member reached the **decision point** where the variant applies; it fires **identically for every arm**, including `control` (where the treatment would have appeared), once per `(assignment, surface_key)`. Surface keys are listed per mechanic in S12.12.
-- The client reports exposure with `POST /v1/experiment-exposures` (`assignment_id`, `surface_key`, `Idempotency-Key`); a server-side effect (for example an invitation created with a bonus) emits it from the server.
+- The client reports exposure with `POST /v1/experiment-exposures` (`surface_key`, `Idempotency-Key`; the server finds the member's own assignment and answers `204` whether or not an experiment applies); a server-side effect (for example an invitation created with a bonus) emits it from the server.
 - The primary analysis is intent-to-treat by assigned arm among eligible members. Exposure-conditioned analyses are secondary and labeled as such. Both are defined in `S13.*`.
 - Events carry no personal data (S12.13). Raw events are kept `retention.event_raw_days`; assignments are kept permanently and reference only the opaque `mem_` id, which is what the `member_bound` closure rule leaves behind (`ISS-129`).
 - Members see which experiments they are part of and their own arm on a settings screen; `copy.growth.experiments_notice` states that features can differ between members. There is no per-experiment opt-out in Phase 1 because every arm stays inside the safe envelope of S12.1 rules 7 and 8 [A]. Whether randomizing who is offered a credit bonus is acceptable is [V] for counsel (S12.1 rule 4).

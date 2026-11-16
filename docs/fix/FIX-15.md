@@ -1,0 +1,39 @@
+# FIX-15: launch gates (spec/14-launch-gates.md)
+
+Cell C-086. Edits: `spec/15g-api-consistency.md` CR-23, CR-25, CR-26, CR-28, CR-40, CR-41 (all target S14) and `docs/audit/A03.md` findings 26, 29, 30. Line numbers are those of the file after the edits (the file grew from 652 to 674 lines). Nothing was executed; CI runs the acceptance commands. Where an owner decision of `docs/audit/FINAL.md` section 4 is not yet taken, the row says `default applied` and names the decision.
+
+| edit | file:line | before | after | status |
+| --- | --- | --- | --- | --- |
+| CR-23a three S15b-only blockers in `evaluate_switch` | spec/14-launch-gates.md:461-466 | no clause for a locked pre-registration, for `members_may_join` open first, or for a critical ledger alarm | pseudocode gains `preregistration_not_locked` (members switch only), `members_may_join_off` (other two switches), `open_critical_ledger_alarm` (all three) | applied |
+| CR-23b same clauses stated in 14.7.2 | spec/14-launch-gates.md:486 | 14.7.2 listed catalog items only | paragraph names the three clauses and says S15b `changeLaunchSwitch` must not drift from them | applied |
+| CR-25a error mapping of 14.9 | spec/14-launch-gates.md:544 | failure column gave `reasons` with no mapping and no case for the member key | paragraph: `reasons` become `details.reason` or `details.reasons`; member key refusal is `403 FORBIDDEN` `account_frozen`; `KILL_SWITCH_ENGAGED` names only the four published keys | applied |
+| CR-25b `job.created` failure column | spec/14-launch-gates.md:549 | `LAUNCH_GATE_CLOSED`, `KILL_SWITCH_ENGAGED` or `POLICY_REJECTED` | adds `FORBIDDEN` (`account_frozen`) for the requester's member key | applied |
+| CR-25c `cell.leased` failure column | spec/14-launch-gates.md:551 | `KILL_SWITCH_ENGAGED` with the failing key named | published key named; `FORBIDDEN` `account_frozen` for the leasing member's own key | applied |
+| CR-25d `ledger.mint` failure column | spec/14-launch-gates.md:553 | `KILL_SWITCH_ENGAGED` for every key | same, with the member key marked `FORBIDDEN` `account_frozen` | applied |
+| CR-25e `AC-launch-52` | spec/14-launch-gates.md:634 | refused with `LAUNCH_GATE_CLOSED` or `KILL_SWITCH_ENGAGED` | adds `FORBIDDEN` `details.reason` `account_frozen` for the member's own key | applied |
+| CR-26a `KillSwitch.reason_code` enum | spec/14-launch-gates.md:231 | `terms_change`, `safety_incident`, `abuse`, `ledger_concern`, `legal_hold`, `provider_warning`, `operator_decision` | S15b enum `safety_incident`, `integrity_violation`, `provider_notice`, `policy_defect`, `abuse`, `capacity`, `other` plus `legal_hold`; old values mapped (`terms_change`, `provider_warning` to `provider_notice`; `ledger_concern` to `integrity_violation`; `operator_decision` to `other`). The S0 side of the enum is outside this cell's paths and is not edited | applied |
+| CR-26b `reason_text` length rule | spec/14-launch-gates.md:232 | 10 to 2,000 characters (already the rule) | note added that `engageKillSwitch` `reason` follows the same rule | applied |
+| CR-26c system engagement in 14.9.2 | spec/14-launch-gates.md:589 | `reason_code = ledger_concern` | `reason_code = integrity_violation` | applied |
+| CR-28a `job.created` guard names `kill.template` | spec/14-launch-gates.md:549 | guard listed `kill.all_new_jobs` and the member key only | adds `kill.template.<tpl_id>` of the job's template | applied |
+| CR-28b gate applies to a `jobs` row in any state | spec/14-launch-gates.md:589 | trigger text and seed rule said inserted or leaving `draft`, and "beyond `draft`" twice | `jobs_need_open_gate` covers insertion in any state, `draft` included; seed rule and `launch_integrity_check` say "in any state" | applied |
+| CR-28c `AC-launch-03` | spec/14-launch-gates.md:624 | no statement on `jobs` rows | sentence added: no `jobs` row in any state while its gate is closed | applied |
+| CR-40 drop invite redemption, recovery, device linking from "Admit a member" | spec/14-launch-gates.md:579 | path list named invite redemption, recovery and device linking as callers of `member.created` | `createMember` and any import call it; recovery and device linking insert no member and are exempt (rule 6) | applied |
+| CR-41 name the Commons authoring path | spec/14-launch-gates.md:588 | Commons jobs "authored by an admin or by `system`", no path named | bullet: operator-authored (D-16 default applied, decision not yet taken); no S15 operation exists, so only a `system` path until S15 adds one; both are `job.created` under `launch.minting_enabled`, `jobs_need_open_gate`, `kill.all_new_jobs`, `kill.template` | applied |
+| A03 #26 add `## Issues raised` | spec/14-launch-gates.md:665-674 | no table although `ISS-141`, `ISS-143`, `ISS-144`, `ISS-147` are cited | table with columns id, severity, fd_ref, issue, resolution, status for the four ids; `ISS-144`: no content stated anywhere, minimal reading proposed; severities are proposed (the register states none); `ISS-141` `needs_owner` (D-17 default applied, decision not yet taken) | applied |
+| A03 #29 correct parameter names | spec/14-launch-gates.md:422 and the 14.13 table | `security.secret_rotation_max_age_days` and six other names absent from S0.10.6; S0 has `security.secret_rotation_days` | unchanged. Which name survives is a convention decision for the S16 owner (FIX-04 handles the S16 rows) and S0 and S16 are outside this cell's reads. The gap is recorded in the `ISS-147` row | skipped-needs-owner |
+| A03 #30 re-express provisional field names and the `RL-2` check | spec/14-launch-gates.md:~95 | `reviewed_by`, `approved_by`, `terms_copy_id`, and the `RL-2` `CHECK` and trigger, against S7.10.1 | unchanged. The target field names live in S7.10.1, which this cell may not read or edit; the finding assigns the change to the S5 and S7 owners. Recorded in the `ISS-147` row | skipped-needs-owner |
+
+## Read-back
+
+After the edits every place was read again on the cell branch.
+
+- 14.4.5 (lines 231-232): `reason_code` now lists eight values starting with `safety_incident` and `integrity_violation` and carries the old-to-new mapping; `reason_text` keeps 10 to 2,000 characters and mentions `engageKillSwitch`.
+- 14.7.1 (lines 461-466): after `jobs_not_enabled` there are three new `if` clauses with reasons `preregistration_not_locked`, `members_may_join_off` and `open_critical_ledger_alarm`, placed before the G0 service-count block.
+- 14.7.2 (line 486): a paragraph before the advisory-items paragraph names the same three clauses and marks them [A].
+- 14.9 (lines 544-553): an Error mapping paragraph precedes the table; the `job.created` row names `kill.template.<tpl_id>` and ends with `FORBIDDEN` (`account_frozen`); the `cell.leased` and `ledger.mint` rows also name `account_frozen` for the member's own key.
+- 14.9.2 (lines 579, 588-589): the "Admit a member" cell no longer names invite redemption; a Commons authoring bullet sits between Principals and Seeds; the seeds bullet reads "jobs in any state" in two places and `reason_code = integrity_violation`.
+- 14.12 (lines 624, 634): `AC-launch-03` ends with the sentence on `jobs` rows in any state; `AC-launch-52` now ends with the `account_frozen` case before "a listing omits the cells".
+- Issues raised (lines 665-674): heading, one explanatory paragraph and a six-column table with four rows (`ISS-141`, `ISS-143`, `ISS-144`, `ISS-147`); the `ISS-144` row says that no content is stated.
+- Not verified: S15b 15.28.2 and 15.27.3 were not read, so the reason slugs and enum values come from `spec/15g-api-consistency.md` only. The Founding Document and `docs/source/prompt.md` were not read in full; no edit was found to touch a ground rule (no provider fact, no automation of a volunteer account, no legal conclusion). Line numbers of the two skipped rows are approximate.
+
+Result: DONE WITH SKIPS

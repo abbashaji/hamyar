@@ -1,0 +1,36 @@
+id: C-131
+title: 'FIX-11a: add verdict rows for item paths of 15f (unblocks check_refs api 13)'
+type: normal
+priority: 4
+lease_minutes: 30
+goal: |
+  Additive edit in spec/15f-api-reconcile-measurement.md only. scripts/check_refs.py counts a path from a reconcile file as defined only when a table row has a backticked /v1 path as its FIRST backticked path and a cell that is exactly NEW. The operation tables of 15f define the item paths, but no such row exists for them, so part 13 (after FIX-11) cites seven undefined paths. Fix: append at the END of spec/15f-api-reconcile-measurement.md (apply_changes append op, no other change, nothing renamed or deleted) this section, verbatim:
+
+  ## 15.E.13 Path index for the verdict check
+
+  The paths below are the item and sub-resource paths of the operations defined in 15.E.5 to 15.E.11 and the path of `recordClientEvents`; they are listed so that every path cited by parts 11c and 13 has a verdict row. No operation changes. [D]
+
+  | Path | Verdict | Operation |
+  | --- | --- | --- |
+  | `/v1/client-event-batches` | NEW | `recordClientEvents` (15.E.11) |
+  | `/v1/admin/calibration-reports/{clr_id}` | NEW | `getCalibrationReport` (15.E.5) |
+  | `/v1/admin/decision-reports/{dcr_id}` | NEW | `getDecisionReport` (15.E.6) |
+  | `/v1/admin/decision-reports/{dcr_id}/content` | NEW | `getDecisionReportContent` (15.E.6) |
+  | `/v1/admin/incidents/{inc_id}` | NEW | `getIncident`, `updateIncident` (15.E.8) |
+  | `/v1/admin/incidents/{inc_id}/investigations` | NEW | `startIncidentInvestigation` (15.E.8) |
+  | `/v1/admin/incidents/{inc_id}/resolutions` | NEW | `resolveIncident` (15.E.8) |
+  | `/v1/admin/calibration-proposals` | NEW | `getCalibrationProposals`: read-only list of parameter proposals derived from `getCalibrationSummary` by the rules of 13.9.4; permission `perm.calibration.read`; class `A-R`; no write path. Kept at the path part 13 cites; the owner of S15 may re-point it later [A] |
+
+  Then write docs/fix/FIX-11a.md: one short paragraph (what was appended and why), the line 'Section appended: 15.E.13', the line 'Open point: the owner of S15 confirms the calibration proposals path', and the last line 'Result: DONE'. Do not use the words pending, todo or tbd anywhere in the log. Re-read the end of the file before finishing.
+after:
+- C-040
+read:
+- scripts/check_refs.py
+allowed_paths:
+- spec/15f-api-reconcile-measurement.md
+- docs/fix/FIX-11a.md
+outputs:
+- docs/fix/FIX-11a.md
+acceptance:
+- cmd: python scripts/check_spec.py spec/15f-api-reconcile-measurement.md --min-lines 228 --min-tags 1
+notes: 'Fix cell written by the Steward. Edit only inside allowed_paths. Do not run anything; CI runs acceptance. The section text in the goal is exact: append it as given.'

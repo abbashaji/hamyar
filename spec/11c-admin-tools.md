@@ -202,12 +202,12 @@ Every confirm dialog is driven by one dry-run call, so the screen never computes
 
 | `op` | Method and path | Permission | Notes |
 | --- | --- | --- | --- |
-| `previewAdminAction` | `POST /v1/admin/action-previews` | the action's own | Body `{action_code, subject_id, payload}`; no `Idempotency-Key` needed (no write) |
-| `listApprovalRequests` / `getApprovalRequest` | `GET /v1/admin/approval-requests[/{apr_id}]` | any admin; rows filtered to what the viewer may decide or started | Filter `state`, `initiated_by_me` |
-| `approveApprovalRequest` | `POST /v1/admin/approval-requests/{apr_id}/approvals` | the action's | Body `{payload_hash, reason_code, reason_text}`; `409 STATE_CONFLICT` if not `pending`; `403 FORBIDDEN` for own request |
-| `rejectApprovalRequest` / `withdrawApprovalRequest` | `POST .../{apr_id}/rejections`, `.../withdrawals` | as above | Withdraw is initiator only |
-| `listAdminActions` / `getAdminAction` | `GET /v1/admin/admin-actions[/{act_id}]` | `perm.audit_trail.read` | Cursor-paged; viewer scope as in `SCR-ops-03` |
-| `verifyAdminActionChain` | `POST /v1/admin/admin-action-verifications` | `perm.audit_trail.read` | One verification runs at a time (`429 RATE_LIMITED` otherwise) |
+| `previewAdminAction` | `POST /v1/admin/action-previews` | the action's own | Body `{op, path_params?, body?}` where `op` is an S15 operation id (15.D.4.1); permission: the previewed op's own; no `Idempotency-Key` needed (no write) |
+| `listApprovals` / `getApproval` | `GET /v1/admin/approvals[/{apv_id}]` | `perm.approval.read` | Filter `status`, `action_name`, `awaiting_me`; entity `AdminApproval`, id `apv_` |
+| `approveApprovalRequest` | `POST /v1/admin/approvals/{apv_id}/approvals` | the action's | Body `{step_up}`; a step-up bound to another payload is `401 AUTH_INVALID` (`step_up_invalid`); `409 STATE_CONFLICT` if not `pending`; `403 FORBIDDEN` for own request |
+| `rejectApprovalRequest` / `withdrawApprovalRequest` | `POST /v1/admin/approvals/{apv_id}/rejections`, `POST /v1/admin/approvals/{apv_id}/withdrawals` (body `{reason}`) | as above | Withdraw is initiator only |
+| `listAdminActions` / `getAdminAction` | `GET /v1/admin/actions[/{act_id}]` | `perm.admin_action.read` | Cursor-paged; viewer scope as in `SCR-ops-03` |
+| `startAdminActionVerification` | `POST /v1/admin/admin-action-verifications` | `perm.admin_action.read` | Body `{from_date, to_date}`; one verification runs at a time (`409 STATE_CONFLICT`, `already_running`, otherwise) |
 
 All admin writes need `Idempotency-Key` (S0.11.5) and carry `RateLimit-*` headers against `ratelimit.admin_api_rpm`; repeated refusals of one admin are counted and surfaced to the operator as an `Alarm` (the Panel had no counter on admin-key retries, panel-review §4.5 item 4) [V][A].
 
@@ -227,7 +227,7 @@ All admin writes need `Idempotency-Key` (S0.11.5) and carry `RateLimit-*` header
 
 | AC | Given | When | Then |
 | --- | --- | --- | --- |
-| `AC-appr-01` | Admin A created a `ledger.reversal` request | A calls `approveApprovalRequest` on it | `403 FORBIDDEN`; an `AdminAction` with `result` `refused` is written; the request stays `pending` |
+| `AC-appr-01` | Admin A created a `ledger.reversal` request | A calls `approveApprovalRequest` on it | `403 FORBIDDEN`; no `AdminAction` row and no event (a refused `AdminAction` is written only for authorization failures, 15.34.1); the request stays `pending` |
 | `AC-appr-02` | A pending request with `payload_hash` H | B approves with a hash other than H | `409 STATE_CONFLICT`; nothing executes; B's dialog must reload the payload |
 | `AC-appr-03` | A pending request older than `security.admin_two_person_pending_ttl_s` | The timer runs | `approval.expired` is emitted by actor `system`; a later approval returns `409 STATE_CONFLICT` |
 | `AC-appr-04` | Only one active `AdminUser` holds `operator` | They open a `killswitch.release` dialog | `previewAdminAction` returns `fail_closed` true; the confirm button stays disabled and shows `copy.admin.fail_closed_one_admin` |
@@ -263,10 +263,10 @@ All admin writes need `Idempotency-Key` (S0.11.5) and carry `RateLimit-*` header
 | --- | --- | --- |
 | `listTemplateVersions` | `GET /v1/admin/template-versions` | Filters above; `ETag` per row |
 | `getTemplateVersion` | `GET /v1/admin/template-versions/{tpv_id}` | Includes diff base and lint results |
-| `runTemplateChecks` | `POST /v1/admin/template-versions/{tpv_id}/check-runs` | Deterministic, no side effects; result hash is stored in the approval `detail` |
+| `runTemplateChecks` | `POST /v1/admin/template-versions/{tpv_id}/check-runs` | Deterministic, no side effects; `check_hash` is stored in the `review` row by `submitTemplateReview` (15.D.4.7) |
 | `createTemplateVersionComment` | `POST .../{tpv_id}/comments` | `CT0` |
 | `requestTemplateChanges` | `POST .../{tpv_id}/change-requests` | `If-Match` |
-| `approveTemplateVersion` / `rejectTemplateVersion` | `POST .../{tpv_id}/approvals`, `.../rejections` | `If-Match`; `409 STATE_CONFLICT` if another admin holds the claim |
+| `approveTemplateVersion` / `rejectTemplateVersion` | `POST .../{tpv_id}/approvals`, `.../rejections` | `If-Match` |
 | `retireTemplateVersion` | `POST .../{tpv_id}/retirements` | `CT2` |
 
 | AC | Given | When | Then |
@@ -362,10 +362,11 @@ Two-person handling: an `audit.accept` or `quarantine.release` creates an `Appro
 
 | `op` | Method and path | Notes |
 | --- | --- | --- |
-| `listAuditQueueItems`, `getAuditQueueItem` | `GET /v1/admin/audit-queue-items[/{id}]` | Metadata only; ids are the underlying `aud_`, `sub_` or `rpt_` ids |
-| `getAuditQueueItemEvidence` | `GET .../{id}/evidence` | Logged read (`submission.view`) |
-| `createGoldView` | `POST .../{id}/gold-views` | Reason required; logged read (`gold.view_answer`) |
-| `decideAuditQueueItem` | `POST .../{id}/decisions` | Body `{outcome, reason_code, reason_text}`; `202` with an `ApprovalRequest` for `CT3` outcomes |
+| `listAudits`, `getAudit` | `GET /v1/admin/audits[/{aud_id}]` | Metadata only; ids are the underlying `aud_` ids |
+| `listQuarantinedSubmissions` | `GET /v1/admin/quarantined-submissions` | Metadata only; ids are the underlying `sub_` ids |
+| `getAuditContent`, `getQuarantinedSubmissionContent` | `GET /v1/admin/audits/{aud_id}/content`, `GET /v1/admin/quarantined-submissions/{sub_id}/content` | Logged read (`submission.view`) for both |
+| `resolveAudit` | `POST /v1/admin/audits/{aud_id}/resolutions` | Body `{outcome, reason_code, reason_text}`; `200` for one admin with step-up, no approval |
+| `releaseQuarantinedSubmission`, `rejectQuarantinedSubmission` | `POST /v1/admin/quarantined-submissions/{sub_id}/releases`, `POST /v1/admin/quarantined-submissions/{sub_id}/rejections` | `200` for one admin with step-up, no approval |
 
 | AC | Given | When | Then |
 | --- | --- | --- | --- |
@@ -453,17 +454,18 @@ When reports on a template reach `template.autopause_report_count` inside `templ
 
 | `op` | Method and path | Notes |
 | --- | --- | --- |
-| `listAbuseItems`, `getAbuseItem` | `GET /v1/admin/abuse-items[/{id}]` | `id` is an `rpt_` or `alm_` id |
-| `triageAbuseItem`, `dismissAbuseItem`, `recordAbuseItemAction` | `POST .../{id}/triages`, `.../dismissals`, `.../actions` | `If-Match` |
-| `restrictMember`, `suspendMember`, `banMember`, `reinstateMember`, `liftMemberRestriction` | `POST /v1/admin/members/{mem_id}/restrictions`, `.../suspensions`, `.../bans`, `.../reinstatements`, `.../restriction-lifts` | Body carries `context`; `banMember` returns `202` |
-| `stopJob` | `POST /v1/admin/jobs/{job_id}/stop-requests` | `CT2` |
-| `voidCell` | `POST /v1/admin/cells/{cel_id}/voidings` | `CT2` |
-| `createCellOverturn` | `POST /v1/admin/cell-overturns` | Body `{cell_ids, reason}`; `202` |
+| `listReports`, `getReport` | `GET /v1/admin/reports[/{rpt_id}]` | `id` is an `rpt_` id |
+| `listAlarms`, `getAlarm` | `GET /v1/admin/alarms[/{alm_id}]` with `?category=abuse` | `id` is an `alm_` id; the screen merges the two streams |
+| `triageReport`, `closeReport`, `acknowledgeAlarm` | `POST /v1/admin/reports/{rpt_id}/triages`; `POST /v1/admin/reports/{rpt_id}/outcomes` with `outcome` `dismissed` or `actioned` (and `linked_admin_action_ids`); `POST /v1/admin/alarms/{alm_id}/acknowledgements` | No `If-Match` |
+| `restrictMember`, `suspendMember`, `banMember`, `reinstateMember`, `liftMemberRestriction` | `POST /v1/admin/members/{mem_id}/restrictions`, `.../suspensions`, `.../bans`, `.../reinstatements`, `.../restriction-lifts` | Body carries `reason_code`, `reason`, `reason_copy_key`, `linked_ids`, `ends_at?` (15.29.6); `banMember` returns `202` |
+| `stopJob` | `POST /v1/admin/jobs/{job_id}/stop-requests` | `CT2`; `perm.job.stop`, step-up, defined in 15.D.4.3 |
+| `voidCell` | `POST /v1/admin/cells/{cel_id}/voidings` | `CT2`; `perm.cell.void`, step-up, body `{reason_code, reason, linked_ids}`, defined in 15.D.4.3 |
+| `createCellOverturn` | `POST /v1/admin/cell-overturns` | Body `{cell_ids, reason_code, reason, linked_ids}`; `202` with an `AdminApproval` (15.D.4.3) |
 
 | AC | Given | When | Then |
 | --- | --- | --- | --- |
 | `AC-abuse-01` | `template.autopause_report_count` = 3 (fixture) and three reports on one template inside the window | The third arrives | The queue shows one row with count 3 and a `killswitch.engaged` for `kill.template.<id>` with principal `system` exists |
-| `AC-abuse-02` | A `suspendMember` call with no `context` | Sent | `422 UNPROCESSABLE`; a refused `AdminAction` is written |
+| `AC-abuse-02` | A `suspendMember` call with no `context` | Sent | `422 UNPROCESSABLE`; no `AdminAction` row and no event (a refused `AdminAction` is written only for authorization failures, 15.34.1) |
 | `AC-abuse-03` | A ban initiated by reviewer A | A confirms | `202`, member status unchanged; the ban executes only after distinct admin B approves |
 | `AC-abuse-04` | Any response of the abuse and appeal APIs | Checked against the schema | No field contains a reporter's `mem_` or `vol_` id |
 | `AC-abuse-05` | A `createCellOverturn` for accepted cells | Approved by a second admin | For each cell `cell.overturned`, a ledger `reversal` and a `rework` cell (S0 `ISS-05`) exist, or the whole request is rejected by the guard of 11.50.3 |
@@ -499,14 +501,15 @@ The original entry is never edited (S0.7 forbids it); both stay visible and link
 
 | `op` | Method and path | Notes |
 | --- | --- | --- |
-| `listLedgerAccounts`, `getLedgerAccount` | `GET /v1/admin/ledger-accounts[/{lac_id}]` | Member accounts need `context` |
-| `listLedgerEntries`, `getLedgerEntry` | `GET /v1/admin/ledger-entries[/{lge_id}]` | Amounts as integer strings |
-| `listLedgerTransactions`, `getLedgerTransaction` | `GET /v1/admin/ledger-transactions[/{txn_id}]` | |
-| `listCreditLots` | `GET /v1/admin/ledger-accounts/{lac_id}/credit-lots` | `context` required |
-| `listInvariantChecks` | `GET /v1/admin/invariant-checks` | |
-| `createLedgerVerification` | `POST /v1/admin/ledger-verifications` | Body `{kind: chain or invariants}`; one at a time |
-| `listLedgerCheckpoints` | `GET /v1/admin/ledger-checkpoints` | |
-| `createLedgerReversal` | `POST /v1/admin/ledger-reversals` | `202` with an `ApprovalRequest` |
+| `listLedgerAccounts`, `getLedgerAccount` | `GET /v1/admin/ledger/accounts[/{lac_id}]` | Member accounts (`?member_id`) need `perm.ledger.read_member` and are logged reads |
+| `listLedgerEntries`, `getLedgerEntry` | `GET /v1/admin/ledger/entries[/{lge_id}]` | Amounts as integer strings |
+| `getLedgerTransaction` | `GET /v1/admin/ledger/transactions/{txn_id}` | No list; use `listLedgerEntries?txn_kind=` |
+| `listLots` | `GET /v1/admin/ledger/lots?member_id=` | `perm.ledger.read_member`, logged read |
+| `listInvariants` | `GET /v1/admin/ledger/invariants` | |
+| `listInvariantChecks` | `GET /v1/admin/ledger/invariants/{inv_id}/checks` | |
+| `startHashChainVerification`, `runInvariant` | `POST /v1/admin/ledger/verifications` with `{from_seq, to_seq}`; `POST /v1/admin/ledger/invariants/{inv_id}/runs` with `{mode}` | `perm.ledger.verify`; a concurrent run of one invariant is `409 STATE_CONFLICT` |
+| `listLedgerCheckpoints` | `GET /v1/admin/ledger/checkpoints` | |
+| `reverseLedgerEntry` | `POST /v1/admin/ledger/reversals` | `202` with an `AdminApproval` |
 | `listAlarms`, `acknowledgeAlarm` | `GET /v1/admin/alarms`, `POST .../{alm_id}/acknowledgements` | |
 
 No `PUT`, `PATCH` or `DELETE` route exists on any ledger resource.
@@ -552,9 +555,9 @@ No `PUT`, `PATCH` or `DELETE` route exists on any ledger resource.
 | --- | --- | --- |
 | `listParameters`, `getParameter` | `GET /v1/admin/parameters[/{name}]` | `ETag`; `name` is the dotted key |
 | `listParameterVersions` | `GET /v1/admin/parameters/{name}/versions` | |
-| `createParameterChangeSet` | `POST /v1/admin/parameter-change-sets` | `201` when executed (tighten, neutral), `202` when an `ApprovalRequest` is needed; `If-Match` per item |
+| `createParameterChangeSet` | `POST /v1/admin/parameter-change-sets` | `201` when executed (tighten, neutral), `202` with an `AdminApproval` (loosening set); `expected_version` per item; one parameter is `proposeParameterChange` at `POST /v1/admin/parameter-changes` (15.D.4.5) |
 | `withdrawParameterVersion` | `POST /v1/admin/parameter-versions/{pmv_id}/withdrawals` | `CT2` |
-| `listChangeLogEntries` | `GET /v1/admin/change-log-entries` | Includes non-public entries |
+| `listPublicChangeLog` | `GET /v1/public/change-log[/{chg_id}]` | All entries are public; annotations are `POST /v1/admin/changelog-entries` |
 
 | AC | Given | When | Then |
 | --- | --- | --- | --- |
