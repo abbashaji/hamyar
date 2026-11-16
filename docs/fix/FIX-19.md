@@ -1,6 +1,6 @@
 # FIX-19: S0 state machines, missing transitions
 
-Cell C-090. Sources: `docs/audit/A15.md` findings 21, 22, 25, 33, 34, 35 and `docs/audit/A06.md` findings 27, 32. Only `spec/00-conventions.md` was edited. File:line values are those of the file after the edits and are approximate (+-3). Nothing was run; CI runs the acceptance checks. `docs/audit/FINAL.md` section 4 has no default for any edit below, so no edit is marked default-pending. The Founding Document was not re-read for these edits: they rest on the text of A15, A06, FINAL, `spec/05b-state-machines.md` (5.22.1, 5.22.3, 5.23.4, 5.26) and S0 itself.
+Cell C-090. Sources: `docs/audit/A15.md` findings 21, 22, 25, 33, 34, 35 and `docs/audit/A06.md` findings 27, 32. Only `spec/00-conventions.md` was edited. File:line values are those of the file after the edits and are approximate (+-3). Nothing was run; CI runs the acceptance checks. `docs/audit/FINAL.md` section 4 has no default for any edit below, so no edit uses an owner default. The Founding Document was not re-read for these edits: they rest on the text of A15, A06, FINAL, `spec/05b-state-machines.md` (5.22.1, 5.22.3, 5.23.4, 5.26) and S0 itself.
 
 | edit | file:line | before | after | status |
 | --- | --- | --- | --- | --- |
