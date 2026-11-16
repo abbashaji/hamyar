@@ -31,7 +31,7 @@ Coverage of the requester items of prompt scope F (every item is a decision, tab
 | Topic | Owner | What 11b consumes |
 | --- | --- | --- |
 | Price formula, escrow postings, refund and settlement rules, admission algorithm, reservations rules | S6.* | `quote`, `escrow`, `window`, `receipt`, `reservation.terms` fields (11.34) |
-| Policy evaluator, allowlist, license options, reason-code semantics | S7.* | `getPolicyProfile`, `rejection.reasons` |
+| Policy evaluator, allowlist, license options, reason-code semantics | S7.* | `getPublicPolicy`, `rejection.reasons` |
 | Template format, data slots, splitter, output formats | S8.* | `template.input_slots`, `cell_count`, `deliverable.files` |
 | Input screening rules, quarantine, output flagging | S9.* | `upload.screen_status`, `findings`, `withheld_for_review` |
 | Identity, session, recovery, rate limits | S10.* | auth failures, `identity.recovery_cooldown_s` |
@@ -45,7 +45,7 @@ Each row is a decision [D] that every requester screen obeys.
 | --- | --- | --- |
 | `RD-01` | The client displays server values and never computes a price, a window, a refund, a policy outcome or a deadline. The only client arithmetic is display conversion of integers (11.33.3), done with arbitrary-precision integers, never floating point. [D] | Ledger amounts are exact integers (S0.6.1); two implementations of the price would drift. |
 | `RD-02` | User-facing promises say "declared", never "guaranteed"; a quoted window is never presented as instant completion. [D] | FD Principle 11 and Principle 10. |
-| `RD-03` | The wizard may use the active allowlist (`getPolicyProfile`) to grey out and explain combinations, but the server decision is final and a hint is never a promise. [D] | Policy is data and can change at any time (`R9`, `R10`). |
+| `RD-03` | The wizard may use the active allowlist (`getPublicPolicy`) to grey out and explain combinations, but the server decision is final and a hint is never a promise. [D] | Policy is data and can change at any time (`R9`, `R10`). |
 | `RD-04` | The wizard is a server-side draft (`Job.draft`). The browser keeps only in-memory state and the current step name; no uploaded text, glossary or result is written to browser storage. [D] | Shared devices and member safety (FD Principle 8); S0.7 retention classes. |
 | `RD-05` | Declaring `S2` or `S3` honestly is not punished: the job is not accepted, the reason is shown, nothing is charged. Only false declarations found later fall under abuse handling (S10.*). [D] | An honest answer must be the easy path (FD§5.7 failure mode 1). |
 | `RD-06` | The price breakdown (`v`, `lambda`, `p`, `eta`) is always shown and always says whether `v` is measured or the prior. [D] | Verification cost is shown, not hidden (FD§4.3). |
@@ -76,7 +76,7 @@ Every screen below uses these rows: **Purpose**, **Entry conditions**, **Blocks*
 | `gate_closed` | `403 LAUNCH_GATE_CLOSED` (`launch.member_jobs_enabled` is false) | Whole requester area shows `copy.req.err_gate_closed`; no form is rendered; nothing is charged |
 | `kill_switch` | `503 KILL_SWITCH_ENGAGED` (`kill.all_new_jobs`, `kill.template.<tpl_id>`, `kill.service.<svc_id>`) | Creation actions disabled with `copy.req.err_kill_switch`; existing jobs stay readable |
 | `rate_limited` | `429 RATE_LIMITED` | Disabled action with a countdown from `Retry-After`; never auto-repeats faster than allowed |
-| `member_blocked` | `403 FORBIDDEN`, `member_status` `suspended` or `banned`, or `identity.recovery_cooldown_s` not elapsed | Read-only; shows the reason class and, for a cooldown, the end time in local time |
+| `member_blocked` | `403 FORBIDDEN`, `status` (from `getMe`) `suspended` or `banned`, or `identity.recovery_cooldown_s` not elapsed | Read-only; shows the reason class and, for a cooldown, the end time in local time |
 
 ### 11.33.3 Display rules [D]
 
@@ -113,42 +113,37 @@ Operation ids (lowerCamelCase, S0.5) are the contract between the screens and S1
 | Operation id | Method and path (proposal) | Used by |
 | --- | --- | --- |
 | `listJobs` | `GET /v1/jobs?state=&cursor=&limit=` | 01 |
-| `getBalance` | `GET /v1/members/me/balance` (`balance_ucr`, `cap_ucr`, `member_status`, `cooldown_ends_at`) | 01, 07, 08 |
-| `listCreditLots` | `GET /v1/members/me/credit-lots` (`lot_id`, `amount_ucr`, `expires_at`) | 07, 08, 15 |
+| `getBalance` | `GET /v1/balance` (`balance_ucr`, `member_cap_ucr`, `headroom_ucr`, `held_ucr`); `status` and `recovery.cooldown_until` come from `getMe` `GET /v1/members/me` | 01, 07, 08 |
+| `listLots` | `GET /v1/balance/lots` (`id`, `amount_ucr`, `remaining_ucr`, `expires_at`; `Page`, oldest expiry first) | 07, 08, 15 |
 | `listTemplates` | `GET /v1/templates?job_type=` (approved versions only) | 02 |
 | `getTemplate` | `GET /v1/templates/{template_id}` | 02, 03 |
-| `getPolicyProfile` | `GET /v1/policy-versions/current` (allowlist, phase locks, `license_options`) | 05 |
-| `listServices` | `GET /v1/services?state=approved` (`service_id`, display names) | 05 |
+| `getPublicPolicy` | `GET /v1/public/policy` (`active.allowlist`; a phase lock is an allowlist row with `status` `locked`; `license_options` is derived from the allowed `license` values) | 05 |
+| `listServices` | `GET /v1/services` (approved entries only, no query) (`id`, `display_name`) | 05 |
 | `createJob` | `POST /v1/jobs` body `{template_id, copy_from_job_id?}` -> `Job` in `draft` | 02, 06, 18 |
 | `getJob` | `GET /v1/jobs/{job_id}` | all |
-| `patchJob` | `PATCH /v1/jobs/{job_id}` (JSON Merge Patch, `If-Match` = `row_version`) | 05 |
-| `createUpload` | `POST /v1/jobs/{job_id}/uploads` JSON body `{file_name, encoding, content}`; `encoding` is `utf8` or `base64`; size limit `job.max_upload_bytes` applies to the decoded bytes; the transport body limit of this operation is derived as `ceil(4 * job.max_upload_bytes / 3) + 4096` bytes because base64 adds one third, and replaces `api.max_body_bytes` for it [A] (`ISS-114`) | 03 |
+| `updateJob` | `PATCH /v1/jobs/{job_id}` (JSON Merge Patch, `If-Match` = `row_version`) | 05 |
+| `createUpload` | `POST /v1/uploads` JSON body `{format, filename?, content, content_hash?}`, UTF-8 text only (no base64); attached by `upload_ids` on `createJob` or `updateJob`; size limit `job.max_upload_bytes` | 03 |
 | `getUpload` | `GET /v1/uploads/{upload_id}` | 03, 04 |
 | `deleteUpload` | `DELETE /v1/uploads/{upload_id}` | 03 |
-| `requestUploadReview`+ | `POST /v1/uploads/{upload_id}/review-requests` body `{note?}` | 04 |
-| `createGlossary` | `POST /v1/jobs/{job_id}/glossaries` body `{entries:[{source,target}]}` | 03 |
+| `createGlossary` | `POST /v1/glossaries` body `{name, source_lang, target_lang, entries:[{source,target}]}`; attached by `glossary_id` on `createJob` or `updateJob` | 03 |
 | `previewCells`+ | `GET /v1/jobs/{job_id}/cell-preview` (up to three sample cells exactly as a volunteer sees them) | 03, 05 |
-| `submitJob` | `POST /v1/jobs/{job_id}/submission` -> `202`, Job `screening` (or already `quoted` / `rejected` when screening finished synchronously) | 05 |
-| `getQuote` | `GET /v1/jobs/{job_id}/quote` | 07, 08 |
-| `createWaitlistEntry` | `POST /v1/jobs/{job_id}/waitlist-entries` | 07 |
-| `getWaitlistEntry` | `GET /v1/waitlist-entries/{waitlist_entry_id}` | 09 |
-| `deleteWaitlistEntry` | `DELETE /v1/waitlist-entries/{waitlist_entry_id}` | 09 |
-| `confirmEscrow` | `POST /v1/jobs/{job_id}/escrow-confirmation` body `{quote_hash, acknowledgements:[string]}` | 08 |
-| `getReservationAvailability`+ | `GET /v1/reservations/availability?from=&to=&cells=&job_type=` | 10 |
+| `submitJobForScreening` | `POST /v1/jobs/{job_id}/screenings` -> `200` Job `quoted` or `waitlisted`, `202` Job `screening`, `422 POLICY_REJECTED` (job `rejected`; read `details.job_id`) | 05 |
+| `getJobQuote` | `GET /v1/jobs/{job_id}/quote` | 07, 08 |
+| `confirmJob` | `POST /v1/jobs/{job_id}/confirmations` body `{quote_hash, reservation_id?}` (acknowledgements are declared earlier, in `Declarations`) | 08, 11 |
+| `getReservationAvailability`+ | `GET /v1/reservations/availability?from=&to=&template_id=&cells=` (`bookable`, `reason`, `price_per_cell_ucr`; an estimate, not a hold) | 10 |
 | `createReservation` | `POST /v1/reservations` | 10 |
 | `listReservations` / `getReservation` | `GET /v1/reservations`, `GET /v1/reservations/{reservation_id}` | 01, 11 |
 | `cancelReservation` | `POST /v1/reservations/{reservation_id}/cancellation` | 11 |
-| `activateReservation` | `POST /v1/reservations/{reservation_id}/activation` body `{job_id}` | 11 |
 | `getJobProgress`+ | `GET /v1/jobs/{job_id}/progress` (ETag, conditional `If-None-Match`) | 12 |
-| `listJobCells` / `getJobCell` | `GET /v1/jobs/{job_id}/cells`, `GET /v1/jobs/{job_id}/cells/{cell_id}` (primary cells only) | 13 |
+| `listJobCells` | `GET /v1/jobs/{job_id}/cells` (primary cells only; outputs by `ordinal` from `listJobResults`) | 13 |
 | `getCancellationPreview`+ | `GET /v1/jobs/{job_id}/cancellation-preview` | 14 |
-| `cancelJob` | `POST /v1/jobs/{job_id}/cancellation` | 14 |
+| `cancelJob` | `POST /v1/jobs/{job_id}/cancellation` | 09, 14 |
 | `getSettlementReceipt`+ | `GET /v1/jobs/{job_id}/receipt` | 15 |
-| `getDeliverable` | `GET /v1/jobs/{job_id}/deliverable` | 16 |
-| `downloadDeliverableFile` | `GET /v1/deliverables/{deliverable_id}/files/{file_name}` (bytes via `fetch` with the Bearer header; no query-string secrets, S0.11.1) | 16 |
-| `getManifest` | `GET /v1/jobs/{job_id}/manifest?profile=requester` | 16 |
-| `createJobRating`+ / `getJobRating`+ | `POST` and `GET /v1/jobs/{job_id}/rating` | 17 |
-| `createAppeal` / `getAppeal` | `POST /v1/appeals` with `appeal_kind` = `job_rejection`; `GET /v1/appeals/{appeal_id}` | 18 |
+| `getJobDeliverable` | `GET /v1/jobs/{job_id}/deliverable` | 16 |
+| `getJobDeliverableContent` | `GET /v1/jobs/{job_id}/deliverable/content` (JSON `{media_type, encoding, content, content_hash}`; the client saves it as a file; Bearer header, no query-string secrets, S0.11.1) | 16 |
+| `getJobManifest` | `GET /v1/jobs/{job_id}/manifest` | 16 |
+| `rateJob` | `PUT /v1/jobs/{job_id}/rating` (replaces an earlier rating; no read exists yet, 15.C.7 O7) | 17 |
+| `createAppeal`+ / `getAppeal`+ | `POST /v1/appeals` with `kind` = `job_rejection` and `subject_id` = the job id; `GET /v1/appeals/{appeal_id}` | 18 |
 | `createReport` | `POST /v1/reports` | 13, 16 |
 
 ### 11.34.1 Response shapes the screens depend on [A]
@@ -174,7 +169,7 @@ Only fields the screens read are listed; unknown fields are ignored (S0.11.1). `
   "cell_count": 240, "chars_available_per_cell": 3100, "cells_over_envelope": [],
   "findings": [ { "kind": "url_present", "severity": "review", "locations": [ { "row": 12, "start": 40, "end": 71 } ] } ] }
 
-// Quote (getQuote)  -- shown on SCR-req-07 and SCR-req-08
+// Quote (getJobQuote)  -- shown on SCR-req-07 and SCR-req-08
 { "job_id": "job_...", "quote_hash": "sha256:...", "quote_expires_at": "...",
   "cells_primary": 240,
   "price": { "v_ppm": 100000, "v_source": "prior", "v_window_days": 28, "v_sample_cells": 0,
@@ -206,7 +201,7 @@ Only fields the screens read are listed; unknown fields are ignored (S0.11.1). `
   "transactions": [ { "txn_id": "txn_...", "txn_kind": "settle" } ],
   "restored_lots": [ { "lot_id": "lot_...", "amount_ucr": "0", "expires_at": "...", "already_expired": false } ] }
 
-// Deliverable (getDeliverable)
+// Deliverable (getJobDeliverable)
 { "id": "dlv_...", "job_id": "job_...", "manifest_id": "mfs_...", "completeness": "complete",
   "available_until": "...", "files": [ { "name": "output-001.txt", "media_type": "text/plain", "bytes": 91234, "hash": "sha256:..." } ] }
 ```
@@ -272,9 +267,9 @@ The fit check is advice with reasons, never a score. [D]
 | --- | --- |
 | Purpose | One place to see credit, drafts, active and finished requests, and to start a new request or reservation |
 | Entry conditions | Authenticated member (`auth_scheme` `member`); `launch.member_jobs_enabled` true, otherwise global state `gate_closed` |
-| Blocks | (1) Balance card: `balance_ucr` (rounded down), the soonest expiry among `listCreditLots` with its local date, and the cap `cap_ucr`. (2) Primary button New request. (3) Collapsible "What can I request?" holding the five job-fit conditions of 11.35.3. (4) Needs attention: quotes ready or about to expire, a waitlist place released, a rejection whose appeal window is open, results not yet downloaded or rated. (5) In progress, then Finished (cursor-paged, 11.33). (6) Drafts with their expiry date (`job.draft_ttl_days`). (7) Reservations (only when `ff.job.reservations` is on) |
+| Blocks | (1) Balance card: `balance_ucr` (rounded down), the soonest expiry among `listLots` with its local date, and the cap `member_cap_ucr`. (2) Primary button New request. (3) Collapsible "What can I request?" holding the five job-fit conditions of 11.35.3. (4) Needs attention: quotes ready or about to expire, a waitlist place released, a rejection whose appeal window is open, results not yet downloaded or rated. (5) In progress, then Finished (cursor-paged, 11.33). (6) Drafts with their expiry date (`job.draft_ttl_days`). (7) Reservations (only when `ff.job.reservations` is on) |
 | States | `first_visit` (no jobs: shows the explainer instead of lists), `no_credit` (balance below one cell price: New request stays enabled to browse, but the page says how credit is earned and links to the volunteer area), `at_job_cap` (`admission.max_concurrent_jobs_per_member` reached: New request disabled with the reason) |
-| Actions | `listJobs`, `getBalance`, `listCreditLots`, `listReservations`; New request opens `SCR-req-02` |
+| Actions | `listJobs`, `getBalance`, `listLots`, `listReservations`; New request opens `SCR-req-02` |
 | Copy intent | Calm and factual; never urges to spend; says credit expires and shows when; wording "request" and "contribute", never "deposit" or "withdraw" (FD§0.1 item 13). Keys: `copy.req.home_title`, `copy.req.home_first_visit`, `copy.req.home_no_credit`, `copy.req.home_job_cap` |
 | Accessibility | One `h1`; lists are real lists; every job row is one link whose accessible name is title + state label + date; the Needs attention region is `aria-live="polite"`, never assertive; state is never colour alone |
 
@@ -306,7 +301,7 @@ The fit check is advice with reasons, never a score. [D]
 | Entry conditions | Job in `draft` with a template |
 | Blocks | (1) One input block per `template.input_slots[]`; supported slot kinds [A, S8.* owns]: `file_rows` (file or pasted text, UTF-8), `glossary` (term pairs; becomes a `Glossary`), `option` (one of a list), `text_short`, `file_archive`. (2) Limits in words: `job.max_upload_bytes`, `admission.max_job_cells`, `cell.envelope.max_input_chars`. (3) Split summary after processing: `cell_count`, `chars_available_per_cell` (envelope minus template overhead minus glossary share), the list `cells_over_envelope` by index. (4) "Preview what a volunteer will see" (collapsed): up to three sample cards from `previewCells` showing the fixed card (purpose, license, sensitivity, service, template, expected time) and the full wrapped prompt as inert text. (5) Notices `copy.req.notice_stranger_reads` and `copy.req.notice_retention`. (6) Continue |
 | States | `choosing`, `uploading` (text progress), `processing` (`screen_status` `pending`), `too_large`, `too_many_cells` (more cells than `admission.max_job_cells`), `over_envelope`, `ready` |
-| Actions | `createUpload` (JSON body, `utf8` or `base64`), `deleteUpload` (Replace), `createGlossary`, `previewCells`. A file larger than `job.max_upload_bytes` is stopped on the device before sending; the server's `413 PAYLOAD_TOO_LARGE` is still handled |
+| Actions | `createUpload` (JSON body, UTF-8 text only, no base64; attached by `upload_ids` on `createJob` or `updateJob`), `deleteUpload` (Replace), `createGlossary` (attached by `glossary_id`), `previewCells`. A file larger than `job.max_upload_bytes` is stopped on the device before sending; the server's `413 PAYLOAD_TOO_LARGE` is still handled |
 | Copy intent | Be specific about limits and why; say that a stranger reads each piece inside their own AI account; say how long text is kept and that hashes and the manifest remain (S0.7 `job_bound`) |
 | Accessibility | File input and paste area both labelled; drag-and-drop is never the only route; progress is text plus `role="progressbar"`; pasted and previewed text uses `dir="auto"` with bidi isolation (11.46); the over-envelope list is a table with row index and size |
 
@@ -319,11 +314,11 @@ The fit check is advice with reasons, never a score. [D]
 
 | Row | Content |
 | --- | --- |
-| Purpose | Show the outcome of upload screening in plain language, with where each finding is, without echoing the sensitive text; let the person fix, re-upload, or ask a reviewer to look |
+| Purpose | Show the outcome of upload screening in plain language, with where each finding is, without echoing the sensitive text; let the person fix, re-upload, or submit for screening |
 | Entry conditions | An `Upload` exists; the screen polls `getUpload` while `screen_status` is `pending` (`ui.requester.progress_poll_s`) |
 | Blocks | Status banner (one of four, below); a findings list (kind, severity, location as row and character range, what to do); counts per kind; the line `copy.req.notice_screening_limits` (screening reduces risk, it does not remove it); actions |
 | States | `pending`: busy text, no promise of speed. `passed`: Continue enabled. `flagged_for_review`: Continue enabled; the page says a reviewer will look before the request is accepted. `rejected`: Continue disabled; findings of severity `reject` are listed first |
-| Actions | Replace file (`deleteUpload` then `createUpload`); Edit and upload again; Ask a reviewer to look (`requestUploadReview`, limited to `screen.requester_review_requests_per_day`; moves `rejected` to `flagged_for_review` only if a reviewer so decides); Continue |
+| Actions | Replace file (`deleteUpload` then `createUpload`); Edit and upload again; Delete upload (`deleteUpload`); Submit for screening (Continue: a flagged upload then waits for a human reviewer automatically; there is no review request and no note from the requester) |
 | Copy intent | Say what was found and where, never the detected text itself (the sensitive text would be reprinted on the screen and in screenshots); say what the person can change; never reveal detection thresholds or which exact check fired for prohibited content (it would teach evasion) |
 | Accessibility | Banner has `role="status"`; findings are a table with row/column headers; locations are readable text ("row 12, characters 40 to 71"), not only highlighted spans; no colour-only severity |
 
@@ -351,9 +346,9 @@ Finding kinds the screen can display (detection is owned by S9.*; the set is a d
 | --- | --- |
 | Purpose | Collect the four mandatory declarations (purpose, license, sensitivity, service requirement; FD§5.2) in plain language, then submit the job for checking |
 | Entry conditions | Job `draft`; at least one upload with `screen_status` `passed` or `flagged_for_review` |
-| Blocks | Four option groups in this order: Purpose `P0`..`P3`, License `L0`..`L3`, Sensitivity `S0`..`S3`, Service `M0`..`M2`. Each option shows its code, a short name and the plain-language explanation of 11.44 (what it means, what it allows, what it does not). Options the active allowlist locks are shown disabled with the reason `copy.req.locked_phase` or `copy.req.locked_unreviewed` (for `P2`, `P3`, `L3`, `M2` in Phases 1-2; the data comes from `getPolicyProfile`, RD-03). Under License `L1`/`L2`: an optional `license_spdx_id` chosen from `license_options` [V counsel], and the downstream notice (11.45). Under Sensitivity `S1`: a required tick "I accept that a stranger will read this" (`ack.stranger_reads`). Acknowledgements: one tick per key of `required_acks` in the active policy version (S7.* 7.5.2: `ack.declared_not_guaranteed` and `ack.no_ownership_assurance` always, `ack.no_personal_data` for `S0` and `S1`, `ack.stranger_reads` for `S1`, `ack.open_license_reuse` for `L1` and `L2`), texts `copy.req.ack_*` (11.45), stored in `Job.acks` through `patchJob`; without them the server answers `R1` `ack_missing`. The tick that `SCR-req-08` sends as `downstream_use_uncontrolled` is the same acknowledgement as `ack.open_license_reuse` [A] (`ISS-114`). Under Service `M1`: a list from `listServices`. A live volunteer-card preview (`previewCells`) updates with the choices. A read-only summary and the notices `copy.req.notice_declared`, `copy.req.notice_screening_limits`. Button Check my request |
-| States | `incomplete` (groups missing; the button is disabled and names them, which is the client form of `R1`), `submit_refused` (`submitJob` returns an API error and the Job stays `draft`: `422 POLICY_REJECTED` with `details.reasons`, for example an `R1` sub-code, or `400 VALIDATION_FAILED`; the reasons of 11.43.1 are shown in place on this step, nothing is charged and every entered value is kept) [A: S7.* 7.1 decision 2], `combination_hint` (the allowlist says the combination is not accepted now: an inline explanation with the reason code; the button stays enabled because the server decides, RD-03), `s2_s3_chosen` (the definition is shown and the page says it will not be accepted now; the choice is allowed so that an honest answer is recorded and explained, RD-05) |
-| Actions | `getPolicyProfile`, `listServices`, `patchJob` (merge patch with `If-Match`), `previewCells`, `submitJob` (Check my request) |
+| Blocks | Four option groups in this order: Purpose `P0`..`P3`, License `L0`..`L3`, Sensitivity `S0`..`S3`, Service `M0`..`M2`. Each option shows its code, a short name and the plain-language explanation of 11.44 (what it means, what it allows, what it does not). Options the active allowlist locks are shown disabled with the reason `copy.req.locked_phase` or `copy.req.locked_unreviewed` (for `P2`, `P3`, `L3`, `M2` in Phases 1-2; the data comes from `getPublicPolicy`, RD-03). Under License `L1`/`L2`: an optional `license_spdx_id` chosen from `license_options` [V counsel], and the downstream notice (11.45). Under Sensitivity `S1`: a required tick "I accept that a stranger will read this" (`ack.stranger_reads`). Acknowledgements: one tick per key of `required_acks` in the active policy version (S7.* 7.5.2: `ack.declared_not_guaranteed` and `ack.no_ownership_assurance` always, `ack.no_personal_data` for `S0` and `S1`, `ack.stranger_reads` for `S1`, `ack.open_license_reuse` for `L1` and `L2`), texts `copy.req.ack_*` (11.45), stored in `Job.acks` through `updateJob`; without them the server answers `R1` `ack_missing`. The tick that `SCR-req-08` sends as `downstream_use_uncontrolled` is the same acknowledgement as `ack.open_license_reuse` [A] (`ISS-114`). Under Service `M1`: a list from `listServices`. A live volunteer-card preview (`previewCells`) updates with the choices. A read-only summary and the notices `copy.req.notice_declared`, `copy.req.notice_screening_limits`. Button Check my request |
+| States | `incomplete` (groups missing; the button is disabled and names them, which is the client form of `R1`), `submit_refused` (`submitJobForScreening` returns an API error and the Job stays `draft`: `422 POLICY_REJECTED` with `details.reasons`, for example an `R1` sub-code, or `400 VALIDATION_FAILED`; the reasons of 11.43.1 are shown in place on this step, nothing is charged and every entered value is kept) [A: S7.* 7.1 decision 2], `combination_hint` (the allowlist says the combination is not accepted now: an inline explanation with the reason code; the button stays enabled because the server decides, RD-03), `s2_s3_chosen` (the definition is shown and the page says it will not be accepted now; the choice is allowed so that an honest answer is recorded and explained, RD-05) |
+| Actions | `getPublicPolicy`, `listServices`, `updateJob` (merge patch with `If-Match`), `previewCells`, `submitJobForScreening` (Check my request) |
 | Copy intent | Explain each code by its consequence for the requester, not by legal categories; always say "declared"; never imply that a declaration is verified or that output use can be controlled downstream |
 | Accessibility | Each group is a `fieldset` with a `legend`; options are radio buttons whose accessible description is the explanation; disabled options remain focusable and announce their reason; no information is carried only by the code letter |
 
@@ -361,7 +356,7 @@ Finding kinds the screen can display (detection is owned by S9.*; the set is a d
 - **AC-req-16** Given the active allowlist locks `P2` and `P3`, When the page renders, Then both options are disabled, focusable and announce their reason.
 - **AC-req-17** Given the person chooses `L2`, When the choice is made, Then the downstream-use notice appears on this step before submission.
 - **AC-req-18** Given the person chooses `S1`, When the acknowledgement tick is empty, Then Check my request stays disabled.
-- **AC-req-19** Given a valid set of declarations, When Check my request is pressed, Then one `patchJob` and one `submitJob` are sent with their own `Idempotency-Key`, the Job becomes `screening` and `SCR-req-06` opens.
+- **AC-req-19** Given a valid set of declarations, When Check my request is pressed, Then one `updateJob` and one `submitJobForScreening` are sent with their own `Idempotency-Key`, the Job becomes `screening` and `SCR-req-06` opens.
 
 ### SCR-req-06 Policy result (wizard step 5)
 
@@ -386,8 +381,8 @@ Finding kinds the screen can display (detection is owned by S9.*; the set is a d
 | Purpose | Show what the request costs, how the price is made, and when it will be done, before any credit is held |
 | Entry conditions | Job `quoted` (a live quote), `waitlisted` re-quoted by `job.waitlist_released`, or `quote_expired` |
 | Blocks | (1) The p line: `p = 1 + v + lambda` written with this quote's numbers, e.g. "1 + 0.10 + 0.05 = 1.15 credits per cell"; each term has a one-line meaning (11.37). (2) Whether `v` is `measured` over the trailing `price.v_window_days` days from `v_sample_cells` cells, or the `prior` (`price.v_prior`) because fewer than `price.v_min_sample_cells` cells exist. (3) Escrow breakdown: volunteer pay, verification pool (and the number of verification cells it buys), reserve levy, total. (4) Round-trip efficiency `eta`. (5) Balance before and after, and which credit lots are used (oldest first) with their expiry. (6) The window: quoted duration, `deadline_at` (local time, both calendars in detail), the latest automatic stop `latest_stop_at` derived by the server from `job.max_overrun_ratio`, and the supply gauge for this kind of request when present. (7) A live countdown to `quote_expires_at` (`price.quote_ttl_s`). (8) Notices `copy.req.notice_no_instant`, `copy.req.notice_credit_not_money` |
-| States | `available`, `unavailable` (the window cannot be honoured now: alternatives `waitlist` and `reservation` are offered, S0.9.2 `job.waitlisted`), `expired` (read-only; Fix and resubmit), `v_prior` (the `v` line is labelled estimated), `insufficient_credit` (balance below `escrow.total_ucr`: shows the shortfall and `floor(balance / p)` cells the person could request now) |
-| Actions | Continue to confirm (opens `SCR-req-08`), Refresh quote (`getQuote`), Join waitlist (`createWaitlistEntry`), Book a reservation (`SCR-req-10`), Cancel this request (`cancelJob`; no credit is held so nothing is refunded) |
+| States | `available`, `unavailable` (the window cannot be honoured now: the job is already `waitlisted` when the screening answer arrives, so there is no join button and the screen shows `waitlist.position` and `waitlist.expires_at`; a reservation is offered as the alternative, S0.9.2 `job.waitlisted`), `expired` (read-only; Fix and resubmit), `v_prior` (the `v` line is labelled estimated), `insufficient_credit` (balance below `escrow.total_ucr`: shows the shortfall and `floor(balance / p)` cells the person could request now) |
+| Actions | Continue to confirm (opens `SCR-req-08`), Refresh quote (`getJobQuote`), Book a reservation (`SCR-req-10`), Cancel this request (`cancelJob`; no credit is held so nothing is refunded) |
 | Copy intent | Show cost as a sum the person can check; show verification cost as a cost, not hidden; call the window a quote based on measured capacity; never "within X hours guaranteed" |
 | Accessibility | The breakdown is a real table; the countdown is announced at coarse intervals only (not every second); amounts are read with units ("credits") |
 
@@ -404,7 +399,7 @@ Finding kinds the screen can display (detection is owned by S9.*; the set is a d
 | Entry conditions | Job `quoted`, `window.status` `available`, quote not expired, balance sufficient |
 | Blocks | A summary (template, `cell_count`, declarations in words, window, total to hold, balance after) in a region that receives initial focus. Required acknowledgements, each a separate tick with its own text: `window_is_quote` (always) and `downstream_use_uncontrolled` (only when the license is `L1` or `L2`, RD-09). The notices `copy.req.notice_declared` and `copy.req.notice_credit_not_money`. Button "Confirm and hold {total} credits" |
 | States | `ready`, `submitting`, `conflict_quote_changed` (`409 STATE_CONFLICT`, `details.reason` `quote_changed`: reloads the quote and returns to `SCR-req-07`), `conflict_policy_changed` (`details.reason` `policy_version_changed`: the quote is void, Fix and resubmit is offered, nothing was charged), `insufficient_credit`, `at_job_cap` (`CAP_EXCEEDED`, `details.cap` `concurrent_jobs`) |
-| Actions | `confirmEscrow` with `{quote_hash, acknowledgements}` and one `Idempotency-Key` (11.33.4) |
+| Actions | `confirmJob` with `{quote_hash, reservation_id?}` and one `Idempotency-Key` (11.33.4); the acknowledgement ticks are client-side only, the acknowledgements themselves are declared earlier in `Declarations` |
 | Copy intent | Say exactly what happens: credit is held now, volunteers are paid per accepted cell, unspent credit returns, results arrive in the quoted window or in part; the button states the amount |
 | Accessibility | Ticks are native checkboxes; the button's accessible name contains the amount; the result (`admitted`) is announced and focus moves to the progress heading |
 
@@ -469,7 +464,7 @@ Labels (copy keys; every row carries `needs_human_and_legal_review`):
 | Entry conditions | Job `waitlisted` (a `WaitlistEntry` exists) |
 | Blocks | Position (`position`, first-come within the deadline class, FD§4.8), the date the place lapses (`admission.waitlist_ttl_days`), the supply gauge for the request kind, a plain statement that **no credit is held while waiting**, what happens on release (the job is re-quoted and the person has `admission.waitlist_claim_ttl_s` to confirm), and the alternative Book a reservation |
 | States | `waiting`; `released` (banner and link to `SCR-req-07`, with the claim countdown); `expired` (`job.waitlist_expired`: the job is `cancelled`, nothing was held); `left` |
-| Actions | `getWaitlistEntry` (polled), `deleteWaitlistEntry` (Leave the waitlist), open `SCR-req-10` |
+| Actions | `getJob` (polled; field `waitlist` with `position` and `expires_at`), `cancelJob` (Leave the waitlist: the job ends at once and nothing was held; to try again the person copies it with `copy_from_job_id`), open `SCR-req-10` |
 | Copy intent | Honest about uncertainty: position can change; no estimate of a date is invented; the person may leave at any time at no cost |
 | Accessibility | Position and lapse date are plain text; the released banner is `role="alert"` only when the person is on the page, otherwise it waits on the home screen under Needs attention |
 
@@ -483,7 +478,7 @@ Labels (copy keys; every row carries `needs_human_and_legal_review`):
 | --- | --- |
 | Purpose | Book capacity for a future date (exam week, a deadline) with credit held at booking (FD§4.8) [H: flattens bursts] |
 | Entry conditions | `ff.job.reservations` on; fewer than `reservation.max_active_per_member` active reservations; entered from home, the quote, or the waitlist |
-| Blocks | Job type, number of cells, date within `reservation.max_horizon_days`; a calendar with Jalali and Gregorian shown together where `i18n.dual_calendar_detail` is true, each day marked available or not from `getReservationAvailability` (days at the share cap `reservation.capacity_share_cap` are unavailable); the four declarations in compact form (a reservation is policy-checked at booking and again at activation, `R9`); the hold: `escrow_ucr` as the server computes it; the terms object: free cancellation until a stated time (`reservation.free_cancel_notice_s` before the start), what applies after it, and what happens if the reservation is not activated; the sentence that the final job still passes screening and policy when activated |
+| Blocks | Template (its `template_id` is the availability query key), number of cells, date within `reservation.max_horizon_days`; a calendar with Jalali and Gregorian shown together where `i18n.dual_calendar_detail` is true, each day marked available or not from `getReservationAvailability` (days at the share cap `reservation.capacity_share_cap` are unavailable); the four declarations in compact form (a reservation is policy-checked at booking and again at activation, `R9`); the hold: `escrow_ucr` as the server computes it; the terms object: free cancellation until a stated time (`reservation.free_cancel_notice_s` before the start), what applies after it, and what happens if the reservation is not activated; the sentence that the final job still passes screening and policy when activated |
 | States | `no_availability` (no day offered; says so), `policy_rejected` (reasons as in 11.43.1), `insufficient_credit`, `at_reservation_cap` |
 | Actions | `getReservationAvailability`, `createReservation` |
 | Copy intent | Present a reservation as a hold with a date and conditions, never as a guarantee of completion; show every term the server returns, and for an enum value the client does not know show the generic line `copy.req.reservation_terms_generic` rather than guessing [V S6] |
@@ -501,7 +496,7 @@ Labels (copy keys; every row carries `needs_human_and_legal_review`):
 | Entry conditions | A `Reservation` of this member |
 | Blocks | State (`held`, `activated`, `cancelled`, `expired`) with its date; booked cells and date; the held amount; the terms object; the cancellation terms in force now (`free_until` and `fee_ucr_if_cancelled_now`, both server values); when `held` and the start has arrived or is near: Create the job now |
 | States | `held`, `activated` (links to the job), `cancelled` (refund shown as in `SCR-req-15`), `expired` (`reservation.expired`: refund shown) |
-| Actions | `getReservation`, `cancelReservation`, Create the job now: starts the wizard with the reservation attached (`createJob` with `reservation_id` [A]); on `SCR-req-08` the button reads "Use my reserved credit" and calls `activateReservation` with `{job_id}` instead of `confirmEscrow`; no new hold is made (`escrow_release`, S0.8.5) |
+| Actions | `getReservation`, `cancelReservation`, Create the job now: starts the wizard; the reservation is chosen on the confirm screen: on `SCR-req-08` the button reads "Use my reserved credit" and calls `confirmJob` with `reservation_id` (it activates the reservation; there is no separate activation call); no new hold is made (`escrow_release`, S0.8.5) |
 | Copy intent | One place that shows what is held, until when, and what each choice costs |
 | Accessibility | Terms in a definition list; the cancel confirmation names the exact amount returned |
 
@@ -614,7 +609,7 @@ The linear baseline is crude because volunteer supply arrives in daily batches; 
 | Entry conditions | A tile chosen on `SCR-req-12` |
 | Blocks | Index; status with label and shape; "attempt {n} of {max}" (`cell.max_attempts`); time in this state rounded to whole hours; "at risk" tag when the bottleneck rule marks it; an attempt list with outcome classes only (`not returned in time` for `lease_expired`, `did not pass the checks` for every other `reject.*` reason, `held for a reviewer` for a quarantined submission); for `double_checking` the line "another volunteer is double-checking this cell" |
 | States | `ready`, `not_found` (the cell no longer maps to this job) |
-| Actions | `getJobCell`; Report a problem with this cell (`createReport`); Close |
+| Actions | `listJobCells` (the tile's list item gives the status and attempts; this sheet shows no output, RD-10); Report a problem with this cell (`createReport`); Close |
 | Copy intent | Explain what the status means and what will happen next; keep outcome classes coarse so the sheet does not teach anyone how to beat verification |
 | Accessibility | Opens as a dialog that returns focus to its tile; Escape closes it; the attempt list is an ordered list |
 
@@ -662,9 +657,9 @@ The linear baseline is crude because volunteer supply arrives in daily batches; 
 | --- | --- |
 | Purpose | Deliver the assembled output and its provenance manifest, make integrity checkable on the device, and say plainly what the provenance does and does not show |
 | Entry conditions | Job `completed` (a complete `Deliverable`) or `failed` or `cancelled` with accepted cells (a partial `Deliverable`, `completeness` `partial`, ISS-115) |
-| Blocks | (1) Completeness banner; for a partial result the missing cell indices. (2) For licenses `L1` and `L2` the notice "downstream use uncontrolled" (11.45). (3) The declared no-training flag in words, marked as contractual and not technically enforced (`copy.req.notice_no_training`). (4) The untrusted-output notice (`copy.req.notice_untrusted_output`). (5) The files list from `getDeliverable`: name, media type, size, short hash, Download, and an integrity mark after download. (6) A text preview of the first `ui.requester.preview_chars` characters of a chosen text file, rendered inert (RD-14). (7) The manifest panel: Download manifest, Verify, and a plain-language summary (template and version, policy version, declared purpose, license and sensitivity, how many cells were verified by which method, which services volunteers reported using, with `copy.req.notice_service_attested`). (8) "Available until {date}" from `available_until` (terminal state plus `retention.job_payload_days`); after that the files are deleted and the manifest with its hashes stays (S0.7). (9) Rate this result, Report a problem |
+| Blocks | (1) Completeness banner; for a partial result the missing cell indices. (2) For licenses `L1` and `L2` the notice "downstream use uncontrolled" (11.45). (3) The declared no-training flag in words, marked as contractual and not technically enforced (`copy.req.notice_no_training`). (4) The untrusted-output notice (`copy.req.notice_untrusted_output`). (5) The files list from `getJobDeliverable`: name, media type, size, short hash, Download, and an integrity mark after download. (6) A text preview of the first `ui.requester.preview_chars` characters of a chosen text file, rendered inert (RD-14). (7) The manifest panel: Download manifest, Verify, and a plain-language summary (template and version, policy version, declared purpose, license and sensitivity, how many cells were verified by which method, which services volunteers reported using, with `copy.req.notice_service_attested`). (8) "Available until {date}" from `available_until` (terminal state plus `retention.job_payload_days`); after that the files are deleted and the manifest with its hashes stays (S0.7). (9) Rate this result, Report a problem |
 | States | `ready`, `partial`, `withheld_present` (some outputs are held for a reviewer and not in the files; the count is shown), `purged` (past `available_until`: no download buttons; manifest only), `hash_mismatch` (a downloaded file's SHA-256 differs from the listed hash: the file is kept, marked untrusted, and Report a problem is prefilled) |
-| Actions | `getDeliverable`, `downloadDeliverableFile` (`fetch` with the Bearer header; the bytes are saved from a `Blob`; the SHA-256 is computed on the device with the platform crypto API and compared with `files[].hash`; where the API is missing the page says integrity could not be checked), `getManifest`, `createReport` |
+| Actions | `getJobDeliverable`, `getJobDeliverableContent` (`fetch` with the Bearer header; the `content` string of the JSON answer is saved as a file under a name the client builds; the SHA-256 is computed on the device with the platform crypto API and compared with `files[].hash`; where the API is missing the page says integrity could not be checked), `getJobManifest`, `createReport` |
 | Copy intent | Results come from strangers using AI services and are verified by sampling, not guaranteed correct; the manifest records what was declared and attested; hashes show the file is unchanged since assembly, not that its content is true |
 | Accessibility | Preview text has `dir="auto"` and bidi isolation; the preview is a labelled region with a copy button; download buttons say the file name and size; after a download an `aria-live` message says whether the hash matched |
 
@@ -682,7 +677,7 @@ The linear baseline is crude because volunteer supply arrives in daily batches; 
 | Entry conditions | Job `completed`, or `failed` or `cancelled` with accepted cells; within `ui.requester.rating_window_days` of the terminal state; no rating exists yet (one rating per job) |
 | Blocks | Outcome: Good / Mixed / Poor (`outcome_rating`: `good`, `mixed`, `poor`). Optional tags: `accuracy`, `format`, `completeness`, `speed_vs_quote`, `other`. Optional comment up to `ui.requester.rating_comment_max_chars`. Optional "these cells look wrong": pick up to `ui.requester.rating_flag_cells_max` cell indices. A statement of use: the rating changes nobody's credit, is never shown to volunteers with the requester's name, and may lead to closer checks of the cells flagged; in aggregate it helps judge templates. The objective figure "finished {x} before or after the quoted deadline" is shown but is recorded by the system, not by the rating |
 | States | `open`, `submitted` (read-only), `window_closed`, `not_eligible` |
-| Actions | `createJobRating`, `getJobRating` |
+| Actions | `rateJob` (a later submission replaces the earlier rating; no read exists yet) |
 | Copy intent | Short and optional; makes clear that a low rating is allowed and safe; never asks for personal details |
 | Accessibility | Three outcomes are radio buttons with text labels and icons; the cell picker accepts typed indices and shows the chosen list as text |
 
@@ -699,7 +694,7 @@ Outcome and tag copy (rows carry `needs_human_and_legal_review`):
 | `speed_vs_quote` | Time compared with the quote | زمان نسبت به بازهٔ اعلام‌شده |
 | `other` | Something else | موارد دیگر |
 
-- **AC-req-57** Given a `completed` job inside the rating window, When the person submits Good with tag `accuracy`, Then one `createJobRating` creates a `JobRating`, the screen becomes read-only and no cell state or ledger entry changes.
+- **AC-req-57** Given a `completed` job inside the rating window, When the person submits Good with tag `accuracy`, Then one `rateJob` creates a `JobRating`, the screen becomes read-only and no cell state or ledger entry changes.
 - **AC-req-58** Given a rating already exists, When a second submission is sent, Then `409 ALREADY_EXISTS` is answered and the stored rating is shown.
 - **AC-req-59** Given `ui.requester.rating_flag_cells_max` cells are already picked, When another index is added, Then the picker refuses it and states the limit by its configured value.
 - **AC-req-60** Given the rating window has passed, When the page loads, Then the form is absent and the page states that the window ended.
@@ -922,13 +917,13 @@ For an unknown code the screen shows `copy.req.reason_unknown` (EN "This request
 | Entry conditions | Job `rejected`; `rejection.appeal.allowed_until` in the future; fewer than `appeal.max_per_decision` appeals filed for this decision |
 | Blocks | The recorded reasons; a note field up to `ui.requester.appeal_note_max_chars` ("why do you think this is wrong"); a statement that a reviewer who did not make the decision will look, that the target time is `appeal.reviewer_sla_days` days and is a target, not a promise, and that the decision can be upheld or overturned; Send. After filing: the appeal state in words (`filed`, `assigned`, `in_review`, `awaiting_second_review`, `upheld`, `overturned`, `withdrawn`) |
 | States | `open`, `filed` (read-only, polled with `getAppeal`), `window_closed`, `already_filed`, `overturned` (banner and Continue: Fix and resubmit creates a copy whose screening records the appeal id; how the reversal is applied to the copy is S7.* and S10.* [V]) |
-| Actions | `createAppeal` with `{appeal_kind: "job_rejection", job_id, note}`, `getAppeal` |
+| Actions | `createAppeal` with `{kind: "job_rejection", subject_id: <the job id>, statement}`, `getAppeal` |
 | Copy intent | A request for a second pair of eyes, not a fight; no promise of outcome; no new sensitive material should be pasted into the note (say so) |
 | Accessibility | The note field has a counter with the limit as text; the status is `role="status"` |
 
 Appeal state labels (`copy.req.appeal_<state>`): `filed` Filed / ثبت شد; `assigned` Assigned to a reviewer / به بازبین سپرده شد; `in_review` Being reviewed / در حال بررسی; `awaiting_second_review` Waiting for a second review / در انتظار بررسی دوم; `upheld` Decision upheld / تصمیم تأیید شد; `overturned` Decision overturned / تصمیم لغو شد; `withdrawn` Withdrawn / پس گرفته شد.
 
-- **AC-req-64** Given a `rejected` job inside the window, When the person files with a note, Then one `createAppeal` with `appeal_kind` `job_rejection` is sent with its `Idempotency-Key`, an `Appeal` in `filed` is shown, and the form becomes read-only.
+- **AC-req-64** Given a `rejected` job inside the window, When the person files with a note, Then one `createAppeal` with `kind` `job_rejection` is sent with its `Idempotency-Key`, an `Appeal` in `filed` is shown, and the form becomes read-only.
 - **AC-req-65** Given an appeal already filed for this decision and `appeal.max_per_decision` = 1, When the page loads, Then no second form is offered and the existing appeal's state is shown.
 - **AC-req-66** Given the appeal is `overturned`, When the person presses Continue, Then a new job is created with `copy_from_job_id`, no credit has moved, and the wizard resumes at the step the server returns.
 
@@ -1015,8 +1010,8 @@ Every notice is a copy key with `fa` and `en` text and the marker `needs_human_a
 - **AC-req-72** Given `kill.all_new_jobs` becomes true while the person is on step 5, When Check my request is pressed, Then `copy.req.err_kill_switch` is shown, the entered declarations remain and nothing is lost.
 - **AC-req-73** Given any requester route loads, When network requests are listed, Then every request goes to the application's own origin (RD-14, 11.46).
 - **AC-req-74** Given the right-to-left locale and a keyboard-only user, When the person completes the wizard from step 1 to step 7, Then every control is reachable in visual order, focus is always visible, and no step needs a pointer (`T-rtl`).
-- **AC-req-75** Given a draft whose declarations pass the client checks but fail `R1` on the server (for example `R1` `not_allowlisted`), When Check my request is pressed, Then `submitJob` answers an API error, the Job stays `draft`, the `R1` reason of 11.43.1 is shown on `SCR-req-05` with the entered values intact, and nothing is charged.
-- **AC-req-76** Given the active policy version requires `ack.declared_not_guaranteed`, `ack.no_ownership_assurance` and `ack.no_personal_data` for `S0` and `S1`, When the person has not ticked all of them, Then Check my request is disabled and names the missing ones; when all are ticked, `patchJob` stores them in `Job.acks` before `submitJob`.
+- **AC-req-75** Given a draft whose declarations pass the client checks but fail `R1` on the server (for example `R1` `not_allowlisted`), When Check my request is pressed, Then `submitJobForScreening` answers an API error, the Job stays `draft`, the `R1` reason of 11.43.1 is shown on `SCR-req-05` with the entered values intact, and nothing is charged.
+- **AC-req-76** Given the active policy version requires `ack.declared_not_guaranteed`, `ack.no_ownership_assurance` and `ack.no_personal_data` for `S0` and `S1`, When the person has not ticked all of them, Then Check my request is disabled and names the missing ones; when all are ticked, `updateJob` stores them in `Job.acks` before `submitJobForScreening`.
 
 ## 11.48 Reuse from the existing panel [V]
 
