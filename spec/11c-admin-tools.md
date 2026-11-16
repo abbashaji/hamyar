@@ -615,7 +615,7 @@ bottleneck = argmax over candidates with blocked > 0; ties broken by oldest
 show: name, blocked count, age, link to its screen
 ```
 
-**API.** `getCapacityDashboard` `GET /v1/admin/capacity-dashboard`; `listMetricSnapshots` `GET /v1/admin/metric-snapshots?kind=`; `getBottleneck` `GET /v1/admin/bottleneck`. Audit: reads are not logged individually; alarms are `Alarm` rows.
+**API.** `getCapacitySnapshot` `GET /v1/admin/capacity`, `listCapacityDays`, `listSupplyGauges`, `getOperationsSnapshot` `GET /v1/admin/capacity/operations`; `listAdminMetricSnapshots` `GET /v1/admin/metric-snapshots?kind=`; `getBottleneck` `GET /v1/admin/bottleneck` (15.D.4.6). Audit: reads are not logged individually; alarms are `Alarm` rows.
 
 | AC | Given | When | Then |
 | --- | --- | --- | --- |
@@ -623,7 +623,7 @@ show: name, blocked count, age, link to its screen
 | `AC-capdash-02` | A category with fewer than `analytics.min_cohort_k` eligible donors | The supply gauge loads | It shows "fewer than k", not a number |
 | `AC-capdash-03` | Mint utilization at or above `inflation.mint_utilization_alarm` | The rollup runs | The tile is red and an `Alarm` exists |
 | `AC-capdash-04` | A rollup older than `metrics.rollup_interval_s` | The dashboard loads | The tile carries a stale badge and its computed time |
-| `AC-capdash-05` | A reviewer principal | `getCapacityDashboard` is called | `403 FORBIDDEN` |
+| `AC-capdash-05` | A reviewer principal | `getCapacitySnapshot` is called | `403 FORBIDDEN` |
 | `AC-capdash-06` | A template awaiting review that blocks 3 backlog entries and a service that blocks 5 waitlisted jobs | `getBottleneck` is called | The service is named with blocked count 5 |
 
 ## 11.53 Tool 9: Launch-gate checklist
@@ -647,12 +647,12 @@ A `launch.signoff` request is the only way to turn a switch on: the initiator's 
 
 | `op` | Method and path | Notes |
 | --- | --- | --- |
-| `listLaunchGates`, `getLaunchGateItem` | `GET /v1/admin/launch-gates`, `GET /v1/admin/launch-gate-items/{lgi_id}` | Gates with items and evidence |
-| `createLaunchGateEvidence` | `POST /v1/admin/launch-gate-items/{lgi_id}/evidence` | `CT1`; `If-Match` |
-| `createLaunchGateReopening` | `POST .../{lgi_id}/reopenings` | `CT2` |
-| `createLaunchSignoff` | `POST /v1/admin/launch-signoffs` | Body `{gate_item_ids, enable_switches, reason}`; `202` |
-| `createLaunchSwitchOff` | `POST /v1/admin/launch-switch-offs` | `CT2` |
-| `getLaunchStatus` | `GET /v1/admin/launch-status` | Rule rows and effective states; feeds `BLK-header` |
+| `listLaunchGates`, `getLaunchGateItem` | `GET /v1/admin/launch/gates[/{gate_id}]`, `GET /v1/admin/launch/gate-items/{lgi_id}` | Gates with items and evidence |
+| `createLaunchGateEvidence` | `POST /v1/admin/launch/gate-items/{lgi_id}/evidence` | `CT1`; no `If-Match`; `Idempotency-Key` required |
+| `createLaunchGateReopening` | `POST /v1/admin/launch/gate-items/{lgi_id}/reopenings` | `CT2` |
+| `signOffGateItem` | `POST /v1/admin/launch/gate-items/{lgi_id}/signoffs` | Body `{comment}`; `201`; one call per item; a switch is turned on by `changeLaunchSwitch` |
+| `changeLaunchSwitch` | `POST /v1/admin/launch/switch-changes` with `{switch, value: false, reason}` | `CT2` |
+| `getLaunchStatus` | `GET /v1/admin/launch/status` | Rule rows and effective states; feeds `BLK-header` |
 
 | AC | Given | When | Then |
 | --- | --- | --- | --- |
