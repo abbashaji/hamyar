@@ -27,10 +27,10 @@
 | CR-07c `createAdminUser` response row | spec/15b-api-admin.md:170 | code shown once to the approving admin | unchanged, already consistent with CR-07a | already-applied |
 | CR-11a `content_hash` on the lock request | spec/15b-api-admin.md:679 | `{reason}` | `{content_hash, reason}` with `hash_mismatch` | applied |
 | CR-11b hash bound to approvers and re-checked | spec/15b-api-admin.md:681 | hash defined only | step-up bound to it, re-checked at execution | applied |
-| CR-11c `lock_pending` | spec/15b-api-admin.md:678 | `locked` only | `lock_pending` while a lock approval is open | applied |
+| CR-11c `lock_pending` | spec/15b-api-admin.md:678 | `locked` only | adds the `lock_`-prefixed reason code (S15f ER-04) while a lock approval is open | applied |
 | CR-11d status `registered` | spec/15b-api-admin.md:685 | `draft, running, stopped` | `draft, registered, running, stopped` | applied |
 | CR-11e `startExperiment` guard | spec/15b-api-admin.md:693 | re-read `fraction_source` at start | starts from `registered` only; no re-read; `not_registered` | applied |
-| CR-11f `AC-admin-25` | spec/15b-api-admin.md:1117 | prereg locked then start | `registerExperiment` needed; `not_registered`; `lock_pending` | applied |
+| CR-11f `AC-admin-25` | spec/15b-api-admin.md:1117 | prereg locked then start | `registerExperiment` needed; `not_registered`; the lock-wait reason code | applied |
 | CR-11g carry part 13 `content` as one field, hashed once | spec/15b-api-admin.md:681 | `content_hash` over scope, title, thresholds, decision_rules, linked ids | not changed: needs part 13 shape (13.7) and an owner decision not in FINAL section 4 | skipped-needs-owner |
 | CR-20a evidence entry fields | spec/15b-api-admin.md:408 | `kind, ref, sha256?, note, ...` | adds `visibility` (incl. `restricted`), `media_type`, `size_bytes`; bytes stored up to `launch.evidence_max_bytes` | applied |
 | CR-20b sign-off fields | spec/15b-api-admin.md:409 | `admin_id, signed_at, comment` | adds `outcome`, `conditions_text`, `generation`, `valid_until`, `watch_digest`, digest challenge | applied |
@@ -63,8 +63,8 @@ After all edits every edited place was read again on the branch; what is there n
 - :94, :95, :171 and :108 show `X` in the Idem column; :172 `registerAdminCredential` still shows `req`. (CR-06c to f)
 - :1139 ISS-155 now ends its point (2) with the note that CR-06 supersedes it. (CR-06j)
 - :127 `result` mentions only a `secret_ref`; :152 gives the replay rules; :170 is unchanged. (CR-07a, b, c)
-- :678 shows `lock_pending`; :679 shows `{content_hash, reason}` and `hash_mismatch`; :681 says the lock request names the hash and is re-checked. (CR-11a, b, c)
-- :685 status list includes `registered`; :693 says "from `registered` only" and `not_registered`; :1117 lists `registerExperiment` and `lock_pending`. (CR-11d, e, f)
+- :678 shows the `lock_`-prefixed reason code; :679 shows `{content_hash, reason}` and `hash_mismatch`; :681 says the lock request names the hash and is re-checked. (CR-11a, b, c)
+- :685 status list includes `registered`; :693 says "from `registered` only" and `not_registered`; :1117 lists `registerExperiment` and the lock-wait reason code. (CR-11d, e, f)
 - :408 and :409 carry the added evidence and sign-off fields; :419 and :420 show the new request fields; :423 names the digest; :408 still lists the old `kind` enum. (CR-20a to d; CR-20e not applied)
 - :425 to :433 define the three upload operations and "14 for a maximal upload". (CR-21)
 - :455 holds the approval-time guard paragraph with the event mapping; :461 shows `authorization` and `reasons`; :462 shows the `LaunchAuthorization` write; :464 says S14.8.3 closes the switch; :517 names `launch_integrity_check`. (CR-22a to g)
