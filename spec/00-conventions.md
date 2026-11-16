@@ -524,7 +524,7 @@ filed|assigned|in_review|awaiting_second_review --appeal.withdrawn-->    withdra
 | `Report` (S10.*) | `open`, `triaged`, `actioned` (T), `dismissed` (T) | `report.filed`, `report.triaged`, `report.actioned`, `report.dismissed` |
 | `LaunchGateItem` (S14.*) | `open`, `evidence_attached`, `signed_off`, `reopened` | `gate.evidence_attached`, `gate.signed_off`, `gate.reopened` |
 | Kill switch (S14.*) | `released`, `engaged` | `killswitch.engaged`, `killswitch.released` |
-| `Referral` (S6.*, S12.*) [A] | `held` , `released` (T), `revoked` (T) | `referral.created`, `referral.released`, `referral.revoked` |
+| `Referral` (S6.*, S12.*) [A] | `held`, `released` (T), `revoked` (T) | `referral.created`, `referral.released`, `referral.revoked` |
 | `Alarm` (S4.*, S13.*) [A] | `raised`, `acknowledged` (T) | `alarm.raised`, `alarm.acknowledged` |
 | `Invite` (S10.*) [A] | `issued`, `redeemed` (T), `expired` (T), `revoked` (T) | `invite.issued`, `invite.redeemed`, `invite.expired`, `invite.revoked` |
 | Ledger and configuration events | not machines | `ledger.entry_committed`, `ledger.invariants_passed`, `ledger.invariant_violated`, `parameter.changed`, `policy.version_published`, `changelog.entry_published`, `launch.members_may_join_changed` |
