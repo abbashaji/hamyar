@@ -10,7 +10,7 @@ Cell C-082. Edited file: `spec/13-measurement.md` (1031 lines before, 1157 after
 | E4 (REMOVE part: landing counter through the API) | spec/13-measurement.md:172 [171] | landing-page row with no note | row says it is not sent through the API; counted at the front-end host | applied |
 | E5 (ALIAS 11) | spec/13-measurement.md:1050 [926] | `approvePreRegistrationLock` on `.../lock-approvals` | `lockPreRegistration`, then `approveApproval`; two-person; `perm.prereg.lock`, `perm.approval.decide` | applied |
 | E6 (ALIAS 13) | spec/13-measurement.md:1051 [927] | `getPreRegistrationProof` on `.../proof` | `getPublicPreRegistration` on `/v1/public/pre-registrations/{prr_id}` | applied |
-| E7 (REMOVE part: `lock_requested` row status) | spec/13-measurement.md:723 [609] | status enum with `lock_requested` | enum `draft`, `locked`, `abandoned`; pending lock is an `AdminApproval`; 13.7.2 rows re-read | applied |
+| E7 (REMOVE part: `lock_requested` row status) | spec/13-measurement.md:723 [609] | status enum with `lock_requested` | enum `draft`, `locked`, `abandoned`; a lock in progress is an `AdminApproval`; 13.7.2 rows re-read | applied |
 | E8 | spec/13-measurement.md:739 [625] | change-log entry without content, with `phase`, `version` | entry of kind `preregistration_lock` with `scope` and the content | applied |
 | E9 | spec/13-measurement.md:1053 [929] | `createDecisionReport` only | four decision-report operations with `perm.metrics.export` or `perm.metrics.view` | applied |
 | E10 | spec/13-measurement.md:1054 [930] | `perm.experiment.manage` | `perm.experiment.edit` | applied |
@@ -19,17 +19,17 @@ Cell C-082. Edited file: `spec/13-measurement.md` (1031 lines before, 1157 after
 | E13 | spec/13-measurement.md:1059 [935] | `createCalibrationReport`, `perm.calibration.record` | three report operations, `perm.calibration.write` and `perm.calibration.read` | applied |
 | E14 | spec/13-measurement.md:1060 [936] | `PATCH`, `GET /v1/admin/incidents` | six incident operations on collection and item paths | applied |
 | E15 | spec/13-measurement.md:1061 [937] | `perm.interview.record` for both | create keeps it, coverage reads with `perm.metrics.view` | applied |
-| remove `perm.metrics.view_small_cells` (table row) | spec/13-measurement.md:1048 [924] | `perm.metrics.view`; `perm.metrics.view_small_cells` for `suppressed` values | `perm.metrics.view`; `value` of a `suppressed` row always `null` for every caller (default-pending: 15e decision, 15g CR-12) | applied |
+| remove `perm.metrics.view_small_cells` (table row) | spec/13-measurement.md:1048 [924] | `perm.metrics.view`; `perm.metrics.view_small_cells` for `suppressed` values | `perm.metrics.view`; `value` of a `suppressed` row always `null` for every caller (default applied, owner undecided: 15e decision, 15g CR-12) | applied |
 | remove `perm.metrics.view_small_cells` (rule `AN-09`) | spec/13-measurement.md:~96 (13.2 table) | rule says the permission shows small cells | unchanged | skipped-needs-owner: not in the authorized list; whether suppressed cells may ever be shown to anyone is not decided with a default in FINAL section 4 (nearest: D-13, D-20); left so that no rule is deleted |
 | `listMetricSnapshots` / `?kind=` (13:51, 13:921, 13:925, 13:929, 11c:615) | spec/13-measurement.md | cited paths | now defined by 15.E.10 and 15.E.7 | no edit needed (as 15f says) |
-| V1 (A11 #4) | spec/13-measurement.md:~616 (13.6.16) | key `hamyar_growth_v1_*` named in S12, undefined in S13 | `MET-16`: definition, query, cadence, bias note | applied (default-pending: window `analysis_window_s` has no default) |
-| V2 `day7_return` (A11 #4) | spec/13-measurement.md:~13.6.17 | `hamyar_growth_v2_day7_return_ratio` undefined | `MET-17`: calendar days 1 to 7 after anchor day, ITT, companion exact-day | applied (reading chosen [A], default-pending) |
-| V3 (A11 #4) | spec/13-measurement.md:~13.6.18 | share-tap ratio and card arrivals undefined | `MET-18` | applied (default-pending) |
-| V4 (A11 #4, same finding) | spec/13-measurement.md:~13.6.19 | `hamyar_growth_v4_week2_return_ratio` undefined | `MET-19`, ITT, not limited to week-1 contributors | applied (default-pending) |
-| V5 (A11 #4) | spec/13-measurement.md:~13.6.20 | activation ratio, blocked total, unrecovered credit undefined | `MET-20` | applied (default-pending) |
-| V6 (A11 #4) | spec/13-measurement.md:~13.6.21 | return after milestone undefined | `MET-21`: first published milestone after assignment per member, ITT | applied (default-pending) |
+| V1 (A11 #4) | spec/13-measurement.md:~616 (13.6.16) | key `hamyar_growth_v1_*` named in S12, undefined in S13 | `MET-16`: definition, query, cadence, bias note | applied (default applied, owner undecided: window `analysis_window_s` has no default) |
+| V2 `day7_return` (A11 #4) | spec/13-measurement.md:~13.6.17 | `hamyar_growth_v2_day7_return_ratio` undefined | `MET-17`: calendar days 1 to 7 after anchor day, ITT, companion exact-day | applied (reading chosen [A], default applied, owner undecided) |
+| V3 (A11 #4) | spec/13-measurement.md:~13.6.18 | share-tap ratio and card arrivals undefined | `MET-18` | applied (default applied, owner undecided) |
+| V4 (A11 #4, same finding) | spec/13-measurement.md:~13.6.19 | `hamyar_growth_v4_week2_return_ratio` undefined | `MET-19`, ITT, not limited to week-1 contributors | applied (default applied, owner undecided) |
+| V5 (A11 #4) | spec/13-measurement.md:~13.6.20 | activation ratio, blocked total, unrecovered credit undefined | `MET-20` | applied (default applied, owner undecided) |
+| V6 (A11 #4) | spec/13-measurement.md:~13.6.21 | return after milestone undefined | `MET-21`: first published milestone after assignment per member, ITT | applied (default applied, owner undecided) |
 | coverage map | spec/13-measurement.md:~29 | `MET-15` was the last FD row | row for `MET-16` to `MET-21` added | applied |
-| seeds TRIP-10, TRIP-11, TRIP-15 (A13 #6) | spec/13-measurement.md:824-834 (13.7.5) | no `thr.*` key for them | keys `thr.exhausted_cell_share_max`, `thr.fast_contribution_share_min`, `thr.copy_paste_error_max`, `thr.active_donors_min`, no initial default; optional `thresholds[].key` | applied (default-pending: lock refused while empty) |
+| seeds TRIP-10, TRIP-11, TRIP-15 (A13 #6) | spec/13-measurement.md:824-834 (13.7.5) | no `thr.*` key for them | keys `thr.exhausted_cell_share_max`, `thr.fast_contribution_share_min`, `thr.copy_paste_error_max`, `thr.active_donors_min`, no initial default; optional `thresholds[].key` | applied (default applied, owner undecided: lock refused while empty) |
 | FIX-11 notes | spec/13-measurement.md:~1155 (Issues raised) | no record of these additions | paragraph listing seven additions and open points | applied |
 
 ## Read-back
@@ -37,7 +37,7 @@ Cell C-082. Edited file: `spec/13-measurement.md` (1031 lines before, 1157 after
 Every edited place was re-read after the last commit. What is there now:
 
 - 13.3.4 row `ui.landing_viewed` (line 172) says the count "comes from aggregate counters at the front-end host"; 13.3.5 (line 179) names `recordClientEvents` and `/v1/client-event-batches`.
-- 13.7.1 status row (line 723) lists `draft`, `locked`, `abandoned` and says a pending lock is an `AdminApproval`; the 13.7.2 table (lines 737 to 739) still has the `lock_requested` rows, which the status row re-reads; line 739 says the entry is of kind `preregistration_lock` and carries "the content".
+- 13.7.1 status row (line 723) lists `draft`, `locked`, `abandoned` and says a lock in progress is an `AdminApproval`; the 13.7.2 table (lines 737 to 739) still has the `lock_requested` rows, which the status row re-reads; line 739 says the entry is of kind `preregistration_lock` and carries "the content".
 - 13.7.5 (lines 824 to 834) shows the paragraph and the four-row table of `thr.*` keys with "no initial default".
 - 13.9.3 (line 997) says the tool "returns the report id and `report_hash`" and that the operator attaches them.
 - 13.10.2 (lines 1047 to 1061): `recordClientEvents` on `/v1/client-event-batches`; `listMetricSnapshots` without the small-cell permission; `lockPreRegistration`, `approveApproval`; `getPublicPreRegistration`; four decision-report operations; `perm.experiment.edit`; `perm.experiment.run`; `getCalibrationSummary`; three report operations; six incident operations; interview coverage under `perm.metrics.view`.
