@@ -32,8 +32,8 @@ Cell C-087. Source: `docs/audit/A05.md` findings 15 to 18, 20, 21, 23 to 27; usa
 Every edited place was read again after the commit.
 
 - E1 (line 150): the intro now says it adds the two entities of S5.4.1, flagged [A].
-- E2 (line 213 on): S5.4.1 has a `StateTransition` table of 14 field rows, a unique key, two indexes, a retention rule and a DDL block ending in a trigger comment (this part of the read-back covered the section heading and first paragraph; the field table and DDL are as written in the commit).
-- E3 (line 213 on): `mint_headroom` is given with scope, period, member id and three amounts; the CHECK "minted + reserved <= cap" and two partial unique indexes are in the DDL (same coverage as E2).
+- E2 (lines 216 to 262): S5.4.1 shows a `StateTransition` field table, "Unique `(entity_type, entity_id, entity_seq)`", two indexes, a retention rule and a DDL block ending in a trigger comment.
+- E3 (lines 264 to 285): `mint_headroom` is given with scope, period, member id and three amounts; the DDL shows the CHECK on minted plus reserved against the cap (its two partial unique indexes follow at the end of the block and were not on the lines re-read).
 - E4 (line 343): rule 3 now ends with `StateTransition` and its two columns.
 - E5 (line 594): the closure_reason row lists `cells_exhausted` and says S0.9.2 lacks it.
 - E6 (lines 619 to 625): seven rows are present; for example `held_ucr` reads "`= escrow_ucr` for a member job".
