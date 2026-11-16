@@ -146,13 +146,15 @@ function pick_lots(account, amount_ucr, now, exclude_grants):
         if need == 0: return moves
     raise INSUFFICIENT_CREDIT        -- only unexpired credit can be spent
 
-function pick_slices(escrow_account, amount_ucr):
-    -- same ordering over the escrow's slices (by the lot's expires_at); used by transfer and levy
+function pick_slices(escrow_account, amount_ucr, now, for_payout):
+    -- same ordering over the escrow's slices (by the lot's expires_at); used by transfer (for_payout = true) and levy (false)
+    -- for_payout: slices of lots with expires_at <= now are skipped, an expired slice pays no donor [default-pending D-03]
+    -- if the unexpired slices sum to less than amount_ucr, refuse with STATE_CONFLICT (6.6.1)
 ```
 
 FD§4.5 says 'oldest-first'. With one lifetime that is the same as earliest-expiry-first; with several lifetimes (a 14-day starter lot, a 60-day lot, the accelerated arm) only earliest-expiry-first achieves what the FD wants, that the least credit expires. The order is therefore by `expires_at`, with `earned_at` and `id` as deterministic tie-breakers (ISS-63). Expired credit (`expires_at <= now`) can never be spent, even before the sweeper has moved it (6.9).
 
-Escrow disbursements (`transfer`, `levy`) drain slices in the same earliest-expiry-first order, so what is left for the final `refund` is the longest-lived part, which is the most favorable restoration for the requester [D]. A `refund` restores each remaining slice to its original lot (`delta_ucr` positive on the lot's own account, negative on the escrow). A restored lot that has already passed `expires_at` is moved to the Reserve by the next sweep (ISS-07); escrow neither extends nor stops expiry.
+Escrow disbursements (`transfer`, `levy`) drain slices in the same earliest-expiry-first order, so what is left for the final `refund` is the longest-lived part, which is the most favorable restoration for the requester [D]. A `refund` restores each remaining slice to its original lot (`delta_ucr` positive on the lot's own account, negative on the escrow). A restored lot that has already passed `expires_at` is moved to the Reserve by the next sweep (ISS-07); escrow neither extends nor stops expiry. A payout never draws an expired slice, because that would give the donor a lot that is already expired: an escrow slice whose lot has passed `expires_at` pays no donor. It leaves the escrow in one of two ways, both ending in the Reserve by the expiry rule (6.9.1): the `levy`, which drains earliest expiry first, takes it before any later slice and posts it to the Reserve directly, and whatever is left of it is restored to the expired lot by the `refund` and swept by the next `expire` entry [default-pending D-03].
 
 Lineage [D]: within one `transfer` entry the slices removed from escrow are the parents of the lot created for the donor. These rows are the only per-unit provenance the ledger keeps (6.14 states what that does and does not prove).
 
@@ -268,7 +270,7 @@ There is no other way to create or move credit. No row moves credit from member 
 | Operation | Guards and error |
 | --- | --- |
 | Mint | `launch.minting_enabled` true (`LAUNCH_GATE_CLOSED`); `kill.all_minting`, `kill.template.<tpl_id>`, `kill.service.<svc_id>`, `kill.member.<mem_id>` all `released` (`KILL_SWITCH_ENGAGED`); the cell is `accepted` in this same transaction, is charged (`charged_job_id`, else its own job) to a job with `is_commons`, has no earlier `mint` entry, and the R9 re-check passed; member `status` = `active`; amount is exactly 1,000,000; the three headroom checks of 6.8 hold against the versions stored on the lease (`CAP_EXCEEDED`) |
-| Payout | Escrow `state` in (`open`, `settling`); the cell is `accepted`, charged to this job and unpaid; the budget rule of 6.7 holds; headroom of 6.8 (lease-time reservation); the donor is not `banned` at lease time |
+| Payout | Escrow `state` in (`open`, `settling`); the cell is `accepted`, charged to this job and unpaid; the budget rule of 6.7 holds; headroom of 6.8 (lease-time reservation); the donor is not `banned` at lease time; the escrow's unexpired slices (lot `expires_at > now`) cover 1,000,000 ucr: an expired slice pays no donor, and if the rest cannot cover the payout it is refused with `STATE_CONFLICT`, `ledger.payout_slice_expired` is logged for the owner, the cell's acceptance rolls back (LD-09) and the gap is the donor's [default-pending D-03] |
 | Hold and booking | `launch.member_jobs_enabled` true; `kill.all_new_jobs`, template and service switches released; member `active` and past `identity.recovery_cooldown_s`; the quote is unexpired (`price.quote_ttl_s`) and its snapshots are those it was made under; the admission result of file 06b is `admitted` (or a reservation slot); unexpired credit >= escrow (`INSUFFICIENT_CREDIT`); `admission.max_concurrent_jobs_per_member` not exceeded |
 | Settlement and cancel | Escrow `state` = `settling`; no cell of the job is in `leased`, `submitted` or `flagged_for_audit` (S5.* drains or voids them first; `STATE_CONFLICT` otherwise) |
 | Expiry | `expires_at <= now` and `remaining_ucr > 0` |
@@ -299,7 +301,7 @@ function post_payout(cell, now):                          -- inside post('payout
         -- no levy draw: the shortfall path of 6.7.2 stops the job instead
         -- the levy budget is never a source of a verification payout
         e.paid_pool_ucr += 1_000_000
-    moves = pick_slices(e.account, 1_000_000)
+    moves = pick_slices(e.account, 1_000_000, now, for_payout = true)   -- unexpired slices only; STATE_CONFLICT if they cannot cover it (default-pending D-03)
     entry = transfer(e.account -> account_of(cell.donor), 1_000_000)
     lot = new_lot(donor, 1_000_000, now, now + lifetime_days(donor) * 86400, 'transfer')
 ```
@@ -403,7 +405,7 @@ every credit.expiry_sweep_interval_s (default 3600 s):
         post('expire', 'expire:' + lot.id + ':' + count_expire_entries(lot.id)):  expire(M(lot) -> R, lot.remaining_ucr); lot -> status 'expired'
 ```
 
-Expired credit moves to the Reserve and is never silently deleted (FD§4.5). A lot restored from a refund after its date is swept the same way (ISS-07): the restoration sets its status back to `active`, and the sweep count k in the natural key (6.6) stops the second sweep being read as a replay of the first. One entry per sweep keeps the trail exact. Notice: members are told `credit.expiry_notice_days` (default 7) before a lot expires by an in-app notice computed from the same query (no e-mail is required, FD§3.2). A swept lot emits `ledger.lot_expired` (new log event, 6.17).
+Expired credit moves to the Reserve and is never silently deleted (FD§4.5). This holds for credit held in escrow too: a slice of an expired lot is never paid to a donor (6.4.3); the levy, or the restoration by the refund and the next sweep, sends it to the Reserve [default-pending D-03]. A lot restored from a refund after its date is swept the same way (ISS-07): the restoration sets its status back to `active`, and the sweep count k in the natural key (6.6) stops the second sweep being read as a replay of the first. One entry per sweep keeps the trail exact. Notice: members are told `credit.expiry_notice_days` (default 7) before a lot expires by an in-app notice computed from the same query (no e-mail is required, FD§3.2). A swept lot emits `ledger.lot_expired` (new log event, 6.17).
 
 ### 6.9.2 The Reserve [D]
 
@@ -623,7 +625,7 @@ The checker is a separate process with a read-only database role and its own cod
 | `INV-L10` | Mint caps: for each `mint`, `month_mint_after_ucr <= mint_cap_ucr` and `member_day_mint_after_ucr <=` the daily cap of the recorded version; running sums equal recomputed sums | incremental, full | high |
 | `INV-L11` | Member cap: for each `mint`, `transfer`, `grant`, `owned_after_ucr <= cap_ucr` | commit, incremental, full | high |
 | `INV-L12` | Reserve: only `grant`, `retire` and `reversal` debit it; after a `grant` the balance >= `grant.reserve_floor_credits`; after a `retire` the balance >= the ceiling used | commit, incremental, full | high |
-| `INV-L13` | Expiry: no unexpired-spend (no `escrow_hold` or `reserve_donation` movement from a lot with `expires_at <=` entry time); no `expire` before `expires_at`; no lot with `remaining > 0` older than `expires_at` plus twice `credit.expiry_sweep_interval_s` | incremental, full | high |
+| `INV-L13` | Expiry: no unexpired-spend (no `escrow_hold`, `reserve_donation` or payout `transfer` movement from a lot or slice with `expires_at <=` entry time; the `levy` may draw an expired slice, 6.4.3); no `expire` before `expires_at`; no lot with `remaining > 0` older than `expires_at` plus twice `credit.expiry_sweep_interval_s` | incremental, full | high |
 | `INV-L14` | Chain: `seq` gap-free from 1; `prev_hash` equals the previous `entry_hash`; each `entry_hash` recomputes; head equals the last entry; the published checkpoint equals the recomputed prefix hash | incremental, checkpoint, full | critical |
 | `INV-L15` | Transactions: every entry has a transaction; `settle` and `cancel` leave their escrow at 0; every `reversal` mirrors (or, for restitution, matches amount and reason) an entry reversed at most once, and `shortfall_ucr = original - reversed` | incremental, full | high |
 | `INV-L16` | Entry-type matrix: each entry's (type, debit account type, credit account type) is one of the S0 0.8.5 rows; no entry other than a `reversal` moves credit member to member | commit, incremental, full | critical |
@@ -709,7 +711,7 @@ SELECT id FROM ledger_entries WHERE entry_type = 'grant' AND reserve_balance_aft
 -- INV-L13
 SELECT id FROM credit_lots WHERE remaining_ucr > 0 AND expires_at < now() - 2 * (credit.expiry_sweep_interval_s) * interval '1 second';
 SELECT m.id FROM lot_movements m JOIN credit_lots l ON l.id = m.lot_id JOIN ledger_entries e ON e.id = m.ledger_entry_id
- WHERE m.delta_ucr < 0 AND e.entry_type IN ('escrow_hold','reserve_donation') AND l.expires_at <= e.created_at;
+ WHERE m.delta_ucr < 0 AND e.entry_type IN ('escrow_hold','reserve_donation','transfer') AND l.expires_at <= e.created_at;
 SELECT e.id FROM ledger_entries e JOIN credit_lots l ON l.id = e.lot_id WHERE e.entry_type = 'expire' AND e.created_at < l.expires_at;
 
 -- INV-L14
@@ -822,7 +824,7 @@ Ids follow S0 0.5. The numbers `AC-ledger-01`..`16`, `T-unit-01`..`02`, `T-prop-
 | `AC-ledger-03` | N = 7 (escrow 8,050,000, pool 700,000, levy budget 350,000) | (a) No verification cell; (b) a verification cell is required (floor or mandatory event) | (a) payouts 7,000,000, levy 350,000, refund 700,000. (b) no verification cell is created (pool 700,000 < 1,000,000, no levy draw): `ledger.verification_budget_exhausted` is logged and the job stops; nothing is paid from the levy budget, no mint, no Reserve outflow; settlement posts the levy on accepted primary cells and refunds the unspent pool [default-pending D-04] |
 | `AC-ledger-04` | An admitted 240-cell job, no cell accepted | The requester cancels and the drain ends | `cancel` posts a refund of 276,000,000 and no levy; each lot is restored with its original `expires_at`; Sara's balance is 300,000,000 |
 | `AC-ledger-05` | Sara holds a 14-day grant lot, a 60-day lot earned earlier and a 60-day lot earned later | She funds a job needing more than the grant lot | Lots are consumed in order of `expires_at`; a lot with `expires_at <= now` is never consumed even if not yet swept |
-| `AC-ledger-06` | A job escrow includes a slice of a lot that expires while the job runs, and the member still holds the rest of that lot, which an earlier sweep has already expired | The job settles with a refund covering that slice after `expires_at` | The lot is restored with its original date and the next sweep posts a second `expire` entry (`expire:{lot_id}:1`) to the Reserve (ISS-07) |
+| `AC-ledger-06` | A job escrow includes a slice of a lot that expires while the job runs, and the member still holds the rest of that lot, which an earlier sweep has already expired | The job settles with a refund covering that slice after `expires_at` | The lot is restored with its original date and the next sweep posts a second `expire` entry (`expire:{lot_id}:1`) to the Reserve (ISS-07). Default-pending D-03, N = 2 (escrow 2,300,000 = primary 2,000,000 + pool 200,000 + levy 100,000) with slices S1 = 300,000 of `L1`, S2 = 1,000,000 of `L2`, S3 = 1,000,000 of `L3`, and `L1` expiring before the first cell is accepted: both payouts are drawn from S2 and S3 only (S1 pays no donor); settlement posts the levy 2 x 50,000 = 100,000 from S1 to the Reserve and a refund of 300,000 - 100,000 = 200,000 that restores the rest of S1 to `L1`; the next sweep posts `expire:{L1}:k` of 200,000 to the Reserve; the requester gets back 0 spendable, the Reserve gains 300,000, and `INV-L07` holds (2,300,000 + 0 = 2,000,000 + 0 + 0 + 100,000 + 200,000). Variant S1 = 600,000, S2 = 1,000,000, S3 = 700,000 (same total): the first payout is drawn from S2, the second finds 700,000 unexpired < 1,000,000 and is refused with `STATE_CONFLICT`, nothing is written and `ledger.payout_slice_expired` is logged |
 | `AC-ledger-07` | Reserve balance = ceiling + 25 credits; `reserve.retire_min_credits` = 10 | The retirement run executes twice in the same interval | One `retire` entry of 25 credits (`retire:{interval_index}` makes the second a replay); `balance(retired)` = 25; a public log line exists |
 | `AC-ledger-08` | Member owned 349 credits, K_eff 350 | Two leases are requested concurrently | Exactly one passes (headroom 1 credit); with owned 349.5 neither passes; `owned_after <= cap` on every mint (`T-adv-02`) |
 | `AC-ledger-09` | Reserve at 2 credits, G = 3, floor 0, 5 eligible members | The grant run executes | No grant is posted, `reserve_empty` is the only denial, order is preserved; after the Reserve reaches 3, the earliest-qualified member is granted first. A second grant for the same member, a second member on the same `Device`, or a 21st grant in a UTC day is denied with `already_granted`, `device_limit`, `day_limit` |
@@ -839,7 +841,7 @@ Ids follow S0 0.5. The numbers `AC-ledger-01`..`16`, `T-unit-01`..`02`, `T-prop-
 | ID | Test |
 | --- | --- |
 | `T-prop-01` | Stateful model-based test: random valid sequences of mint, hold, payout, settle, cancel, expire, retire, grant, donate and reverse with random clock advances; after every step the independent checker finds no violation of `INV-L01`..`INV-L17`; shrinking enabled; failing seeds stored |
-| `T-prop-02` | `pick_lots` consumes exactly the prefix of lots sorted by (`expires_at`, `earned_at`, `id`); never consumes an expired lot; sum equals the request or `INSUFFICIENT_CREDIT` |
+| `T-prop-02` | `pick_lots` consumes exactly the prefix of lots sorted by (`expires_at`, `earned_at`, `id`); never consumes an expired lot; sum equals the request or `INSUFFICIENT_CREDIT`; `pick_slices` with `for_payout` skips slices of expired lots and refuses with `STATE_CONFLICT` when the rest cannot cover the amount [default-pending D-03] |
 | `T-prop-03` | For any hold followed by any payouts, settlement and refund restore each lot's amount exactly to what the escrow slices still hold; total restored plus levy plus payouts equals the hold |
 | `T-prop-04` | For N, v, lambda in the validated ranges: `escrow_ucr` = primary + pool + levy; `eta_ppm` is monotone non-increasing in v and lambda; `div_ceil` never over-states v by more than 1 ppm |
 | `T-prop-05` | Any single-field mutation, deletion, reordering or insertion in the entry sequence is detected by `INV-L14` |
