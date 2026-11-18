@@ -761,13 +761,13 @@ Given / When / Then, in the ID scheme of S0.5. Tests are named in `S18.*`.
 
 | ID | Given | When | Then |
 | --- | --- | --- | --- |
-| `AC-exp-01` | A running experiment | The same member is evaluated in two processes and after a restart | The same arm each time, and recomputing from `salt`, `seed_version`, ids and `stratum_key` equals the stored `arm_key` |
-| `AC-exp-02` | Mode `hash_bucket`, two arms at 500,000 ppm, n synthetic member ids | Arms are assigned | Each arm's count lies within 5 standard deviations, 5 x sqrt(n x p x (1 - p)) with p = 0.5, of n x p |
-| `AC-exp-03` | Mode `hash_blocked` with `block_size` b | Assignments fill complete blocks in a stratum | Each complete block holds exactly `weight_ppm` x b / 1,000,000 of each arm |
-| `AC-exp-04` | Concurrent first evaluations of one member | They run | One `ExperimentAssignment`, one `experiment.assigned`, one arm returned to all |
-| `AC-exp-05` | A decision point reached by a `control` member and a treatment member | Each reaches it | Both produce `experiment.exposed`, once per surface |
-| `AC-exp-06` | An experiment with no locked `PreRegistration`, or a locked one | Start, or a weight change, is requested | Refused with `STATE_CONFLICT`, respectively `VALIDATION_FAILED` |
-| `AC-exp-07` | A running experiment | Its flag is disabled | Evaluations return OFF, no new exposure is logged, existing assignments remain |
+| `AC-exp-01` | A `running` experiment | The same member is evaluated in two processes and after a restart | The same arm each time, and recomputing the permutation of her `block_id` from the published `salt`, `assignment_seed_version`, `stratum` and `block_index` (`S13.8.4` item 4) gives a list whose entry at `position_in_block` equals the stored `arm_key` |
+| `AC-exp-02` | Two arms at 500,000 ppm (`block_size` 2), n synthetic members in one stratum | Arms are assigned | Each arm's count differs from n / 2 by less than `block_size` (`S13.8.4` item 6), and `experiment.balance_check` raises no `experiment.balance_violated` |
+| `AC-exp-03` | A `registered` experiment with `block_size` b | Assignments fill a complete `ExperimentBlock` of a stratum | Its `permutation` holds exactly `weight_ppm` x b / 1,000,000 of each arm key, and `next_position` equals b |
+| `AC-exp-04` | Concurrent first evaluations of one member | They run | One `ExperimentAssignment` (unique `(experiment_id, member_id)`), one `experiment.member_assigned`, `next_position` of the block advanced once, one arm returned to all |
+| `AC-exp-05` | A decision point reached by a `control` member and a treatment member | Each reaches it | Both produce `ui.variant_exposed`, once per assignment and surface |
+| `AC-exp-06` | A `draft` experiment whose code no locked `PreRegistration` lists; and a `registered` one | Registration is requested; then a change of `arms` or a weight | Registration is refused with `VALIDATION_FAILED`; the change is refused with `STATE_CONFLICT` (`S13.8.2`) |
+| `AC-exp-07` | A `running` experiment | Its flag is turned off | It becomes `stopped` and its salt is published; no new assignment or exposure is logged, existing assignments remain, and lots earned afterwards use the base value |
 | `AC-exp-08` | An experiment created with a `device` or IP-hash stratifier | It is saved | `VALIDATION_FAILED` |
 
 ## 12.17 Requirements on other parts
