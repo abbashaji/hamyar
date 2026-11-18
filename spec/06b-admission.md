@@ -172,7 +172,7 @@ Restrictive opt-ins can starve one category while the platform as a whole has ca
 | Gauge | For every `category_key` that has a live job, a waitlist entry, a reservation or a recent quote, and for `ALL`: the `Forecast` of 6.24 with `scope` = that key. The gauge is recomputed every `admission.reforecast_interval_s` and at every quote |
 | Overlap | One donor can be eligible for several categories, so category capacities are not additive. The admission test therefore applies **two** constraints, the global one and the category one; a job must satisfy both (6.27). By construction `B(category) <= B(ALL)` |
 | Feeding the quote | The quote record carries `supply` = `{category_key, limiting_factor}`; `limiting_factor` is one of `global_capacity`, `category_supply`, `backlog`, `claim_pressure`, `window_bounds`. The requester sees the factor, never donor counts |
-| Public gauge | `GET /v1/public/capacity` returns per category: eligible-donor bucket, `forecast_cells_per_day` and the committed share, refreshed every `public.counter_refresh_s`. A category with fewer than `analytics.min_cohort_k` eligible donors shows `"<k"` for both counts, so a small category cannot reveal individual donors (S10.*). No member id, handle or location appears [D] |
+| Public gauge | `GET /v1/public/capacity` returns per category: eligible-donor bucket, `forecast_cells_per_day` and the committed share, refreshed every `public.counter_refresh_s`. A category with fewer than `analytics.min_cohort_k` eligible donors shows `null` with `suppressed: true` for both counts (and the bucket rule of S15.B.8.2 for `eligible-donor bucket`), so a small category cannot reveal individual donors (S10.*). No member id, handle or location appears [D] |
 | Operator view | The admin capacity dashboard (`SCR-ops-*`, S11.*) shows exact counts, the gauge history and the forecast error of 6.33 |
 | Opt-out fragmentation signal | `hamyar_admission_category_supply_ratio` = `B(category) / B(ALL)` per category; a falling ratio is the early sign of FD§5.7(8) [H: that opt-out fragmentation matters in Phase 1; test: the ratio of the two most restrictive categories over the pilot; kill criterion: ratio stays above `0.9` for every live category] |
 
@@ -540,8 +540,8 @@ Operation ids and paths are proposals for `S15.*`; conventions of S0 0.11 apply 
 
 | `op` | Method and path | Purpose | Errors beyond the common ones |
 | --- | --- | --- | --- |
-| `confirmJobQuote` | `POST /v1/jobs/{job_id}/confirmation` body `{quote_seq}` | 6.28.3 | `422 NO_CAPACITY` (`details.requote`), `422 INSUFFICIENT_CREDIT`, `409 STATE_CONFLICT` (also for an expired quote) |
-| `requestJobQuote` | `POST /v1/jobs/{job_id}/quotes` body `{requested_window_s?}` | Re-quote while `quoted` or after a release | `422 CAP_EXCEEDED`, `403 LAUNCH_GATE_CLOSED`, `503 KILL_SWITCH_ENGAGED` |
+| `confirmJob` | `POST /v1/jobs/{job_id}/confirmations` body `{quote_hash, reservation_id?}` | 6.28.3 | `422 NO_CAPACITY` (`details.requote`), `422 INSUFFICIENT_CREDIT`, `409 STATE_CONFLICT` (also for an expired quote) |
+| `requestJobQuote` | `POST /v1/jobs/{job_id}/quotes` body `{requested_window_s?}` | Re-quote while `quoted` (a waitlist release is re-quoted by the system, not by this call) | `409 STATE_CONFLICT`, `422 CAP_EXCEEDED` (`waitlist_limit`), `422 POLICY_REJECTED`, `403 LAUNCH_GATE_CLOSED`, `503 KILL_SWITCH_ENGAGED` |
 | `cancelJob` | `POST /v1/jobs/{job_id}/cancellation` | 6.32 | `409 STATE_CONFLICT` |
 | `createReservation` | `POST /v1/reservations` | 6.30.2 | `422 CAP_EXCEEDED`, `422 NO_CAPACITY`, `422 INSUFFICIENT_CREDIT` |
 | `getReservation`, `listReservations` | `GET /v1/reservations/{id}`, `GET /v1/reservations` | Read | `404 NOT_FOUND` |
