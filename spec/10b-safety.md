@@ -281,17 +281,17 @@ Before any new field, event, log line, `ff.*` flag turning on, or change to a `r
 
 The outcome is an `AdminAction` (`safety_review`: `passed` or `rejected`). A change that loosens privacy (a larger `retention.*` value, a wider `public.*` setting) is a `loosen` change: public change-log entry, `change.notice_days_default` notice, second `operator` approval (S0.10.3). A tightening change takes effect at once (R10 applies by analogy).
 
-## 10.14 Secrets management
+## 10.24 Secrets management
 
-### 10.14.1 Principles [D]
+### 10.24.1 Principles [D]
 
-1. A secret exists only in the host secret store behind `SecretsPort` (S10.15.2) and in the memory of the process that needs it. Never in the repository, the database, the `Parameter` table, a log, a URL, a client bundle or a chat transcript (S0.10.1 reserves `secret.<name>` for this).
+1. A secret exists only in the host secret store behind `SecretsPort` (S10.25.2) and in the memory of the process that needs it. Never in the repository, the database, the `Parameter` table, a log, a URL, a client bundle or a chat transcript (S0.10.1 reserves `secret.<name>` for this).
 2. No human reads a secret value after creation. Access to a value is an `AdminAction` of kind `secret.emergency_access`, a two-person action with expiry `security.emergency_access_ttl_s`.
 3. Every secret has an owner role, a version, a rotation cadence and a compromise procedure. A secret without all four is not allowed to exist.
-4. Secrets are scoped to the smallest component that needs them (S10.14.3).
+4. Secrets are scoped to the smallest component that needs them (S10.24.3).
 5. Statements about the four existing secrets come from panel-review §4 (static reading, nothing executed) and stay [V].
 
-### 10.14.2 Inventory [D]
+### 10.24.2 Inventory [D]
 
 **A. Existing secrets of the panel repo** (names are the panel's environment variable names; spec names are `secret.legacy_*`). None of them authenticates a Hamyar member or admin: members use key pairs and admins use WebAuthn (S0.6.4). They stay only while the panel remains in use as build tooling [V].
 
@@ -300,7 +300,7 @@ The outcome is an `AdminAction` (`safety_review`: `passed` or `rejected`). A cha
 | `secret.legacy_panel_token` (`PANEL_TOKEN`) | Panel login password and the HMAC key of the stateless 12-hour cookie (§4.1) | Shared by all users; cookie not revocable except by changing the token; login limit read-then-write on KV (§4.5 items 1 to 3) | `security.secret_rotation_days`; rotating revokes every cookie at once | Rotate now |
 | `secret.legacy_admin_token` (`ADMIN_TOKEN`) | Owner key for release, takeover, publish-plan and steward actions (§4.2) | May persist in browser storage as `bp_owner_key`; legacy steward prompt asks it be pasted into a chat; no failure counter (§4.5 items 4 to 6) | As above; also rotated if it was ever pasted into a transcript, URL or browser storage | Rotate now; clear stored copies |
 | `secret.legacy_github_token` (`GITHUB_TOKEN`) | Every GitHub call of the Worker (§4.3) | Scope not determinable; one token, owner-wide `ALLOWED_REPOS` (§4.5 item 8); the Worker pushes to `main` (§2.1) | As above | Revoke at GitHub, issue a narrower replacement, review GitHub's audit log for use [V] |
-| `secret.legacy_mcp_auth_token` (`MCP_AUTH_TOKEN`) | Password of the connector consent page; every consenting client becomes one `owner` principal (§4.4, §4.5 item 7) | Dynamic client registration is on; limiter on `/authorize` not seen; issued grants outlive the token (§9) | As above | Rotate and invalidate all issued grants (S10.14.5) |
+| `secret.legacy_mcp_auth_token` (`MCP_AUTH_TOKEN`) | Password of the connector consent page; every consenting client becomes one `owner` principal (§4.4, §4.5 item 7) | Dynamic client registration is on; limiter on `/authorize` not seen; issued grants outlive the token (§9) | As above | Rotate and invalidate all issued grants (S10.24.5) |
 | `secret.legacy_ext_token` (`EXT_TOKEN`) | Retired browser-extension endpoints; off when unset (§4, overview) | A fifth secret the README does not list | Unset it | Unset it |
 
 **B. Hamyar runtime secrets** (new)
@@ -328,22 +328,22 @@ The outcome is an `AdminAction` (`safety_review`: `passed` or `rejected`). A cha
 
 **D. Never held by the platform** [D]: member private keys, member recovery keys, any provider credential or session (ground rule 3).
 
-### 10.14.3 Storage and access [D]
+### 10.24.3 Storage and access [D]
 
 | Rule | Detail |
 | --- | --- |
 | Store | `SecretsPort` backed by the chosen host's secret facility, or by an operator-run store that meets the port contract; secrets injected at process start or fetched on demand with a short cache |
-| Component scope | A component receives only the secrets in the "Held by" column of S10.14.2. The checkpoint job cannot read database credentials of other roles; CI cannot read runtime secrets; the member origin never holds admin-only material |
+| Component scope | A component receives only the secrets in the "Held by" column of S10.24.2. The checkpoint job cannot read database credentials of other roles; CI cannot read runtime secrets; the member origin never holds admin-only material |
 | Database roles | `app` (no UPDATE or DELETE on ledger tables), `ledger_append` (INSERT only on ledger tables), `readonly` (analytics, aggregates), `migrate` (schema, used only by deploys), `backup` (read, no write) |
 | Humans | No role reads values. The only path is `secret.emergency_access`, expiring after `security.emergency_access_ttl_s`, with an `AdminAction` entry and an `Alarm` |
 | Backup key custodians | Two named people each hold half of the wrapping key; neither alone can decrypt a backup |
 | Admin tool | Shows secret names, versions, created and rotated times, never values |
 
-### 10.14.4 Rotation [D]
+### 10.24.4 Rotation [D]
 
-**Cadence.** Every secret rotates at most `security.secret_rotation_days` (initial configurable default 90) after creation, except where S10.14.2 gives a shorter rule (`secret.ip_hash_key` daily). Rotation is a calendar item owned by the `operator` role; a missed rotation raises an `Alarm` (`hamyar_secret_rotation_overdue_total`). Each rotation cycle also includes an access review of `AdminUser` accounts and the threat-model re-read (S10.12.2).
+**Cadence.** Every secret rotates at most `security.secret_rotation_days` (initial configurable default 90) after creation, except where S10.24.2 gives a shorter rule (`secret.ip_hash_key` daily). Rotation is a calendar item owned by the `operator` role; a missed rotation raises an `Alarm` (`hamyar_secret_rotation_overdue_total`). Each rotation cycle also includes an access review of `AdminUser` accounts and the threat-model re-read (S10.22.2).
 
-**Procedure** (generic; each secret's "overlap" is in S10.14.2)
+**Procedure** (generic; each secret's "overlap" is in S10.24.2)
 
 ```
 rotate(secret):
@@ -351,7 +351,7 @@ rotate(secret):
   v_new := create version n+1 in SecretsPort (CSPRNG, length per table)
   mark v_new as "write"; keep v_old as "verify only" for the overlap window
   deploy; run the rotation canary (a request signed or hashed under v_new succeeds, one under a wrong key fails)
-  after the overlap window: mark v_old "retired"; destroy it when its destroy rule (S10.14.2) allows
+  after the overlap window: mark v_old "retired"; destroy it when its destroy rule (S10.24.2) allows
   write AdminAction{kind: secret.rotated, secret: name, from: n, to: n+1}   # never the value
   if the secret has a public part (signing key): publish the new public key in a ChangeLogEntry
 ```
@@ -366,7 +366,7 @@ rotate(secret):
 | `MCP_AUTH_TOKEN` | Generate; set; redeploy; invalidate every issued OAuth grant and registered client, by replacing the KV namespace the connector library uses (its key layout was not read [V]); re-consent from the owner's own client only | Old password refused; an old grant is refused; the owner's new consent works |
 | `EXT_TOKEN` | Unset the secret so the legacy endpoints answer 404 | Endpoint returns 404 |
 
-### 10.14.5 Rotate before any public exposure, and the launch-gate items [D]
+### 10.24.5 Rotate before any public exposure, and the launch-gate items [D]
 
 **Rule.** All existing secrets (`secret.legacy_*`) are rotated before any public exposure. `security.rotate_before_public_exposure` = true is a constant (S0.10.6). "Public exposure" is the earliest of: (a) `launch.members_may_join` becomes true; (b) `/v1/public/*` or the panel's `/panel/*` is reachable by anyone outside the founders; (c) the repository holding the panel or this spec becomes public; (d) any non-founder receives any credential. The rotation must be dated after the last moment the old value could have been seen by anyone else (a transcript, a URL, browser storage, a screen share) and recorded by `AdminAction` (`secret.rotated`).
 
@@ -374,33 +374,33 @@ rotate(secret):
 
 | Proposed item key | Gate | Evidence required | Test |
 | --- | --- | --- | --- |
-| `g1.secrets_rotated` | G1 (always required, S0.10.6 `launch.required_gate_ids`) | One `secret.rotated` record per `secret.legacy_*`, each dated before the exposure event, plus the verification result of S10.14.4 | `AC-safety-05` |
-| `g1.secrets_inventory_complete` | G1 | S10.14.2 matches the deployed `SecretsPort` listing, no extra names | `AC-safety-06` |
+| `g1.secrets_rotated` | G1 (always required, S0.10.6 `launch.required_gate_ids`) | One `secret.rotated` record per `secret.legacy_*`, each dated before the exposure event, plus the verification result of S10.24.4 | `AC-safety-05` |
+| `g1.secrets_inventory_complete` | G1 | S10.24.2 matches the deployed `SecretsPort` listing, no extra names | `AC-safety-06` |
 | `g1.no_raw_ip_audit` | G1 | Audit of storage and logs finding no raw IP in the app; statement of host-level logging [V] | `AC-safety-01` |
-| `g1.retention_jobs_verified` | G1 | Each sweep ran on synthetic data and removed what S10.13.2 states | `AC-safety-03` |
-| `g1.disclosure_runbook_reviewed` | G1 | S10.13.5 reviewed by counsel [V] | review record |
-| `g1.member_notice_reviewed` | G1 | The notice of S10.13.7 reviewed by someone qualified to advise [V] | review record |
-| `g1.threat_model_accepted` | G1 | Founders' acceptance of every `high` row (S10.12.2) | review record |
+| `g1.retention_jobs_verified` | G1 | Each sweep ran on synthetic data and removed what S10.23.2 states | `AC-safety-03` |
+| `g1.disclosure_runbook_reviewed` | G1 | S10.23.5 reviewed by counsel [V] | review record |
+| `g1.member_notice_reviewed` | G1 | The notice of S10.23.7 reviewed by someone qualified to advise [V] | review record |
+| `g1.threat_model_accepted` | G1 | Founders' acceptance of every `high` row (S10.22.2) | review record |
 | `g1.abuse_contact_published` | G1 | `report.external_contact` set and shown on the public pages | `AC-safety-12` |
 | `g4.secret_handling_audited` | G4 | The audit FD§8.3 G4 asks for, covering panel-review §4.5 items 1 to 15 | review record |
-| `g2.reachability_recorded` | G2 | Reachability evidence of S10.15.4 | S10.15.4 |
+| `g2.reachability_recorded` | G2 | Reachability evidence of S10.25.4 | S10.25.4 |
 
 While `g1.secrets_rotated` is open, `launch.members_may_join` refuses to turn on (`LAUNCH_GATE_CLOSED`).
 
-### 10.14.6 Compromise response [D]
+### 10.24.6 Compromise response [D]
 
 ```
 on suspected_compromise(secret or class):
   open an incident; engage kill.all_new_jobs (and kill.all_minting if the ledger path is involved)
   revoke sessions that the secret could have forged or read (member, admin, or panel cookies)
-  rotate(secret) immediately; for a class (host seizure) rotate every secret in S10.14.2
+  rotate(secret) immediately; for a class (host seizure) rotate every secret in S10.24.2
   for secret.ledger_checkpoint_signing_key: publish a signed ChangeLogEntry naming the last trusted checkpoint
   record AdminAction entries; release kill switches only by two-person killswitch.release
   publish what members need to know in the change log, if safe and lawful [V]
-  threat-model re-read (S10.12.2)
+  threat-model re-read (S10.22.2)
 ```
 
-### 10.14.7 Hygiene [D]
+### 10.24.7 Hygiene [D]
 
 - **Scanning.** A secret scanner runs before each commit and in CI over the whole history of any branch before it is made public. Patterns include the GitHub token forms the panel already redacts (`ghp_`, `github_pat_` and the like, panel-review §4.3) [V].
 - **Redaction.** Error and log text passes a redactor that masks token-shaped strings; a user-supplied string is never concatenated into a log format.
