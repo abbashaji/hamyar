@@ -581,7 +581,7 @@ target: decision within appeal.reviewer_sla_days (published target, initial conf
 
 **Effects of `appeal.overturned`** [D]: a ban or suspension is lifted (`member.reinstated`); a restriction ends (`member.restriction_lifted`, tier returns to `tier_before_restriction`); a withdrawn output may be restored by a decider; a cell outcome follows S8.* and S9.*; ledger effects are only by two-approver `reversal`. An overturned appeal where the report was abusive is itself input to `THR-29` (restriction of the reporter, S10.26.8). The appellant sees the reason code, the object and the decision, never the reporter.
 
-### 10.16.7 Evidence retention [D]
+### 10.26.7 Evidence retention [D]
 
 | Evidence | Kept | Access | Rule |
 | --- | --- | --- | --- |
@@ -590,9 +590,9 @@ target: decision within appeal.reviewer_sla_days (published target, initial conf
 | Payload text of a reported cell | Normally purged on the S0.7 schedule. For `prohibited_content`, `harassment` and `forged_or_junk_result` it may be held, for no longer than `retention.moderation_days` after resolution | Reviewers on the case only | Held text is listed in the case; a hold is not renewable without a second approver |
 | Payload text for `suspected_sensitive_data` and `safety_of_person` | Not held: only hash, screening result and the reviewer's note are kept | | Avoids keeping the very data the report says should not exist [D] |
 | Legal hold | Only on counsel's written instruction [V]; set by an operator, cleared only by the two-person action `report.legal_hold_clear` | Operators and counsel | Each hold is logged; a hold is never silent |
-| Disclosure records | `AdminAction`, hash of the exported bytes | Operators | No content (S10.13.5) |
+| Disclosure records | `AdminAction`, hash of the exported bytes | Operators | No content (S10.23.5) |
 
-### 10.16.8 Safeguards against moderator abuse and weaponized reporting [D]
+### 10.26.8 Safeguards against moderator abuse and weaponized reporting [D]
 
 - Decisions are logged in `AdminAction`; a second look at a random sample of closed reports (`report.decision_sample_rate`, initial configurable default 0.10) is done by a reviewer who did not decide them. A reversal rate above the founders' threshold (pre-registered, code `FND`) opens a review of the decider.
 - A reviewer declares a conflict (self, relative, a member they know) and is reassigned at once; undeclared conflicts found later are grounds for removal of the role.
@@ -601,7 +601,7 @@ target: decision within appeal.reviewer_sla_days (published target, initial conf
 - Aggregate counts of reports, actions, appeals and outcomes are published every `report.transparency_publish_days` (initial configurable default 30), unless counsel advises a delay [V].
 - Reporter anonymity from the subject is a constant (`report.reporter_identity_hidden` = true).
 
-## 10.17 Acceptance criteria (Given / When / Then)
+## 10.27 Acceptance criteria (Given / When / Then)
 
 IDs follow S0.5 (`AC-safety-nn`). Test layers (`T-adv`, `T-inj`, `T-policy`, `T-e2e`) are assigned in S18.*. [D]
 
@@ -610,23 +610,23 @@ IDs follow S0.5 (`AC-safety-nn`). Test layers (`T-adv`, `T-inj`, `T-policy`, `T-
 | `AC-safety-01` | A full synthetic day of traffic from known IPs | Every table, log line and metric is searched for those IPs, in clear or as plain hashes | None found in app storage; only keyed counters exist, holding no member id (`retention.raw_ip_stored` = false) |
 | `AC-safety-02` | `secret.ip_hash_key` version for day D and `retention.ip_hash_ttl_days` = 1 | One day after day D ends | The version no longer exists in `SecretsPort`, and counters for day D cannot be matched to any IP |
 | `AC-safety-03` | A member with cells, a device, a session and an optional e-mail, then `member.closed` | The retention sweep runs | All `member_bound` rows are deleted or opaqued; the ledger keeps only the opaque `mem_` id with day-granular times; a payload older than `retention.job_payload_days` is purged; an overdue sweep raises `hamyar_retention_overdue_rows_total` |
-| `AC-safety-04` | A synthetic legal request naming a `mem_` id | One admin tries `disclosure.release` alone | It is refused until a second distinct admin approves; both approvals and the export hash are in `AdminAction`; the export contains only the rows of the S10.13.5 table |
+| `AC-safety-04` | A synthetic legal request naming a `mem_` id | One admin tries `disclosure.release` alone | It is refused until a second distinct admin approves; both approvals and the export hash are in `AdminAction`; the export contains only the rows of the S10.23.5 table |
 | `AC-safety-05` | `secret.legacy_*` not yet rotated | An operator tries to set `launch.members_may_join` to true | Refused with `LAUNCH_GATE_CLOSED` until `g1.secrets_rotated` is signed off with a `secret.rotated` record per legacy secret dated before the exposure event |
-| `AC-safety-06` | The deployed `SecretsPort` listing | Compared to S10.14.2 | Names match exactly; a missing or extra name fails `g1.secrets_inventory_complete` |
+| `AC-safety-06` | The deployed `SecretsPort` listing | Compared to S10.24.2 | Names match exactly; a missing or extra name fails `g1.secrets_inventory_complete` |
 | `AC-safety-07` | A synthetic run that logs errors containing token-shaped strings | Logs and error bodies are scanned | Every token-shaped string is masked; no secret value appears; the scanner finds none in the repository history |
 | `AC-safety-08` | A report whose decider chooses `ban` | The decider confirms | The ban takes effect only after a distinct second approver; no ledger row is added or changed; leases are revoked (`lease.revoked`); the member can still file an appeal, export and close the account |
 | `AC-safety-09` | A production build | The build check scans all assets and pages | Any absolute URL to a host outside the project's set fails the build; the content security policy has no external source |
-| `AC-safety-10` | A backup and a second host | The move drill of S10.15.3 runs on synthetic data | The restored ledger hash chain equals the last published checkpoint; invariants pass; secrets readable by the old host are rotated |
+| `AC-safety-10` | A backup and a second host | The move drill of S10.25.3 runs on synthetic data | The restored ledger hash chain equals the last published checkpoint; invariants pass; secrets readable by the old host are rotated |
 | `AC-safety-11` | An appeal about a decision by reviewer A | It is assigned | The reviewer is not A and has no declared conflict; the appellant's view contains no reporter identity; a ban appeal needs `appeal.ban_min_reviewers` distinct reviewers |
 | `AC-safety-12` | `report.external_contact` is empty | `g1.abuse_contact_published` is submitted for sign-off | It is refused until the contact is set and shown on the public pages |
 | `AC-safety-13` | `template.autopause_report_count` reports in `template.autopause_window_s`, all from one member or from `new` members | Counting runs | The template is not paused; with enough distinct reporters at or above `template.autopause_min_reporter_tier` it is paused (`template.paused`) and release needs the two-person action |
-| `AC-safety-14` | All `copy.privacy.*` and `copy.risk.*` keys in `fa` and `en` | The copy lint runs | No key contains the forbidden words of S10.13.1 item 12 (Persian equivalents from a reviewer-maintained list), each carries `needs_human_and_legal_review`, and the fourteen items of S10.13.7 are present |
+| `AC-safety-14` | All `copy.privacy.*` and `copy.risk.*` keys in `fa` and `en` | The copy lint runs | No key contains the forbidden words of S10.23.1 item 12 (Persian equivalents from a reviewer-maintained list), each carries `needs_human_and_legal_review`, and the fourteen items of S10.23.7 are present |
 | `AC-safety-15` | Submitted text with script tags, SQL fragments, a leading `=`, bidirectional controls and zero-width characters | It is stored, displayed in every reviewer and requester view, and exported | Nothing executes; display is escaped; controls are isolated and marked; the CSV cell is prefixed; the stored bytes and hash are unchanged (`T-inj-nn`) |
 | `AC-safety-16` | A `safety_of_person` report and a `prohibited_content` report | Neither is triaged within its SLA | `hamyar_report_triage_overdue_total` rises and an `Alarm` is raised, the urgent one first |
 | `AC-safety-17` | A member token | It is sent to `/v1/admin/*`, and an admin token to a member endpoint | `AUTH_INVALID` each time, counted by the rate limiter; the member origin does not route the admin surface |
 | `AC-safety-18` | A ledger row edited or deleted using the app database role | The statement runs | It is refused by privileges; a row altered by a superuser in a test is detected by the hash chain and `ledger.invariant_violated` fires within `ledger.invariant_check_interval_s` |
 
-## 10.18 Parameters, enums and permissions added by this part
+## 10.28 Parameters, enums and permissions added by this part
 
 All are convention additions (S0.1) and are reported under `## Issues raised`. Defaults are `initial configurable default` values, not findings. `owner` follows S0.10.5. [A]
 
@@ -658,9 +658,9 @@ All are convention additions (S0.1) and are reported under `## Issues raised`. D
 | `report_category` | `unsafe_prompt`, `injection_attempt`, `suspected_sensitive_data`, `prohibited_content`, `harassment`, `forged_or_junk_result`, `fraud_or_farming`, `impersonation`, `safety_of_person`, `legal_notice`, `other` |
 | `moderation_action` | `no_action`, `warn`, `restrict`, `suspend`, `ban`, `reject_job`, `pause_template`, `suspend_service`, `void_cells`, `takedown_output`, `refer_to_counsel` |
 
-**Permissions**: `perm.report.decide` is new (added to the 10a matrix: reviewer, X8, X11); `perm.report.file`, `perm.report.triage`, `perm.member.ban` and `perm.appeal.decide` are defined in 10a 10.11 and replace the proposals `perm.member.ban_approve` and `perm.appeal.review`. **Secrets**: the `secret.*` names of S10.14.2 (never parameters). **Admin action kinds**: `disclosure.received`, `disclosure.release`, `secret.rotated`, `secret.emergency_access`, `safety_review`.
+**Permissions**: `perm.report.decide` is new (added to the 10a matrix: reviewer, X8, X11); `perm.report.file`, `perm.report.triage`, `perm.member.ban` and `perm.appeal.decide` are defined in 10a 10.11 and replace the proposals `perm.member.ban_approve` and `perm.appeal.review`. **Secrets**: the `secret.*` names of S10.24.2 (never parameters). **Admin action kinds**: `disclosure.received`, `disclosure.release`, `secret.rotated`, `secret.emergency_access`, `safety_review`.
 
-## 10.19 Register of unverified items and assumptions
+## 10.29 Register of unverified items and assumptions
 
 **[V] items**: what is verified, by whom, where the answer is stored. [D]
 
@@ -681,9 +681,9 @@ All are convention additions (S0.1) and are reported under `## Issues raised`. D
 
 | Assumption | Overturned by |
 | --- | --- |
-| Device-group and invite-tree exclusion in audit assignment (`THR-04`) | Owner decision on whether device grouping is acceptable under S10.13.1 item 4 |
+| Device-group and invite-tree exclusion in audit assignment (`THR-04`) | Owner decision on whether device grouping is acceptable under S10.23.1 item 4 |
 | `secret.device_hash_key`, `secret.analytics_key`, `secret.email_encryption_key`, `secret.email_lookup_key` and the Ed25519 checkpoint key | Identity file or S13.* choosing different mechanisms |
-| Ports of S10.15.2 and their names | S4.* |
+| Ports of S10.25.2 and their names | S4.* |
 | Two custodians for the backup key | Team size (one-person team: owner decision) |
 | `service.min_approvers` raised to 2 | Owner decision |
 | Proposed gate item keys and gate assignment | S14.* |
@@ -697,8 +697,8 @@ Block `ISS-104`..`ISS-106` is the second sub-block of part 10 (S0.4), assuming t
 | --- | --- | --- | --- | --- | --- |
 | `ISS-104` | major | FD§4.2, FD Principle 8, `RISK-05` | The ledger is `permanent` and every entry has an exact `created_at`, so each pseudonym leaves a permanent minute-level activity timeline; combined with any network log it supports timing correlation. S0.7 calls the class free of personal data, which understates this | Member-account legs and lots store times truncated to `ledger.member_timestamp_granularity_s` (one UTC day); order stays by `seq` (S0.6.2); exact times stay only in `ops` data that expires; the public ledger shows aggregates only; S6.* applies it | proposed |
 | `ISS-105` | major | FD§5.3 S1, `THR-30` | Nothing limits how many cells of one job a single volunteer may lease, so one volunteer can rebuild a requester's whole S1 input | Add `lease.max_job_share_ratio` (ratio, owner `operator`, initial configurable default 0.34 of a job's cells per member, replaced by `P1M`), enforced at lease time by S9.*; reported for S16.* | needs_owner |
-| `ISS-106` | major | FD§5.5, `THR-29` | `template.autopause_report_count` (5 reports in 3600 s) lets a few accounts pause any template, a denial of service through the report button | Count distinct reporters at or above a minimum tier (`template.autopause_min_distinct_reporters`, `template.autopause_min_reporter_tier`); autopause is a pause, release is two-person (S10.16.3) | proposed |
+| `ISS-106` | major | FD§5.5, `THR-29` | `template.autopause_report_count` (5 reports in 3600 s) lets a few accounts pause any template, a denial of service through the report button | Count distinct reporters at or above a minimum tier (`template.autopause_min_distinct_reporters`, `template.autopause_min_reporter_tier`); autopause is a pause, release is two-person (S10.26.3) | proposed |
 
-**Convention additions made by this part** (not issues, listed so assembly can fold them back): parameters, enums, permissions, secret names, admin action kinds and the changed `security.two_person_actions` default of S10.18; the ports of S10.15.2; the proposed gate item keys of S10.14.5; the legacy secret names `secret.legacy_*` (S10.14.2); and heading numbers `10.11`..`10.19` for this second file of part 10, because S0.3 has no heading rule for a part split over files (the identity file is assumed to use `10.1`..`10.9`).
+**Convention additions made by this part** (not issues, listed so assembly can fold them back): parameters, enums, permissions, secret names, admin action kinds and the changed `security.two_person_actions` default of S10.28; the ports of S10.25.2; the proposed gate item keys of S10.24.5; the legacy secret names `secret.legacy_*` (S10.24.2); and heading numbers `10.21`..`10.29` for this second file of part 10 (renumbered by FIX-21 from `10.11`..`10.19`, which collided with the identity file's `10.1`..`10.19`), because S0.3 has no heading rule for a part split over files.
 
 **Owner decisions this part needs** (also for S3.*): operator jurisdiction and host; whether the team has two independent admins (needed for two-person actions and `launch.min_signoffs`); who the two backup-key custodians are; whether `service.min_approvers` is 2; whether the cap in `ISS-105` is accepted; who is the qualified adviser for the member notice.
