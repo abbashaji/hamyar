@@ -70,3 +70,35 @@ Flag removals are logged in rows E-06, E-11, E-16, E-21, E-22 (`ff.verify.sandbo
 | E-58 | spec/08a-templates.md:1143-1148 | rows `template.exec.timeout_s`, `template.exec.memory_bytes`, `template.exec.max_output_bytes` | rows kept and annotated (E-49); defined or used in S0 and S16, which are outside `allowed_paths` and would fail `check_params.py` if only one side changed | skipped-needs-owner |
 | E-59 | spec/08a-templates.md:843-844 | two slugs `code_change_tests` and `code_change_tests_rs` | kept as two ids; now equivalent (E-31, E-32); merging or retiring one is a rename or deletion this cell may not do | skipped-needs-owner |
 | E-60 | S0, S16, 06, 07, 08b, 14, 15a to 15g, 17, 18 and every file other than the three edited | any mention of `ff.verify.sandboxed_tests`, `ff.template.code_change_sandbox`, `test_run`, `test_outcome_equal` or a runner | not searched: only the three files named by the cell were read; searched nothing else | skipped-not-found |
+
+## Read-back
+
+Every edited place was re-read after the last edit. What is there now:
+
+| rows | place | what is now there |
+| --- | --- | --- |
+| E-01, E-02, E-03 | spec/04:17, 46, 60 | decision 1 reads `submitted content is never executed`; the fail-closed row ends `no check ever runs submitted content`; the exclusion row says there is `no exception` |
+| E-04, E-05 | spec/04:89-91, 116 | the fourth diagram box reads `No runner: submitted content is never executed anywhere`; the port list ends at `StaticHost` and `Mailer` follows on the next line |
+| E-06, E-09, E-10 | spec/04:125-126, 187, 236 | the deployable table goes from `server` to `static bundles`; the component table ends with the `Scheduler and outbox relay` row; the verification block ends with `createAudit / compare(audit) / estimateReliability(member)` and has no runner call |
+| E-07, E-08 | spec/04:161, 178 | B4 reads `no such boundary exists` and B5 follows; the verification pipeline row ends `human-review cells` and depends on the job service and the ledger only |
+| E-11, E-12 | spec/04:259-266, 298 | 4.4.4 is titled `Checks never execute submitted content` with four bullets, none naming a flag, a port or a runner design; the port row is `Mailer` alone |
+| E-13, E-14, E-15 | spec/04:766, 817, 852 | F2 reads `a second donor's output`; the Phase 1 topology says `no check runner in any phase`; the merge-gate row says it is `not a model for executing submitted content` |
+| E-16, E-17, E-18 | spec/04:889, 895, 906-909 | `Also added:` starts with `registry field`; the assumption reads `Modular monolith (4.3.2)`; the verification table goes from the reachability row on, with no check-runner row seen in the window read |
+| E-19, E-20, E-21, E-22 | spec/04:941, 956, 960, 966 | `AC-arch-16` is about a code-change template that is not refused; the `ISS-41` row says `ISS-12` rules and keeps status `proposed`; the `ISS-45` list and the closing paragraph name `adapter.open_url` and no flag |
+| E-23, E-24, E-25, E-26 | spec/08a:36, 124-125, 278, 284 | decision 8 says `No check ever executes submitted content`; the enum is `none` and `requester_side` only; 8.5.4 says `no runner exists`; the inconclusive example reads `a check cannot be evaluated` |
+| E-27, E-28, E-29 | spec/08a:303-305, 311-314, 327 | the registry has `diff_applies_cleanly`, `path_allowlist` and `forbidden_patterns` after `static_parse` and no `test_run` row; step 8 of the order lists the four static checks; the comparator table has no `test_outcome_equal` row and `patch_normalized_equal` is used by both slugs |
+| E-30, E-31, E-32, E-53 | spec/08a:839-846 | the tests are run `by the requester, on their own machine`; both slug rows say `requester_side` and `high` with static checks; the paragraph says `renames and deletes no id` |
+| E-33, E-34, E-35, E-36, E-37 | spec/08a:848-863 | 8.13.3 is `Static verification contract; no runner`; the table has Checks, Limits, Inputs, Languages, Order, Outage, Audit and the `RC-13` row; no flag name remains; the closing paragraph says there is `no place` that executes submitted text |
+| E-38, E-39, E-40 | spec/08a:869-875 | `language` lists the languages reviewers allow; `tests_holdout` is read by no check; upload validation says the platform `runs nothing at upload` |
+| E-41, E-42, E-43 | spec/08a:929, 934-948 | 8.13.7 ends `never interpreted or executed`; the yaml has c01 to c08 with c06 `diff_applies_cleanly`, c07 `path_allowlist`, c08 `forbidden_patterns` and comparator `patch_normalized_equal`; the sentence below names only `patch_normalized_equal` |
+| E-44, E-45, E-46 | spec/08a:954-976 | gold steps use reading and static checks only; KR-CC-1 to KR-CC-7 keep their ids and no row names a runner; the H-CC table has H-CC-1 and H-CC-2 and no H-CC-3 |
+| E-47, E-48 | spec/08a:1097-1098, 1121-1123 | the summary row reads `Static checks` with `high`; AC-template-15 says `no later check`; AC-template-16 says `no flag gates it`; AC-template-17 says `no process is started` |
+| E-49, E-50, E-51, E-52 | spec/08a:1143-1160 | the note says the `template.exec.*` parameters `belonged to the removed runner`; the other-additions table has no feature-flag row and lists the three static checks and no `test_outcome_equal`; the open decision reads `default applied: it never does` |
+| E-54 | spec/08a:1171 | the `ISS-81` row says `Superseded by ISS-12` and keeps status `needs_owner` |
+| E-55, E-56 | spec/09:304, 812 | 9.8.2 says there is no runner, sandbox or `test_run` check and the template is approved `like any other template`; the `ISS-91` row says `Superseded by ISS-12` and keeps status `proposed` |
+
+Checked and left unchanged: spec/04 `4.2.2` first two exclusion rows, `4.18` rows other than the merge-gate row, and the `execute` and `exec` words in spec/09 9.8.2 (forbidden-API table) and 9.16; spec/08a 8.7 lint words `run` and `execute` (they block volunteer prompts, not runners) and 8.8.5 `execution.mode` to `requester_side` as a loosening. The file names `spec/08b-verification.md`, `spec/03-assumptions.md`, S0 and S16 were not opened (rows E-57, E-58, E-60).
+
+Assumptions made [A]: the three static check types of E-27 are named by this fix; `code_change_tests` is `requester_side` and `high` because LR-08 requires `high` for that mode, which makes the two slugs equivalent (E-59); `reject.schema_invalid` is the reason of the two new reject checks.
+
+Result: DONE WITH SKIPS
