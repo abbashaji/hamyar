@@ -408,34 +408,34 @@ on suspected_compromise(secret or class):
 - **CI separation.** Jobs that run untrusted code get no secrets and a read-only token (the panel's own design comment, panel-review §4.5 item 13 [V]).
 - **Drill.** A rotation drill and a compromise drill run in `BM9`; both are logged and reviewed.
 
-## 10.15 Hosting and reachability
+## 10.25 Hosting and reachability
 
-### 10.15.1 Principles [D]
+### 10.25.1 Principles [D]
 
 1. **Provider-neutral** (FD Principle 7): storage, hosting, mail, secrets and edge sit behind ports, so the system can move without a rewrite.
 2. **Reachability is unverified** [V]: whether members in Iran can reach any chosen host is a measurement (G2), not an assumption (`RISK-14`).
 3. **No circumvention** (FD Principle 9, ground rule 3): the platform bundles, recommends and implements no VPN, proxy, relay, bridge, domain fronting or mirror-hunting feature, and its copy gives no instruction to bypass a block. If the host is unreachable from a place, that is a recorded finding and an owner decision (change host through the ports, or accept). Whether any reachability measure is lawful is [V] for counsel.
 4. **No mandatory third-party dependency** at runtime in any page: no CDN, font host, analytics, tag manager, captcha, embedded map or social widget (`analytics.third_party_trackers` = false, constant).
-5. **Low bandwidth** is a design input, not a polish step (S10.15.6).
+5. **Low bandwidth** is a design input, not a polish step (S10.25.6).
 
-### 10.15.2 Ports [A]
+### 10.25.2 Ports [A]
 
 Port names are proposed here; S4.* may rename them and assembly reconciles. Each port has a contract, a forbidden list, and a conformance test run against every adapter.
 
 | Port | Contract | Forbidden | Conformance test |
 | --- | --- | --- | --- |
-| `StoragePort` | Relational store with serializable transactions for ledger postings, role separation (S10.14.3), append-only ledger tables, point-in-time restore | Eventually consistent stores for the ledger or leases (the panel's KV is advisory only, panel-review §2.2) | Ledger property and race suite (`T-prop-nn`, `T-adv-nn`) passes on the adapter |
+| `StoragePort` | Relational store with serializable transactions for ledger postings, role separation (S10.24.3), append-only ledger tables, point-in-time restore | Eventually consistent stores for the ledger or leases (the panel's KV is advisory only, panel-review §2.2) | Ledger property and race suite (`T-prop-nn`, `T-adv-nn`) passes on the adapter |
 | `BlobPort` | Immutable objects by hash: `TermsCopy` bytes, uploads, backups | Public-read buckets | Round trip by hash; access denied without credentials |
 | `SecretsPort` | Versioned secrets, per-component scope, no value listing | Reading values into logs or the database | Scope test: a component reads only its own secrets |
 | `SchedulerPort` | Reliable timers for lease reaping, expiry sweeps, retention sweeps, checkpoints, rotation reminders, invariant checks | Timers that run only when a request arrives (the panel evaluates expiry lazily, panel-review §3.3, which is not enough here) | Missed-tick test |
 | `EdgePort` (optional) | TLS termination, routing, coarse rate limiting, HSTS | Logging full IPs beyond `retention.ip_hash_ttl_days`; injecting third-party scripts | Header and log audit |
 | `MailPort` (optional, off by default) | Send a notice to a member-supplied address | Any message that asks for a recovery key or contains a login link | Template audit |
 | `ClockPort` | Server time from a trusted source (S0.6.2) | Client time | Skew alarm |
-| `LogSink` | Accepts only the fields of S10.13.1 item 9 | Free text, IPs, bodies | Schema test rejects extra fields |
+| `LogSink` | Accepts only the fields of S10.23.1 item 9 | Free text, IPs, bodies | Schema test rejects extra fields |
 
-An optional DoS-absorbing front is permitted only as an `EdgePort` adapter chosen by the owner after G1; such a front is an additional `host_provider` in S10.13.3 and must be named there before use.
+An optional DoS-absorbing front is permitted only as an `EdgePort` adapter chosen by the owner after G1; such a front is an additional `host_provider` in S10.23.3 and must be named there before use.
 
-### 10.15.3 Portability and the move drill [D]
+### 10.25.3 Portability and the move drill [D]
 
 ```
 move(host_old -> host_new):
@@ -443,22 +443,22 @@ move(host_old -> host_new):
   take a backup (encrypted); verify the ledger hash chain and checkpoints on the old host
   provision host_new from the same artifacts through the same ports; restore the backup
   verify: hash chain equals the last published checkpoint; invariants pass; counts of members, lots, escrows match
-  rotate secrets that the old host could read (S10.14.6 list for a host change)
+  rotate secrets that the old host could read (S10.24.6 list for a host change)
   switch DNS (TTL lowered in advance); keep host_old read-only until traffic has moved
   release kill switches by two-person killswitch.release; publish a ChangeLogEntry
 ```
 
 The drill runs in `BM9` on a second host with synthetic data before launch (`AC-safety-10`).
 
-### 10.15.4 Reachability from Iran [V] [D]
+### 10.25.4 Reachability from Iran [V] [D]
 
 - **What is verified:** from networks inside Iran, can the first page load, the member API answer, and a cell round trip (lease, paste-back, submit) complete, within `ui.first_load_budget_bytes` and time budgets recorded as results, not promised? Also from outside Iran for the control.
 - **Who:** the founders, with testers who opt in knowing the risk of the test and who are asked for no identity; remote measurement services where available [V]. No provider account is used in the test.
 - **Measures:** DNS resolution, TCP connect, TLS handshake, first byte, full load on a throttled link, repeated at different times of day.
 - **Where stored:** evidence on `g2.reachability_recorded` and `CalibrationRecord`-style rows by the `TEC` code; repeated every `security.reachability_check_interval_days` after launch, because blocking changes.
-- **If unreachable:** the options in S10.15.1 item 3 only. The record states the finding; it is a [V] for counsel whether any further step is lawful.
+- **If unreachable:** the options in S10.25.1 item 3 only. The record states the finding; it is a [V] for counsel whether any further step is lawful.
 
-### 10.15.5 No third-party resources [D]
+### 10.25.5 No third-party resources [D]
 
 | Control | Detail |
 | --- | --- |
@@ -468,22 +468,22 @@ The drill runs in `BM9` on a second host with synthetic data before launch (`AC-
 | Preconnect, prefetch, embeds | None to third parties |
 | Reports | No third-party error reporting; errors go to `LogSink` only |
 
-### 10.15.6 Low-bandwidth rules [D]
+### 10.25.6 Low-bandwidth rules [D]
 
-- First load stays within `ui.first_load_budget_bytes` compressed (initial configurable default in S10.18; replaced by `TEC` measurement on real phones and links).
+- First load stays within `ui.first_load_budget_bytes` compressed (initial configurable default in S10.28; replaced by `TEC` measurement on real phones and links).
 - Text first: no images on the first-contribution path; system fonts until the subset font arrives; no web socket requirement, polling with `ETag`, `Retry-After` and backoff (S0.11.7).
 - A cell response body is at most `cell.envelope.max_input_chars` x 3 bytes of UTF-8 plus metadata; a submission is at most `cell.envelope.max_submission_bytes` (S0.10.6). Paste-back retries use the same `Idempotency-Key`, so a dropped connection never costs a second submission.
 - Public pages are cacheable (`Cache-Control: max-age` no larger than the refresh parameter, S0.11.7), so a weak link can reuse them.
 
-### 10.15.7 Environments [D]
+### 10.25.7 Environments [D]
 
-Production, staging and development are separate hosts and secret scopes. No production data, member record or secret enters a non-production environment; tests use synthetic data (S18.*). The admin origin is separate in every environment (S0.11.4). Monitoring and alerting follow S10.13.1 item 9.
+Production, staging and development are separate hosts and secret scopes. No production data, member record or secret enters a non-production environment; tests use synthetic data (S18.*). The admin origin is separate in every environment (S0.11.4). Monitoring and alerting follow S10.23.1 item 9.
 
-## 10.16 Abuse reporting, takedown, ban and appeals
+## 10.26 Abuse reporting, takedown, ban and appeals
 
 Process spec. Entities `Report` and `Appeal`, their states and events are in S0.9.7 and S0.9.8 and are used unchanged. Everything legal is [V] for counsel.
 
-### 10.16.1 Roles and permissions [D]
+### 10.26.1 Roles and permissions [D]
 
 Permission names follow `perm.<area>.<action>` (S0.8.2); the matrix itself is in the identity file of S10.*, and the names below are proposed [A].
 
@@ -498,22 +498,22 @@ Permission names follow `perm.<area>.<action>` (S0.8.2); the matrix itself is in
 | Counsel (external) | Outside the system | Advise on legal notices and disclosure [V] | Hold any system credential |
 | Subject | The reported member or requester | See the decision, its reason code and the object; appeal | See the reporter's identity |
 
-### 10.16.2 Intake [D]
+### 10.26.2 Intake [D]
 
 - **In product:** a report button on every cell card (FD§5.5), on public team and milestone surfaces, and on a requester's result view. A filing creates `Report` in state `open` and the event `report.filed`.
-- **Categories** (`report_category`, new enum, S10.18): `unsafe_prompt`, `injection_attempt`, `suspected_sensitive_data`, `prohibited_content`, `harassment`, `forged_or_junk_result`, `fraud_or_farming`, `impersonation`, `safety_of_person`, `legal_notice`, `other`.
-- **Automatic evidence** attached at filing, by identifier only: object id (`cel_`, `tpv_`, `job_`), `policy_version`, rule results (`policy.<rule>.<slug>`), submission hash, verification outcomes. Never a volunteer's chat page (never read) and never plaintext of a payload that is about to be purged for `suspected_sensitive_data` (S10.16.7).
+- **Categories** (`report_category`, new enum, S10.28): `unsafe_prompt`, `injection_attempt`, `suspected_sensitive_data`, `prohibited_content`, `harassment`, `forged_or_junk_result`, `fraud_or_farming`, `impersonation`, `safety_of_person`, `legal_notice`, `other`.
+- **Automatic evidence** attached at filing, by identifier only: object id (`cel_`, `tpv_`, `job_`), `policy_version`, rule results (`policy.<rule>.<slug>`), submission hash, verification outcomes. Never a volunteer's chat page (never read) and never plaintext of a payload that is about to be purged for `suspected_sensitive_data` (S10.26.7).
 - **Free text** is limited to `report.max_text_chars` and is stored with the report; it is written for reviewers, never shown to the subject.
 - **Automatic flags** (screening, gold failures, anomaly detectors) create reports with `principal_type` = `system`. A flag never bans anyone by itself [D].
 - **Outside the product:** people who are not members (a copyright holder, a person named in content, a legal authority) use the contact `report.external_contact` (string, set by the operator, published on the public pages; empty means launch gate `g1.abuse_contact_published` is open). Legal notices go to counsel without any member data being checked or produced first [V].
 - **Rate limit:** `report.max_per_member_per_day` per member.
 
-### 10.16.3 Triage and service levels [D]
+### 10.26.3 Triage and service levels [D]
 
 ```
 report.filed  -> state open
 triager picks within SLA -> report.triaged (category confirmed or changed, severity set)
-decider chooses an action (10.16.4)  -> report.actioned   or   report.dismissed (reason code recorded)
+decider chooses an action (10.26.4)  -> report.actioned   or   report.dismissed (reason code recorded)
 SLA clock: filed_at -> triaged_at
   normal categories : report.triage_sla_days        (initial configurable default 3)
   urgent categories : report.urgent_triage_sla_s     (initial configurable default 14400)
@@ -523,9 +523,9 @@ on breach: Alarm, metric hamyar_report_triage_overdue_total increments; the olde
 
 SLAs are published defaults, configurable parameters, and targets, not promises ("declared"). A report in an urgent category lets any reviewer escalate to an operator at once, who may engage `kill.template.<tpl_id>` or pause cells (`cell.paused`) before a decision, with a logged reason. Template autopause: when `template.autopause_report_count` reports from at least `template.autopause_min_distinct_reporters` distinct reporters, each at or above `template.autopause_min_reporter_tier`, arrive within `template.autopause_window_s` for the categories `unsafe_prompt`, `injection_attempt`, `suspected_sensitive_data`, `prohibited_content`, the template is paused (`template.paused`); the pause is not a verdict, and release needs the usual `killswitch.release` two-person action (`ISS-106`).
 
-### 10.16.4 Action ladder [D]
+### 10.26.4 Action ladder [D]
 
-`moderation_action` (new enum, S10.18) with the existing event that records each effect:
+`moderation_action` (new enum, S10.28) with the existing event that records each effect:
 
 | Action | Effect and event | Decider and approval | Notes |
 | --- | --- | --- | --- |
@@ -538,7 +538,7 @@ SLAs are published defaults, configurable parameters, and targets, not promises 
 | `pause_template` | `template.paused` through `kill.template.<tpl_id>` | Operator on a decider's request | Release is two-person |
 | `suspend_service` | `service.suspended` through `kill.service.<svc_id>` | Operator | Release is two-person |
 | `void_cells` | `cell.voided` for in-flight cells | Decider | |
-| `takedown_output` | Hosted copy withdrawn (S10.16.5) | Decider; legal notices via counsel [V] | |
+| `takedown_output` | Hosted copy withdrawn (S10.26.5) | Decider; legal notices via counsel [V] | |
 | `refer_to_counsel` | Note on the report; no member data produced | Operator | [V] |
 
 **Rules** [D]
@@ -547,10 +547,10 @@ SLAs are published defaults, configurable parameters, and targets, not promises 
 2. A ban is never automatic, never produced by a classifier alone, and never propagates to an invite tree; tree members are reviewed individually (`THR-06`).
 3. A ban or suspension never edits the ledger and never confiscates credit: the member's lots expire normally into the Reserve (FD§4.5), escrow refunds proceed under S6.*, accepted cells stand unless a fraud finding leads to `cell.overturned` and a two-approver `reversal`. Involuntary forfeiture is not specified: no ledger entry type exists for it (S0.8.5) and it would reward false reports.
 4. A suspended or banned member can still authenticate to a restricted scope: read history, export own data, file an appeal, close the account (constraint on S10.*).
-5. A ban does not trigger tracking of the person elsewhere: evasion is limited by `grant.max_per_device` and the sybil limits only; no extra fingerprinting is added to detect it (S10.13.1 item 4). Residual evasion is accepted.
+5. A ban does not trigger tracking of the person elsewhere: evasion is limited by `grant.max_per_device` and the sybil limits only; no extra fingerprinting is added to detect it (S10.23.1 item 4). Residual evasion is accepted.
 6. The platform does not report members to any authority on its own initiative unless counsel determines the law compels it [V].
 
-### 10.16.5 Takedown [D]
+### 10.26.5 Takedown [D]
 
 | Object | What takedown does | What it cannot do |
 | --- | --- | --- |
@@ -563,7 +563,7 @@ SLAs are published defaults, configurable parameters, and targets, not promises 
 
 A takedown on a legal notice (copyright, defamation, privacy or similar) is routed to counsel; any counter-notice process is designed with counsel [V]. Material that counsel identifies as requiring special handling (for example child sexual abuse material) is handled under a counsel-approved runbook that preserves only what the law requires and exposes it to as few people as possible [V].
 
-### 10.16.6 Appeals [D]
+### 10.26.6 Appeals [D]
 
 Kinds, states and events are in S0.9.7. This file fixes the process.
 
@@ -579,7 +579,7 @@ outcome -> appeal.upheld or appeal.overturned ; reason code and a short written 
 target: decision within appeal.reviewer_sla_days (published target, initial configurable default 7)
 ```
 
-**Effects of `appeal.overturned`** [D]: a ban or suspension is lifted (`member.reinstated`); a restriction ends (`member.restriction_lifted`, tier returns to `tier_before_restriction`); a withdrawn output may be restored by a decider; a cell outcome follows S8.* and S9.*; ledger effects are only by two-approver `reversal`. An overturned appeal where the report was abusive is itself input to `THR-29` (restriction of the reporter, S10.16.8). The appellant sees the reason code, the object and the decision, never the reporter.
+**Effects of `appeal.overturned`** [D]: a ban or suspension is lifted (`member.reinstated`); a restriction ends (`member.restriction_lifted`, tier returns to `tier_before_restriction`); a withdrawn output may be restored by a decider; a cell outcome follows S8.* and S9.*; ledger effects are only by two-approver `reversal`. An overturned appeal where the report was abusive is itself input to `THR-29` (restriction of the reporter, S10.26.8). The appellant sees the reason code, the object and the decision, never the reporter.
 
 ### 10.16.7 Evidence retention [D]
 
