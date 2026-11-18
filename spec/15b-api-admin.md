@@ -43,7 +43,7 @@ The three new parameters are convention additions (`ISS-154`); each is replaced 
 
 ### 15.21.3 Rules for every admin write [D]
 
-1. **Audit trail.** The same database transaction that changes state inserts one `AdminAction` (`act_`): `admin_id`, `op`, `subject_type`, `subject_id`, `request_hash` (SHA-256 over RFC 8785 canonical JSON of method, path and body without `step_up`, S0 0.6.4), `reason`, `request_id`, `approval_id` (if any), `occurred_at`. If the insert fails, the change fails. No admin write bypasses this.
+1. **Audit trail.** The same database transaction that changes state inserts one `AdminAction` (`act_`): `admin_id`, `op`, `subject_type`, `subject_id`, `request_hash` (SHA-256 over RFC 8785 canonical JSON of method, path and body without `step_up`, S0 0.6.4), `reason`, `request_id`, `approval_id` (if any), `occurred_at`, `prev_hash` (the `entry_hash` of the previous `AdminAction`, null for the first) and `entry_hash` (SHA-256 over RFC 8785 canonical JSON of the other fields of the row, `prev_hash` included), so the log is a hash chain (`CR-18`, S15e open point 1) [A][P: S0 and S10 own the field list]. If the insert fails, the change fails. No admin write bypasses this.
 2. **Reason.** Every admin write that changes non-draft state carries `reason` (string, 1..2000 characters, English or Persian). It is stored, never shown to members.
 3. **Reads are logged too** where they expose member-scoped data or cell content: the ledger explorer's member views, member detail, audit and appeal content, calibration of members. Such a read inserts an `AdminAction` of kind `read` [A]. Threat reasoning: insider and operator risk (S10.*).
 4. **Idempotency and concurrency.** `Idempotency-Key` is required on every write (S0 0.11.5), except the four challenge and login operations `startAdminLogin`, `createAdminSession`, `createCredentialChallenge` and `createStepUpChallenge` (15.22), which are marked `X`: the key is ignored and never stored, because a stored `createAdminSession` 201 would hold a bearer token (part a never replays a session token); the single-use challenge is their idempotency (`CR-06`). `registerAdminCredential` is an unauthenticated write on the enrollment path and keeps `req`; its stored body holds `acr_id`, `label` and `created_at` and no secret, and its record is scoped by IP hash as in part a 15.10. A POST that changes no state and writes no `AdminAction` of kind `write` (for example `previewParameterChange`, `runTemplateChecks`, `checkExperimentAssignment`, `verifyManifest`) takes `opt`. The scope of a stored admin record is (`adm_` id, method, path template with ids, key) for 24 hours (`api.idempotency_ttl_s`). Mutable resources (service adapter, template drafts, feature flags, experiments, pre-registration drafts, milestones) return `ETag` and require `If-Match` on `PATCH`.
@@ -74,6 +74,7 @@ Permission names follow `perm.<area>.<action>` (S0 0.8.2). The permission matrix
 | `perm.member.read_admin`, `perm.member.restrict`, `perm.member.suspend`, `perm.member.ban` | operator, reviewer | 15.29 |
 | `perm.ledger.read`, `perm.ledger.read_member`, `perm.ledger.verify`, `perm.ledger.reverse` | operator | 15.30 |
 | `perm.capacity.read` | operator | 15.31 |
+| `perm.claim.takeover` | operator | S15e 15.D.4.4 `takeoverWorkClaim` (replaces "the operator role"; `CR-43`) |
 | `perm.prereg.read`, `perm.prereg.edit`, `perm.prereg.lock`, `perm.experiment.read`, `perm.experiment.edit`, `perm.experiment.run`, `perm.calibration.read`, `perm.calibration.write`, `perm.milestone.edit` | operator (`perm.prereg.edit` and `perm.prereg.lock` founders) | 15.32 |
 
 ## 15.22 Admin authentication, sessions, step-up and two-person approvals
@@ -292,7 +293,7 @@ A `Template` is the stable identity of a reviewed prompt pattern; a `TemplateVer
 | `getTemplateVersion` | `GET /v1/admin/template-versions/{tpv_id}` | `admin` `perm.template.read` | - | `TemplateVersion`, `reviews`, `ETag` | `NOT_FOUND` | n/a | - | `A-R` |
 | `updateTemplateDraft` | `PATCH /v1/admin/template-versions/{tpv_id}` | `admin` `perm.template.author` (author only) | Merge Patch of `definition`, `change_summary`; `If-Match` | 200 `TemplateVersion` | `STATE_CONFLICT` (only `draft` or `changes_requested`; an approved version is immutable), `FORBIDDEN`, `PRECONDITION_FAILED` | req | - | `A-W` |
 | `requestTemplateReview` | `POST /v1/admin/template-versions/{tpv_id}/review-requests` | `admin` `perm.template.author` | `{}` | 200 `TemplateVersion` (`in_review`); event `template.review_requested`; guard: the definition validates and its declared test vectors pass the S8.* checker | `STATE_CONFLICT`, `VALIDATION_FAILED` | req | - | `A-W` |
-| `submitTemplateReview` | `POST /v1/admin/template-versions/{tpv_id}/reviews` | `admin` `SU` `perm.template.review` | `{decision (approve, request_changes, reject), checklist: [{key, passed}], comments, reason}` | 201 `{review, version, review_round}`; used for the first and the second review | `FORBIDDEN` (author, or a reviewer who already reviewed this version), `STATE_CONFLICT` (not `in_review` or `awaiting_second_review`) | req | - | `A-W` |
+| `submitTemplateReview` | `POST /v1/admin/template-versions/{tpv_id}/reviews` | `admin` `SU` `perm.template.review` | `{decision (approve, request_changes, reject), checklist: [{key, passed}], comments, reason}` | 201 `{review, version, review_round}`; used for the first and the second review | `FORBIDDEN` (author, or a reviewer who already reviewed this version), `STATE_CONFLICT` (not `in_review` or `awaiting_second_review`), `UNPROCESSABLE` (`blocking_finding`: an `approve` is refused while the version has an open blocking finding, S15e open point 2; `CR-18`) [A][P: S15e owner] | req | - | `A-W` |
 | `retireTemplateVersion` | `POST /v1/admin/template-versions/{tpv_id}/retirement` | `admin` `SU` `perm.template.retire` | `{reason_code (superseded, defect, policy, other), reason, public_text: {fa, en}}` | 200 `TemplateVersion` (`retired`); event `template.retired`; public change-log entry | `STATE_CONFLICT` | req | - | `A-W` |
 
 **Outcome mapping of `submitTemplateReview`** [D] (event names are those of S0 0.9.5):
@@ -545,7 +546,7 @@ There is no endpoint that marks an audit passed without a verdict from the compa
 | `requestSecondAppealReview` | `POST /v1/admin/appeals/{apl_id}/second-review-requests` | `admin` `perm.appeal.decide` | `{reason}` | 200 appeal; event `appeal.second_review_requested` | `STATE_CONFLICT` | req | - | `A-W` |
 | `decideAppeal` | `POST /v1/admin/appeals/{apl_id}/decisions` | `admin` `SU` `perm.appeal.decide` | `{decision (upheld, overturned), rationale, member_message_copy_key}` | 201 `{decision, appeal}`; final decision emits `appeal.upheld` or `appeal.overturned` | `FORBIDDEN` (made the original decision, or already decided this appeal), `STATE_CONFLICT` | req | - | `A-W` |
 
-For appeal kinds `member_ban` and `template_rejection`, a decision is final only when `appeal.ban_min_reviewers` distinct reviewers (initial configurable default 2) recorded the same decision; if the first two differ, a third distinct reviewer breaks the tie [A]. The consequences of `appeal.overturned` (restoring a status, re-crediting an accepted cell, re-opening a template) are carried out by the consumers named in 15.34 under S8.* and S10.*; this API only records the decision and emits the event.
+For appeal kinds `member_ban` and `template_rejection`, a decision is final only when `appeal.ban_min_reviewers` distinct reviewers (initial configurable default 2) recorded the same decision; if the first two differ, a third distinct reviewer breaks the tie [A]. The consequences of `appeal.overturned` (restoring a status, re-crediting an accepted cell, re-opening a template) are carried out by the consumers named in 15.34 under S8.* and S10.*; this API only records the decision and emits the event. `job_svc` is a consumer of `appeal.overturned` for the kind `job_rejection`; what an overturn does to a terminal `rejected` job is owned by S5.* and S10.* (the proposal of 15d O8 is a fast-tracked copy) (`CR-35`) [A]. The kind `template_rejection` is in this queue but a member cannot file it (15.29.7): it is filed on behalf of an author by an admin only, because template authors are admin users (15.24); no operation of this file files it (`CR-35`) [A].
 
 ### 15.29.3 Reports queue
 
@@ -606,8 +607,49 @@ Statuses and events are S0 0.9.4. Each action is a separate noun so every one ha
 | `reinstateMember` | `POST /v1/admin/members/{mem_id}/reinstatements` | `admin` `SU` `perm.member.suspend` | `{reason}` | 200 member (`active`); event `member.reinstated` | `STATE_CONFLICT` | req | - | `A-W` |
 | `banMember` | `POST /v1/admin/members/{mem_id}/bans` | `admin` `SU` `2P` `member.ban` `perm.member.ban` | `{reason_code, reason, reason_copy_key, linked_ids: [at least one report, alarm or audit id]}` | 202 approval; on approval 200 member (`banned`); event `member.banned`; sessions and leases revoked | `VALIDATION_FAILED` (no linked evidence), `STATE_CONFLICT` | req | - | `A-W` |
 | `restrictInviteTree` | `POST /v1/admin/members/{mem_id}/invite-tree/restrictions` | `admin` `SU` `perm.member.restrict` | `{reason_code, reason, reason_copy_key, linked_ids: [], member_ids?: [mem_id]}` (default: the whole tree, at most `invite.tree_max_members`) | 200 `{restricted: [mem_id]}`; one `member.restricted` event per member, one audit row naming the tree | `STATE_CONFLICT` | req | - | `A-W` |
+| `lockTeam` | `POST /v1/admin/teams/{tem_id}/locks` | `admin` `SU` `perm.report.triage` | `{reason, linked_ids: [at least one report id]}` | 200 `{tem_id, locked: true}`; event `team.locked` | `VALIDATION_FAILED` (no linked report), `STATE_CONFLICT` (already locked), `NOT_FOUND` | req | - | `A-W` |
+| `unlockTeam` | `POST /v1/admin/teams/{tem_id}/unlocks` | `admin` `SU` `perm.report.triage` | `{reason}` | 200 `{tem_id, locked: false}`; event `team.unlocked` | `STATE_CONFLICT` (not locked), `NOT_FOUND` | req | - | `A-W` |
 
 A ban stays appealable (`appeal.*`); the balance of a banned member is not touched by this API, and expiry continues as for any account (S10.*). A ban is two-person because a capture of one reviewer account would otherwise be enough to expel any member (FD§5.7 failure mode 10) [D].
+
+Locking a team is tightening (`CR-17`): one admin with step-up, linked to a report, and the report outcome lists the action in `linked_admin_action_ids` (15.29.3). Unlocking is also one admin here, as 15g CR-17 asks. What a lock does to joins and to the public list is owned by part 12 (12.9.1); the events `team.locked` and `team.unlocked` are convention additions (`ISS-154`) [A][P: part 12 owner].
+
+### 15.29.7 Member appeals (moved from 15d)
+
+*Moved from 15d (15.C.4.1, rows 1 and 2) in answer to A12 findings 27 and 28; the overlay text in 15d is not deleted.* The admin queue is 15.29.2 and the events are in 15.34.3; this is the member side, which no table of S15a or S15b defined. Auth is `member`: an admin token is `401 AUTH_INVALID`, reason `wrong_scheme` (S15a 15.4). A `suspended` or `banned` member may use all four operations (S15a 15.4: they can still file appeals), so none is marked active only. `listAppeals` and `getAppeal` here are the member operations; the admin operations of 15.29.2 carry the same two names and are keyed apart as the opening of this file says (A12 finding 15; decision D-08 of `docs/audit/FINAL.md` is pending) [D][A].
+
+| op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `createAppeal` | `POST /v1/appeals` | `member` | `{kind (submission_rejection, job_rejection, member_ban), subject_id (id<sub>, id<job> or null), statement?: text<500>}` | 201 `{appeal: Appeal}`, `Location: /v1/appeals/{appeal_id}`; event `appeal.filed` | `NOT_FOUND`, `ALREADY_EXISTS` (`appeal_exists`), `STATE_CONFLICT` (`appeal_window_closed`, `not_appealable`), `VALIDATION_FAILED` (`kind` and `subject_id` do not fit; `subject_id` is required except for `member_ban`) | req | - | `RL-WRITE` |
+| `listAppeals` | `GET /v1/appeals` | `member` | `?state`, `?kind` | `Page<Appeal>`, newest first (S15a 15.11 order rule) | - | n/a | cursor | `RL-READ` |
+| `getAppeal` | `GET /v1/appeals/{appeal_id}` | `member` | - | `Appeal` | `NOT_FOUND` | n/a | - | `RL-READ` |
+| `withdrawAppeal` | `POST /v1/appeals/{appeal_id}/withdrawals` | `member` | `{}` | 200 `{appeal: Appeal}`; event `appeal.withdrawn` | `STATE_CONFLICT` (`appeal_decided`), `NOT_FOUND` | req | - | `RL-WRITE` |
+
+```
+Appeal        { id: id<apl>, kind: enum<appeal_kind>, subject: { kind: "submission"/"job"/"member", id: id<sub>/id<job>/null },
+                state: "filed"/"in_review"/"decided"/"withdrawn", outcome: "upheld"/"overturned"/null,
+                outcome_copy_key: copy_key/null, statement: text<500>/null, filed_at: ts, decided_at: ts/null }
+createAppeal  req { kind: "submission_rejection"/"job_rejection"/"member_ban", subject_id: id<sub>/id<job>/null, statement: text<500>? }
+              201 { appeal: Appeal }       Location: /v1/appeals/{appeal_id}
+listAppeals   Page<Appeal>, newest first, filters state, kind (S15a 15.11 order rule)
+withdrawAppeal req {}   200 { appeal: Appeal }
+```
+
+| `kind` | `subject_id` | Guard at filing | Window |
+| --- | --- | --- | --- |
+| `submission_rejection` | `id<sub>` of the caller's own submission | `verdict` is `rejected` | now at most `Submission.appealable_until` (= `decided_at` + `appeal.window_days` x 86,400 s, S15a 15.6.4) |
+| `job_rejection` | `id<job>` of the caller's own job | job `state` is `rejected` | `appeal.window_days` x 86,400 s after `Job.updated_at`, which no longer changes in a terminal state [A] |
+| `member_ban` | null | the caller's `status` is `banned` | none while banned (15.29.6: a ban stays appealable) |
+
+- **Mapping to the admin queue.** `state`: `filed` covers `appeal.filed`, `appeal.assigned` and `appeal.reassigned`; `in_review` covers `appeal.review_started` and `appeal.second_review_requested`; `decided` carries `outcome` from `appeal.upheld` or `appeal.overturned`, issued only when the final-decision rule of 15.29.2 is met (two matching reviewers for `member_ban`); `withdrawn` comes from `withdrawAppeal`. `outcome_copy_key` is the `member_message_copy_key` the reviewer chose, so no free text reaches the member (15.29.6) [D].
+- **No deadline is returned.** The reviewer `due_at` (`appeal.reviewer_sla_days`) is an internal target; returning it would be a promise (FD Principle 11) [D][A].
+- **Statement.** `statement` is plain text, stored verbatim and shown to reviewers only as an escaped string (S9.*) [D].
+- **Visibility.** A subject that is not the caller's own is `404 NOT_FOUND` (S15a 15.3 rule 2). `template_rejection` is not fileable here (15.29.2) [D].
+- **Withdraw.** Only in `filed` or `in_review`; otherwise `409 STATE_CONFLICT` reason `appeal_decided`. A withdrawn appeal frees the subject for one new appeal inside the window [A].
+- **Idempotency.** `createAppeal` and `withdrawAppeal` take `Idempotency-Key` (required); the natural idempotency of filing is the single non-withdrawn appeal per subject (`appeal_exists`), so a double click never files two [D].
+
+- `AC-api-C01` Given a submission rejected two days ago whose `appealable_until` is in the future, When its owner calls `createAppeal` with `kind` `submission_rejection` and its `subject_id`, Then `201`, `state` `filed`, one `appeal.filed` event; the same call with the same key replays the stored body; a new key gives `409 ALREADY_EXISTS` reason `appeal_exists`; after `appealable_until` a new subject of the same kind gives `409 STATE_CONFLICT` reason `appeal_window_closed`.
+- `AC-api-C02` Given a banned member, When they call `createAppeal` with `kind` `member_ban` and `subject_id` null, Then `201`, and every other operation of S15a that is active only still answers `403 FORBIDDEN`.
 
 ## 15.30 Ledger explorer, invariant status, reversal
 
@@ -701,13 +743,13 @@ There is no endpoint that lists which member is in which arm; a per-member view 
 
 Phase 0 replaces guessed defaults with measurements typed in by a human working through each service's own interface (FD§6). The platform never reads a volunteer's account, never drives a service, and stores only the numbers below.
 
-`CalibrationRecord` (`cal_`, permanent) = `{cal_id, service_id, template_version_id?, observed_on (UTC date), observer_admin_id, cells_attempted, cells_completed, limit_reached (bool), seconds_per_cell: [int] (1..200 values), refusals, failures, copy_paste_errors, check_passes, corrects_id?, note, created_at}`. Corrections are new records with `corrects_id`; nothing is edited.
+`CalibrationRecord` (`cal_`, permanent) = `{cal_id, service_id, template_version_id?, observed_on (UTC date), observer_admin_id, cells_attempted, cells_completed, limit_reached (bool), seconds_per_cell: [int] (1..200 values), refusals, failures, copy_paste_errors, check_passes, input_chars? (int >= 0), output_chars? (int >= 0), kind? (text<24>, values owned by S13.*), corrects_id?, note, created_at}`. Corrections are new records with `corrects_id`; nothing is edited. The three optional fields are what part 13 (13.9.1, one row per run) needs for `CAL-06` and the probe statistics; if the S13 owner declines them, part 13 drops `CAL-06` (`CR-38`) [A][P: S13 owner].
 
 | op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `listCalibrationRecords` | `GET /v1/admin/calibration-records` | `admin` `perm.calibration.read` | `?service_id`, `?from`, `?to` | list | - | n/a | cursor | `A-R` |
 | `getCalibrationRecord` | `GET /v1/admin/calibration-records/{cal_id}` | `admin` `perm.calibration.read` | - | `CalibrationRecord` | `NOT_FOUND` | n/a | - | `A-R` |
-| `createCalibrationRecord` | `POST /v1/admin/calibration-records` | `admin` `perm.calibration.write` | `{service_id, template_version_id?, observed_on, cells_attempted, cells_completed, limit_reached, seconds_per_cell, refusals, failures, copy_paste_errors, check_passes, corrects_id?, note?}` | 201 `CalibrationRecord`; event `calibration.recorded` | `VALIDATION_FAILED` (`cells_completed` > `cells_attempted`; any count negative) | req | - | `A-W` |
+| `createCalibrationRecord` | `POST /v1/admin/calibration-records` | `admin` `perm.calibration.write` | `{service_id, template_version_id?, observed_on, cells_attempted, cells_completed, limit_reached, seconds_per_cell, refusals, failures, copy_paste_errors, check_passes, input_chars?, output_chars?, kind?, corrects_id?, note?}` | 201 `CalibrationRecord`; event `calibration.recorded` | `VALIDATION_FAILED` (`cells_completed` > `cells_attempted`; any count negative) | req | - | `A-W` |
 | `getCalibrationSummary` | `GET /v1/admin/calibration/summary` | `admin` `perm.calibration.read` | `?service_id` (default: all) | per service `{n_cells, days, cells_per_day: {min, median, max}, seconds_per_cell: {p50, p95}, refusal_ppm, failure_ppm, copy_paste_error_ppm, check_pass_ppm, meets_min_samples (n_cells >= calibration.min_samples_per_service), informs: [parameter names]}` | `VALIDATION_FAILED` | n/a | - | `A-R` |
 
 `informs` is a fixed mapping: `seconds_per_cell.p50` informs `cell.envelope.expected_time_s`; `p95` informs `lease.timeout_s`; the low end informs `verify.timing_min_s`; `cells_per_day` informs `lease.max_active_per_member` and `mint.monthly_cap_credits`; `copy_paste_error_ppm` and `check_pass_ppm` inform `verify.*` thresholds [A]. The summary suggests no number; a person decides and enters it through `proposeParameterChange` with `calibration_source` (15.26 rule 6). Percentiles use the nearest-rank method on the pooled `seconds_per_cell` values [D].
@@ -750,8 +792,8 @@ Public endpoints are read-only except the verification `POST`. They are the code
 | `listPublicParameters` | `GET /v1/public/parameters` | `none` | `?area` | list of `{name, area, unit, value, version, effective_from, scheduled: {value, effective_from} or null}` for every parameter with `public` = true | - | n/a | cursor | `PUB` |
 | `getPublicParameter` | `GET /v1/public/parameters/{name}` | `none` | - | same shape for one parameter | `NOT_FOUND` | n/a | - | `PUB` |
 | `listPublicParameterVersions` | `GET /v1/public/parameters/{name}/versions` | `none` | - | `{version, value, effective_from, change_class, changelog_entry_id}` newest first, withdrawn versions marked | `NOT_FOUND` | n/a | cursor | `PUB` |
-| `getPublicMetrics` | `GET /v1/public/metrics` | `none` | - | the latest published `MetricSnapshot`, see 15.33.4 | - | n/a | - | `PUB` |
-| `listPublicMetricSnapshots` | `GET /v1/public/metrics/snapshots` | `none` | `?from`, `?to` | list of `MetricSnapshot`, newest first | - | n/a | cursor | `PUB` |
+| `getPublicMetrics` | `GET /v1/public/metrics` | `none` | - | the latest `MetricSnapshot` of kind `price_publication`, see 15.33.4 | - | n/a | - | `PUB` |
+| `listPublicMetricSnapshots` | `GET /v1/public/metrics/snapshots` | `none` | `?from`, `?to` | list of `MetricSnapshot` of kind `price_publication`, newest first | - | n/a | cursor | `PUB` |
 | `listPublicChangeLog` | `GET /v1/public/change-log` | `none` | `?kind`, `?area`, `?from`, `?to` | list of `ChangeLogEntry`, newest first | - | n/a | cursor | `PUB` |
 | `getPublicChangeLogEntry` | `GET /v1/public/change-log/{chg_id}` | `none` | - | `ChangeLogEntry` | `NOT_FOUND` | n/a | - | `PUB` |
 | `listPublicMilestones` | `GET /v1/public/milestones` | `none` | - | list of published `Milestone` (no admin fields) | `NOT_FOUND` (flag off) | n/a | cursor | `PUB` |
@@ -780,7 +822,7 @@ Public endpoints are read-only except the verification `POST`. They are the code
 
 ### 15.33.4 Metrics snapshot [D]
 
-`MetricSnapshot` (`mts_`) is published every `price.publish_period_days` (initial configurable default 30): `{mts_id, period_start, period_end, published_at, v_by_job_type: [{job_type, v_ppm, verification_cells, accepted_primary_cells}], eta_ppm, claim_ratio_ppm, price_by_job_type: [{job_type, credits_per_cell_ucr}], quality: {false_accept_estimate_ppm, false_reject_estimate_ppm, gold_cells, audited_cells}, parameter_versions: [{name, version}]}`. An estimate with fewer than `analytics.min_cohort_k` underlying cells is `null`. The public record shows how the verification overhead `v`, the haircut `eta` and the claim ratio actually behaved, so the price formula (S6.*) can be re-derived from published numbers [D].
+`MetricSnapshot` (`mts_`) is one entity: a row per metric, window and dimension (S15e 15.D.4.6, S15f 15.E.10), and the published bundle is its row of kind `price_publication`; the bundle fields below are that row's payload (`CR-39`) [A][P: S13 owner]. The bundle is published every `price.publish_period_days` (initial configurable default 30): `{mts_id, period_start, period_end, published_at, v_by_job_type: [{job_type, v_ppm, verification_cells, accepted_primary_cells}], eta_ppm, claim_ratio_ppm, price_by_job_type: [{job_type, credits_per_cell_ucr}], quality: {false_accept_estimate_ppm, false_reject_estimate_ppm, gold_cells, audited_cells}, parameter_versions: [{name, version}]}`. An estimate with fewer than `analytics.min_cohort_k` underlying cells is `null`. The public record shows how the verification overhead `v`, the haircut `eta` and the claim ratio actually behaved, so the price formula (S6.*) can be re-derived from published numbers [D].
 
 ### 15.33.5 Share card [D]
 
@@ -861,6 +903,7 @@ Every event has this envelope; the catalog below lists only the payload.
 | `job.settled_partial` | `job_id`, `accepted_cells`, `refund_ucr` | `ledger_svc` | `job_svc`, `inbox_proj`, `metrics_svc` |
 | `job.cancel_requested` | `job_id` | `job_svc` | `cell_svc`, `ledger_svc` |
 | `job.cancel_settled` | `job_id`, `refund_ucr` | `ledger_svc` | `job_svc`, `inbox_proj` |
+| `job.cancelled` | `job_id`, `from_state (draft, quoted, waitlisted)` | `job_svc` | `inbox_proj`, `metrics_svc` |
 | `cell.created` | `cell_id`, `job_id`, `kind`, `attempt` | `cell_svc` | `verify_svc` |
 | `cell.leased` | `cell_id`, `lease_id`, `member_id` | `cell_svc` | `metrics_svc` |
 | `cell.submitted` | `cell_id`, `submission_id` | `cell_svc` | `verify_svc` |
@@ -879,6 +922,8 @@ Every event has this envelope; the catalog below lists only the payload.
 | `cell.overturned` | `cell_id`, `via (appeal, fraud_finding)`, `rework_cell_id` | `verify_svc` | `ledger_svc`, `cell_svc` |
 | `lease.issued`, `lease.submission_received`, `lease.expired`, `lease.released`, `lease.revoked` | `lease_id`, `cell_id`, `member_id` | `cell_svc` | `metrics_svc` (`lease.revoked` also `inbox_proj`) |
 | `submission.received`, `submission.schema_failed`, `submission.checks_passed`, `submission.checks_failed`, `submission.quarantined`, `submission.accepted`, `submission.rejected`, `submission.released_from_quarantine` | `submission_id`, `cell_id`, `reason_code?` | `cell_svc`, `verify_svc` | `verify_svc`, `inbox_proj` (rejections), `metrics_svc` |
+
+`job.cancelled` is the event of an immediate cancel: `cancelJob` in `draft`, `quoted` or `waitlisted` (answer `200`, nothing held), and each such job that `closeMember` cancels. Until now the catalog had `job.cancel_requested` and `job.cancel_settled` only, which are the settling path (`CR-34`) [A]. `closeMember` (S15c 15.B.5.1) also emits `lease.released` and `cell.declined` once per lease it releases, in the same transaction as `member.closed` (`CR-34`) [D].
 
 ### 15.34.3 Catalog: member, template, service, appeal, audit, escrow, reservation, report
 
@@ -902,12 +947,12 @@ Every event has this envelope; the catalog below lists only the payload.
 | `service.flags_recorded` | `service_id`, `terms_copy_id`, `flag_keys` | `registry_svc` | (audit only) |
 | `service.review_started`, `service.rejected` | `service_id` | `registry_svc` | `public_proj` |
 | `service.approved` | `service_id`, `terms_copy_id`, `approved_by` | `registry_svc` | `public_proj`, `policy_svc`, `config_svc` (launch rule) |
-| `service.review_due`, `service.review_lapsed` | `service_id` | `scheduler` | `registry_svc`, `job_svc` |
+| `service.review_due`, `service.review_lapsed` | `service_id`; `cause` on `service.review_due` (`item_reopened` when `reopenGateItem` moves the service to `review_due`; absent for the timer) | `scheduler`; `registry_svc` for `item_reopened` | `registry_svc`, `job_svc` |
 | `service.suspended`, `service.resumed` | `service_id`, `switch_key` | `config_svc` | `job_svc`, `cell_svc`, `public_proj` |
 | `service.revoked` | `service_id`, `reason_code`, `affected_open_jobs` | `registry_svc` | `job_svc`, `cell_svc`, `ledger_svc`, `public_proj`, `config_svc` |
 | `appeal.filed` | `appeal_id`, `kind`, `subject_ref` | `identity_svc` | `inbox_proj` (reviewers) |
 | `appeal.assigned`, `appeal.reassigned`, `appeal.review_started`, `appeal.second_review_requested` | `appeal_id`, `admin_id` | `admin_svc` | (audit only) |
-| `appeal.upheld`, `appeal.overturned` | `appeal_id`, `kind`, `subject_ref`, `decision_count` | `admin_svc` | `identity_svc`, `verify_svc`, `template_svc`, `ledger_svc` (per `kind`), `inbox_proj` |
+| `appeal.upheld`, `appeal.overturned` | `appeal_id`, `kind`, `subject_ref`, `decision_count` | `admin_svc` | `identity_svc`, `verify_svc`, `template_svc`, `job_svc` (`job_rejection`), `ledger_svc` (per `kind`), `inbox_proj` |
 | `appeal.withdrawn` | `appeal_id` | `identity_svc` | (audit only) |
 | `audit.created`, `audit.second_submitted`, `audit.matched`, `audit.mismatched`, `audit.third_requested`, `audit.third_submitted` | `audit_id`, `cell_id` | `verify_svc` | `verify_svc`, `metrics_svc` |
 | `audit.resolved`, `audit.cancelled` | `audit_id`, `cell_id`, `verdict?`, `actor` | `verify_svc` or `admin_svc` | `cell_svc`, `ledger_svc`, `identity_svc` |
@@ -915,6 +960,7 @@ Every event has this envelope; the catalog below lists only the payload.
 | `reservation.held`, `reservation.activated`, `reservation.cancelled`, `reservation.expired` | `reservation_id`, `member_id`, `window_start` | `job_svc` | `ledger_svc`, `metrics_svc` |
 | `report.filed` | `report_id`, `category`, `subject_ref` | `identity_svc` | `config_svc` (template autopause counter) |
 | `report.triaged`, `report.actioned`, `report.dismissed` | `report_id`, `action_ids?` | `admin_svc` | `inbox_proj` |
+| `team.locked`, `team.unlocked` | `team_id`, `action_id`, `report_id?` | `admin_svc` | `identity_svc`, `public_proj` |
 
 ### 15.34.4 Catalog: ledger, configuration, launch, kill switches
 
@@ -937,6 +983,9 @@ Every event has this envelope; the catalog below lists only the payload.
 | `killswitch.released` | `switch_key`, `approval_id` | `config_svc` | per 15.28.1 |
 | `preregistration.locked` | `prereg_id`, `content_hash`, `approval_id` | `config_svc` | `public_proj` |
 | `experiment.started`, `experiment.stopped` | `experiment_id`, `flag_key`, `seed_version` | `config_svc` | `analytics`, `identity_svc` (assignments) |
+| `experiment.registered` | `experiment_id`, `flag_key` | `config_svc` | `analytics` |
+| `experiment.assigned` | `experiment_id`, `assignment_id` | `config_svc` | `analytics` |
+| `experiment.exposed` | `experiment_id`, `surface_key`, `assignment_id` | `config_svc` | `analytics` |
 | `calibration.recorded` | `calibration_id`, `service_id` | `admin_svc` | (audit only) |
 | `milestone.published` | `milestone_id`, `key` | `config_svc` | `public_proj` |
 | `sharecard.created`, `sharecard.revoked` | `share_card_id` (not the token) | `api` | `public_proj` |
@@ -965,11 +1014,12 @@ Part a (`S15.5` to `S15.8`) names these events as convention additions; they fol
 | `invite.redeemed` | `invite_id`, `new_member_id`, `tree_depth` | `identity_svc` | `analytics` |
 | `member.key_revoked` | `member_id`, `key_id`, `cause (member, rotation_grace_ended, recovery)` | `identity_svc` | `identity_svc` (ends the key's sessions), `analytics` |
 | `member.device_revoked` | `member_id`, `device_id` | `identity_svc` | `identity_svc` (ends the device's sessions) |
+| `member.recovery_confirmed` | `member_id`, `key_id` | `identity_svc` | `analytics` |
 | `offer.declined` | `cell_id`, `member_id`, `reason (decline_reason)` | `cell_svc` | `metrics_svc` |
 | `job.rated` | `job_id`, `score` | `job_svc` | `metrics_svc` |
 | `team.created`, `team.joined`, `team.left` | `team_id`, `member_id` | `identity_svc` | `analytics` |
 | `referral.issued`, `referral.redeemed`, `referral.activated`, `referral.voided` | `referral_id` | `identity_svc` | `analytics` |
-| `referral.paid` | `referral_id`, `entry_ids` | `identity_svc` | `ledger_svc` (posts the two `grant` entries), `analytics` |
+| `referral.paid` | `referral_id`, `entry_ids` | `identity_svc` | `ledger_svc` (posts the two `grant` entries; same transaction as their `ledger.entry_committed` events), `analytics` |
 
 ## 15.35 Webhook-free by design [D]
 

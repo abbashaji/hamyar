@@ -27,6 +27,7 @@
 | Incidents, typed | `MET-13` | S13.6 | hourly |
 | Qualitative interviews (8-10) | `MET-14` | S13.6 | on record |
 | Accelerated-expiry arm outcomes (FD§4.5 arm, FD§9 setup) | `MET-15` | S13.8 | weekly |
+| Growth mechanics V1 to V6 (FD§9 Phase 2, S12.12) | `MET-16` to `MET-21` | S13.6.15 | daily |
 | Phase 0: cells per day per service, seconds per cell, refusal and failure, copy-paste error, automatic-check pass rate | `CAL-01`..`CAL-06` | S13.9 | on demand, frozen as evidence |
 
 **Build split** (S0.12). `BM2` builds the `PreRegistration` lock, the `Experiment` and `ExperimentAssignment` engine and the Phase 0 calibration tool, so the founders can measure while the rest is built. `BM9` builds the event projector, the metric views, the rollups, the dashboards and the activation of the expiry arm. Domain events are written to the outbox from `BM0` on (S4.*); the projector MUST read the outbox from its first row, and an outbox row MUST NOT be purged before it has been projected. [D]
@@ -168,14 +169,14 @@ A third class that contains a member identifier does not exist; member-linked co
 | `ui.service_opened` | Open-in-service button pressed (prefill or copy-only link) | refs: `lease_id`, `service_id` | `entity_ref` | ev |
 | `ui.paste_started` | Paste-back field first receives input | refs: `lease_id` | `entity_ref` | ev |
 | `ui.variant_exposed` | A growth or experiment variant is first rendered to the member (S12.*) | dims: `experiment_code`, `arm_key` | `none` | ev; exposure counts in `MetricSnapshot` |
-| `ui.landing_viewed` | Public landing page loaded (count only; never deduplicated by visitor) | dims: `locale`, `device_class` | `none` | ev |
+| `ui.landing_viewed` | Public landing page loaded (count only; never deduplicated by visitor); not sent through the API, S15.E.11 defines no public ingestion endpoint, so this count comes from aggregate counters at the front-end host | dims: `locale`, `device_class` | `none` | ev |
 
 No client event can carry free text, a prompt, an output, a URL, a clipboard content or a timestamp from the device. Events `ui.prompt_copied` and `ui.service_opened` record that a button was pressed; they do not read the clipboard, the provider page or any provider session (ground rule 2 of the brief). [D]
 
 ### 13.3.5 Ingestion
 
 - **Server events.** Background job `metrics.projector` reads the outbox in order, strips the actor id, maps fields per 13.3.4, validates against the JSON Schema of `(name, event_version)`, and inserts into `events`. A row that fails validation is not inserted; it increments `hamyar_metrics_events_rejected_total` and writes a log line (no payload). The projector is idempotent: `(outbox_id)` is stored in a side table `metrics_projector_offsets`, so replay inserts nothing twice. [D]
-- **Client events.** A member-scheme batch endpoint accepts at most `api.max_body_bytes` of JSON containing up to 50 events [A] (limit stated here because S15.* has no parameter for it; see `## Issues raised`). The server stamps `occurred_at`; it drops any event whose `lease_id` does not belong to the authenticated member (drop, not error, so the endpoint reveals nothing); it applies `ratelimit.member_api_rpm`; it ignores the batch silently when `analytics.client_events_enabled` or the member's `client_events_enabled` is false. `Idempotency-Key` is optional here (S0.11.5). Loss of client events never blocks the UI and never changes a ledger or cell state. [D]
+- **Client events.** The member-scheme batch endpoint `recordClientEvents` (`POST /v1/client-event-batches`, S15.E.11, which answers 204 in every valid case) accepts at most `api.max_body_bytes` of JSON containing up to 50 events [A] (limit stated here because S15.* has no parameter for it; see `## Issues raised`). The server stamps `occurred_at`; it drops any event whose `lease_id` does not belong to the authenticated member (drop, not error, so the endpoint reveals nothing); it applies `ratelimit.member_api_rpm`; it ignores the batch silently when `analytics.client_events_enabled` or the member's `client_events_enabled` is false. `Idempotency-Key` is optional here (S0.11.5). Loss of client events never blocks the UI and never changes a ledger or cell state. [D]
 - **Deduplication.** `ui.card_opened` may repeat per lease (each return is informative); all other `ui.*` events keep only the first row per `(lease_id, name)` within the lease lifetime. [D]
 
 ## 13.4 Metric source views and data model additions
@@ -592,6 +593,118 @@ FD§9 asks for 8 to 10 interviews including reasons for stopping. The platform t
 
 Reporting: counts by `segment` against the target range stored in the pre-registration (`qualitative_plan.min_interviews` = 8, `max_interviews` = 10, FD§9), counts by `stop_reason_codes`, and the coverage flag `has_stopped_donor` (an interview set with no `stopped_donor` cannot report reasons for stopping). Counts under `analytics.min_cohort_k` are shown as ranges only in the admin report, never published. Cadence: on record. Known biases: interviewees are self-selected and reachable, which excludes members who left because of safety concerns and went silent; eight to ten interviews support hypothesis generation, not frequencies (S13.11). [D]
 
+### 13.6.15 Growth mechanic metrics `MET-16` to `MET-21` (V1 to V6)
+
+S12.12 names a primary metric key for each growth mechanic `V1` to `V6` and says that `S13.*` owns the definitions; before FIX-11 none of them was defined here (audit A11 finding 4). The keys below are the S12 keys, unchanged. They are the FD§9 Phase 2 measures; in Phase 1 the same queries run descriptively with `arm_key = 'all'` (no experiment, S12.12). Ids `MET-16` to `MET-21` are convention additions in the existing `MET-nn` family, so the `metric_no` forms of 13.5.4 and `?kind=met` of the metric-snapshot listing need no change. [D][A]
+
+**Conventions shared by `MET-16` to `MET-21`** [D]
+
+1. **Intent to treat.** The denominator is the members assigned to an arm (`mv_assignment`), not the members who saw the variant; `MET-18` is the one exception, as S12.12.3 defines it, and also reports the assigned-member variant.
+2. **Anchor.** `t_a` is `assigned_at` of the member's assignment for the experiment of that mechanic; with no experiment (`arm_key = 'all'`) it is `created_at`. Days are UTC calendar days (S0.6.2).
+3. **Stored form.** Every ratio is stored as integer ppm with a Wilson interval (13.5.3), `scale = ppm`, although the S12 key ends in `_ratio` (the S12 key is kept, not renamed). `n_members` counts distinct members behind the value, so `AN-06` and `AN-07` apply; with 30 to 50 members every split by arm is suppressed and only the `arm_key = 'all'` row is readable (S12.11.8, 13.11).
+4. **Right-censoring.** A member enters a denominator only when her window is closed (`t_a + window <= as_of`); the members still inside the window are reported as `censored_n`, never dropped silently and never counted as not returned.
+5. **Windows.** The 7 days of `MET-17` are part of its name, as the week is part of 13.5.1. Every other window is `experiments[].analysis_window_s` of the effective pre-registration (13.7.5). It has no initial default and is not invented here: while it is not pinned, the rows that need it are `no_data`. [A]
+6. **Added views** (inside the trust boundary, like those of 13.4.1; S5.* is authoritative for the base columns) [A]:
+
+| View | One row per | Columns |
+| --- | --- | --- |
+| `mv_assignment` | experiment assignment | `assignment_id`, `member_ref`, `experiment_code`, `arm_key`, `stratum_key`, `assigned_at`, `surface_key`, `first_exposed_at` (nullable) |
+| `mv_referral` | referral | `referral_id`, `referrer_ref`, `newcomer_ref`, `arm_key` (the referrer's), `state`, `block_reason`, `created_at`, `qualified_at`, `paid_ucr`, `clawed_back_ucr` |
+| `mv_share` | member and share event | `member_ref`, `rendered_at`, `shared_at` (from `sharecard.rendered` and `sharecard.shared`) |
+| `mv_milestone` | milestone | `milestone_key`, `published_at`, `withdrawn_at` |
+
+`first_exposed_at` is a column added to `ExperimentAssignment`, written when the server records `experiment.exposed`; it does for exposure what `leases.last_card_opened_at` does for `MET-08` (13.10.1), so exposure stays recomputable after the raw events expire. `mv_share` reads the actor-bearing outbox rows, which exist only inside the trust boundary; whether S4.* keeps them until the closing rollup has run is open (`## Issues raised`).
+
+### 13.6.16 `MET-16` V1: first verified cell after joining
+
+| Field | Value |
+| --- | --- |
+| Names | `hamyar_growth_v1_created_to_first_verified_cell_ratio`, `hamyar_growth_v1_time_to_first_verified_cell_seconds`, `hamyar_growth_v1_contribution_under_threshold_ratio` |
+| Definition | Over members created on or after `day0` (`population` per 13.5.2), grouped by `arm_key`. For a window `w` in seconds: `ratio_within(w)` = members with `first_accepted_at - created_at <= w`, divided by members with `created_at + w <= as_of` (convention 4). It is reported for `w` = 3,600; 86,400; 604,800 (the survival points of `MET-09`, units of time and not thresholds) and for `w = analysis_window_s` (convention 5); the pre-registered reading is the last. `first_accepted_at` is the first accepted cell of any kind, as in `MET-09` |
+| Secondary keys | `..._time_to_first_verified_cell_seconds` is `MET-09` (median, p90) grouped by `arm_key`. `..._contribution_under_threshold_ratio` is `MET-08` `fast_share` with `first_only = true`, grouped by `arm_key`, with the strict comparison `T < ui.fast_contribution_threshold_s` and the `time_source` split of `MET-08`. They add no new query, only the grouping by assignment. The landing-to-created figure is not a rate: `hamyar_growth_landing_requests_total` is shown beside it and never divided into it (`ISS-124`) |
+| Cadence | Daily; each value is final when its window is closed |
+| Known biases | `MET-09` biases apply: the first `verify.new_donor_blanket_cells` cells wait for other executions, so "verified" measures queue supply as well as the member. A fast path can raise the numerator with members who skip the explainer and are rejected later; read the S12.12.1 guardrails (`reject.timing_anomaly` and `reject.schema_invalid` among first cells, decline rate, copy-paste failures) beside it. Invited participants overstate conversion relative to an open beta [H]. With 30 to 50 members the value is a count, not an estimate |
+
+```sql
+SELECT COALESCE(a.arm_key, 'all') AS arm_key, w.w_s,
+       count(*) FILTER (WHERE m.created_at + w.w_s * interval '1 second' <= :as_of) AS eligible_n,
+       count(*) FILTER (WHERE m.created_at + w.w_s * interval '1 second' <= :as_of
+                          AND m.first_accepted_at - m.created_at <= w.w_s * interval '1 second') AS verified_n
+FROM mv_member m
+LEFT JOIN mv_assignment a ON a.member_ref = m.member_ref AND a.experiment_code = :exp
+CROSS JOIN (VALUES (3600), (86400), (604800), (:analysis_window_s)) AS w(w_s)
+WHERE m.created_at >= :day0 AND pop_ok_member GROUP BY 1, 2;
+-- ratio_ppm = round_half_up(verified_n * 1e6 / eligible_n); a NULL :analysis_window_s gives no row for that window (status no_data)
+```
+
+### 13.6.17 `MET-17` V2: day-7 return
+
+| Field | Value |
+| --- | --- |
+| Name | `hamyar_growth_v2_day7_return_ratio` |
+| Definition | Let `d_a` be the UTC calendar day of `t_a`. A member *returned by day 7* when at least one submission (`submitted_at` not null, any outcome, as in `MET-07`) falls in `[d_a + 1 d, d_a + 8 d)`, that is on calendar days 1 to 7 after the anchor day [A]. Value = returned members divided by assigned members with `d_a + 8 d <= as_of`, grouped by `arm_key`. Companion `exact_day = true`: a submission on calendar day 7 only, `[d_a + 7 d, d_a + 8 d)`; stricter and sparser. The choice between the two readings is made in the pre-registration through the pinned `stat` (`day7_return` or `day7_return_exact`) |
+| Cadence | Daily; final when `d_a + 8 d <= as_of` |
+| Known biases | The public counter page is visible to every member, so the arm without the in-app widget still sees the figure; the contrast is diluted toward zero (S12.12.2). The denominator is every assigned member, not only week-1 contributors, which differs from `MET-07`; members assigned late in the pilot are censored. A submission on the anchor day itself is day 0 and is not a return. Day-7 return measures staying, not satisfaction (`MET-07`) |
+
+```sql
+SELECT COALESCE(x.arm_key, 'all') AS arm_key,
+       count(*) FILTER (WHERE d_a + interval '8 days' <= :as_of) AS eligible_n,
+       count(*) FILTER (WHERE d_a + interval '8 days' <= :as_of AND EXISTS (
+           SELECT 1 FROM mv_attempt t WHERE t.member_ref = x.member_ref AND t.submitted_at IS NOT NULL
+             AND t.submitted_at >= d_a + interval '1 day' AND t.submitted_at < d_a + interval '8 days')) AS returned_n
+FROM (SELECT m.member_ref, date_trunc('day', COALESCE(a.assigned_at, m.created_at)) AS d_a, a.arm_key
+      FROM mv_member m LEFT JOIN mv_assignment a ON a.member_ref = m.member_ref AND a.experiment_code = :exp
+      WHERE m.created_at >= :day0 AND pop_ok_member) x GROUP BY 1;
+```
+
+### 13.6.18 `MET-18` V3: share taps and card arrivals
+
+| Field | Value |
+| --- | --- |
+| Names | `hamyar_growth_v3_share_tap_ratio`, `hamyar_growth_v3_card_source_arrivals_total` |
+| Definition (tap ratio) | An *exposed* member is an assignment for surface `result.share_offer` with `first_exposed_at` not null. The decision point is logged for both arms (S12.11), the control arm with `rendered = false`. A member *tapped* when she has a `sharecard.shared` with `shared_at` in `[first_exposed_at, first_exposed_at + analysis_window_s)`. Value = tapped divided by exposed members whose window is closed, by `arm_key`; the assigned-member variant (denominator all assigned, `variant = itt`) is stored beside it |
+| Definition (arrivals) | Count of members created with `join_source = 'card'` per non-overlapping week (`AN-08`); descriptive, not randomized (`ISS-124`). It carries `n_members`, so `AN-06` applies |
+| Cadence | Daily for the ratio; weekly for the arrivals |
+| Known biases | A tap is intent: the platform cannot know that anything was posted (S12.12.3). The card carries no per-member token, so an arrival cannot be tied to the member who shared; arrivals depend on the source tag surviving the link. Exposure follows a first accepted cell or a new badge, so exposed members are more engaged than the whole population; the `itt` variant keeps that visible. The share control in settings stays reachable to the control arm, so the contrast is the offer, not the ability |
+
+```sql
+SELECT a.arm_key,
+       count(*) FILTER (WHERE a.first_exposed_at IS NOT NULL AND a.first_exposed_at + (:analysis_window_s * interval '1 second') <= :as_of) AS exposed_n,
+       count(*) FILTER (WHERE a.first_exposed_at IS NOT NULL AND a.first_exposed_at + (:analysis_window_s * interval '1 second') <= :as_of AND EXISTS (
+           SELECT 1 FROM mv_share s WHERE s.member_ref = a.member_ref AND s.shared_at >= a.first_exposed_at
+             AND s.shared_at < a.first_exposed_at + (:analysis_window_s * interval '1 second'))) AS tapped_n
+FROM mv_assignment a WHERE a.experiment_code = :exp AND a.surface_key = 'result.share_offer' GROUP BY 1;
+```
+
+### 13.6.19 `MET-19` V4: week-2 return by arm
+
+| Field | Value |
+| --- | --- |
+| Name | `hamyar_growth_v4_week2_return_ratio` |
+| Definition | By `arm_key`, intent to treat: assigned members with `t_a + 14 d <= as_of` are the denominator; *returned* means at least one submission in `[t_a + 7 d, t_a + 14 d)`. Unlike `MET-07`, the cohort is not limited to week-1 contributors, because conditioning on a contribution made after assignment would break the randomization. Members who join a team by code stay in the arm they were assigned (the offer is randomized, not the joining, FD§6.2) |
+| Cadence | Daily; final when the window is closed |
+| Known biases | Members self-select into teams, so only the offer is causal. Team totals are public (S12.9), so contamination across arms is likely. Week-2 cohorts are tiny in a 30-day pilot (`ISS-131`, `MET-07`) |
+
+### 13.6.20 `MET-20` V5: referral activation, blocks and unrecovered credit
+
+| Field | Value |
+| --- | --- |
+| Names | `hamyar_growth_v5_referred_activation_ratio`, `hamyar_growth_v5_blocked_total`, `hamyar_growth_referral_unrecovered_ucr_total` |
+| Definition (activation) | Over `Referral` rows with `created_at` in the window, by `arm_key` (the referrer's arm; the newcomer inherits it, S12.12.5): `referral.qualified` divided by `referral.created`, as S12 states, counting only referrals whose window is closed, that is `created_at + growth.referral.qualify_window_days <= as_of`, or that already qualified. `qualified` is the state of the S12.10 machine (the newcomer reached `growth.referral.min_newcomer_verified_cells` verified cells inside that window; S12 wins if it defines it differently). A blocked referral stays in the denominator as not qualified. The pending ones are reported as `pending_n` |
+| Definition (guardrails) | `hamyar_growth_v5_blocked_total`: count of `referral.blocked` by `block_reason`, and its share of `referral.created` in ppm. `hamyar_growth_referral_unrecovered_ucr_total` (`scale = ucr`): `sum(paid_ucr) - sum(clawed_back_ucr)` over referrals with `referral.paid`, read from the S6.* ledger postings named in S12.10; this part defines no ledger kind |
+| Cadence | Daily; the activation value is final when the qualify window of the last referral in the period has closed |
+| Known biases | The randomization unit is the referrer, and one referrer can hold several referrals (`growth.referral.max_per_referrer_per_30d`), so the Wilson interval over referrals ignores clustering and is too narrow; read it with `n_members` (distinct referrers) and never as a test (`ci_unit = referral`). The arm with a bonus may recruit more farming than genuine activations, so blocks and unrecovered credit are read beside the ratio. The qualify window (default 30 days) is as long as the pilot, so most referrals are `pending_n` (13.11) [A] |
+
+### 13.6.21 `MET-21` V6: return after a published milestone
+
+| Field | Value |
+| --- | --- |
+| Name | `hamyar_growth_v6_return_after_milestone_ratio` |
+| Definition | For each member of an arm, the *first* `milestone.published` at or after her `assigned_at` is her one observation (later milestones are shown descriptively, so no member is counted twice). Anchor `T_m` is that milestone's `published_at`, the same instant for every arm: the arm decides only whether the in-app announcement (`inbox.milestone`) is shown. *Returned* means at least one submission in `[T_m, T_m + analysis_window_s)`. Value = returned divided by assigned members whose window is closed, by `arm_key` (intent to treat) |
+| Descriptive companion | Members active per UTC day and arrivals with `join_source = 'milestone'` around milestone dates, read as an interrupted time series and not as a causal estimate (S12.12.6). The model and the window around a milestone are written in the pre-registration under `analysis_plan.estimator_notes`; no number is fixed here |
+| Cadence | Daily; final when the window is closed |
+| Known biases | Public milestone pages cannot be hidden from the control arm, so the contrast is the in-app announcement only. A milestone that coincides with a large-job week or an invitation wave confounds the time series, not the assigned-arm comparison. A withdrawn milestone (`milestone.withdrawn`) is excluded from the observation and listed |
+
 ## 13.7 Pre-registration
 
 FD§9 requires the Phase 1 thresholds to be pre-registered before day 1 and calls its decision rules "arbitrary until you set them". This section makes the setting auditable: the thresholds and rules are written down, canonicalized, hashed, timestamped and locked by two admins before anyone outside the founders can join, and the evaluation later reads only what was locked. The values themselves are decisions for the founders (`FND`); this part provides the mechanism and a template, not the numbers. [D]
@@ -607,7 +720,7 @@ Table `pre_registrations` (entity `PreRegistration`, prefix `prr_`, retention `p
 | `phase` | enum `phase0`, `phase1`, `phase2` | Which phase it governs |
 | `version` | int | 1 for the first row of a `name`; each amendment is a new row with `version + 1` |
 | `amends_id` | text, nullable | The `prr_` it amends |
-| `status` | enum | `draft`, `lock_requested`, `locked`, `abandoned` |
+| `status` | enum | `draft`, `locked`, `abandoned`; a pending lock is an `AdminApproval` (S15.E.3), not a row status. Rows `draft -> lock_requested`, `lock_requested -> draft` and `lock_requested -> locked` of 13.7.2 are re-read as: initiation of `lockPreRegistration`, withdrawal or expiry of that approval, and execution by `approveApproval` |
 | `content` | jsonb | The document of 13.7.5 |
 | `content_hash` | text, nullable | `sha256:<hex>` of the RFC 8785 canonical form of `content` (S0.6.4); set at `lock_requested` |
 | `chain_hash` | text, nullable | `sha256(prev_chain_hash ":" content_hash ":" locked_at_rfc3339)`; `prev_chain_hash` is that of the previously locked pre-registration of any phase, or the SHA-256 of the ASCII string `hamyar-prereg-genesis` for the first |
@@ -623,7 +736,7 @@ Table `pre_registrations` (entity `PreRegistration`, prefix `prr_`, retention `p
 | (none) | `draft` | `prereg.created` | `perm.prereg.edit` | Row created; `content` validated against the JSON Schema only as a draft |
 | `draft` | `lock_requested` | `prereg.lock_requested` | First approver has `perm.prereg.lock` and has passed the step-up re-authentication of S10.*; all lock guards (13.7.3) pass | `content_hash` computed and shown; `lock_approvals[0]` stored; `content` becomes read-only |
 | `lock_requested` | `draft` | (none; `AdminAction` kind `prereg.lock_withdrawn`) | The first approver withdraws, or the two-person approval window of S10.* expires | Approvals cleared; `content_hash` cleared; `content` editable again |
-| `lock_requested` | `locked` | `prereg.locked` | A different admin with `perm.prereg.lock` approves the identical `content_hash`; all guards re-run | `locked_at` set; `chain_hash` computed; `ChangeLogEntry` published with `content_hash`, `chain_hash`, `locked_at`, `phase`, `version` (not the content); evidence attached to the gate item (13.7.6) |
+| `lock_requested` | `locked` | `prereg.locked` | A different admin with `perm.prereg.lock` approves the identical `content_hash`; all guards re-run | `locked_at` set; `chain_hash` computed; `ChangeLogEntry` of kind `preregistration_lock` published with `content_hash`, `chain_hash`, `locked_at`, `scope` and the content (S15.32.1 publishes the content so that anyone can recompute the hash); evidence attached to the gate item (13.7.6) |
 | `draft` | `abandoned` | `prereg.abandoned` | `perm.prereg.edit`, never locked | Terminal; row kept |
 | `locked` | `locked` | `prereg.evaluated` | System, per 13.7.7 | Evaluation snapshots written; no change to the row |
 | (amendment) | new row `draft` | `prereg.amended` | `amends_id` points at a `locked` row | The amended row follows the same machine; the amended row stays `locked` |
@@ -672,7 +785,7 @@ The JSON Schema is stored with the code as `schemas/pre_registration.v1.json` [A
 | `population` | `{ default: "external", exclude_internal: true }` |
 | `return_basis` | `pilot_calendar` or `member_relative` (13.6.7) |
 | `measures[]` | `{ metric_id, definition_version, role: decision \| monitoring \| exploratory, population, window }` |
-| `thresholds[]` | `{ id: "TH-nn", metric_id, stat, comparator: gte \| gt \| lte \| lt, value, unit, min_sample, parameter_ref? , fixed_m? }`; `value` is in the metric's scale (ppm, seconds, count); `fixed_m` is the `m` of `first_m_large(m)` |
+| `thresholds[]` | `{ id: "TH-nn", metric_id, stat, comparator: gte \| gt \| lte \| lt, value, unit, min_sample, parameter_ref? , fixed_m?, key? }`; `value` is in the metric's scale (ppm, seconds, count); `fixed_m` is the `m` of `first_m_large(m)` |
 | `decision_rules[]` | `{ id: "DR-nn", expr, on_pass, on_fail, on_inconclusive }` |
 | `analysis_plan` | `{ interval: "wilson95", missing_data, exclusions[], estimator_notes }`; `exclusions[]` entries are `{ code, description }` fixed before day 1 |
 | `experiments[]` | `{ experiment_code: "EXP-nn", primary_outcome: "MET-..", analysis: "itt", min_exposed_per_arm?, analysis_window_s?, guardrail_metrics?, success_rule?, kill_rule?, decision_if_success?, decision_if_neither? }` (for growth mechanics the optional fields are those of S12.11.7; `success_rule` and `kill_rule` are `DR-nn` ids) |
@@ -708,6 +821,17 @@ The JSON Schema is stored with the code as `schemas/pre_registration.v1.json` [A
 ```
 
 The value `800000` for `TH-02` is the conventions default `price.eta_alarm_threshold` = 0.80 (S0.10.6, `FND`), not an FD figure. `TH-03` has `min_sample = 0` because an empty incident list is a valid pass. The `diagnose` list is capacity (`MET-10`, `MET-11`), verification (`MET-03`..`MET-06`) and friction (`MET-08`, `MET-09`, `MET-12`), the three causes FD§9 names for a failure of rule (a). [D]
+
+**Thresholds without a parameter seed (`TRIP-10`, `TRIP-11`, `TRIP-15`).** S19 tripwires name levels "locked in the `PreRegistration`" for which S16.15 lists no seed (audit A13 finding 6). Like `thr.week2_return_min`, these keys are not parameters: they exist only inside a lock record and cannot be loosened after the lock (`ISS-167`). Each is a `thresholds[]` entry with the next free `TH-nn` and its key in the optional field `key`. None has an initial default: the lock is refused while `value` is empty, and no number is proposed here (`FND`). [A]
+
+| `key` | Tripwire | `metric_id` and `stat` | `comparator` | `unit` | Source |
+| --- | --- | --- | --- | --- | --- |
+| `thr.exhausted_cell_share_max` | `TRIP-10` | `MET-02`, `exhausted_cell_share`: cells in state `Cell.exhausted` divided by primary cells of the member jobs admitted in the window, `round_half_up(1e6 * exhausted / primary)` | `lte` | ppm | cell states, S5.* |
+| `thr.fast_contribution_share_min` | `TRIP-11` | `MET-08`, `fast_share_ppm` (13.6.8; `first_only = false`) | `gte` | ppm | 13.6.8 |
+| `thr.copy_paste_error_max` | `TRIP-11` | `CAL-04`, copy-paste error rate over `cell_run` rows of the Phase 0 sample (13.9.2) | `lte` | ppm | 13.9.2 |
+| `thr.active_donors_min` | `TRIP-15` | `MET-07` cohort view: members with at least one submission in the pilot week (`act` of 13.6.7), `stat = active_donors_week` | `gte` | count | 13.6.7 |
+
+The return half of `TRIP-15` uses the existing `thr.week2_return_min` (`TH-04` of the template). S13 has no Phase 1 measure of the copy-paste error rate (only `CAL-04`, Phase 0): until one is defined, the second half of `TRIP-11` can only be read on the calibration sample. S16.15 needs the same four rows in its table; FIX-02 and FIX-04 do not cover them (see `docs/fix/FIX-11.md`). [D]
 
 ### 13.7.6 Link to the launch gate and the launch switch
 
@@ -870,7 +994,7 @@ Expected scale: collecting 30 runs per service for four or five services is 120 
 
 ### 13.9.3 Freezing as evidence
 
-A report is *frozen* by `POST /v1/admin/calibration-reports` (creates a report resource): the tool computes all statistics at that instant, writes them as `MetricSnapshot` rows (`metric_no = CAL-nn`, `visibility = internal`, `dims` with `service_id`), records the id range of the `calibration_records` used, and attaches the report id and a SHA-256 of its canonical JSON as evidence to the launch-gate item that S14.* designates for calibration data. Frozen reports are immutable; a later report supersedes (`supersedes_id`), never edits. [D]
+A report is *frozen* by `POST /v1/admin/calibration-reports` (creates a report resource): the tool computes all statistics at that instant, writes them as `MetricSnapshot` rows (`metric_no = CAL-nn`, `visibility = internal`, `dims` with `service_id`), records the id range of the `calibration_records` used, and returns the report id and `report_hash` (a SHA-256 of its canonical JSON); the operator attaches them as evidence to the launch-gate item that S14.* designates for calibration data with the launch evidence operation of S15.27 (`perm.launch.evidence`). Frozen reports are immutable; a later report supersedes (`supersedes_id`), never edits. [D]
 
 ### 13.9.4 Parameter proposals
 
@@ -920,21 +1044,21 @@ Conventions of S0.11 apply: plural resource nouns, commands as `POST` creating a
 
 | Operation (camelCase id) | Method and path | Scheme | Permission |
 | --- | --- | --- | --- |
-| `recordClientEvents` | `POST /v1/events` | member | none (own leases only; 13.3.5) |
-| `listMetricSnapshots` | `GET /v1/admin/metric-snapshots` | admin | `perm.metrics.view`; `perm.metrics.view_small_cells` for `suppressed` values |
+| `recordClientEvents` | `POST /v1/client-event-batches` | member | none (own leases only; 13.3.5) |
+| `listMetricSnapshots` | `GET /v1/admin/metric-snapshots` | admin | `perm.metrics.view`; the `value` of a `suppressed` row is always `null` for every caller (no permission shows it; FIX-11) |
 | `createPreRegistration`, `updatePreRegistration` | `POST`, `PATCH /v1/admin/pre-registrations[/{prr_id}]` | admin | `perm.prereg.edit` |
-| `approvePreRegistrationLock` | `POST /v1/admin/pre-registrations/{prr_id}/lock-approvals` | admin, step-up | `perm.prereg.lock` |
-| `getPreRegistrationProof` | `GET /v1/public/pre-registrations/{prr_id}/proof` | none | Returns `content_hash`, `chain_hash`, `locked_at`, `phase`, `version` only |
+| `lockPreRegistration`, `approveApproval` | `POST /v1/admin/pre-registrations/{prr_id}/lock`, then `POST /v1/admin/approvals/{apv_id}/approvals` by a different admin | admin, step-up, two-person | `perm.prereg.lock`, `perm.approval.decide` |
+| `getPublicPreRegistration` | `GET /v1/public/pre-registrations/{prr_id}` | none | Returns the locked `PreRegistration` of S15.33.2 with `content_hash`, `locked_at`, `post_launch` and the additive `chain_hash`; `phase` is `scope`, `version` is the depth of the `supersedes_id` chain |
 | `listPreRegistrationEvaluations` | `GET /v1/admin/pre-registrations/{prr_id}/evaluations` | admin | `perm.metrics.view` |
-| `createDecisionReport` | `POST /v1/admin/decision-reports` | admin | `perm.metrics.export` |
-| `createExperiment`, `updateExperiment` | `POST`, `PATCH /v1/admin/experiments[/{exp_id}]` | admin | `perm.experiment.manage` |
-| `registerExperiment`, `startExperiment`, `stopExperiment` | `POST /v1/admin/experiments/{exp_id}/registrations`, `/starts`, `/stops` | admin; `startExperiment` two-person | `perm.experiment.manage` |
+| `createDecisionReport`, `listDecisionReports`, `getDecisionReport`, `getDecisionReportContent` | `POST`, `GET /v1/admin/decision-reports`; `GET /v1/admin/decision-reports/{dcr_id}`; `GET /v1/admin/decision-reports/{dcr_id}/content` | admin | `perm.metrics.export` (create, content), `perm.metrics.view` (lists, get) |
+| `createExperiment`, `updateExperiment` | `POST`, `PATCH /v1/admin/experiments[/{exp_id}]` | admin | `perm.experiment.edit` |
+| `registerExperiment`, `startExperiment`, `stopExperiment` | `POST /v1/admin/experiments/{exp_id}/registrations`, `/starts`, `/stops` | admin, step-up; two-person start is open (S15.E Issues raised, item 3) | `perm.experiment.run` |
 | `getExperimentBalance` | `GET /v1/admin/experiments/{exp_id}/balance` | admin | `perm.metrics.view`; counts only |
 | `createCalibrationRecords` | `POST /v1/admin/calibration-records` | admin | `perm.calibration.record` |
-| `getCalibrationStatistics`, `getCalibrationProposals` | `GET /v1/admin/calibration-statistics`, `/calibration-proposals` | admin | `perm.calibration.record` |
-| `createCalibrationReport` | `POST /v1/admin/calibration-reports` | admin | `perm.calibration.record` |
-| `createIncident`, `updateIncident`, `listIncidents` | `POST`, `PATCH`, `GET /v1/admin/incidents` | admin | `perm.incident.record` |
-| `createInterview`, `getInterviewCoverage` | `POST /v1/admin/interviews`, `GET /v1/admin/interview-coverage` | admin | `perm.interview.record` |
+| `getCalibrationSummary` (was `getCalibrationStatistics`), `getCalibrationProposals` | `GET /v1/admin/calibration/summary`, `GET /v1/admin/calibration-proposals` (path not reconciled here) | admin | `perm.calibration.read` |
+| `createCalibrationReport`, `listCalibrationReports`, `getCalibrationReport` | `POST`, `GET /v1/admin/calibration-reports`; `GET /v1/admin/calibration-reports/{clr_id}` | admin | `perm.calibration.write` (create), `perm.calibration.read` (lists, get) |
+| `createIncident`, `listIncidents`, `getIncident`, `updateIncident`, `startIncidentInvestigation`, `resolveIncident` | `POST`, `GET /v1/admin/incidents`; `GET`, `PATCH /v1/admin/incidents/{inc_id}`; `POST /v1/admin/incidents/{inc_id}/investigations`, `/resolutions` | admin | `perm.incident.record` (writes), `perm.metrics.view` (reads) |
+| `createInterview`, `getInterviewCoverage` | `POST /v1/admin/interviews`, `GET /v1/admin/interview-coverage` | admin | `perm.interview.record` (create), `perm.metrics.view` (coverage) |
 
 No endpoint returns events or operational rows per member. Error codes are those of S0.8.5; this part adds none. S10.* owns the role matrix; the permission names above are `perm.<area>.<action>` per S0.5 (`ISS-138`). [D]
 
@@ -1029,3 +1153,5 @@ Problems and gaps found while writing this part. Each resolution is applied in t
 | `ISS-139` | major | FD§4.5, FD§9 | The accelerated-expiry arm is compared by "share of credit expiring" (FD§9 setup, parameter table), but lots of the accelerated arm mature earlier, so a naive expired share compares different ages and favors neither arm correctly | The primary comparison is week-2 return; the credit comparison uses a fixed horizon (`spent_within_h_share`) and shows the matured expired share only beside it (13.8.6) | applied |
 
 Convention additions made by this part (not issues, listed so `C-001` can fold them back): the rows of `ISS-138`, the retention class and fields of 13.4, and the `AN-nn` rule ids.
+
+Additions and open points of FIX-11 (no new `ISS` id is assigned here) [A]: (1) metric ids `MET-16` to `MET-21` and the views `mv_assignment`, `mv_referral`, `mv_share`, `mv_milestone` (13.6.15); (2) the column `ExperimentAssignment.first_exposed_at`; (3) whether the actor-bearing outbox rows behind `mv_share` are kept until the rollup that closes their window has run is for S4.*; (4) the optional `thresholds[].key` and the four `thr.*` keys of 13.7.5, to be mirrored in S16.15; (5) guardrails that S12.12 names without a key (V2 share of exposures with `rendered` false, V3 reports, V4 members in teams below `team.min_public_members`) are not defined here; `rendered` is not an allowed dimension of 13.3.4; (6) the permission `perm.metrics.view_small_cells` was removed from the operation table 13.10.2 only; `AN-09` (13.2) still names it, see `docs/fix/FIX-11.md`; (7) the permissions `perm.experiment.manage` and `perm.calibration.record` named in `ISS-138` are partly replaced by `perm.experiment.edit`, `perm.experiment.run`, `perm.calibration.read` and `perm.calibration.write` in 13.10.2, and `perm.approval.decide` is added; the `ISS-138` list is not rewritten.

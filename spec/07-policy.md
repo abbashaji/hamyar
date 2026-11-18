@@ -1062,15 +1062,15 @@ Enums: `policy_version_status`, `change_class` (`tighten`, `loosen`, `neutral`),
 
 | `operationId` | Method and path | Auth | Notes |
 | --- | --- | --- | --- |
-| `previewPolicy` | `POST /v1/policy-previews` | member | stage-`submit`/`screen`-style dry run, no state change; rate-limited; returns the first failing rule |
-| `getCurrentPolicy` | `GET /v1/policy` | public | current version summary, allowlist, change-log pointer; no private data |
+| `checkJobPolicy` | `POST /v1/jobs/{job_id}/policy-checks` | member | dry run on a `draft` job, no state change; returns every failing rule |
+| `getPublicPolicy` | `GET /v1/public/policy` | none | current version summary, allowlist, change-log pointer; no private data |
 | `listServices` | `GET /v1/services` | member | approved services only: `name`, `service_kind`, adapter capabilities, notices |
-| `getOptIns`, `setOptIns` | `GET`, `PUT /v1/me/opt-ins` | member | grants need the acknowledgement; ETag / `row_version` |
+| `getOptIns`, `replaceOptIns` | `GET`, `PUT /v1/members/me/opt-ins` | member | grants need the acknowledgement; ETag / `row_version` |
 | `listTopicCategories` | `GET /v1/topic-categories` | member | active only |
 | `createPolicyVersionDraft`, `proposePolicyVersion`, `approvePolicyVersion`, `withdrawPolicyVersion` | `POST /v1/admin/policy-versions`, `.../{id}/proposal`, `.../{id}/approval`, `.../{id}/withdrawal` | admin (reviewer / operator) | 7.8 |
 | `createService`, `startServiceReview`, `uploadTermsCopy`, `recordFlagAnswer`, `approveService`, `rejectService`, `revokeService` | `POST /v1/admin/services`, `.../{id}/review`, `.../{id}/terms-copies`, `.../{id}/flag-answers`, `.../{id}/approval`, `.../{id}/rejection`, `.../{id}/revocation` | admin | 7.10 |
 | `listScreeningQueue`, `decideScreening` | `GET /v1/admin/screening`, `POST /v1/admin/screening/{job_id}/decision` | admin reviewer | 7.12.4 |
-| `getSupplyGauge` | `GET /v1/admin/supply-gauge` | admin | exact counts; the public and requester views use bands |
+| `listSupplyGauges` | `GET /v1/admin/capacity/supply-gauges` | admin | buckets under `analytics.min_cohort_k` donors are suppressed (`null`); the public view is `GET /v1/public/capacity` |
 
 ### 7.15.5 Metrics and alarms
 
