@@ -1,49 +1,49 @@
 # 11. Experiences, part d: Persian first, accessibility, low bandwidth and notices copy
 
-*Spec part 11d (the fourth file of part 11) · written against Founding Document draft v0.1 (FD) · vocabulary from `spec/00-conventions.md` (S0), used exactly. Nothing here is legal advice. Every notice in S11.51 needs human and legal review before any member can see it; none of it has been read by a lawyer, a safety advisor or a native-speaking reviewer.*
+*Spec part 11d (the fourth file of part 11) · written against Founding Document draft v0.1 (FD) · vocabulary from `spec/00-conventions.md` (S0), used exactly. Nothing here is legal advice. Every notice in S11.81 needs human and legal review before any member can see it; none of it has been read by a lawyer, a safety advisor or a native-speaking reviewer.*
 
-## 11.40 Scope, status and how to read this part
+## 11.70 Scope, status and how to read this part
 
 This part completes the last bullet of prompt scope F: Persian first (full RTL, numerals, Jalali and Gregorian dates, mixed-direction text, fonts), English, accessibility, low-bandwidth behavior, and the copy of every policy, privacy and risk notice in both languages. Screens, states and flows live in the other files of S11; this file sets the cross-cutting rules that every screen obeys, and it owns the notice texts. [D]
 
 | Prompt item (scope F) | Where decided |
 | --- | --- |
-| Full RTL | S11.42 |
-| Persian numerals option; storage always ASCII digits | S11.43 |
-| Jalali and Gregorian dates; UTC storage | S11.44 |
-| Mixed-direction text in prompts and outputs; clipboard | S11.45 |
-| Fonts | S11.46 |
-| English | S11.47 |
-| Accessibility | S11.48 |
-| Low-bandwidth behavior; offline-tolerant paste-back drafts | S11.49 |
-| Copy of all notices: keyed table, review process | S11.50 to S11.53 |
-| Acceptance criteria (Given / When / Then) | S11.54 |
-| New parameters | S11.55 |
-| Assumptions, items to verify, requirements on other parts | S11.56, S11.57 |
+| Full RTL | S11.72 |
+| Persian numerals option; storage always ASCII digits | S11.73 |
+| Jalali and Gregorian dates; UTC storage | S11.74 |
+| Mixed-direction text in prompts and outputs; clipboard | S11.75 |
+| Fonts | S11.76 |
+| English | S11.77 |
+| Accessibility | S11.78 |
+| Low-bandwidth behavior; offline-tolerant paste-back drafts | S11.79 |
+| Copy of all notices: keyed table, review process | S11.80 to S11.83 |
+| Acceptance criteria (Given / When / Then) | S11.84 |
+| New parameters | S11.85 |
+| Assumptions, items to verify, requirements on other parts | S11.86, S11.87 |
 
 **Reading rules** [D]
 
 - Persian first: wherever a table lists both locales, `fa` comes before `en`.
-- MUST, MUST NOT, SHOULD and MAY carry their RFC 2119 meaning (S0.2). Evidence tags are those of S0.2; `[A]` assumptions are collected in S11.56.
+- MUST, MUST NOT, SHOULD and MAY carry their RFC 2119 meaning (S0.2). Evidence tags are those of S0.2; `[A]` assumptions are collected in S11.86.
 - Persian text uses the zero-width non-joiner (ZWNJ, U+200C) where Persian orthography needs it, for example after the verb prefix and before the plural suffix. It is invisible; a file where it is missing is wrong, not different.
-- Every number is derived by a formula shown next to it or labeled `initial configurable default` and listed in S11.55. Copy contains no hard-coded number that comes from a parameter (S11.50).
-- Heading numbers of this file start at 11.40 so that they cannot collide with the other files of S11 [A]; see `ISS-117`.
+- Every number is derived by a formula shown next to it or labeled `initial configurable default` and listed in S11.85. Copy contains no hard-coded number that comes from a parameter (S11.80).
+- Heading numbers of this file start at 11.70 so that they cannot collide with the other files of S11 [A]; see `ISS-117`.
 
 **The decisions of this part in one table** [D]
 
 | Decision | Section |
 | --- | --- |
-| Locale, digits, calendar and time zone are four independent settings kept on the device; the API is language-neutral and returns copy keys, never prose | S11.41 |
-| Layout uses logical CSS only; direction is set once at the root and changed only by isolates around foreign text | S11.42, S11.45 |
-| Persian digits exist only at the display edge; storage, API, exports, hashes and the clipboard carry ASCII digits and byte-exact text | S11.43, S11.45 |
-| Jalali is the primary display calendar for `fa`, Gregorian is shown in detail views; the server never sees a Jalali string; cap periods are labeled in UTC, never with Jalali month names | S11.44 |
-| Text from other people is never altered, only isolated; invisible bidi controls inside it are made visible and screened | S11.45 |
-| Fonts are self-hosted and subset with shaping tables intact, with system fallbacks; no third-party font, script or style request on any member page | S11.46, S11.49 |
-| WCAG 2.2 level AA is the declared target [A], with one known deviation (lease timing) stated openly | S11.48 |
-| Budgets are initial configurable defaults enforced in CI; a paste-back draft stays on the device and is sent only after an explicit Submit | S11.49, S11.55 |
-| Notices are one keyed table in `fa` and `en`, every row `needs human and legal review`; each promise-like sentence says declared (`اعلام‌شده`) | S11.50 to S11.53 |
+| Locale, digits, calendar and time zone are four independent settings kept on the device; the API is language-neutral and returns copy keys, never prose | S11.71 |
+| Layout uses logical CSS only; direction is set once at the root and changed only by isolates around foreign text | S11.72, S11.75 |
+| Persian digits exist only at the display edge; storage, API, exports, hashes and the clipboard carry ASCII digits and byte-exact text | S11.73, S11.75 |
+| Jalali is the primary display calendar for `fa`, Gregorian is shown in detail views; the server never sees a Jalali string; cap periods are labeled in UTC, never with Jalali month names | S11.74 |
+| Text from other people is never altered, only isolated; invisible bidi controls inside it are made visible and screened | S11.75 |
+| Fonts are self-hosted and subset with shaping tables intact, with system fallbacks; no third-party font, script or style request on any member page | S11.76, S11.79 |
+| WCAG 2.2 level AA is the declared target [A], with one known deviation (lease timing) stated openly | S11.78 |
+| Budgets are initial configurable defaults enforced in CI; a paste-back draft stays on the device and is sent only after an explicit Submit | S11.79, S11.85 |
+| Notices are one keyed table in `fa` and `en`, every row `needs human and legal review`; each promise-like sentence says declared (`اعلام‌شده`) | S11.80 to S11.83 |
 
-## 11.41 Locale model
+## 11.71 Locale model
 
 Supported locales are the `locale` enum of S0.8.6 (`fa`, `en`), listed in `i18n.supported_locales`; the default is `i18n.default_locale` (`fa`). [D]
 
@@ -52,8 +52,8 @@ Supported locales are the `locale` enum of S0.8.6 (`fa`, `en`), listed in `i18n.
 | Setting | Values | Default for `fa` | Default for `en` | Kept | Effect of a change |
 | --- | --- | --- | --- | --- | --- |
 | `locale` | `fa`, `en` | see first-visit rule | see first-visit rule | on the device | Immediate re-render; no reload; no input lost |
-| `digits` | `latin`, `persian` | `i18n.digits_default_fa` (`persian` [A][H]) | `i18n.digits_default_en` (`latin`) | on the device | Display only (S11.43) |
-| `calendar` | `jalali`, `gregorian` | `i18n.calendar_default_fa` (`jalali`) | `i18n.calendar_default_en` (`gregorian`) | on the device | Display only (S11.44) |
+| `digits` | `latin`, `persian` | `i18n.digits_default_fa` (`persian` [A][H]) | `i18n.digits_default_en` (`latin`) | on the device | Display only (S11.73) |
+| `calendar` | `jalali`, `gregorian` | `i18n.calendar_default_fa` (`jalali`) | `i18n.calendar_default_en` (`gregorian`) | on the device | Display only (S11.74) |
 | `time_zone` | an IANA zone | the device zone | the device zone | on the device | Display only; never inferred from an IP address (S0.6) |
 
 The four settings are independent: a member may use `en` with Persian digits, or `fa` with Gregorian dates. They are stored on the device, not on the server, to collect less [D]; if S15.* offers a member settings resource, these four fields are the only i18n fields in it [A].
@@ -80,37 +80,37 @@ The preference list is read on the client only and is never sent to the server. 
 - Any human-authored, member-visible string that the system stores (template display name, topic category name, badge name, service display name, reviewer-written reject reason) MUST be stored as a `{fa, en}` pair or as a copy key. S5.*, S8.* and S7.* apply this to their fields.
 - Missing-translation policy: static copy with a missing key in either locale fails the build (AC-i18n-31). For human-authored dynamic strings with a missing `fa` or `en`, the UI shows the other locale's text inside an element carrying its own `lang` and `dir` (never an empty string, never the raw key). No telemetry about missing strings is sent, to avoid collecting reading behavior.
 
-## 11.42 Right-to-left rules
+## 11.72 Right-to-left rules
 
-RTL is the primary layout, not a mirrored afterthought: the design is made in `fa` first and checked in `en` second. [D] Each rule is testable; the test cases are named in S11.54.
+RTL is the primary layout, not a mirrored afterthought: the design is made in `fa` first and checked in `en` second. [D] Each rule is testable; the test cases are named in S11.84.
 
 | Area | Rule | Test |
 | --- | --- | --- |
-| Direction source | The root element carries `lang` and `dir` set from the active locale (`fa` gives `dir=rtl`, `en` gives `dir=ltr`) before first paint; a switch updates both without reload. No component sets its own direction except the isolates of S11.45. | AC-i18n-01 |
+| Direction source | The root element carries `lang` and `dir` set from the active locale (`fa` gives `dir=rtl`, `en` gives `dir=ltr`) before first paint; a switch updates both without reload. No component sets its own direction except the isolates of S11.75. | AC-i18n-01 |
 | Logical properties | Layout CSS uses logical properties only: `margin-inline-start`, `padding-inline-end`, `inset-inline-start`, `border-start-start-radius`, `text-align: start` or `end`, `float: inline-start`. Physical `left` and `right` properties and values are forbidden outside the allowlist in the next row. A CI check fails the build on a violation. | AC-i18n-04 |
-| Physical-direction allowlist | Allowed only for code blocks (always LTR), LTR-only tokens that set their own `dir` (S11.42 forms row), canvas or drawing code that works in coordinates, and operating-system safe-area insets. Each use carries a comment `physical-ok: <reason>` that the check reads. | AC-i18n-04 |
+| Physical-direction allowlist | Allowed only for code blocks (always LTR), LTR-only tokens that set their own `dir` (S11.72 forms row), canvas or drawing code that works in coordinates, and operating-system safe-area insets. Each use carries a comment `physical-ok: <reason>` that the check reads. | AC-i18n-04 |
 | Flex and grid | Use `flex` and `grid`, which follow direction. `row-reverse` and manual order swaps used to fake RTL are forbidden. | AC-i18n-04 |
 | Alignment | Text aligns `start`. Centered text only for short single-line headings. Never `text-align` left or right. | AC-i18n-04 |
 | Mirrored in RTL | Arrows and chevrons, back and forward, next and previous, disclosure triangles, progress bars and sliders (fill grows from the inline start), carousel and swipe order, list and tree indentation, stepper order, breadcrumbs, timelines, and the position of the primary action (at the inline end of a button row). Every icon in the sprite carries `mirror: true` or `mirror: false` in the icon manifest (default `false`); mirrored icons flip under `dir=rtl`. | AC-i18n-05 |
 | Not mirrored | The brand mark, code, URLs, hashes, IDs, e-mail addresses, the order of digits inside a number, check marks, plus and minus signs, clock faces, the numeric axis of a chart. | AC-i18n-05 |
 | Time axes | Time runs from the inline start to the inline end (right to left in `fa`), so that charts read like text [D]. Whether this reads naturally to Persian readers is [H], tested in the Phase 1 interviews (FD§9) with a 5-second read test; the kill criterion (a share of interviewees who misread the axis) is set by the founders in the pre-registration (`FND`); the fallback is a per-chart setting, not a redesign. | AC-i18n-05 |
-| Operator diagrams | Any diagram the operator tools draw as a graph is an explicit `dir=ltr` figure whose text labels still follow S11.45. | AC-i18n-05 |
+| Operator diagrams | Any diagram the operator tools draw as a graph is an explicit `dir=ltr` figure whose text labels still follow S11.75. | AC-i18n-05 |
 | Tables | Column order follows the reading direction; row headers sit at the inline start; numeric columns align `end` and use tabular figures where the font supports them [V]. | AC-i18n-04 |
 | Forms | Labels above fields; helper and error text under the field; the required marker follows the end of the label; a checkbox or radio sits at the inline start of its label. | AC-i18n-22 |
 | Free-text input | `dir=auto` plus a three-way direction toggle (auto, RTL, LTR) on the paste-back box, because a pasted answer may begin with a digit, a quote or a Latin word. The toggle is kept per field on the device only. | AC-i18n-14 |
 | LTR-only fields | Recovery key, e-mail address, invite code, device-link code and URL fields set `dir=ltr`, `text-align: start`, `autocapitalize=off`, `autocorrect=off`, `spellcheck=false`. `text-align: start` resolves against the element's own `dir`, so no physical alignment is needed. | AC-i18n-14 |
-| Numeric fields | `inputmode` is `numeric` or `decimal`, and the field is `dir=ltr`, so that digits and separators never reorder; the typed text is parsed by S11.43. | AC-i18n-08 |
-| Punctuation and quotes | Persian copy uses « » ، ؛ ؟ and the Persian decimal and thousands separators (S11.43). Latin punctuation appears inside Persian sentences only inside an isolated Latin token. Brackets and parentheses are never swapped by hand; the bidi algorithm mirrors them. | AC-i18n-31 |
+| Numeric fields | `inputmode` is `numeric` or `decimal`, and the field is `dir=ltr`, so that digits and separators never reorder; the typed text is parsed by S11.73. | AC-i18n-08 |
+| Punctuation and quotes | Persian copy uses « » ، ؛ ؟ and the Persian decimal and thousands separators (S11.73). Latin punctuation appears inside Persian sentences only inside an isolated Latin token. Brackets and parentheses are never swapped by hand; the bidi algorithm mirrors them. | AC-i18n-31 |
 | ZWNJ and ZWJ | Inputs, storage and rendering keep U+200C and U+200D. No sanitizer, trimmer or normalizer removes them. Truncation with an ellipsis happens on extended grapheme cluster boundaries only. | AC-i18n-15 |
 | Styling of Arabic-script text | No `letter-spacing` (it breaks cursive joining); no italic or synthetic italic; no `text-transform`; no justified text (no kashida support is assumed). Emphasis is by weight only. | AC-i18n-19 |
 | Line breaking and height | No hard-coded line breaks in copy; `overflow-wrap: anywhere` for long unbroken tokens (keys, hashes); `hyphens: none` for Persian; no fixed-height or fixed-width container holds text; the `fa` line-height token is larger than the `en` token so that dots and descenders are not clipped (values are design tokens checked by the clipping test, not set here). | AC-i18n-20 |
 | Scrolling and focus | Horizontally scrollable regions start at the inline start; scroll-into-view and focus logic use the inline axis. | AC-i18n-01 |
 | Keyboard | Arrow keys keep their visual meaning; custom widgets (tabs, sliders, carousels) map ArrowLeft and ArrowRight to the visual direction and Home and End to the inline start and end; no shortcut depends on a physical key position. | AC-i18n-23 |
 | Text in images | No text is baked into a bitmap. Any generated image (share card, S12.*) draws its text with the same font stack, direction and digit rules as the UI. | AC-i18n-18 |
-| Emoji and symbols | Never the only carrier of meaning (S11.48); rendering varies by device [V]. | AC-i18n-22 |
+| Emoji and symbols | Never the only carrier of meaning (S11.78); rendering varies by device [V]. | AC-i18n-22 |
 | Exports | Downloads that contain text (provenance manifest, deliverables) are UTF-8, use ASCII digits and ISO dates (S0.6), and carry no direction marks added by the renderer. | AC-i18n-07 |
 
-## 11.43 Numerals
+## 11.73 Numerals
 
 Three contexts, one rule each [D]:
 
@@ -133,7 +133,7 @@ fn fmt_number(value, opts, ctx):            # value: integer or exact decimal, n
     sep_dec   = '٫' if ctx.digits == 'persian' else '.'
     s = group(int_part, size=3, sep=sep_group) + ((sep_dec + frac) if frac else '')
     if ctx.digits == 'persian': s = map_digits(s, '0123456789' -> '۰۱۲۳۴۵۶۷۸۹')
-    return isolate(sign + s, dir='ltr', mode=ctx.mode)   # S11.45: one LTR unit per number
+    return isolate(sign + s, dir='ltr', mode=ctx.mode)   # S11.75: one LTR unit per number
 ```
 
 The separators follow the digit set, not the locale. Platform number formatting MAY be used where it gives exactly this output [V: support on the target phones]; otherwise the bundled formatter is used. Every formatted number is one LTR isolate, so its display does not depend on the surrounding text direction or on the mixed bidi classes of digits and separators [D]. A ratio is shown as a decimal, never as a percent (`0.87`, not `87%`), which avoids a percent-sign placement problem and matches the FD figures [D].
@@ -145,7 +145,7 @@ The separators follow the digit set, not the locale. Platform number formatting 
 - Counts are integers. Grouping separators are used from four digits up.
 - A value that the system could not compute is shown as an em dash with an accessible label, never as `0`.
 
-**Where the digit mapping is never applied** [D]: free text of any kind (prompt text, requester data, template bodies, submitted results, glossary terms, reviewer notes); the recovery key, invite and device-link codes; IDs (`job_...`), hashes, keys, URLs, e-mail addresses, version strings; code blocks; JSON. Copy buttons that copy a number from the UI copy the ASCII form. The mapping is a property of the formatter that produced the number, so text a person typed cannot be changed by it. Literal digits in notice copy are avoided altogether (S11.50).
+**Where the digit mapping is never applied** [D]: free text of any kind (prompt text, requester data, template bodies, submitted results, glossary terms, reviewer notes); the recovery key, invite and device-link codes; IDs (`job_...`), hashes, keys, URLs, e-mail addresses, version strings; code blocks; JSON. Copy buttons that copy a number from the UI copy the ASCII form. The mapping is a property of the formatter that produced the number, so text a person typed cannot be changed by it. Literal digits in notice copy are avoided altogether (S11.80).
 
 **Input parsing** [D]
 
@@ -165,7 +165,7 @@ A comma is never read as a decimal point, because `1,5` read as `15` would silen
 
 **Ordered lists** use a CSS counter style defined in the stylesheet (`system: numeric`, symbols `۰` to `۹`) when `digits` is `persian`, and `decimal` otherwise; no external resource is involved. Sorting, search and filtering operate on the ASCII values. [D]
 
-## 11.44 Dates, times and calendars
+## 11.74 Dates, times and calendars
 
 **Storage and wire** [D]: UTC `timestamptz` and RFC 3339 with `Z`; durations in integer seconds (S0.6). The server never stores, accepts or emits a Jalali string. Conversion to a display calendar happens only on the client.
 
@@ -202,14 +202,14 @@ The clock is 24-hour in both locales [A] (no AM and PM markers to translate). Re
 | 11 | بهمن | Bahman | نوامبر |
 | 12 | اسفند | Esfand | دسامبر |
 
-Weekdays in `fa`, Saturday first: `شنبه`, `یکشنبه`, `دوشنبه`, `سه‌شنبه`, `چهارشنبه`, `پنجشنبه`, `جمعه`. Jalali months 1 to 6 have 31 days, months 7 to 11 have 30 days, month 12 has 29 days, or 30 in a leap year. [V: names and spellings checked by a native-speaking reviewer; stored in the copy review record of S11.53]
+Weekdays in `fa`, Saturday first: `شنبه`, `یکشنبه`, `دوشنبه`, `سه‌شنبه`, `چهارشنبه`, `پنجشنبه`, `جمعه`. Jalali months 1 to 6 have 31 days, months 7 to 11 have 30 days, month 12 has 29 days, or 30 in a leap year. [V: names and spellings checked by a native-speaking reviewer; stored in the copy review record of S11.83]
 
 **Calendar library requirement** (the library is chosen by the stack in S4.*; this is the requirement) [D]
 
 1. Convert between a UTC instant and a Jalali or Gregorian calendar date, in a given IANA zone, correctly for at least 2026-01-01 to 2040-12-31 [A]; the range covers every date the system can show (credit lifetime, reservations, quotes; S0.10).
 2. The official Jalali calendar defines leap years astronomically; arithmetic algorithms approximate it and may differ for some years [V]. The library MUST pass a golden table of boundary dates (the first day of each Jalali year, the last day of each leap Esfand, month boundaries, and the Gregorian dates around them) in CI. Who supplies and signs the table, and its source, is [V]: a native-speaking reviewer records it as a test fixture with its source reference.
 3. Prefer the platform calendar support (`Intl` with the Persian calendar) where present [V: support on the target phones]; always bundle an arithmetic fallback (S0.6). Both are self-hosted, make no network request and count against `ui.budget.js_bytes`.
-4. Pure functions; no hidden clock; time comes from the server-supplied instant (S11.49).
+4. Pure functions; no hidden clock; time comes from the server-supplied instant (S11.79).
 5. A date typed or picked by the member is converted to a UTC instant or window on the client and sent as RFC 3339; the UI shows the resulting UTC window in both calendars before confirmation.
 
 **Time zone** [D]: the device zone by default, overridden by an IANA zone chosen in settings, never from an IP address (S0.6). Offsets and daylight-saving rules for any country come from the tz database on the device and are not written into this spec or the code [V]. Detail views show the offset in force at that instant.
@@ -218,11 +218,11 @@ Weekdays in `fa`, Saturday first: `شنبه`, `یکشنبه`, `دوشنبه`, `�
 
 - Rate limits, the monthly mint cap and daily jobs use UTC boundaries (S0.6). A cap period is therefore labeled `UTC month` (`ماه میلادی به وقت UTC`) and never with a Jalali month name, because the boundaries differ and a Jalali label would mislead. The screen shows the start and end of the period, and any reset time, in the member's calendar and zone next to the UTC value.
 - Weekly aggregates on public pages (S12.*, S13.*) use fixed UTC weeks and say so; the member's week start (`i18n.week_start_fa`, `saturday` [V]) affects only calendar pickers and personal views.
-- Countdowns (lease time left) are rendered from the server's `expires_at`; see S11.49 for clock-skew handling.
+- Countdowns (lease time left) are rendered from the server's `expires_at`; see S11.79 for clock-skew handling.
 
 **Date input and pickers** [D]: every date field names its calendar in its label; the text field parses only the selected calendar, and the year must fall in a plausible window for it (otherwise the error is `VALIDATION_FAILED` with a field code, shown from a copy key); the picker is keyboard operable, its month grid follows the reading direction, and its week starts on `i18n.week_start_fa` for `jalali` and on the member's regional default otherwise [V].
 
-## 11.45 Mixed-direction text
+## 11.75 Mixed-direction text
 
 Prompts, requester data, pasted answers, glossary terms and reviewer notes mix Persian, English, digits, code and URLs in any order. Policy: **never alter what a person wrote or what a template says; only isolate it for display.** [D]
 
@@ -233,22 +233,22 @@ Prompts, requester data, pasted answers, glossary terms and reviewer notes mix P
 | Content is never altered | Stored text is exactly what was pasted or authored: no Unicode normalization, no trimming, no digit mapping, no ZWNJ removal, no inserted direction marks. Hashes are over raw bytes (S0.6). Only comparison keys are folded (`fold_fa`, below). | AC-i18n-15 |
 | Isolation units | Block-level foreign text is split into paragraphs at line breaks, each a separate element with `dir=auto`. Inline dynamic text is wrapped in `<bdi>` in markup. In plain-text contexts (page title, `aria-label`, `alt`, toast text) the renderer wraps dynamic text in U+2068 and U+2069 (first-strong isolate) and LTR tokens in U+2066 and U+2069. Preformatted text keeps its line breaks and is rendered per line with `dir=auto`. | AC-i18n-14 |
 | Declared language wins | If a template slot or output field declares its language (a BCP 47 tag from a closed list), the renderer sets `lang` and `dir` from it and uses `dir=auto` only for undeclared or mixed text. `dir=auto` follows the first strong character, so a Persian paragraph that starts with a Latin word would otherwise render left to right. Requirement on S8.*: slots and output fields carry `lang`. | AC-i18n-14 |
-| LTR tokens | Code, URLs, hashes, IDs, e-mail addresses and keys render in an `dir=ltr` isolate in the monospace stack (S11.46) and are never mirrored. Code blocks scroll horizontally. | AC-i18n-14 |
+| LTR tokens | Code, URLs, hashes, IDs, e-mail addresses and keys render in an `dir=ltr` isolate in the monospace stack (S11.76) and are never mirrored. Code blocks scroll horizontally. | AC-i18n-14 |
 | Fixing punctuation | A sentence-final mark next to an opposite-direction word is fixed by isolating that word, never by inserting direction marks into the content. | AC-i18n-14 |
 | Invisible controls are made visible | In the expanded prompt and in reviewer and requester result views, U+202A to U+202E, U+2066 to U+2069, U+200B, U+2060 and U+FEFF are always shown as labeled markers. U+200C, U+200D, U+200E, U+200F and U+061C (the Arabic letter mark; legitimate in Persian text) are shown as markers only when the member turns on *show invisible characters*. Markers come from CSS-generated content or `user-select: none` elements, so they are never in a copied range. | AC-i18n-16 |
 | Screening | Embedding and override controls (U+202A to U+202E) and isolate controls (U+2066 to U+2069) in requester input or in a submission are flagged, because they can make text read differently from what it is (the same class of trick as source-code spoofing). The action is `screen.bidi_control_action`, initially `flag_for_review`; for a submission, a flag means `submission.quarantined` (S9.*). U+200C, U+200D, U+200E, U+200F and U+061C are not flagged. | AC-i18n-17 |
 | Copy buttons | *Copy prompt* writes exactly the stored prompt text to the clipboard: no marks added or removed, no digit mapping, no trailing characters. Copying a UI-originated number or string writes the raw form without isolates. | AC-i18n-15 |
 | Paste-back | The field's content is sent exactly as it is in the field, without trimming. The server judges length and schema on the raw text (S9.*). | AC-i18n-15 |
-| Placeholders in notices | The renderer escapes dynamic text first, then isolates it (below). Numbers come from the formatter (S11.43). | AC-i18n-14 |
+| Placeholders in notices | The renderer escapes dynamic text first, then isolates it (below). Numbers come from the formatter (S11.73). | AC-i18n-14 |
 | Prefilled links | Where a registry entry says prefill is supported, the prompt is percent-encoded from its UTF-8 bytes unchanged. Encoded length is computed by actually encoding, and if it exceeds `adapter.max_url_chars` (a per-service value, [V]) or `adapter.copy_only` is true, the adapter falls back to copy-only. For planning: every non-ASCII byte becomes three characters (`%XX`), a Persian letter is two bytes, so a Persian prompt expands up to six URL characters per letter; a prompt of `cell.envelope.max_input_chars` (4,000, initial configurable default) Persian letters can reach about 24,000 URL characters, so copy-only is the expected path for Persian prompts. | AC-i18n-15 |
 
 ```
 fn render(key, params, ctx, mode):                 # mode: 'markup' | 'plain'
-    tpl = copy[key][ctx.locale] or fallback(key, ctx)        # S11.41
+    tpl = copy[key][ctx.locale] or fallback(key, ctx)        # S11.71
     for p in placeholders(tpl):
         v = params[p.name]
         if p.type in {number, credits, ratio, duration, date, datetime}:
-            s = format(v, ctx)                               # S11.43, S11.44; already one LTR unit
+            s = format(v, ctx)                               # S11.73, S11.74; already one LTR unit
         elif p.type in {text, service, topic}:
             s = escape(v)                                    # untrusted text: escape, then isolate
             s = isolate(s, dir='auto', mode=mode, lang=known_lang(v))
@@ -276,7 +276,7 @@ fn fold_fa(text, opts):
 
 Each comparator declares its `opts`; whether `zwnj` is folded is a per-template decision because *می‌کنم* and *می کنم* are both seen in real text [A].
 
-## 11.46 Fonts
+## 11.76 Fonts
 
 | Topic | Decision |
 | --- | --- |
@@ -286,55 +286,55 @@ Each comparator declares its `opts`; whether `zwnj` is folded is a per-template 
 | Subsetting | A build step subsets by `unicode-range` so that `en` pages do not download Arabic-script ranges and `fa` pages download Latin only if the face contains it. The subset MUST keep the OpenType layout tables that Arabic-script shaping needs (at least `ccmp`, `locl`, `isol`, `init`, `medi`, `fina`, `rlig`, `liga`, `calt`, `mark`, `mkmk`, `kern`); stripping them breaks letter joining. A render test on joined words and on a ZWNJ pair is part of CI (AC-i18n-19). [D] |
 | Weights and styles | Two weights (`ui.font.max_weights`, initial configurable default 2: regular and bold). No italic; `font-synthesis` is off, so a missing style is not faked. [D] |
 | Loading | Preload only the regular face of the active locale on first screens; hashed file names with long immutable caching [A]; `font-display: swap` so text is never invisible; metric overrides to limit layout shift where the browser supports them [V]. [D] |
-| Fallback stack | The default Persian stack ends in system faces and a generic family (`ui.font.fa_stack`, S11.55). Which system faces render Persian on the target phones is [V] (G2, FD§8.3). A prompt that contains letters outside the subset (Kurdish, Urdu, Arabic) must still render in a fallback face and never as empty boxes (AC-i18n-20). [D] |
+| Fallback stack | The default Persian stack ends in system faces and a generic family (`ui.font.fa_stack`, S11.85). Which system faces render Persian on the target phones is [V] (G2, FD§8.3). A prompt that contains letters outside the subset (Kurdish, Urdu, Arabic) must still render in a fallback face and never as empty boxes (AC-i18n-20). [D] |
 | Monospace | A system monospace stack for codes, keys and code blocks; always `dir=ltr`. The recovery key is shown in groups of four characters, as an LTR isolate, with no digit mapping; on input, hyphens, spaces and case are ignored; paste is never blocked. Its alphabet and length belong to S10.*, which SHOULD avoid visually ambiguous characters. [D] |
 | Budget | Total font bytes are capped by `ui.budget.fonts_bytes` (initial configurable default 80,000, replaced by the measured subset sizes, `TEC`). [D] |
 
-## 11.47 English
+## 11.77 English
 
 English is a full locale, not a fallback. [D]
 
-- Same keys, same screens, same flows as `fa`; the layout is checked in both directions (S11.42).
-- Digits `latin` and calendar `gregorian` by default, with the Jalali date shown as a second line in detail views (S11.44). Jalali month names in English are the transliterations in S11.44.
-- Plain, short sentences; the same terms in the same meaning every time (S11.53 glossary); no idioms, humor or abbreviations in notices.
+- Same keys, same screens, same flows as `fa`; the layout is checked in both directions (S11.72).
+- Digits `latin` and calendar `gregorian` by default, with the Jalali date shown as a second line in detail views (S11.74). Jalali month names in English are the transliterations in S11.74.
+- Plain, short sentences; the same terms in the same meaning every time (S11.83 glossary); no idioms, humor or abbreviations in notices.
 - Counted nouns have `one` and `other` plural forms in `en`; Persian uses the singular noun after a number, so a Persian key has a single form [A].
-- Dates are unambiguous (`11 Nov 2026`), never `11/11/26`. The clock is 24-hour (S11.44).
+- Dates are unambiguous (`11 Nov 2026`), never `11/11/26`. The clock is 24-hour (S11.74).
 - English is written first for counsel to read and Persian is written natively, not machine-translated; which language prevails if they ever differ is a legal question that this spec does not decide and no precedence clause is written [V: counsel; recorded in the counsel memo]. [A]
-- A member can read both languages of any notice side by side on the public notices page (S11.52).
+- A member can read both languages of any notice side by side on the public notices page (S11.82).
 
-## 11.48 Accessibility
+## 11.78 Accessibility
 
 **Target** [A]: WCAG 2.2 level AA on every member, requester, reviewer, operator and public screen, in both locales. This is a declared target, not a claim that it has been reached; reaching it is shown by the audit in the last row of the table below. The owner decision that could overturn it (a different level, or a lower level for operator tools) is listed in S3.*. One deviation is known and stated openly (row 2.2.1).
 
 | Success criterion (WCAG 2.2) | Decision |
 | --- | --- |
-| 1.1.1 Non-text content | Every icon that carries meaning has a text alternative from a copy key; decorative icons are hidden from assistive technology. No text is baked into images (S11.42). |
+| 1.1.1 Non-text content | Every icon that carries meaning has a text alternative from a copy key; decorative icons are hidden from assistive technology. No text is baked into images (S11.72). |
 | 1.3.1, 1.3.2 Structure and order | Landmarks, one `h1` per screen, ordered headings, labeled controls, table headers. The cell card is one `article` with the declarations (purpose, license, sensitivity, service, template, expected time) in a description list. DOM order equals reading order in both directions. |
 | 1.3.4 Orientation | No orientation lock. |
 | 1.4.1 Use of color | Status (accepted, rejected, flagged, expired) is never color alone; each has a word and a shape. |
 | 1.4.3, 1.4.11 Contrast | Text at least 4.5:1 (3:1 for large text); borders, icons and focus indicators at least 3:1, in light and dark themes. |
 | 1.4.4, 1.4.10 Resize and reflow | Usable at 200% text zoom and at a 320 CSS pixel width without two-dimensional scrolling, except for code blocks and data tables, which scroll inside their own container. |
-| 1.4.12 Text spacing | Nothing is lost when a user stylesheet increases line, paragraph and word spacing. Letter spacing is never applied to Arabic-script text (S11.42). |
+| 1.4.12 Text spacing | Nothing is lost when a user stylesheet increases line, paragraph and word spacing. Letter spacing is never applied to Arabic-script text (S11.72). |
 | 1.4.13 Content on hover or focus | Dismissible, hoverable, persistent. |
 | 2.1.1, 2.1.2 Keyboard | Everything is operable by keyboard; nothing traps focus. The language switch, the prompt expansion, copy, paste-back and Submit are reachable in a short tab sequence. |
-| 2.2.1 Timing adjustable (known deviation) | A lease has a server-enforced time limit (`lease.timeout_s`) that exists so that cells are not hoarded. WCAG asks that a user can extend a limit many times; the product allows `lease.max_extensions` (initial configurable default 1) extensions of `lease.extend_s`. The deviation is mitigated by: a warning at `ui.lease.warn_remaining_s`; a default limit of ten times the expected time per cell (`lease.timeout_s` is 10 x 120 s, S0.10); a free decline at any moment; an immediate re-lease of the next cell; and local draft preservation (S11.49). The deviation is listed in the accessibility statement. [A][V: whether the essential-limit exception applies is for the accessibility auditor] |
+| 2.2.1 Timing adjustable (known deviation) | A lease has a server-enforced time limit (`lease.timeout_s`) that exists so that cells are not hoarded. WCAG asks that a user can extend a limit many times; the product allows `lease.max_extensions` (initial configurable default 1) extensions of `lease.extend_s`. The deviation is mitigated by: a warning at `ui.lease.warn_remaining_s`; a default limit of ten times the expected time per cell (`lease.timeout_s` is 10 x 120 s, S0.10); a free decline at any moment; an immediate re-lease of the next cell; and local draft preservation (S11.79). The deviation is listed in the accessibility statement. [A][V: whether the essential-limit exception applies is for the accessibility auditor] |
 | 2.2.2, 2.3.1, 2.3.3 Motion | Nothing blinks or flashes. Animation honors `prefers-reduced-motion`; the counter and progress indicators work without motion. |
-| 2.4.1, 2.4.2, 2.4.6 Navigation | Skip-to-content link; localized page titles (dynamic parts isolated, S11.45); descriptive headings and labels. |
+| 2.4.1, 2.4.2, 2.4.6 Navigation | Skip-to-content link; localized page titles (dynamic parts isolated, S11.75); descriptive headings and labels. |
 | 2.4.3, 2.4.7, 2.4.11 Focus | Logical focus order; a visible focus indicator on every control; focused elements are never hidden under sticky bars. |
 | 2.5.1, 2.5.2 Pointer gestures | No gesture is required (no path-based gestures); swipes and carousels have buttons. Actions fire on release and can be cancelled. |
 | 2.5.3 Label in name | A control's accessible name starts with its visible Persian or English label. |
 | 2.5.8 Target size | Targets are at least `ui.a11y.min_target_css_px` (initial configurable default 44; the WCAG 2.2 minimum is 24). |
-| 3.1.1, 3.1.2 Language | `lang` on the root and `lang` on every inline passage in the other language, so that speech output switches voice (S11.45). Persian speech availability differs by device [V: target phones]; no function depends on audio. |
+| 3.1.1, 3.1.2 Language | `lang` on the root and `lang` on every inline passage in the other language, so that speech output switches voice (S11.75). Persian speech availability differs by device [V: target phones]; no function depends on audio. |
 | 3.2.2 On input | Changing the language, digits or calendar setting changes only the display and never submits or navigates. |
 | 3.3.1 to 3.3.4 Errors | An error summary at the top receives focus, links to each field, and names the problem and the fix from `details.copy_key` and `details.fields[].path` (S0.11). Screens that move credit (escrow confirmation, reservation, cancellation) show a review step and can be reversed or cancelled where the ledger allows (S6.*). |
-| 3.3.7 Redundant entry | Nothing already entered is asked again; the paste-back draft survives reload and re-lease (S11.49). |
-| 3.3.8 Accessible authentication | No cognitive test, no transcription. The recovery key field accepts paste and password managers; its grouping, hyphens and case are tolerated (S11.46). |
+| 3.3.7 Redundant entry | Nothing already entered is asked again; the paste-back draft survives reload and re-lease (S11.79). |
+| 3.3.8 Accessible authentication | No cognitive test, no transcription. The recovery key field accepts paste and password managers; its grouping, hyphens and case are tolerated (S11.76). |
 | 4.1.2, 4.1.3 Name, role, value; status messages | Standard controls; custom ones carry ARIA roles. Result feedback (accepted, rejected, balance changed, draft saved, offline) is announced politely by a status region. The lease countdown is not announced every second: only at `ui.lease.warn_remaining_s` and at expiry. |
 | Mandatory prompt expansion (FD§5.5) | While a first-use or non-default prompt is unexpanded, Copy and Open stay focusable with `aria-disabled=true` and an adjacent explanation linked by `aria-describedby`; they are not removed from the tab order and not conveyed by color alone. Expanding moves focus to the start of the expanded text and announces it. |
-| Plain language | Notices follow the copy rules of S11.50: short sentences, one idea each, the actor named. |
+| Plain language | Notices follow the copy rules of S11.80: short sentences, one idea each, the actor named. |
 | Verification | An automated rules engine runs in CI on every screen in both locales (a failure fails the build); a manual pass with keyboard only, 200% zoom, and a screen reader on a real Android and a real iOS phone, in `fa` and in `en`, is a `LaunchGateItem` under G2 with evidence attached (S14.*). An accessibility statement page with a way to report problems exists before launch [A]. Automated checks find only part of the problems; the manual pass is not optional. |
 
-## 11.49 Low-bandwidth behavior and offline-tolerant paste-back
+## 11.79 Low-bandwidth behavior and offline-tolerant paste-back
 
 The design assumes slow, lossy and sometimes blocked connections without assuming any statistic about them. Reachability from Iran is [V] (FD§8.3 G2) and is measured, not assumed. [D]
 
@@ -342,11 +342,11 @@ The design assumes slow, lossy and sometimes blocked connections without assumin
 
 - **No third-party requests** from any member or public page: no CDN, font, script, style, tracker, map, embed, avatar or analytics service. The content security policy (S10.*) allows the page origin and the API origin only. A CI test loads every screen with all other origins blocked and fails on any attempt (AC-i18n-28). Opening a service in another tab is a member action and is not part of a page load.
 - **No heavy assets:** no video, no raster hero images; icons are one inline SVG sprite; share cards (S12.*) are generated only on explicit request and are outside the flows of this part.
-- **Notices and public pages work without JavaScript and without an identity:** the notices (S11.51) are static pages readable before an identity exists, in both languages; the first-contribution flow needs JavaScript because keys are generated and used on the device (S10.*).
+- **Notices and public pages work without JavaScript and without an identity:** the notices (S11.81) are static pages readable before an identity exists, in both languages; the first-contribution flow needs JavaScript because keys are generated and used on the device (S10.*).
 - **UTF-8 JSON is sent raw**, not ASCII-escaped: an escaped Persian letter costs six bytes against two. Text responses are compressed (brotli or gzip).
 - **Caching:** static assets have hashed names and immutable caching [A]; authenticated responses are `no-store` and public ones follow S0.11.7.
 - **Polling, not sockets:** public counters refresh every `public.counter_refresh_s`; polling pauses while the tab is hidden and backs off on failure. Where the browser signals a data-saver preference, optional refreshes and animations stop [V: browser support].
-- **Only the active locale's strings** are loaded; the other locale loads on switch. The consent manifest (S11.50) is small and carries hashes, not texts.
+- **Only the active locale's strings** are loaded; the other locale loads on switch. The consent manifest (S11.80) is small and carries hashes, not texts.
 - **Retries** use the same `Idempotency-Key` and exponential backoff with jitter: `delay_n = min(ui.retry.max_delay_s, ui.retry.base_delay_s x 2^(n-1)) x u`, with `u` uniform in [0.5, 1.0], and `Retry-After` wins when larger. After `ui.retry.max_attempts` the client stops retrying by itself and offers a manual retry.
 
 **Budgets** (every one is an `initial configurable default` or a formula; each is enforced in CI against the build and replaced by measurement on real phones and networks, `TEC`)
@@ -409,7 +409,7 @@ Storage and privacy [D]:
 - Two tabs: the draft is keyed by lease, the last write wins, and a `storage` event refreshes the other tab.
 - A service worker MAY cache the application shell and the notices for offline reading. It never caches API responses beyond the cell card of an active lease, which follows the same time-to-live. [A]
 
-## 11.50 Copy system
+## 11.80 Copy system
 
 **Storage and delivery** [D]. Copy is a set of versioned resource files shipped with the front-end build, one record per key, not rows in the database and not editable by the parameter editor: legal text changes only by a reviewed release. The build also emits a `copy_manifest` (key, version, hash, review status) that the API reads. Keys follow S0.5: `copy.<area>.<key>`, with an optional last segment (`.title`, `.body`, `.chip`, `.ack`).
 
@@ -431,7 +431,7 @@ copy_entry:
 | Value | Meaning | Allowed next values |
 | --- | --- | --- |
 | `needs_human_and_legal_review` | Initial value of every row; any text change returns here. Shown to no member of a launched system. | `human_reviewed` |
-| `human_reviewed` | A native-speaking reviewer for each language recorded that the text passes the checklist of S11.53 | `legal_reviewed`, `needs_human_and_legal_review` |
+| `human_reviewed` | A native-speaking reviewer for each language recorded that the text passes the checklist of S11.83 | `legal_reviewed`, `needs_human_and_legal_review` |
 | `legal_reviewed` | Counsel's memo is referenced in `reviewed.legal_ref` [V] | `approved`, `needs_human_and_legal_review` |
 | `approved` | Two distinct admins signed off (the rule of `launch.min_signoffs`, S14.*) | `withdrawn`, `needs_human_and_legal_review` |
 | `withdrawn` | Taken out of use; the key is not deleted | none |
@@ -447,9 +447,9 @@ Changing the text of either language resets both to `needs_human_and_legal_revie
 - No provider name, no law name, no URL inside a notice.
 - No absolute about something the project cannot show; *never* appears only inside a sentence that also says declared.
 - No tip for getting around a limit; no politics; no humor.
-- Any number that comes from a parameter is a placeholder (registry in S11.52). Literal digits do not appear in Persian copy.
+- Any number that comes from a parameter is a placeholder (registry in S11.82). Literal digits do not appear in Persian copy.
 - Paragraph break `¶`, list item `•` and placeholder `{name}` are the only markup. No HTML, no Markdown.
-- Persian orthography and terminology follow S11.53.
+- Persian orthography and terminology follow S11.83.
 
 **Copy checks in CI** (they fail the build; AC-i18n-31, AC-i18n-32)
 
@@ -464,13 +464,13 @@ Changing the text of either language resets both to `needs_human_and_legal_revie
 | No markup | No `<`, no URL, no Markdown |
 | Status | A key whose text changed without a version bump or a status reset fails |
 
-## 11.51 The notices: keyed copy table
+## 11.81 The notices: keyed copy table
 
-The table lists the copy of every policy, privacy and risk notice required by prompt scope F. Columns: `key`; `FA` (Persian first); `EN`; `review status`. The machine value of the review status of every row is `needs_human_and_legal_review` (S11.50), written in the last column as *needs human and legal review*. All rows have `promise: true` unless the text contains no promise-like sentence. `¶` is a paragraph break and `•` a list item. [D]
+The table lists the copy of every policy, privacy and risk notice required by prompt scope F. Columns: `key`; `FA` (Persian first); `EN`; `review status`. The machine value of the review status of every row is `needs_human_and_legal_review` (S11.80), written in the last column as *needs human and legal review*. All rows have `promise: true` unless the text contains no promise-like sentence. `¶` is a paragraph break and `•` a list item. [D]
 
 No text below has been checked by a lawyer, a safety advisor or a native-speaking reviewer. The wording of the contributor waiver and of every statement about law, terms or safety is a draft for counsel and for a qualified safety advisor [V: counsel in the operator's jurisdiction, FD§8.3 G0; a person qualified to advise on safety, FD§8.3 G1].
 
-### 11.51.A Account risk
+### 11.81.A Account risk
 
 | key | FA | EN | review status |
 | --- | --- | --- | --- |
@@ -478,7 +478,7 @@ No text below has been checked by a lawyer, a safety advisor or a native-speakin
 | `copy.risk.account_notice.body` | همیار از شما می‌خواهد با حساب شخصی خودتان در یک سرویس هوش مصنوعی، کارهای کوچکی به نام «سلول کار» را برای دیگران انجام دهید. هر سرویس شرایط استفادهٔ خودش را دارد. ممکن است آن شرایط چنین کاری را مجاز ندانند، بدون اطلاع قبلی تغییر کنند، یا در محل زندگی شما به شکل دیگری اعمال شوند. اگر سرویسی تشخیص دهد که شرایط آن را نقض کرده‌اید، ممکن است حساب شما را محدود یا مسدود کند. همیار نمی‌تواند جلوی این اتفاق را بگیرد، از طرف شما پیگیری نمی‌کند و هیچ سرویسی را کنترل نمی‌کند. ¶ • اعلام‌شده: هر سرویس تنها وقتی در همیار عرضه می‌شود که یک بازبین شرایط آن را ثبت کرده و نسخهٔ تاریخ‌دارش را ذخیره کرده باشد. این بازبینی اعلام‌شده است و تضمین نمی‌کند که سرویس کار شما را بپذیرد. • اعلام‌شده: دکمهٔ ارسال را همیشه خودتان می‌زنید. همیار هرگز گذرواژه‌تان را نمی‌خواهد، به حساب شما وصل نمی‌شود و صفحهٔ گفتگوی شما را نمی‌خواند. • اعلام‌شده: می‌توانید از هر سلول کار انصراف دهید و هر زمان که خواستید کنار بگذارید، بدون هیچ جریمه‌ای. • پیش از استفاده از هر سرویس، شرایط آن را خودتان بخوانید. اگر مطمئن نیستید، از آن استفاده نکنید. | Hamyar asks you to use your own account on a third-party AI service to do small tasks, called cells, for other people. That service has its own terms. Those terms may not allow this, may change without notice, or may be applied differently where you live. If a service decides that you broke its terms, it may limit or suspend your account. Hamyar cannot prevent that, cannot follow up with the service for you and does not control any service. ¶ • Declared: a service is offered in Hamyar only when a reviewer has recorded its terms and saved a dated copy. This is a declared review, not a guarantee that the service will accept what you do. • Declared: you press Send yourself every time. Hamyar never asks for your password, never connects to your account and never reads your chat page. • Declared: you may decline any cell and stop at any time, without penalty. • Read the terms of a service yourself before you use it. If you are not sure, do not use it. | needs human and legal review |
 | `copy.risk.service_review_line` | شرایط این سرویس آخرین بار در {review_date} بازبینی شده است. این بازبینی اعلام‌شده است و تضمین نیست. | The terms of this service were last reviewed on {review_date}. This is a declared review, not a guarantee. | needs human and legal review |
 
-### 11.51.B Privacy
+### 11.81.B Privacy
 
 | key | FA | EN | review status |
 | --- | --- | --- | --- |
@@ -487,7 +487,7 @@ No text below has been checked by a lawyer, a safety advisor or a native-speakin
 | `copy.privacy.pseudonymity_notice.body_not_collected` | اعلام‌شده: همیار نام واقعی، شمارهٔ تلفن یا هیچ مدرک هویتی از شما نمی‌خواهد. ¶ • اعلام‌شده: گذرواژه یا نشست ورود شما در هیچ سرویسی را ذخیره نمی‌کند و متن صفحهٔ گفتگوی شما را نگه نمی‌دارد. • اعلام‌شده: محل اعضا را نمایش نمی‌دهد و از ردیاب یا کوکی شخص ثالث استفاده نمی‌کند. • اعلام‌شده: درخواست‌دهندگان هرگز نمی‌بینند چه کسی سلول کار را انجام داده است. | Declared: Hamyar does not ask for your real name, phone number or any identity document. ¶ • Declared: it does not store your password or session for any service, and it does not keep the text of your chat page. • Declared: it does not show where members are, and it does not use third-party trackers or cookies. • Declared: requesters never see who completed a cell. | needs human and legal review |
 | `copy.privacy.pseudonymity_notice.body_limits` | آنچه همیار نمی‌تواند وعده دهد: ¶ • همیار «با نام مستعار» است، نه «ناشناس». ما وعده نمی‌دهیم که هیچ‌کس نتواند شما را شناسایی کند. • ارائه‌دهندهٔ میزبانی همیار و شبکه‌هایی که میان دستگاه شما و همیار قرار دارند ممکن است ببینند که دستگاه شما به همیار وصل شده است، هرچند طبق سیاست اعلام‌شدهٔ ما، نشانی خام شبکه ذخیره نمی‌شود. • اگر کسی با اختیار قانونی یا دسترسی فیزیکی داده‌ای بخواهد یا دستگاهی را بردارد، نتیجه به قانون و به چیزی که وجود دارد بستگی دارد. اعلام‌شده: ما تا جای ممکن کم نگه می‌داریم تا چیز کمتری برای تحویل وجود داشته باشد. • همیار نمی‌تواند اطلاعاتی را که خودتان بیرون از همیار منتشر می‌کنید کنترل کند. | What Hamyar cannot promise: ¶ • Hamyar is pseudonymous, not anonymous. We do not promise that nobody can identify you. • The provider that hosts Hamyar, and the networks between your device and Hamyar, may be able to see that your device connected, even though our declared policy is not to store raw network addresses. • If someone with legal power or physical access asks for data or takes a device, the outcome depends on the law and on what exists to be taken. Declared: we keep as little as we can, so that there is less to hand over. • Hamyar cannot control what other people do with information that you share outside Hamyar. | needs human and legal review |
 
-### 11.51.C Safety of members in Iran
+### 11.81.C Safety of members in Iran
 
 The notice is shown to every new member and does not depend on any guess about location: Hamyar never infers where a member is (S0.6, S10.*). It is also on the public notices page. [D]
 
@@ -496,7 +496,7 @@ The notice is shown to every new member and does not depend on any guess about l
 | `copy.safety.iran_notice.title` | یادداشتی ساده دربارهٔ ایمنی شخصی | A plain note on personal safety | needs human and legal review |
 | `copy.safety.iran_notice.body` | اگر در ایران هستید، یا در جایی که مشارکت می‌تواند خطرناک باشد، پیش از عضویت این یادداشت را بخوانید. اعلام‌شده: همیار تلاش نمی‌کند بفهمد شما کجا هستید و این یادداشت را به همهٔ اعضای جدید نشان می‌دهد. ¶ مشارکت ممکن است برای شما خطر شخصی داشته باشد؛ این به محل زندگی شما، قانون همان‌جا و شرایط سرویس‌هایی که استفاده می‌کنید بستگی دارد. همیار نمی‌تواند این را به‌جای شما ارزیابی کند و مشاورهٔ حقوقی نمی‌دهد. ¶ • همیار «با نام مستعار» است، نه «ناشناس». اعلام‌شده: ما تا جای ممکن کمترین اطلاعات را جمع می‌کنیم. وعده نمی‌دهیم که هیچ‌کس نتواند شما را شناسایی کند. • هر چیزی که در یک کار، گزارش یا درخواست بازبینی می‌نویسید ممکن است کسانی آن را بخوانند که ما کنترلی بر آن‌ها نداریم. نام، راه‌های تماس یا هر چیزی را که بتواند خودتان یا دیگری را شناسایی کند ننویسید. • هر چیزی که روی دستگاه شما ذخیره شود، مثل پیش‌نویس‌ها، برای هرکس که بتواند از دستگاه استفاده کند یا آن را بررسی کند قابل دیدن است. هر زمان می‌توانید آن را پاک کنید. • همیار از شما نمی‌خواهد و به شما توصیه نمی‌کند که محدودیتی را دور بزنید یا شرایط استفادهٔ سرویسی را نقض کنید. اگر سرویسی برای شما در دسترس یا مجاز نیست، از آن استفاده نکنید. • اعلام‌شده: همیار محل اعضا را نمایش نمی‌دهد و مدرک هویتی نمی‌خواهد. • می‌توانید از هر سلول کار انصراف دهید، کنار بگذارید یا حساب خود را ببندید. اگر احساس امنیت نمی‌کنید، کنار گذاشتن انتخابی معقول است. | If you are in Iran, or anywhere else where taking part may be risky, please read this note before you join. Declared: Hamyar does not try to work out where you are, and it shows this note to every new member. ¶ Taking part may carry personal risk, depending on where you are, what the law says there, and what the services you use allow. Hamyar cannot judge this for you and gives no legal advice. ¶ • Hamyar is pseudonymous, not anonymous. Declared: we collect as little as we can. We do not promise that nobody can identify you. • Anything you write in a job, a report or an appeal may be read by people we do not control. Do not include your name, your contacts or anything that could identify you or another person. • Anything saved on your device, such as drafts, can be seen by anyone who can use or inspect that device. You can clear it at any time. • Hamyar does not ask or advise you to get around any restriction or to break any service's terms. If a service is not available or not allowed for you, do not use it. • Declared: Hamyar does not show where members are, and it does not require an identity document. • You may decline any cell, stop, or close your account at any time. If you do not feel safe, stopping is a reasonable choice. | needs human and legal review |
 
-### 11.51.D Open license, declared not guaranteed, credit is not money
+### 11.81.D Open license, declared not guaranteed, credit is not money
 
 | key | FA | EN | review status |
 | --- | --- | --- | --- |
@@ -510,7 +510,7 @@ The notice is shown to every new member and does not depend on any guess about l
 | `copy.credit.not_money.title` | اعتبار، پول نیست | Credit is not money | needs human and legal review |
 | `copy.credit.not_money.body` | اعتبار در همیار واحد حسابِ کارهایی است که بررسی و پذیرفته شده‌اند. اعتبار پول نیست، دارایی نیست و حقِ وعده‌داده‌شده‌ای هم به شمار نمی‌رود. ¶ • اعلام‌شده: اعتبار با انجام کار به دست می‌آید یا به‌صورت هدیهٔ اعلام‌شده از ذخیرهٔ مشترک (مانند اعتبار آغازین) داده می‌شود. نه خرید و فروش می‌شود، نه مستقیم برای عضو دیگری فرستاده می‌شود و نه با پول مبادله می‌شود. • اعلام‌شده: اعتبار تاریخ انقضا دارد و هر موجودی تاریخ‌های انقضای خود را نشان می‌دهد. اعتبارِ حاصل از کار {credit_lifetime_days} روز ماندگار است، مگر آنکه قوانین با اطلاع قبلی در سابقهٔ تغییرات عوض شوند. • اعلام‌شده: قیمت هر کار پیش از تأیید درخواست‌دهنده نشان داده می‌شود و کار فقط وقتی پذیرفته می‌شود که ظرفیت اعلام‌شده اجازه بدهد. • همیار دربارهٔ اینکه قانون با اعتبار چگونه رفتار می‌کند هیچ ادعایی ندارد. | Credit in Hamyar is a unit of account for work that has been checked and accepted. It is not money, not property and not a promised entitlement. ¶ • Declared: credit is earned through completed work or given as a declared grant from the Commons Reserve (for example the starter grant). It is not bought or sold, it is not sent directly to another member, and it is not exchanged for money. • Declared: credit expires, and each balance shows its expiry dates. Credit earned by work lasts {credit_lifetime_days} days, unless the rules change with advance notice in the change log. • Declared: the price of a job is shown before the requester confirms, and a job is accepted only when the declared capacity allows it. • Hamyar makes no statement about how any law treats credit. | needs human and legal review |
 
-### 11.51.E Prompt-injection advice, decline, report and rejection
+### 11.81.E Prompt-injection advice, decline, report and rejection
 
 | key | FA | EN | review status |
 | --- | --- | --- | --- |
@@ -521,7 +521,7 @@ The notice is shown to every new member and does not depend on any guess about l
 | `copy.moderation.report_explainer` | اگر سلولی ناامن به نظر می‌رسد، چیزی بیشتر از کپی، ارسال و بازگرداندن متن می‌خواهد، به نظر می‌رسد اطلاعات شخصی دارد یا به هر شکل دیگری ایراد دارد، آن را گزارش کنید. ¶ • اعلام‌شده: یک بازبین هر گزارش را می‌بیند. هدف اعلام‌شده برای نخستین بررسی {report_triage_sla_days} روز است. • اعلام‌شده: درخواست‌دهنده نمی‌فهمد چه کسی گزارش داده است. • اعلام‌شده: گزارش‌ها تا {moderation_days} روز پس از رسیدگی نگه داشته می‌شوند و بعد به شمارش‌های کلی تقلیل می‌یابند. | Report a cell if it looks unsafe, asks for more than copying, pressing Send and returning text, seems to contain personal data, or is wrong in some other way. ¶ • Declared: a reviewer looks at every report. The declared target for a first look is {report_triage_sla_days} days. • Declared: the requester does not learn who reported. • Declared: reports are kept for {moderation_days} days after they are resolved, then reduced to counts. | needs human and legal review |
 | `copy.moderation.rejection_explainer` | نتیجه‌ای که رد‌شده باشد اعتباری نمی‌آورد. اعلام‌شده: دلیل رد را می‌بینید و تا {appeal_window_days} روز می‌توانید درخواست بازبینی بدهید. بازبینی را کسی انجام می‌دهد که تصمیم اول را نگرفته است. | A rejected result earns no credit. Declared: you can see the reason, and you can ask for a review within {appeal_window_days} days. A reviewer who did not make the first decision looks at it. | needs human and legal review |
 
-### 11.51.F Recovery key, consent and opt-in
+### 11.81.F Recovery key, consent and opt-in
 
 | key | FA | EN | review status |
 | --- | --- | --- | --- |
@@ -542,7 +542,7 @@ The notice is shown to every new member and does not depend on any guess about l
 | `copy.consent.optin.sensitive_topic` | سلول‌هایی با این موضوع به من نشان داده شود: {topic}. ممکن است محتوای سخت یا ناراحت‌کننده داشته باشند. اعلام‌شده: این گزینه به‌طور پیش‌فرض خاموش است و هر زمان می‌توانید خاموشش کنید. | Show me cells on this topic: {topic}. They may contain difficult material. Declared: this is off by default, and you can turn it off at any time. | needs human and legal review |
 | `copy.consent.optin.locked_purpose` | این نوع استفاده هنوز باز نشده است. اعلام‌شده: برای هر سرویس فقط پس از بازبینی شرایط آن باز می‌شود و تغییر در سابقهٔ تغییرات اعلام می‌شود. | This use is not open yet. Declared: it opens for a service only after that service's terms have been reviewed, and the change is announced in the change log. | needs human and legal review |
 
-### 11.51.G No circumvention and offline drafts
+### 11.81.G No circumvention and offline drafts
 
 | key | FA | EN | review status |
 | --- | --- | --- | --- |
@@ -551,14 +551,14 @@ The notice is shown to every new member and does not depend on any guess about l
 | `copy.offline.draft_local_only` | اعلام‌شده: متنی که چسبانده‌اید فقط روی همین دستگاه ذخیره می‌شود، تا وقتی که ارسال را بزنید، یا زمانِ سلول کار تمام شود، یا {draft_ttl}، هر کدام زودتر باشد. هر کسی که بتواند از این دستگاه استفاده کند آن را می‌بیند. همین حالا می‌توانید آن را پاک کنید. | Declared: your pasted text is saved only on this device, until you press Submit, until the cell's time runs out, or for {draft_ttl}, whichever comes first. Anyone who can use this device can see it. You can clear it now. | needs human and legal review |
 | `copy.offline.submit_queued` | شما آفلاین هستید. ارسال شما روی همین دستگاه منتظر مانده است. اعلام‌شده: اگر زمان سلول کار تمام نشده باشد، با برگشتن اتصال فرستاده می‌شود. هنوز پذیرفته نشده است. | You are offline. Your submission is waiting on this device. Declared: if the cell's time has not run out, it will be sent when the connection returns. It has not been accepted yet. | needs human and legal review |
 
-## 11.52 Where each notice appears, placeholders and the declared-claim register
+## 11.82 Where each notice appears, placeholders and the declared-claim register
 
 **Usage map** [D]
 
 | Notice group (keys) | Where it appears | Rule |
 | --- | --- | --- |
-| `copy.safety.iran_notice.*`, `copy.risk.account_notice.*`, `copy.privacy.pseudonymity_notice.*`, `copy.credit.not_money.*`, `copy.declared.not_guaranteed.*`, `copy.license.downstream_uncontrolled.body`, `copy.policy.no_circumvention.*` | The join page, in this order (safety first), displayed in full, not collapsed; then the consent keys | Static, readable without JavaScript and before an identity exists (S11.49) |
-| `copy.consent.join.*` | Below the notices on the join page | Every box starts unticked; all are required; no box is hidden or collapsed; the continue button stays focusable and explains what is missing (S11.48) |
+| `copy.safety.iran_notice.*`, `copy.risk.account_notice.*`, `copy.privacy.pseudonymity_notice.*`, `copy.credit.not_money.*`, `copy.declared.not_guaranteed.*`, `copy.license.downstream_uncontrolled.body`, `copy.policy.no_circumvention.*` | The join page, in this order (safety first), displayed in full, not collapsed; then the consent keys | Static, readable without JavaScript and before an identity exists (S11.79) |
+| `copy.consent.join.*` | Below the notices on the join page | Every box starts unticked; all are required; no box is hidden or collapsed; the continue button stays focusable and explains what is missing (S11.78) |
 | `copy.identity.recovery_key_warning.*` | Once, after the member's first accepted cell, as decided in `ISS-113` of S11 (`spec/11a-volunteer-ux.md`, 11.18; an owner decision); after a key rotation from settings a new key is shown once in the same way; a key is never shown a second time | The confirm step gates leaving the key screen, not the app; the unsaved-key marker stays until confirmed |
 | `copy.injection.advice.*` | The cell card, one tap away, and mandatory expansion on first use (FD§5.5); the help page | `copy.injection.clean_chat_hint.default` is the target of `adapter.clean_chat_hint_key` (S0.8.3) when an entry sets no hint of its own |
 | `copy.moderation.decline_explainer`, `copy.moderation.report_explainer` | Next to the decline and report buttons of the cell card; the help page | |
@@ -573,7 +573,7 @@ The notice is shown to every new member and does not depend on any guess about l
 
 The keys above are not API error texts. API errors use their own `copy.*` keys through `details.copy_key` (S0.11) and follow the same rules.
 
-**Placeholder registry** [D] (every placeholder in the table of S11.51; a placeholder with no row here is a build error)
+**Placeholder registry** [D] (every placeholder in the table of S11.81; a placeholder with no row here is a build error)
 
 | Placeholder | Type | Source |
 | --- | --- | --- |
@@ -617,12 +617,12 @@ The keys above are not API error texts. API errors use their own `copy.*` keys t
 | Locked purposes open only after a terms review and a change-log entry | Rules `R5`, `R6`, `R10` (S0.8.4) | consistent with S0 |
 | Inputs are reviewed and suspicious results are flagged | Screening and quarantine (S9.*) | [V] S9.* |
 | Published numbers carry the measurement date; changes with advance notice | `change.notice_days_default`; public change log (S12.*) | partly: a `tighten` change takes effect at once and is logged within `change.tighten_publish_within_s` (S0.10.3, R10), so 'advance notice' is not true for every change; the notice wording needs an owner decision [V] |
-| The safety note is shown to every new member and Hamyar does not infer location | S11.51.C; S0.6 (no IP-derived location) | consistent with this part |
-| Hamyar does not publish tips for getting around limits | Editorial rule; the copy checks of S11.50 | consistent with this part |
-| Drafts stay on the device for the stated time | S11.49; `ui.draft.ttl_s` | consistent with this part |
+| The safety note is shown to every new member and Hamyar does not infer location | S11.81.C; S0.6 (no IP-derived location) | consistent with this part |
+| Hamyar does not publish tips for getting around limits | Editorial rule; the copy checks of S11.80 | consistent with this part |
+| Drafts stay on the device for the stated time | S11.79; `ui.draft.ttl_s` | consistent with this part |
 | Opt-in changes apply to cells not yet opened | Rule `R8`; the lease-time opt-in check (S8.*) | [V] S8.* |
 
-## 11.53 Persian quality, terminology and the review procedure
+## 11.83 Persian quality, terminology and the review procedure
 
 The Persian must be correct, natural written Persian, not a word-for-word rendering of the English. [D]
 
@@ -657,7 +657,7 @@ The Persian must be correct, natural written Persian, not a word-for-word render
 | rejected, accepted | رد‌شده، پذیرفته‌شده | |
 | recovery key | کلید بازیابی | |
 | pseudonymous, anonymous | با نام مستعار، ناشناس | the two are never mixed up |
-| declared | اعلام‌شده | the required word of S11.50 |
+| declared | اعلام‌شده | the required word of S11.80 |
 | guarantee | تضمین | only in negated sentences |
 | opt-in | انتخاب | |
 | change log | سابقهٔ تغییرات | |
@@ -673,11 +673,11 @@ The Persian must be correct, natural written Persian, not a word-for-word render
 
 1. The author writes the English first, as the source of meaning for counsel, and writes the Persian natively from the meaning, not from the English words.
 2. A native-speaking reviewer for Persian and one for English each go through the checklist below and are recorded in `reviewed.fa_by` and `reviewed.en_by`; status becomes `human_reviewed`.
-3. The notices are rendered on real phones in both locales and checked against S11.42 to S11.46 (this is also the G2 item on RTL rendering, FD§8.3).
+3. The notices are rendered on real phones in both locales and checked against S11.72 to S11.76 (this is also the G2 item on RTL rendering, FD§8.3).
 4. A person qualified to advise on safety reads the safety and privacy-limits keys (FD§8.3 G1); counsel in the operator's jurisdiction reads all keys, the contributor waiver, and the declared-claim register [V]. Their memo reference goes into `reviewed.legal_ref`; status becomes `legal_reviewed`.
-5. Two distinct admins sign off; status becomes `approved`. The launch rule that depends on this is in S11.57.
+5. Two distinct admins sign off; status becomes `approved`. The launch rule that depends on this is in S11.87.
 6. For the consent keys and the safety keys, a second native speaker who has not seen the English reads the Persian and says in their own words what it asks the member to accept; a mismatch returns the key to step 1 [A].
-7. Any text change, in either language, resets both to `needs_human_and_legal_review` (S11.50). A change of a parameter that fills a placeholder goes through the parameter change log and the loosen-with-notice rule (`R10`, S0.8.4); it does not reset the copy, but the claim register row is re-read by the reviewer.
+7. Any text change, in either language, resets both to `needs_human_and_legal_review` (S11.80). A change of a parameter that fills a placeholder goes through the parameter change log and the loosen-with-notice rule (`R10`, S0.8.4); it does not reset the copy, but the claim register row is re-read by the reviewer.
 
 **Checklist** [D]
 
@@ -689,10 +689,10 @@ The Persian must be correct, natural written Persian, not a word-for-word render
 | Terms | Every term as in the table above |
 | Orthography | ZWNJ, ezafe, yeh and kaf, punctuation as above |
 | Fear and blame | The safety and privacy texts neither scare nor reassure beyond the facts; no blame |
-| Rendering | On a real phone: joined letters, ZWNJ pairs, digits, isolates, no boxes (S11.46) |
-| Length | Fits its container at 200% zoom in both languages (S11.48) |
+| Rendering | On a real phone: joined letters, ZWNJ pairs, digits, isolates, no boxes (S11.76) |
+| Length | Fits its container at 200% zoom in both languages (S11.78) |
 
-## 11.54 Acceptance criteria
+## 11.84 Acceptance criteria
 
 Test cases are named here by acceptance id; S18.* assigns `T-*` ids and layers (`rtl`, `unit`, `e2e`, `load`, `inj`). Every item stays in CI once added (S0.12 ordering rule 5). [D]
 
@@ -728,15 +728,15 @@ Test cases are named here by acceptance id; S18.* assigns `T-*` ids and layers (
 | `AC-i18n-28` | the first-contribution flow in the harness | it runs on the test profile with other origins blocked | it completes, with no third-party request |
 | `AC-i18n-29` | a draft and the network switched off | Submit is pressed, and the network returns | exactly one submission is accepted by the server; a retry of the same press replays the stored response; no submission happens before the press |
 | `AC-i18n-30` | drafts in every state | the time-to-live passes, *clear local data* is pressed, or the identity is closed | the records are purged; the member key is not deleted by *clear local data* |
-| `AC-i18n-31` | the copy files | the build runs | a missing key or placeholder mismatch in either language, a failed check of S11.50, or a placeholder with no registry row fails the build |
+| `AC-i18n-31` | the copy files | the build runs | a missing key or placeholder mismatch in either language, a failed check of S11.80, or a placeholder with no registry row fails the build |
 | `AC-i18n-32` | every key with `promise: true` | the declared check runs | `اعلام‌شده` is present in `fa` and `declared` in `en`; guarantee words occur only in allowlisted negated sentences |
 | `AC-i18n-33` | an approved key | its Persian or English text is edited | its version increases, both languages return to `needs_human_and_legal_review`, and the hash in the manifest changes |
-| `AC-i18n-34` | a request to set `launch.members_may_join` to true | any required key of S11.51 is not `approved` | the request is refused with `LAUNCH_GATE_CLOSED` |
+| `AC-i18n-34` | a request to set `launch.members_may_join` to true | any required key of S11.81 is not `approved` | the request is refused with `LAUNCH_GATE_CLOSED` |
 | `AC-i18n-35` | a member accepts the consent boxes | the consent is recorded | the stored record holds `copy_key`, `copy_hash` and `accepted_at` for each box and no text; a hash that is in neither the current nor the previous manifest is refused |
-| `AC-i18n-36` | the join page | it loads | all notices are shown in full in the order of S11.52, every box is unticked, and the continue button stays focusable and says what is missing |
+| `AC-i18n-36` | the join page | it loads | all notices are shown in full in the order of S11.82, every box is unticked, and the continue button stays focusable and says what is missing |
 | `AC-i18n-37` | a new member from any network | the join page is shown | the safety note appears for everyone, and no code path reads or derives a location |
 
-## 11.55 Parameters introduced by this part
+## 11.85 Parameters introduced by this part
 
 Names follow S0.10.1 (areas `i18n`, `ui`, `screen`, `identity`). Every default is an `initial configurable default` or a formula shown in the row; S16.* completes the rows without renaming (convention gap, `ISS-119` and the note after the issues table). Owner is `operator` except `screen.*`, which is `reviewer`. `Replaced by` uses the codes of S0.10.4. [D]
 
@@ -772,27 +772,27 @@ Names follow S0.10.1 (areas `i18n`, `ui`, `screen`, `identity`). Every default i
 
 Existing parameters used by this part: `i18n.default_locale`, `i18n.supported_locales`, `i18n.digits_default_fa`, `i18n.dual_calendar_detail`, `public.counter_refresh_s`, `lease.timeout_s`, `lease.max_extensions`, `lease.extend_s`, `lease.submit_grace_s`, `cell.envelope.*`, `retention.*`, `identity.recovery_cooldown_s`, `report.triage_sla_days`, `appeal.window_days`, `analytics.third_party_trackers`, `analytics.cookies_enabled`, `launch.min_signoffs`.
 
-## 11.56 Assumptions and items to verify
+## 11.86 Assumptions and items to verify
 
 **Assumptions [A] introduced by this part** (S3.* collects them; the right column is the owner decision that could overturn each)
 
 | Assumption | Could be overturned by |
 | --- | --- |
-| Heading numbers of this file start at 11.40; issue ids `ISS-117` to `ISS-119` are used (S11.40) | the plan, at assembly |
-| WCAG 2.2 level AA is the target, with the lease-timing deviation (S11.48) | the owner choosing another level, or a lower one for operator tools |
-| `fa` defaults to Persian digits (S11.43) | the Phase 1 interview result |
-| The clock is 24-hour in both locales (S11.44) | the owner or interview feedback |
-| Public pages carry a `/fa/` or `/en/` path prefix (S11.41) | the stack decision in S4.* |
-| Locale, digits, calendar and time zone live on the device, not on the server (S11.41) | a decision to sync preferences |
-| The calendar range to validate is 2026-01-01 to 2040-12-31 (S11.44) | the longest horizon that S6.* decides |
-| The copy review statuses and the manifest (S11.50) | `ISS-118` resolution |
-| `appeal` is rendered `درخواست بازبینی` (S11.53) | the native-speaking reviewer |
-| English is written first for counsel, no precedence clause is written (S11.47) | counsel |
-| Hashed font files are cached as immutable; a service worker may cache the shell (S11.46, S11.49) | S10.* policy on service workers |
-| Six round trips in the first-interactive formula (S11.49) | measurement on real networks (`TEC`) |
-| Time axes run in reading direction (S11.42) | the interview read test, an [H] |
-| The safety note is shown to every new member, not by location (S11.51.C) | the safety advisor (G1) |
-| The `opt-in`, `escrow` and `operator` terms in Persian (S11.53) | the native-speaking reviewer |
+| Heading numbers of this file start at 11.70; issue ids `ISS-117` to `ISS-119` are used (S11.70) | the plan, at assembly |
+| WCAG 2.2 level AA is the target, with the lease-timing deviation (S11.78) | the owner choosing another level, or a lower one for operator tools |
+| `fa` defaults to Persian digits (S11.73) | the Phase 1 interview result |
+| The clock is 24-hour in both locales (S11.74) | the owner or interview feedback |
+| Public pages carry a `/fa/` or `/en/` path prefix (S11.71) | the stack decision in S4.* |
+| Locale, digits, calendar and time zone live on the device, not on the server (S11.71) | a decision to sync preferences |
+| The calendar range to validate is 2026-01-01 to 2040-12-31 (S11.74) | the longest horizon that S6.* decides |
+| The copy review statuses and the manifest (S11.80) | `ISS-118` resolution |
+| `appeal` is rendered `درخواست بازبینی` (S11.83) | the native-speaking reviewer |
+| English is written first for counsel, no precedence clause is written (S11.77) | counsel |
+| Hashed font files are cached as immutable; a service worker may cache the shell (S11.76, S11.79) | S10.* policy on service workers |
+| Six round trips in the first-interactive formula (S11.79) | measurement on real networks (`TEC`) |
+| Time axes run in reading direction (S11.72) | the interview read test, an [H] |
+| The safety note is shown to every new member, not by location (S11.81.C) | the safety advisor (G1) |
+| The `opt-in`, `escrow` and `operator` terms in Persian (S11.83) | the native-speaking reviewer |
 
 **Items to verify [V]** (every inline [V] in this file maps to one row)
 
@@ -809,23 +809,23 @@ Existing parameters used by this part: `i18n.default_locale`, `i18n.supported_lo
 | Week start and regional picker defaults | a native-speaking reviewer | `i18n.week_start_fa` and its change-log entry |
 | Claims marked [V] in the declared-claim register (S8.*, S9.*, S10.*, operator procedure) | the owners of those parts and the operator | this file's register until closed, then S14.* launch items |
 
-## 11.57 Requirements on other parts
+## 11.87 Requirements on other parts
 
 Each row is a requirement that this part places on another part. If the owner of that part cannot meet it, they record an issue in their own block. [D]
 
 | Part | Requirement |
 | --- | --- |
-| S4.* | Choose the calendar library to the requirement of S11.44; keep fonts behind the storage and host interface; decide the service-worker policy of S11.49 |
-| S5.*, S7.*, S8.* | Member-visible human-authored strings are `{fa, en}` pairs or copy keys (S11.41); templates declare `lang` on slots and output fields (S11.45); comparators declare their `fold_fa` options; declines are never counted in reliability or trust (declared-claim register) |
-| S9.* | Screen bidi controls per `screen.bidi_control_action` and quarantine flagged submissions; judge size and schema on the raw text, with no trimming (S11.45); lease responses carry `expires_at` and `server_time` (S11.49) |
-| S10.* | Content security policy limited to the page and API origins; recovery key alphabet without ambiguous characters; *clear local data* versus key deletion (S11.49); e-mail storage form; validate consent hashes against the current and previous `copy_manifest`; no code path that derives location; add `identity.min_age_years` |
-| S12.* | A public notices page (S11.52); weekly aggregates labeled as UTC weeks; share-card text follows S11.42 to S11.45; a change-log kind for notice text that changes a promise (`ISS-118`) |
+| S4.* | Choose the calendar library to the requirement of S11.74; keep fonts behind the storage and host interface; decide the service-worker policy of S11.79 |
+| S5.*, S7.*, S8.* | Member-visible human-authored strings are `{fa, en}` pairs or copy keys (S11.71); templates declare `lang` on slots and output fields (S11.75); comparators declare their `fold_fa` options; declines are never counted in reliability or trust (declared-claim register) |
+| S9.* | Screen bidi controls per `screen.bidi_control_action` and quarantine flagged submissions; judge size and schema on the raw text, with no trimming (S11.75); lease responses carry `expires_at` and `server_time` (S11.79) |
+| S10.* | Content security policy limited to the page and API origins; recovery key alphabet without ambiguous characters; *clear local data* versus key deletion (S11.79); e-mail storage form; validate consent hashes against the current and previous `copy_manifest`; no code path that derives location; add `identity.min_age_years` |
+| S12.* | A public notices page (S11.82); weekly aggregates labeled as UTC weeks; share-card text follows S11.72 to S11.75; a change-log kind for notice text that changes a promise (`ISS-118`) |
 | S13.* | Add to the Phase 1 interview guide: digits preference, time-axis read test, the terms `انصراف` and `درخواست بازبینی`, comprehension of the consent boxes |
 | S14.* | Launch gate items: all required copy keys `approved` before `launch.members_may_join` can be true (`AC-i18n-34`); the G1 safety-note item; the G2 items for RTL rendering, accessibility pass and low-bandwidth budgets on real devices; the recovery-key procedure of the team |
 | S15.* | Error bodies keep `details.copy_key` and carry no prose; no locale parameter; the consent write accepts `copy_key` and `copy_hash`; lease responses carry `server_time` |
-| S16.* | Complete the parameter rows of S11.55 and the placeholder sources of S11.52 |
-| S18.* | Number the acceptance ids of S11.54 as tests; state that simulation output is not evidence about human reading or reaction |
-| S19.*, S20.*, S21.* | Risks: dependence on human and legal review of the notices, font license, device variation in Persian rendering; glossary from S11.53; the Persian summary uses the same terms |
+| S16.* | Complete the parameter rows of S11.85 and the placeholder sources of S11.82 |
+| S18.* | Number the acceptance ids of S11.84 as tests; state that simulation output is not evidence about human reading or reaction |
+| S19.*, S20.*, S21.* | Risks: dependence on human and legal review of the notices, font license, device variation in Persian rendering; glossary from S11.83; the Persian summary uses the same terms |
 
 ## Issues raised
 
@@ -833,8 +833,8 @@ Problems and gaps found while writing this part. Each resolution is already appl
 
 | id | severity | fd_ref | issue | resolution | status |
 | --- | --- | --- | --- | --- | --- |
-| `ISS-117` | minor | prompt | S0.4 gives a split part three issue sub-blocks and S0.13 gives no heading-number plan, but part 11 has at least four files, so a fourth file has no sub-block and its `S11.<m>` headings could collide with the other three | This file uses `ISS-117` to `ISS-119` and headings from `11.40`; the plan or C-001 assigns final blocks and numbers at assembly and updates references | proposed |
-| `ISS-118` | major | FD§5.5, FD§9, prompt F | The FD requires explicit, informed opt-in (FD§9) and notices that change only in public, but S0 has no place to record which notice text a member accepted, no review state for legal text, and no change-log kind for notices | (a) `OptIn` rows of a new kind `consent` carry `copy_key`, `copy_hash`, `accepted_at` and no text; (b) a new enum `copy_review_status` (S11.50); (c) a `copy_manifest` shipped with each build; (d) a change-log entry kind `notice` for any approved text change that alters a promise | proposed |
+| `ISS-117` | minor | prompt | S0.4 gives a split part three issue sub-blocks and S0.13 gives no heading-number plan, but part 11 has at least four files, so a fourth file has no sub-block and its `S11.<m>` headings could collide with the other three | This file uses `ISS-117` to `ISS-119` and headings from `11.70`; the plan or C-001 assigns final blocks and numbers at assembly and updates references | proposed |
+| `ISS-118` | major | FD§5.5, FD§9, prompt F | The FD requires explicit, informed opt-in (FD§9) and notices that change only in public, but S0 has no place to record which notice text a member accepted, no review state for legal text, and no change-log kind for notices | (a) `OptIn` rows of a new kind `consent` carry `copy_key`, `copy_hash`, `accepted_at` and no text; (b) a new enum `copy_review_status` (S11.80); (c) a `copy_manifest` shipped with each build; (d) a change-log entry kind `notice` for any approved text change that alters a promise | proposed |
 | `ISS-119` | major | FD§5.3 (S3 includes minors' data), FD§8.3 | The FD keeps minors' data out of jobs but says nothing about a minimum age for members, and consent text normally needs one; setting it is a legal decision this spec cannot make | A parameter `identity.min_age_years`, default 0 (the age line `copy.consent.join.age_confirmation` is not rendered); counsel sets it [V]; also listed as an owner decision in S3.* | needs_owner |
 
-Convention additions made by this part (not issues, listed so C-001 can fold them back): the parameters of S11.55 (names are new, no existing name is changed); the enum `copy_review_status` and the copy record of S11.50; the copy key groups of S11.51 beyond the example key of S0.5; the client-local draft states of S11.49 (explicitly not domain states); the `OptIn` kind `consent` and the change-log kind `notice` (`ISS-118`); the use of `fa` and `en` pairs for stored human-authored strings (S11.41).
+Convention additions made by this part (not issues, listed so C-001 can fold them back): the parameters of S11.85 (names are new, no existing name is changed); the enum `copy_review_status` and the copy record of S11.80; the copy key groups of S11.81 beyond the example key of S0.5; the client-local draft states of S11.79 (explicitly not domain states); the `OptIn` kind `consent` and the change-log kind `notice` (`ISS-118`); the use of `fa` and `en` pairs for stored human-authored strings (S11.71).
