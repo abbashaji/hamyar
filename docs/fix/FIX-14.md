@@ -31,7 +31,7 @@ Cell C-085. Corrections from spec/15g-api-consistency.md: CR-09, CR-17, CR-18, C
 | CR-42 member-read context_id on getMemberAdmin and listLotsAdmin | spec/15b-api-admin.md:75 | no context_id | no change: it applies only if S10 adopts it, and until then the logged read (15.21.3 rule 3) is the control | skipped-needs-owner |
 | CR-43 perm.claim.takeover | spec/15b-api-admin.md:77 | no row | row added (operator, S15e takeoverWorkClaim) | applied |
 
-Notes. The alarm kinds admin_action.chain_broken and incident.safety_or_critical of CR-09 target S0 and 15e, not this file, and are not touched. The new 15.29.7 operations keep the bare ids listAppeals and getAppeal; the admin operations with the same names stay as they were (D-08 pending). docs/decisions.md was not re-read for this cell; heading and evidence-tag format were copied from the surrounding 15b text.
+Notes. The alarm kinds admin_action.chain_broken and incident.safety_or_critical of CR-09 target S0 and 15e, not this file, and are not touched. The new 15.29.7 operations keep the bare ids listAppeals and getAppeal; the admin operations with the same names stay as they were (D-08 is not yet decided). docs/decisions.md was not re-read for this cell; heading and evidence-tag format were copied from the surrounding 15b text.
 
 ## Read-back
 
