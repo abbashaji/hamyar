@@ -6,7 +6,7 @@ Source: `docs/audit/A11.md` finding 2 (and 14, 15); `docs/audit/FINAL.md` sectio
 | --- | --- | --- | --- | --- |
 | E1 precedence paragraph | spec/12-public-growth.md:430 | rule saying S13.8 governs on differences | states S13.8 canonical, its four states, its event names, `ExperimentBlock` blocks; lazy-path and strata sentence kept | applied |
 | E2 status states and events | spec/12-public-growth.md:442 | `draft`, `locked`, `running`, `stopped`; `experiment.locked` | `draft`, `registered`, `running`, `stopped`; `experiment.created`, `experiment.registered` | applied |
-| E3 `assignment_mode` | spec/12-public-growth.md:448 | `hash_bucket` or `hash_blocked` | `hash_blocked` only (S13.8.4); `hash_bucket` reserved, `VALIDATION_FAILED` (default-pending, owner may re-add a stateless mode to S13.8) | applied |
+| E3 `assignment_mode` | spec/12-public-growth.md:448 | `hash_bucket` or `hash_blocked` | `hash_blocked` only (S13.8.4); `hash_bucket` reserved, `VALIDATION_FAILED` (owner default applied; the owner may re-add a stateless mode to S13.8) | applied |
 | E4 `block_size` | spec/12-public-growth.md:450 | required, divisibility rule | derived at `registered` by the S13.8.3 gcd rule, at most 100 | applied |
 | E5 `salt` | spec/12-public-growth.md:451 | 128 bits | 32 bytes (256 bits), generated at `draft` (S13.8.1) | applied |
 | E6 `pre_registration_id` and immutability sentence | spec/12-public-growth.md:453, :457 | `running` requires lock; "After `locked`" | `registered` requires lock; "After `registered`" | applied |
@@ -20,7 +20,7 @@ Source: `docs/audit/A11.md` finding 2 (and 14, 15); `docs/audit/FINAL.md` sectio
 | E14 AC-exp-01..08 | spec/12-public-growth.md:764-771 | bucket tolerance test, counter blocks, `experiment.assigned`, `locked` | block recomputation, balance below `block_size`, `ExperimentBlock` permutation, `ui.variant_exposed`, `registered` refusals, flag off means `stopped` with salt published; AC-exp-08 unchanged | applied |
 | E15 lazy path in 13.8.4 | spec/13-measurement.md:905 | existing members not assigned unless `include_existing` | same, plus lazy assignment at first `getFeatures` by the same block draw | applied |
 | E16 stratifier name `cohort_week` (12.11.4, V2, V4, V6) vs `pilot_week` (13.8.1) | spec/12-public-growth.md:497 | `cohort_week` | unchanged: renaming a stratifier is not authorized and S13.8.1 lists no `cohort_week`; also `stratum_key` wording in 12.11.4 | skipped-needs-owner |
-| E17 A11 #14 `TH-01` early fail | spec/13-measurement.md:~860 | `min_sample = 3` | unchanged; D-21 default "as written" (default-pending) | already-applied |
+| E17 A11 #14 `TH-01` early fail | spec/13-measurement.md:~860 | `min_sample = 3` | unchanged; D-21 default "as written" applied | already-applied |
 | E18 A11 #15 envelope proposal margin | spec/13-measurement.md (envelope proposal, 13.9.4) | `ceil(3 x max_output_chars / 1024) x 1024` | not located within 60 lines of 545-600 (searched 13.6.12 and neighbours); D-21 default "as written" so no change | skipped-not-found |
 
 ## Read-back
