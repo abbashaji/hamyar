@@ -615,7 +615,7 @@ bottleneck = argmax over candidates with blocked > 0; ties broken by oldest
 show: name, blocked count, age, link to its screen
 ```
 
-**API.** `getCapacityDashboard` `GET /v1/admin/capacity-dashboard`; `listMetricSnapshots` `GET /v1/admin/metric-snapshots?kind=`; `getBottleneck` `GET /v1/admin/bottleneck`. Audit: reads are not logged individually; alarms are `Alarm` rows.
+**API.** `getCapacitySnapshot` `GET /v1/admin/capacity`, `listCapacityDays`, `listSupplyGauges`, `getOperationsSnapshot` `GET /v1/admin/capacity/operations`; `listAdminMetricSnapshots` `GET /v1/admin/metric-snapshots?kind=`; `getBottleneck` `GET /v1/admin/bottleneck` (15.D.4.6). Audit: reads are not logged individually; alarms are `Alarm` rows.
 
 | AC | Given | When | Then |
 | --- | --- | --- | --- |
@@ -623,7 +623,7 @@ show: name, blocked count, age, link to its screen
 | `AC-capdash-02` | A category with fewer than `analytics.min_cohort_k` eligible donors | The supply gauge loads | It shows "fewer than k", not a number |
 | `AC-capdash-03` | Mint utilization at or above `inflation.mint_utilization_alarm` | The rollup runs | The tile is red and an `Alarm` exists |
 | `AC-capdash-04` | A rollup older than `metrics.rollup_interval_s` | The dashboard loads | The tile carries a stale badge and its computed time |
-| `AC-capdash-05` | A reviewer principal | `getCapacityDashboard` is called | `403 FORBIDDEN` |
+| `AC-capdash-05` | A reviewer principal | `getCapacitySnapshot` is called | `403 FORBIDDEN` |
 | `AC-capdash-06` | A template awaiting review that blocks 3 backlog entries and a service that blocks 5 waitlisted jobs | `getBottleneck` is called | The service is named with blocked count 5 |
 
 ## 11.53 Tool 9: Launch-gate checklist
@@ -647,12 +647,12 @@ A `launch.signoff` request is the only way to turn a switch on: the initiator's 
 
 | `op` | Method and path | Notes |
 | --- | --- | --- |
-| `listLaunchGates`, `getLaunchGateItem` | `GET /v1/admin/launch-gates`, `GET /v1/admin/launch-gate-items/{lgi_id}` | Gates with items and evidence |
-| `createLaunchGateEvidence` | `POST /v1/admin/launch-gate-items/{lgi_id}/evidence` | `CT1`; `If-Match` |
-| `createLaunchGateReopening` | `POST .../{lgi_id}/reopenings` | `CT2` |
-| `createLaunchSignoff` | `POST /v1/admin/launch-signoffs` | Body `{gate_item_ids, enable_switches, reason}`; `202` |
-| `createLaunchSwitchOff` | `POST /v1/admin/launch-switch-offs` | `CT2` |
-| `getLaunchStatus` | `GET /v1/admin/launch-status` | Rule rows and effective states; feeds `BLK-header` |
+| `listLaunchGates`, `getLaunchGateItem` | `GET /v1/admin/launch/gates[/{gate_id}]`, `GET /v1/admin/launch/gate-items/{lgi_id}` | Gates with items and evidence |
+| `createLaunchGateEvidence` | `POST /v1/admin/launch/gate-items/{lgi_id}/evidence` | `CT1`; no `If-Match`; `Idempotency-Key` required |
+| `createLaunchGateReopening` | `POST /v1/admin/launch/gate-items/{lgi_id}/reopenings` | `CT2` |
+| `signOffGateItem` | `POST /v1/admin/launch/gate-items/{lgi_id}/signoffs` | Body `{comment}`; `201`; one call per item; a switch is turned on by `changeLaunchSwitch` |
+| `changeLaunchSwitch` | `POST /v1/admin/launch/switch-changes` with `{switch, value: false, reason}` | `CT2` |
+| `getLaunchStatus` | `GET /v1/admin/launch/status` | Rule rows and effective states; feeds `BLK-header` |
 
 | AC | Given | When | Then |
 | --- | --- | --- | --- |
@@ -700,8 +700,8 @@ The system may also engage a switch (for example S6.* or S14.* automation on `le
 | `op` | Method and path | Notes |
 | --- | --- | --- |
 | `listKillSwitches`, `getKillSwitch` | `GET /v1/admin/kill-switches[/{key}]` | `key` is the dotted switch name |
-| `createKillSwitchEngagement` | `POST /v1/admin/kill-switch-engagements` | Body `{switch, reason_code, reason_text, context?}`; `CT2` |
-| `createKillSwitchRelease` | `POST /v1/admin/kill-switch-releases` | `202` with an `ApprovalRequest` |
+| `createKillSwitchEngagement` | `POST /v1/admin/kill-switches/{switch_key}/engagements` | Body `{reason_code, reason, public_text?, linked_report_id?, linked_alarm_id?}`; `CT2` |
+| `createKillSwitchRelease` | `POST /v1/admin/kill-switches/{switch_key}/releases` | Body `{reason, verification, public_text?}`; `202` with an `ApprovalRequest` |
 | `listKillSwitchHistory` | `GET /v1/admin/kill-switches/{key}/history` | |
 
 | AC | Given | When | Then |
@@ -747,17 +747,14 @@ The screen states "only minimal data is shown and every view is logged" (`copy.a
 
 ### 11.55.3 Handle resolution [D][A]
 
-`member.resolve_handle` turns a `vol_` handle (for example from a provenance manifest in a dispute) into a `mem_` id. It is operator-only, `CT3`, needs a `context` and a reason, and the id is shown once to the initiator after execution. The server keeps no handle-to-member table: it recomputes `HMAC-SHA-256(secret.volunteer_handle_key[version], mem_id)` over members for the handle's key version, so resolution works only while that key version is retained; destroying an old version makes its handles permanently unresolvable (S0.6.4; retention decided in S10.*) [V]. The tool never shows a name, an IP or an e-mail because the platform stores none; what else exists is whatever S10.* records, and the platform cannot promise more than that. A legal request is answered outside the tool, and the tool offers no export of member data.
-
 | `op` | Method and path | Notes |
 | --- | --- | --- |
-| `createMemberView` | `POST /v1/admin/member-views` | Body `{member_id, context:{kind, id}, reason_code, reason_text}`; a POST because it writes a log row; `Cache-Control: no-store` |
-| `createHandleResolution` | `POST /v1/admin/handle-resolutions` | Body `{handle, context, reason}`; `202` with an `ApprovalRequest` |
+| `getMemberAdmin` | `GET /v1/admin/members/{mem_id}` | No body; logged as a `read` `AdminAction`; `Cache-Control: no-store` |
 
 | AC | Given | When | Then |
 | --- | --- | --- | --- |
-| `AC-lookup-01` | The admin route table | Any `GET` list or search of members is requested | `404 NOT_FOUND`; no such route exists |
-| `AC-lookup-02` | A context object that does not link to the member | `createMemberView` is called | `422 UNPROCESSABLE`; a refused `AdminAction` is written |
+| `AC-lookup-01` | The admin route table | A request searches members by name, e-mail, handle or free text | `404 NOT_FOUND`; `GET /v1/admin/members` filters by `status`, `trust_tier`, `has_open_report` only |
+| `AC-lookup-02` | A context object that does not link to the member | `createMemberView` is called | `422 UNPROCESSABLE`; no row and no event for a guard refusal (a refused `AdminAction` is written only for authorization failures, 15.34.1) |
 | `AC-lookup-03` | A valid lookup | The response is checked against an allow-list schema | It contains none of the denied fields of 11.55.2 |
 | `AC-lookup-04` | `ratelimit.admin_member_lookups_per_day` = 3 (fixture) | An admin makes a fourth lookup in one UTC day | `429 RATE_LIMITED` and an `Alarm` for operators |
 | `AC-lookup-05` | Any successful lookup | The audit trail is read | One `member.lookup` row names the admin, the `mem_` id and the context ids |
@@ -793,15 +790,15 @@ Entity `WorkClaim`, table `work_claims`, prefix `clm_`, retention `moderation`. 
 
 ### 11.56.3 Lease release for member-held cells [D][A]
 
-`SCR-ops-16` Lease inspector (operator): lists active leases by `cel_` id, job or template with template, attested service, age and time left, and no member id. `cell.release` (`CT2`, `perm.cell.release`) is allowed only for a lease in state `active`: it emits `lease.revoked`, and the cell returns to `queued` through the existing `leased --cell.declined--> queued` transition, recorded with actor `admin` and reason `operator_release`, so there is no penalty to the member (FD§5.5; no new event, `ISS-118`). An optional `requeue_at_front` puts the cell at the head of its template queue for its next lease [A]. A revoked lease gets no `lease.submit_grace_s`: a late paste-back is rejected with `reject.lease_expired`. A lease in `submitted` returns `409 STATE_CONFLICT`. Release is per cell; a larger stop is a kill switch (11.54), not a bulk release.
+`SCR-ops-16` Lease inspector (operator): lists active leases by `cel_` id, job or template with template, attested service, age and time left, and no member id. `cell.release` (`CT2`, `perm.cell.release`) is allowed only for a lease in state `active`: it emits `lease.revoked`, and the cell returns to `queued` through the existing `leased --cell.declined--> queued` transition, recorded with actor `admin` and reason `operator_release`, so there is no penalty to the member (FD§5.5; no new event, `ISS-118`). A revoked lease gets no `lease.submit_grace_s`: a late paste-back is rejected with `reject.lease_expired`. A lease in `submitted` returns `409 STATE_CONFLICT`. Release is per cell; a larger stop is a kill switch (11.54), not a bulk release.
 
 | `op` | Method and path | Notes |
 | --- | --- | --- |
 | `listWorkClaims` | `GET /v1/admin/work-claims` | Filters `mine`, `subject_type`, `active` |
 | `createWorkClaim` | `POST /v1/admin/work-claims` | Body `{subject_type, subject_id}` |
-| `createWorkClaimRelease`, `createWorkClaimHandover`, `createWorkClaimTakeover` | `POST /v1/admin/work-claims/{clm_id}/releases`, `.../handovers`, `.../takeovers` | Takeover is `CT2` |
+| `releaseWorkClaim`, `takeoverWorkClaim` | `POST /v1/admin/work-claims/{clm_id}/releases`, `.../takeovers` | No handover; takeover is operator with step-up |
 | `listLeases` | `GET /v1/admin/leases` | Operator; response has no member id |
-| `createLeaseRelease` | `POST /v1/admin/leases/{lse_id}/releases` | Body `{reason_code, reason_text, requeue_at_front}`; `CT2` |
+| `releaseLease` | `POST /v1/admin/leases/{lse_id}/releases` | Body `{reason_code, reason}`; `CT2` |
 
 | AC | Given | When | Then |
 | --- | --- | --- | --- |
