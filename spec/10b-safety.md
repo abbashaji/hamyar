@@ -29,7 +29,7 @@
 | Asset | Why it matters | Defended mainly by |
 | --- | --- | --- |
 | Member safety (physical, legal, social) | Participation may carry personal risk in Iran (`RISK-05`); safety outranks growth (FD Principle 8) | S10.23 |
-| Unlinkability of a pseudonym from a person | The only privacy property the design tries to protect, and only as minimization, never as anonymity | S10.13 |
+| Unlinkability of a pseudonym from a person | The only privacy property the design tries to protect, and only as minimization, never as anonymity | S10.23 |
 | Ledger integrity | Trust is the asset (FD Principle 11); every credit traces to an accepted Commons cell (FD§4.2) | `THR-12`, S6.* |
 | Volunteers' provider accounts | A suspended or exposed account harms the volunteer, not the project | `THR-09`, `THR-31`, S7.* |
 | Requesters' S0 and S1 inputs | A stranger reads them by design (FD§5.3 S1) but they must not carry personal data of others | `R1`..`R3`, `THR-07` |
@@ -178,7 +178,7 @@ Numbered for reference as "S10.23.1 item n".
 | --- | --- | --- | --- | --- |
 | `network_observer` (passive) | Member's IP and the host's IP; DNS lookups unless encrypted; the host name in the TLS handshake unless encrypted client hello is used [V]; timing and volume, from which screens may be inferred | Paths, headers, tokens, bodies, cell text (TLS), unless a device or certificate authority is compromised | HTTPS only, HSTS [V], no third-party hosts, neutral content, no tracking | That a device contacts the host at all |
 | `network_observer` (active) | The above, plus blocking, throttling, resetting, injection against users who click through certificate warnings | Same | Copy tells members never to bypass a certificate warning | Blocking. No circumvention is offered (S10.25.1) |
-| `host_provider` | Whatever the layout gives it: at least disks, snapshots, memory, the secrets handed to the process, and provider-level network logs; at a TLS-terminating edge, plaintext requests and IPs [V per host] | Member private keys and recovery keys (never sent); backups' contents without `secret.backup_encryption_key` | Collects nothing beyond S10.13.2; chooses a host and logging settings by G1 decision | Provider-level logs and legal duties of the provider |
+| `host_provider` | Whatever the layout gives it: at least disks, snapshots, memory, the secrets handed to the process, and provider-level network logs; at a TLS-terminating edge, plaintext requests and IPs [V per host] | Member private keys and recovery keys (never sent); backups' contents without `secret.backup_encryption_key` | Collects nothing beyond S10.23.2; chooses a host and logging settings by G1 decision | Provider-level logs and legal duties of the provider |
 | Operators (`operator_insider`) | Admin-tool views, `AdminAction`, database through role-separated access | IPs and e-mail through the tool; secret values (S10.24.3) | Two-person actions; public change log | What a deployer can do by changing code (`THR-13`) |
 | `other_member` | Own data; public aggregates; a team's total if the team is public | Any other member's id, handle, activity or place | `vol_` handle never shown to requesters or members | Writing style and what members say about themselves |
 | `requester_malicious` and honest requesters | Own jobs, results, manifest without handle | Which member did a cell | Handle withheld; key rotated | Stylometry of outputs |
@@ -231,7 +231,7 @@ on legal_request(r):
 
 The platform adds no backdoor, no unlogged access path, no identity collection in response to a request without an owner decision, and promises no gag-order behavior. It specifies no warrant canary; whether one is lawful or wise is [V].
 
-**Seizure of a server or host.** Assume disk and possibly memory are taken. Obtainable: the database, secrets in the process, and the logs of S10.13.2 (no IPs, no content). Not obtainable without a separate key held off-host: backups. Response: engage `kill.all_new_jobs` and `kill.all_minting`, revoke sessions, rotate every secret (S10.24.6). Data already taken cannot be recalled.
+**Seizure of a server or host.** Assume disk and possibly memory are taken. Obtainable: the database, secrets in the process, and the logs of S10.23.2 (no IPs, no content). Not obtainable without a separate key held off-host: backups. Response: engage `kill.all_new_jobs` and `kill.all_minting`, revoke sessions, rotate every secret (S10.24.6). Data already taken cannot be recalled.
 
 ### 10.23.6 Identity, location and public-surface rules [D]
 
