@@ -931,47 +931,48 @@ RESULT {{dlm}}>>>
 ### 8.13.8 Automatic checks and comparator
 
 ```yaml
-# code_change_tests (server_sandbox)
+# code_change_tests (requester_side; no check executes anything)
 checks:
   - { id: c01, type: size_bounds,      on_fail: reject }
   - { id: c02, type: output_flag_scan, on_fail: quarantine, params: { pattern_sets: [urls] } }
   - { id: c03, type: refusal_pattern,  on_fail: reject, reason: reject.refusal_pattern }
   - { id: c04, type: extract_result,   on_fail: reject }
   - { id: c05, type: static_parse,     on_fail: reject, params: { language_from_slot: language } }
-  - { id: c06, type: test_run,         on_fail: reject, reason: reject.test_failed, params: { runner_profile_from_slot: language, tests_slots: [tests, tests_holdout] } }
-comparator: { type: test_outcome_equal }
-# code_change_tests_rs: identical minus c06; risk_class high; comparator patch_normalized_equal
+  - { id: c06, type: diff_applies_cleanly, on_fail: reject, reason: reject.schema_invalid, params: { snapshot_slot: source_file } }
+  - { id: c07, type: path_allowlist,       on_fail: reject, reason: reject.schema_invalid, params: { allowed_paths_from: source_file } }
+  - { id: c08, type: forbidden_patterns,   on_fail: quarantine, params: { pattern_set: code_forbidden } }
+comparator: { type: patch_normalized_equal }
+# code_change_tests_rs: identical to the above; risk_class high; comparator patch_normalized_equal
 ```
 
-`output_flag_scan` uses only the `urls` pattern set here because source code legitimately contains words that the instruction-pattern set flags; the set is reviewed per template (RC-04). `test_outcome_equal` matches two executions that have the same pass or fail result on every test id; it does not require identical code [D].
+`output_flag_scan` uses only the `urls` pattern set here because source code legitimately contains words that the instruction-pattern set flags; the set is reviewed per template (RC-04). `patch_normalized_equal` matches two returned files that are equal after stripping comments and whitespace; agreement is expected to be rare, which is why `risk_class` is `high` [D].
 
 ### 8.13.9 Gold-cell construction method
 
 1. A reviewer writes a small task with a source file and tests, all `S0` and original or openly licensed, of production size.
-2. A reviewer writes a reference solution. In the runner the baseline must fail, the reference must pass, and at least one reviewer-written wrong variant must fail, so the tests can tell good from bad.
-3. Gold kind `property` (`server_sandbox`): an answer passes if all checks pass, including `test_run`. Hold-out tests are used so that hard-coding visible expectations fails.
-4. For `_rs` the platform cannot execute answers, so gold kind is `reference_tolerant` against the reference with `patch_normalized_equal`; reliability estimation for this template is therefore weak [H] and blanket redundancy is applied.
-5. A second reviewer reproduces the baseline, reference and wrong-variant results (RC-06).
+2. A reviewer writes a reference solution and at least one wrong variant, and checks them by reading and by the static checks; the platform runs nothing.
+3. Gold kind `reference_tolerant` against the reference with `patch_normalized_equal`: an answer passes if all static checks pass and the comparator gives `match`.
+4. The platform cannot execute answers for either slug, so reliability estimation for these templates is weak [H] and blanket redundancy is applied.
+5. A second reviewer re-reads the reference and the wrong variant (RC-06).
 
 ### 8.13.10 Known risks
 
 | Id | Risk | Mitigation |
 | --- | --- | --- |
-| KR-CC-1 | Executing donor-written (and requester-written) code is the largest attack surface in the system: sandbox escape, resource exhaustion, data exfiltration | Isolation requirements of 8.13.3, flag off by default, G1 review item RC-13, kill switch, runner never shares infrastructure with the ledger [V] |
-| KR-CC-2 | Passing visible tests is not correctness; code can special-case test inputs | Hold-out tests; audit comparator; the deliverable states which tests ran |
-| KR-CC-3 | `requester_side` leaves no automatic quality signal beyond parsing | `risk_class` = `high`, blanket redundancy, explicit label, `patch_normalized_equal` expected to agree rarely, so v rises [H] |
-| KR-CC-4 | Flaky or environment-dependent tests | Repeated baseline; refusal at upload |
+| KR-CC-1 | Static checks are a weak signal for code, and a returned file may be wrong or hostile text | The platform never executes it (8.13.3); stored as data and displayed escaped; sampled and blanket audit; RC-13; kill switch |
+| KR-CC-2 | The platform cannot show that code passes tests, and code can special-case test inputs | Declared; audit comparator; the deliverable states that the platform ran no tests |
+| KR-CC-3 | `requester_side` leaves no automatic quality signal beyond static checks | `risk_class` = `high`, blanket redundancy, explicit label, `patch_normalized_equal` expected to agree rarely, so v rises [H] |
+| KR-CC-4 | Flaky or environment-dependent tests | Not detectable by the platform; the requester sees them when running the tests; a reported result is a rating input only |
 | KR-CC-5 | Secrets or personal data in code or tests | `pii` and credential screening (`S9.*`, `screen.pii_action`); `S3` rejection |
-| KR-CC-6 | Runner language support is narrow | Profiles are data; unsupported languages are rejected at job creation |
+| KR-CC-6 | Parser language support is narrow | The language list is reviewer data; unsupported languages are rejected at job creation |
 | KR-CC-7 | The whole file may not fit the envelope | `file_unit` split with a size check; larger files are not eligible |
 
 ### 8.13.11 Effectiveness hypotheses [H]
 
 | Id | Claim [H] | Measurement | Success | Kill |
 | --- | --- | --- | --- | --- |
-| H-CC-1 | A general chat service returns a complete file that passes the tests within the envelope often enough | Phase 0 dry runs on reviewer-authored tasks: share of cells passing `test_run`, per service | False-reject and false-accept estimates at or below `verify.false_reject_alarm` and `verify.false_accept_alarm` over `calibration.min_samples_per_service` cells | An alarm exceeded after that sample |
+| H-CC-1 | A general chat service returns a complete file that passes the static checks within the envelope often enough | Phase 0 dry runs on reviewer-authored tasks: share of cells passing the static checks (c01 to c08), per service | False-reject and false-accept estimates at or below `verify.false_reject_alarm` and `verify.false_accept_alarm` over `calibration.min_samples_per_service` cells | An alarm exceeded after that sample |
 | H-CC-2 | Blanket redundancy makes `_rs` affordable | Measured agreement of `patch_normalized_equal` and the resulting v | Implied v within `price.v_cap` | Implied v above `price.v_cap`: retire `_rs` (`withdrawn` is not required; `superseded` or unused) |
-| H-CC-3 | Hold-out tests reduce test-gaming | Gold cells with a gaming variant that special-cases visible tests | Gaming variant fails hold-out | Gaming variant passes: tighten the template |
 
 ## 8.14 Template `format_convert_validator`
 
@@ -1093,7 +1094,7 @@ Because the target is deterministic for grounded fields, two correct executions 
 | `translation_glossary` | `marked_segments` | Marker and id match (c05) | No check of meaning; glossary check may false-reject inflections | `segment_overlap` (weak) | `standard` | `mixed` |
 | `classify_extract` | `json` | Schema, id set and span grounding | Label correctness is unverified except by gold and audits | `item_agreement` | `standard` | `mixed` |
 | `summarize_schema` | `json` | Entity and numeral grounding | Faithfulness of statements is unverified | `summary_overlap` (weak) | `standard` | `subjective` |
-| `code_change_tests` | `text` | `test_run` in the isolated runner | The runner itself is the largest attack surface | `test_outcome_equal` | `standard` | `objective` |
+| `code_change_tests` | `text` | Static checks: `static_parse`, `diff_applies_cleanly`, `path_allowlist` | No automatic quality signal; nothing is executed | `patch_normalized_equal` (weak) | `high` | `objective` |
 | `code_change_tests_rs` | `text` | `static_parse` only | No automatic quality signal | `patch_normalized_equal` (weak) | `high` | `objective` |
 | `format_convert_validator` | `jsonl` | Row id match and field grounding | `none`-grounded fields are type-checked only | `record_equal` | `standard` | `objective` |
 
@@ -1117,9 +1118,9 @@ Given / When / Then, in addition to `AC-template-01` to `AC-template-08` above. 
 - `AC-template-12` (forgeable close line). Given source text that contains `<<<RESULT zzzzzzzzzzzz` and `RESULT zzzzzzzzzzzz>>>`, When the upload is screened, Then it is refused with `delimiter_collision`.
 - `AC-template-13` (glossary density). Given a glossary whose matched subset for one segment exceeds the slot budget, When the upload is split, Then it fails with field code `glossary_too_dense` and no entry is dropped.
 - `AC-template-14` (gold indistinguishability). Given a gold cell and a primary cell of the same template, When both are rendered, Then they pass through the same function, have the same structure and delimiters, and the gold cell's answer is absent from every volunteer-visible field.
-- `AC-template-15` (execution order). Given a submission for `code_change_tests` that fails `output_flag_scan`, When checks run, Then `test_run` is not invoked and the submission is `quarantined`.
-- `AC-template-16` (sandbox off). Given `ff.template.code_change_sandbox` is off, When a reviewer tries to approve `code_change_tests`, Then it is refused; When `code_change_tests_rs` passes review, Then it can be approved and its deliverable carries the label "tests not run by the platform".
-- `AC-template-17` (runner outage). Given the runner is unavailable, When `test_run` is evaluated, Then the check result is `inconclusive`, the submission is not rejected and no credit moves.
+- `AC-template-15` (execution order). Given a submission for `code_change_tests` that fails `output_flag_scan`, When checks run, Then no later check (parse, diff) is invoked and the submission is `quarantined`.
+- `AC-template-16` (no runner). Given a code-change template, When a reviewer approves `code_change_tests` or `code_change_tests_rs` after review, Then it is not refused for lack of a runner, no flag gates it, and its deliverable carries the label "tests not run by the platform".
+- `AC-template-17` (nothing executed). Given any submission for a code-change template, When checks run, Then no process is started with its content, every check result is pass, fail or inconclusive, and an `inconclusive` result does not reject the submission or move credit.
 - `AC-template-18` (no pre-approval). Given a fresh install seeded from this spec, When the template list is read, Then every seed `TemplateVersion` is `draft`, `Template.active_version_id` is null and the job wizard offers no template.
 - `AC-template-19` (no volunteer-side execution). Given any approved template variant, When the volunteer card is built from it, Then the only actions offered are copy prompt and paste back (press Send and copy answer are the volunteer's own steps, shown as instructions), plus, only where the adapter supports it and `prefilled_link_use` is `yes` [V], a plain open-the-service link that the volunteer chooses to follow and that is not part of the prompt text; no action runs, installs or downloads anything.
 - `AC-template-20` (promise wording). Given any user-facing string of a template, When the linter scans it, Then "guarantee" and its Persian equivalents are absent (LR-09).
@@ -1139,16 +1140,15 @@ Every item is a convention gap reported for folding into `S0.*` (rule 0.1). Valu
 | `template.exec.memory_bytes` | int | 268,435,456 (2^28) | 1,048,576..4,294,967,296 | `TEC` |
 | `template.exec.max_output_bytes` | int | 65,536 (2^16) | 1,024..1,048,576 | `OPS` |
 
-The three `template.exec.*` parameters are operational and are owned by the `operator` role, not `reviewer` [A].
+The three `template.exec.*` parameters belonged to the removed runner and no component reads them (FIX-27, `OD-08` default applied); the rows stay only because S0 and S16 may still define them, and removing them is an edit of those files.
 
 **Other additions**
 
 | Kind | Addition |
 | --- | --- |
-| Feature flag | `ff.template.code_change_sandbox` (default off) |
 | Reject reasons (`S0.8.4` seed list) | `reject.glossary_violation`, `reject.echo_token_mismatch`, `reject.grounding_failed` |
-| Check types | `size_bounds`, `output_flag_scan`, `refusal_pattern`, `extract_result`, `json_schema` (params `schema`, `schema_from`, `ids_at`, `ids_from`), `jsonl_records_match`, `marked_segments_match`, `glossary_adherence`, `grounded_span`, `numbers_grounded`, `script_ratio`, `orthography_variants`, `length_ratio`, `static_parse`, `test_run` |
-| Comparator types | `normalized_equal`, `segment_overlap`, `item_agreement`, `summary_overlap`, `record_equal`, `test_outcome_equal`, `patch_normalized_equal` |
+| Check types | `size_bounds`, `output_flag_scan`, `refusal_pattern`, `extract_result`, `json_schema` (params `schema`, `schema_from`, `ids_at`, `ids_from`), `jsonl_records_match`, `marked_segments_match`, `glossary_adherence`, `grounded_span`, `numbers_grounded`, `script_ratio`, `orthography_variants`, `length_ratio`, `static_parse`, `diff_applies_cleanly`, `path_allowlist`, `forbidden_patterns` |
+| Comparator types | `normalized_equal`, `segment_overlap`, `item_agreement`, `summary_overlap`, `record_equal`, `patch_normalized_equal` |
 | Template slugs | The `job_type` values and `code_change_tests_rs` |
 | `TemplateVersion` fields | `body`, `body_hash`, `change_class`, `change_note`, `author_admin_id`, `supersedes_version_id`, `approved_at`, `effective_from`, `retired_at`, `retired_reason` (`superseded`, `withdrawn`) |
 | `Lease` fields | `prompt_variant`, `render_token`, `prompt_hash` (owner `S5.*`) |
@@ -1160,7 +1160,7 @@ The three `template.exec.*` parameters are operational and are owned by the `ope
 
 **Assumptions [A] introduced here, for `S3.*`:** the language-pair allowlist `en>fa`, `fa>en`; the Persian prompt variant selected by the volunteer's locale at lease time (variant effect measured, H-TR-3); keeping ZWNJ, LRM and RLM while stripping bidi overrides; the non-author second-reviewer interpretation (`ISS-82`); delayed activation of loosening template versions; Phase 0 dry-run evidence as an approval item; `code_change_tests_rs` as a separate slug.
 
-**Open owner decisions** (also listed for `S3.*`): whether the platform may execute submitted code in an isolated runner at all (`ISS-81`); how many people hold the `reviewer` role in Phase 1 (`ISS-82`); which runner languages, if any, are supported [V].
+**Open owner decisions** (also listed for `S3.*`): whether the platform may ever execute submitted code (`ISS-81`, `OD-08`; default applied: it never does); how many people hold the `reviewer` role in Phase 1 (`ISS-82`); which languages have a safe parser for `static_parse` [V].
 
 ## Issues raised
 
@@ -1168,6 +1168,6 @@ Provenance: owner cell C-008. Block `ISS-81`..`ISS-83` (first-sorting file of pa
 
 | id | severity | fd_ref | issue | resolution | status |
 | --- | --- | --- | --- | --- | --- |
-| `ISS-81` | major | FD§4.4, FD§10, prompt | FD§4.4 lists unit tests as an automatic check and FD§2 lists code changes with supplied tests as a likely fit, but the result-return rule (FD§10 item 4, prompt scope E) says submitted content is never executed. Tests cannot be run by the volunteer (R3). Running them needs the platform to execute donor-written code | Scope the rule: submitted content is never executed on the web or API tier; `code_change_tests` may execute it only in an isolated runner (8.13.3), behind `ff.template.code_change_sandbox` (off by default) and a G1 review item; otherwise the `_rs` template, where the requester runs tests and the platform runs nothing (8.13.2) | `needs_owner` |
+| `ISS-81` | major | FD§4.4, FD§10, prompt | FD§4.4 lists unit tests as an automatic check and FD§2 lists code changes with supplied tests as a likely fit, but the result-return rule (FD§10 item 4, prompt scope E) says submitted content is never executed. Tests cannot be run by the volunteer (R3). Running them needs the platform to execute donor-written code | Superseded by `ISS-12` (02e A1): submitted content is never executed, by the platform or by any runner; no `ff.template.code_change_sandbox` flag exists; code-change checks are static plus a sampled audit, and the requester runs the supplied tests (8.13.2, 8.13.3); `OD-08` default applied | `needs_owner` |
 | `ISS-82` | major | FD§5.7 | FD§5.7 failure mode 10 asks for "a second reviewer for new templates" (author plus one), while `S0.9.5` and `template.min_reviewers_new` = 2 require two approvals from reviewers who are not the author, so three people. FD§0.2 says founders are the Phase 1 reviewers, possibly two or one | Follow `S0.9.5` (two non-author approvals), state the staffing consequence (8.8.4), and let seed templates be authored by an importing admin who is not one of the two approvers; the owner decides the Phase 1 reviewer count or lowers `template.min_reviewers_new` knowingly | `needs_owner` |
 | `ISS-83` | minor | none | Rule 2 of `S0.2` says every number labeled `initial configurable default` must exist in the parameter table, but template documents contain many such numbers (budget shares, thresholds) that are versioned and reviewed per template version, and a parameter per threshold would be unmanageable. Also three reject reasons and several names are missing from `S0.8.4` | Template-document numbers are template data, labeled `initial configurable default` with a `calibration_source`, kept in the reviewed body instead of the parameter table (8.1 rule 4); names and reasons are listed in 8.17 for folding back | `proposed` |
