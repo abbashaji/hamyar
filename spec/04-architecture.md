@@ -14,7 +14,7 @@ Vocabulary [D]:
 
 | # | Decision [D] | Reason | Where |
 | --- | --- | --- | --- |
-| 1 | Modular monolith plus one optional isolated check runner; ports and drivers for everything outside the process | Ledger atomicity needs one transaction scope; a small team needs few moving parts; module rules keep extraction possible | 4.3, 4.5 |
+| 1 | Modular monolith; ports and drivers for everything outside the process; submitted content is never executed (`ISS-12`) | Ledger atomicity needs one transaction scope; a small team needs few moving parts; module rules keep extraction possible | 4.3, 4.5 |
 | 2 | Ledger, escrow, lots, cell and job state, idempotency records and the event outbox commit in one transactional store | The FD§4.2 invariants cannot be kept across stores without distributed transactions | 4.6 |
 | 3 | Exactly one ledger and one hash chain; serializable posting; gapless `seq` | Global invariant (total credit in existence) and tamper evidence | 4.6 |
 | 4 | Events announce committed facts; they never carry money or commands | Money movement must not depend on a relay being up | 4.7 |
@@ -43,7 +43,7 @@ Vocabulary [D]:
 | Human presses Send | The platform has no channel into a volunteer's provider session: it hands text to the human and receives text from the human | FD Principle 3, ground rule 3 |
 | Minimal by construction | Storage, logs, metrics and events are built from field allowlists, so personal data cannot enter by accident | FD Principle 8 |
 | Replaceable hosts | Hosting, storage, backup and delivery sit behind ports so the system can move; reachability from Iran is [V] | FD§8.2 risk 14 |
-| Fail closed | Unknown flag means no; missing configuration means refuse; a failed invariant engages brakes; an unreachable check runner means no code-running template | FD§5.3 |
+| Fail closed | Unknown flag means no; missing configuration means refuse; a failed invariant engages brakes; no check ever runs submitted content | FD§5.3 |
 | Observable without surveillance | Operators can see system health and the flow of credit without seeing who did what | FD Principle 8 |
 
 ### 4.2.2 Exclusions [D]
@@ -57,7 +57,7 @@ These are not deferred; they are out of the product. Each follows from ground ru
 | Storing a volunteer's provider credentials, cookies, session or API keys; calling any provider from the server | No component needs it. No component calls any AI service; a future server-side call would be a new port and a spec change (`verify.model_judge_mints_credit` stays `false`) |
 | Features that help anyone bypass a regional or technical restriction (relays or mirrors aimed at evading a provider's blocks, circumvention advice) | FD Principle 9. Moving the platform's own host because it is unreachable (4.15) is not circumvention of a provider restriction |
 | Third-party runtime resources in any client (CDN, web fonts, analytics, captcha, maps, social widgets, web push) | Blocked-resource risk and tracking (`analytics.third_party_trackers` = `false`) |
-| Executing submitted content in the application process or in any process that holds secrets or store access | Submitted text is untrusted; the only exception is the isolated check runner (4.4, `ISS-41`) |
+| Executing submitted content anywhere: not in the application process, not in an isolated runner, not in a sandbox, and no `test_run` check | Submitted text is untrusted and the platform never executes it (`ISS-12`, `OD-08` default applied); there is no exception |
 | A shared password or shared token for any principal | Per-principal credentials only (S0.11.4); PR§4.5 items 1, 2 and 7 show the cost of a shared one |
 | Unsolicited messages of any kind (push, SMS, e-mail marketing, in-site pop-ups) | The public site is notification-free (4.4); the only message the platform may ever send is one the member explicitly requested, such as a recovery action [A] (`ISS-44`) |
 
@@ -86,9 +86,9 @@ These are not deferred; they are out of the product. Each follows from ground ru
 +--------------------------------------------------------------------------------------+
      |                   |                    |                       |
      v                   v                    v                       v
-[Transactional store] [Blob store]      [Ephemeral store]      [Check runner: isolated,
- ledger, state,        terms copies,     rate-limit counters,   flag-gated, no network,
- outbox, config        uploads,          login challenges       no secrets, no store access]
+[Transactional store] [Blob store]      [Ephemeral store]      [No runner: submitted
+ ledger, state,        terms copies,     rate-limit counters,   content is never
+ outbox, config        uploads,          login challenges       executed anywhere]
                        deliverables
      |
      v
@@ -113,7 +113,7 @@ The arrow from the member to the provider chat site is the human's own browser a
 | evaluator, state machines, estimators, canonical JSON, ids, hashing              |
 +----------------------------------------------------------------------------------+
 | Ports: TransactionalStore BlobStore EphemeralStore Clock Random Scheduler        |
-|  SecretStore LogSink MetricSink AlertSink BackupSink StaticHost CheckRunner      |
+|  SecretStore LogSink MetricSink AlertSink BackupSink StaticHost                  |
 |  Mailer (optional, off unless S10.* adopts e-mail recovery)                      |
 +----------------------------------------------------------------------------------+
 | Drivers: one real and one in-memory fake per port                                |
@@ -123,7 +123,6 @@ The arrow from the member to the provider chat site is the human's own browser a
 | Deployable unit | Contents | State | Scaling and roles |
 | --- | --- | --- | --- |
 | `server` | API layer, application services, scheduler (4.8), outbox relay (4.7) | none in process; everything in the stores | N identical instances; `HAMYAR_ROLES` selects `api`, `jobs` or both; each background job runs on whichever instance holds its lock |
-| `check-runner` | Executes template-defined checks that must run code (4.4, `ISS-41`) | none; ephemeral work directory | Separate host or sandbox; absent unless `ff.verify.sandboxed_tests` is on |
 | `static bundles` | Public site, member app, admin tool: build output with content hashes | none | Published to the `StaticHost` port; cacheable; no server code |
 | Stores | Transactional store, blob store, ephemeral store | all durable state | Per 4.6 |
 
@@ -159,7 +158,7 @@ The panel sets no CSP or security headers and its `index.html` loads web fonts f
 | B1 browser to API | Untrusted input | Schema validation at the edge, authentication by scheme, rate limits, idempotency, size limits (`api.max_body_bytes`) |
 | B2 member to provider site | Nothing of ours: the human copies a prompt out and pastes text back | No channel exists; pasted text is untrusted input (S9.*) |
 | B3 application to stores | Queries and writes | Separate database roles per component (4.6.5); ledger tables writable only through the ledger module |
-| B4 application to check runner | Untrusted content in, verdict out | One-way call, size and time limits, no network, no secrets, no store access |
+| B4 application to any executor of submitted content | Nothing: no such boundary exists | The platform never executes submitted content; checks only parse and compare (4.4.4) |
 | B5 admin origin to member origin | Nothing | Separate origins, session stores and CORS lists |
 | B6 operators to production | Admin actions | Passkeys per `AdminUser`, `AdminAction` log, two-person actions (`security.two_person_actions`) |
 | B7 production to backup sink | Backup artifacts | Encrypted before leaving the host; the sink cannot read them (4.12) |
@@ -176,7 +175,7 @@ The panel sets no CSP or security headers and its `index.html` loads web fonts f
 | Policy engine | Pure evaluator of rules R1..R10 over data; stamping and re-check; policy versioning | `Policy`, `PolicyVersion`, `Rule` | Service registry, template registry, config | S7.* |
 | Service registry | Services, dated flag answers, saved terms copies, review machine, derived Service-adapter descriptors | `ServiceRegistryEntry`, `TermsCopy`, `FlagAnswer` | Blob store, config | S7.*, 4.14 |
 | Template registry | Templates, immutable versions, review machine, deterministic rendering of prompts | `Template`, `TemplateVersion`, `TopicCategory`, `GoldCell` (library) | Config | S8.* |
-| Verification pipeline | Automatic checks, gold insertion, audit selection and comparison, reliability estimates, human-review cells; optional check runner | `VerificationRecord`, `Audit` | Job and cell service, ledger (via job service), check runner port | S8.*, S9.* |
+| Verification pipeline | Automatic checks, gold insertion, audit selection and comparison, reliability estimates, human-review cells | `VerificationRecord`, `Audit` | Job and cell service, ledger (via job service) | S8.*, S9.* |
 | Admission control | Capacity forecast, quote, waitlist, reservations, fairness | `Reservation` (with job service), forecast tables | Metrics rollups, config | S6.* |
 | Config service | Parameters, feature flags, kill switches, launch switches and gates, config epoch | `Parameter`, `ParameterVersion`, `FeatureFlag`, `KillSwitch`, `LaunchGateItem`, `Experiment`, `ExperimentAssignment`, `PreRegistration`, `CalibrationRecord`, `ChangeLogEntry`, `AdminAction` | Transactional store | 4.9, S14.* |
 | Moderation | Reports, appeals, bans, template auto-pause | `Report`, `Appeal` | Identity, template registry, job service | S10.* |
@@ -185,7 +184,6 @@ The panel sets no CSP or security headers and its `index.html` loads web fonts f
 | Admin tool | A thin single-page client of `/v1/admin/*`; no business logic, no direct store access | none | API | S11.* |
 | Service-adapter layer | Client-side preparation of copy and open actions from registry descriptors | none | Descriptor from service registry | 4.14 |
 | Scheduler and outbox relay | Run background jobs and deliver events | infrastructure tables (4.7, 4.8) | Stores, clock | 4.7, 4.8 |
-| Check runner | Runs code-executing checks in isolation | none | none (no network, no secrets) | S8.*, `ISS-41` |
 
 **Notification-free public site [D][A].** The public site (S12.*) is static and read-only. It has no cookies, no service-worker push registration, no sign-up or subscribe form, no e-mail capture and no third-party embed. Anything a member needs to know (expiry dates, a changed parameter, a restored service) is shown in the member app when it is next opened, never pushed. Reason: FD Principle 8, FD§8.2 risk 15 (burnout) and `analytics.cookies_enabled` = `false`. The owner decision that could overturn this is a wish for expiry reminders (`ISS-44`, S3.*).
 
@@ -235,7 +233,6 @@ VerificationPipeline                                               // S8.*, S9.*
   runAutomaticChecks(submission)                       -> VerificationRecord[]   // inline, bounded
   selectForAudit(cell, member_reliability, config)     -> bool                   // pure
   createAudit / compare(audit) / estimateReliability(member)
-  CheckRunner.run(check_spec, content, limits)         -> CheckResult | Unavailable
 
 AdmissionControl                                                   // S6.*
   forecast()                                           -> CapacityForecast      // read of the stored forecast
@@ -259,14 +256,14 @@ AnalyticsPipeline                                                  // S13.*
 4. A cross-component call inside one request passes the same unit of work; no component opens its own transaction inside another's.
 5. Every admin write goes through the same service operations as the equivalent system action, adds one `AdminAction` row in the same commit, and honors `security.two_person_actions`.
 
-### 4.4.4 Check runner [D][A]
+### 4.4.4 Checks never execute submitted content [D][A]
 
-Prompt E requires automatic checks including tests for code-change jobs, while the abuse rules forbid executing submitted content. Both hold only if code runs somewhere that cannot hurt anything (`ISS-41`):
+Prompt E requires automatic checks for code-change jobs, and the abuse rules forbid executing submitted content. Both hold because the platform never executes submitted content anywhere: there is no isolated runner, no sandbox and no `test_run` check (`ISS-12`, which rules over `ISS-41` per 02e A1; `OD-08` default applied):
 
-- The server never executes submitted content. A check of kind `run_tests` is a request to the `CheckRunner` port.
-- The runner has no network, no secrets, no store access, a read-only base image, a fresh working directory per run, and hard limits on CPU time, memory, process count, output size and wall time. It returns a verdict and a bounded log, nothing else.
-- It is off by default (`ff.verify.sandboxed_tests`). While it is off or unreachable, `CheckRunner.run` returns `Unavailable`, and templates whose checks need it cannot be approved or leased (R4 then rejects jobs for them). It never fails open.
-- Whether a runner design is safe enough to turn on is a G1 decision [V: security reviewer, recorded as `LaunchGateItem` evidence].
+- The server never executes submitted content. No check of kind `run_tests` or `test_run` exists, and no port can run one.
+- Checks of code-change jobs are static: parse, the diff applies cleanly to the supplied snapshot, file-path allowlist, size and forbidden patterns, plus a sampled audit against a second donor's output (S8.*, S9.*). None of them runs the submitted code or the supplied tests.
+- The requester runs the supplied tests on their own machine after delivery and may report the result. The report is a rating input and never mints or moves credit. The volunteer is never asked to run anything.
+- No runner design exists to approve and no G1 item exists for one, and a template is never blocked from approval or leasing for lack of one. If the owner ever allows a sandbox (`OD-08`), one flag name and one threat-model entry (`ISS-12` item 5) are needed first; none is specified here.
 
 ## 4.5 Module and dependency rules
 
@@ -298,7 +295,7 @@ The panel's `GitHubApi` interface with an in-memory fake (`test/fakegh.ts`) and 
 | `LogSink`, `MetricSink`, `AlertSink` | Operational output | Allowlisted fields only (4.11); no third-party sink by default [A] |
 | `BackupSink` | Encrypted backup artifacts | At least two independent locations (4.12) |
 | `StaticHost` | Publishes built bundles | Atomic switch of a release; content-hashed file names |
-| `CheckRunner`, `Mailer` | Isolated checks (4.4.4); optional recovery mail | `Unavailable` is a valid, safe answer |
+| `Mailer` | Optional recovery mail | `Unavailable` is a valid, safe answer |
 
 ### 4.6.2 The ledger consistency requirement (exact) [D]
 
@@ -766,7 +763,7 @@ These show which components act and which writes commit together. States and gua
 
 **F1. Lease a cell.** Member app calls `leaseNextCell`. One unit of work: read `ConfigSnapshot` and re-check epoch, kill switches and launch switches; select a queued cell whose opt-ins cover it (R8) and whose service is `approved`; compare-and-set `Cell.queued` to `leased`; insert `Lease` with a 128-bit nonce stored as a hash and `expires_at` from the store clock; insert the event rows. Commit. The rendered prompt and nonce are returned once. Two concurrent callers: exactly one commit wins the compare-and-set; the other retries or receives no cell.
 
-**F2. Submit, check, accept, pay.** Member app posts the paste-back with the lease id and nonce and an idempotency key. One unit of work: validate nonce and size; store `Submission` (a replay returns the stored outcome and writes nothing); run inline automatic checks (bounded); decide `accepted`, `rejected` or `flagged_for_audit`; on acceptance, post the `payout` or `mint` transaction through `LedgerService.post` in the same commit; update cell state; insert events. Checks that need the check runner or a second donor make the cell `flagged_for_audit` and finish later in the `audit_sweeper`; the member sees a pending result [D].
+**F2. Submit, check, accept, pay.** Member app posts the paste-back with the lease id and nonce and an idempotency key. One unit of work: validate nonce and size; store `Submission` (a replay returns the stored outcome and writes nothing); run inline automatic checks (bounded); decide `accepted`, `rejected` or `flagged_for_audit`; on acceptance, post the `payout` or `mint` transaction through `LedgerService.post` in the same commit; update cell state; insert events. Checks that need a second donor's output make the cell `flagged_for_audit` and finish later in the `audit_sweeper`; the member sees a pending result [D].
 
 **F3. Admit a job.** `submitJob`: policy evaluation (pure) and stamping; template and service checks; `quote` from the stored forecast and the latest v and λ. `confirmEscrow` (separate request, within `price.quote_ttl_s`): one unit of work that re-checks the quote, capacity and kill switches, posts `escrow_hold`, creates the cells, and moves the job to `admitted`. No capacity is promised before this commit.
 
@@ -817,7 +814,7 @@ The panel's own storage shows why a weaker store is not enough: it has no databa
 | Scheduler | In-process runner with database locks (4.8) | No external scheduler to reach or secure |
 | Hosting | Not named. One small server or container host chosen after the G2 measurement; the database on the same private network or a managed instance [V] | Hosting is an owner decision (S3.*) |
 
-Phase 1 topology (a configuration of the full topology, not a different design): one `server` instance with both roles, one primary with archived log, optional warm replica, the static bundles on the same host or a static host, no check runner. Full topology: N server instances, a replica, a separate check runner, backups in two locations.
+Phase 1 topology (a configuration of the full topology, not a different design): one `server` instance with both roles, one primary with archived log, optional warm replica, the static bundles on the same host or a static host, and no check runner in any phase. Full topology: N server instances, a replica, backups in two locations.
 
 Optional use of Cloudflare Workers is limited to serving the static public bundle behind the `StaticHost` port if the reachability test favors it [V]. No such worker holds a secret or touches the ledger.
 
@@ -852,7 +849,7 @@ Fact base: `docs/source/panel-review.md` (PR§n), a static reading of `github.co
 | Git as state, key-value store, in-memory caches | replace | PR§2: no database; git branches and commits are the state; the key-value store is advisory. Hamyar's state is the transactional store; the ephemeral store holds only counters and challenges (4.6.3) | None |
 | Result path (commits, pull request, CI artifact) | replace | PR§5: no output store of its own. Hamyar returns results by paste-back with a lease nonce (F2, S9.*) | None |
 | Per-request GitHub queries for state | replace | PR§8 and PR§3.1: one snapshot query plus per-cell calls will not scale to many members; indexed queries in the store do | None |
-| Merge gate pattern (trusted checkout, untrusted code in a job without secrets, merge only the verified commit) | keep as a pattern | PR§7.5 and PR§4.5 item 13: used for Hamyar's own pipeline (4.13.3) and as the model for the check runner (4.4.4) | G4 review of the workflow files |
+| Merge gate pattern (trusted checkout, untrusted code in a job without secrets, merge only the verified commit) | keep as a pattern | PR§7.5 and PR§4.5 item 13: used for Hamyar's own pipeline (4.13.3); it is not a model for executing submitted content, which the platform never does (4.4.4) | G4 review of the workflow files |
 | Pure state function with a twin and shared fixtures; in-memory fake of the external interface | keep as a pattern | PR§7.1: the practice behind 4.5 | None |
 | Cloudflare Worker runtime and static assets hosting | keep as an option | PR§1: usable for the static public bundle or as alternative B (4.17.4), subject to reachability | Reachability from Iran [V] (PR§9) |
 | `GitHubApi`-style seam, `redact()` and constant-time compare helpers, bounded request bodies | wrap | PR§8: small reusable helpers; Hamyar uses the pattern for ports and its own logging scrubber (4.11) | Code review only |
@@ -889,13 +886,13 @@ Owner role `operator`. Every default is an `initial configurable default` replac
 | `ops.alert_window_s` | duration_s | 300 | 30..86400 | `OPS` |
 | `admission.forecast_refresh_s` | duration_s | 3600 | 60..86400 | `P1M` forecast error |
 
-Also added: flag `ff.verify.sandboxed_tests` (default off); registry field `adapter.open_url`; `config_epoch` and the envelope fields of 4.7.2; alarm keys of 4.11.3; bootstrap settings of 4.13.2; secret name `secret.backup_key` (proposed, owned by S10.*).
+Also added: registry field `adapter.open_url`; `config_epoch` and the envelope fields of 4.7.2; alarm keys of 4.11.3; bootstrap settings of 4.13.2; secret name `secret.backup_key` (proposed, owned by S10.*).
 
 ### 4.19.2 Assumptions [A] for S3.* (with the decision that could overturn each)
 
 | Assumption | Overturned by |
 | --- | --- |
-| Modular monolith with an optional check runner (4.3.2) | A larger team or a host that forces separate deployables |
+| Modular monolith (4.3.2) | A larger team or a host that forces separate deployables |
 | TypeScript, PostgreSQL, static SPAs (4.17.3) | Owner stack preference; the alternative-B decision memo |
 | Automatic engagement of two kill switches on an invariant violation (4.11.3) | Founders preferring a manual decision |
 | Notification-free public site; no unsolicited messages (4.4.1) | A wish for expiry reminders or marketing messages |
@@ -917,7 +914,6 @@ Also added: flag `ff.verify.sandboxed_tests` (default off); registry field `adap
 | Terms permit prefilled links and copy-and-paste | Reviewer | `FlagAnswer` with `TermsCopy` |
 | Font licenses allow self-hosting | Operator | `LaunchGateItem` evidence |
 | Backup retention against privacy duties; legal exposure of a host jurisdiction | Counsel | `CNS` memo |
-| Check runner design is safe enough to enable | Security reviewer | `LaunchGateItem` evidence under G1 |
 | Panel code matches PR and may be reused (4.18) | Human reviewer | `LaunchGateItem` evidence under G4 |
 | All existing secrets rotated before exposure | Operator | `LaunchGateItem` evidence under G4 |
 
@@ -942,7 +938,7 @@ Given / When / Then; each is also a test (ids assigned by S18.*).
 | `AC-arch-13` | Given a failing consumer, when delivery is attempted `ops.outbox_max_attempts` times, then the row is dead-lettered and `alarm.outbox_dead_letter` is raised, and no ledger entry is affected |
 | `AC-arch-14` | Given any emitted event, when inspected, then it carries `config_epoch` and `policy_version_id`, and its name matches the transition in S0.9 |
 | `AC-arch-15` | Given a `loosen` parameter change with `effective_from` earlier than now plus its notice, when applied, then it is rejected with `VALIDATION_FAILED` |
-| `AC-arch-16` | Given `ff.verify.sandboxed_tests` off, when a template needing `run_tests` is submitted for approval or its cell for leasing, then it is refused and no submitted content is executed anywhere |
+| `AC-arch-16` | Given a code-change template, when it is submitted for approval or its cells are leased, then it is not refused for lack of a runner, its checks are the static checks of 4.4.4, and no submitted content is executed anywhere |
 | `AC-arch-17` | Given `HAMYAR_ENV` = `prod`, when two origins are equal or one is not HTTPS, then the process refuses to start |
 | `AC-adapter-01` | Given a service that is not `approved`, when its descriptor is requested, then `mode_allowed` is `[copy_only]` and `open_url` is absent |
 | `AC-adapter-02` | Given `supports_prefill` true and `prefilled_link_use` `unknown`, when the descriptor is computed, then `mode_allowed` is `[copy_only]` |
@@ -957,14 +953,14 @@ Each resolution is already applied in this file. C-001 consolidates them into S2
 
 | id | severity | fd_ref | issue | resolution | status |
 | --- | --- | --- | --- | --- | --- |
-| `ISS-41` | major | prompt | Prompt E requires automatic checks including tests for code-change jobs, and also forbids executing submitted content; running supplied tests executes it | Submitted content is never executed by the server. `run_tests` checks run only in an isolated check runner behind `ff.verify.sandboxed_tests` (off by default); while it is off or unreachable, templates needing it cannot be approved or leased (4.4.4) | proposed |
+| `ISS-41` | major | prompt | Prompt E requires automatic checks including tests for code-change jobs, and also forbids executing submitted content; running supplied tests executes it | Submitted content is never executed, by the server or by any runner (`ISS-12` rules, 02e A1; `OD-08` default applied). Code-change checks are static plus a sampled audit; the requester runs the supplied tests (4.4.4) | proposed |
 | `ISS-42` | minor | prompt | Prompt J says the panel repository's code and docs were not read, but `docs/source/panel-review.md` now exists | The review is the fact base for 4.18; every panel decision keeps a [V] condition and G4 stays open until a human review | applied |
 | `ISS-43` | major | FD§4.2 | The FD§4.2 invariants are global (total credit in existence), and the hash chain serializes appends, so the ledger has one serialization point; the FD gives no scale | One ledger, one chain; a capacity formula and load test decide the store (4.6.2); partitioning is allowed only after S6.* redefines the global invariants | needs_owner |
 | `ISS-44` | minor | FD§4.5, FD§3.2 | `credit.expiry_notice_days` and optional e-mail exist, but nothing says through which channel a member is told | In-app notices only; the public site is notification-free; the platform sends only a message a member explicitly requests, such as recovery (4.4.1) [A] | needs_owner |
-| `ISS-45` | minor | none | Convention gaps: parameter area `ops` and the 21 `ops` names in 4.19.1; `admission.forecast_refresh_s`; flag `ff.verify.sandboxed_tests`; field `adapter.open_url`; log events `http.request_served`, `sched.run_finished`, `outbox.relayed`, `alarm.raised`; infrastructure tables exempt from the entity rules (4.7.3); `config_epoch`; alarm keys | Added here; C-001 folds them into S0 and S16.* | proposed |
+| `ISS-45` | minor | none | Convention gaps: parameter area `ops` and the 21 `ops` names in 4.19.1; `admission.forecast_refresh_s`; field `adapter.open_url`; log events `http.request_served`, `sched.run_finished`, `outbox.relayed`, `alarm.raised`; infrastructure tables exempt from the entity rules (4.7.3); `config_epoch`; alarm keys | Added here; C-001 folds them into S0 and S16.* | proposed |
 | `ISS-46` | minor | FD§10 | FD§10 keeps the launcher optional but does not say that its opt-in auto-send userscript and chat-link record (PR§6.4, PR§6.5) must not carry over, while Principle 3 forbids submitting on a volunteer's behalf | Both are excluded from Hamyar (4.2.2, 4.18) | proposed |
 | `ISS-47` | major | FD§8.2 risk 5 | The FD does not address backups, which copy pseudonymous data beyond the `retention.*` windows and are a compelled-disclosure surface | Backups encrypted with a key the sink does not hold, at least two locations, retention `ops.backup_retention_days`, purge reaches backups by aging out; legal sufficiency is [V] for counsel (4.12.1) | needs_owner |
 | `ISS-48` | minor | FD§10 | FD§10 and prompt I count four secrets; PR§4 finds a fifth, `EXT_TOKEN` (off when unset) | All five are rotated before exposure and never reused (4.13.3) | proposed |
 | `ISS-49` | minor | FD§8.3 G4 | G4 requires a repository review; PR is a static, execution-free reading, so treating it as G4 would overstate what is known | 4.18 decisions carry [V] conditions; the G4 `LaunchGateItem` stays open until a human signs off | needs_owner |
 
-Convention additions made by this part (listed so C-001 can fold them back): parameter area `ops` and the names in 4.19.1; `ff.verify.sandboxed_tests`; `adapter.open_url`; log event names `http.request_served`, `sched.run_finished`, `outbox.relayed`, `alarm.raised`; acceptance-criteria areas `arch` and `adapter`; bootstrap settings `HAMYAR_*` (4.13.2); `config_epoch`; `AdapterDescriptor` and `mode_allowed`; ledger consistency requirements `LC-1`..`LC-9`; secret name `secret.backup_key` (proposed for S10.*).
+Convention additions made by this part (listed so C-001 can fold them back): parameter area `ops` and the names in 4.19.1; `adapter.open_url`; log event names `http.request_served`, `sched.run_finished`, `outbox.relayed`, `alarm.raised`; acceptance-criteria areas `arch` and `adapter`; bootstrap settings `HAMYAR_*` (4.13.2); `config_epoch`; `AdapterDescriptor` and `mode_allowed`; ledger consistency requirements `LC-1`..`LC-9`; secret name `secret.backup_key` (proposed for S10.*).
