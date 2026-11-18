@@ -4,7 +4,8 @@
 
 ## Checked
 
-- Work in progress: this file was created first and is extended as the spec files are read.
+- Reads so far: `05a` lines 100-200, 250-520, 545-640, 676-780, 842-990, 1052-1100; `10a` lines 24-135, 318-400, 470-600; `10b` lines 1-70, 150-280, 540-640. Line numbers are counted from the start of each read range and can be off by up to 3; every row gives a quoted anchor next to the number.
+- This file was extended in steps; rows 18 to 21 and 26 and reasons 1, 3 and 4 are carried from `FINAL.md` where marked and not yet re-read.
 
 ## Contradictions
 
@@ -14,12 +15,12 @@
 | 9 | CLOSED | `05a:141` ("The creation-time IP hash is not a column of any table of this model"), `05a:405` (Device `Not stored` list names "any IP hash"), `05a:107` (IP held only in volatile counters); Device field table `05a:397-401` has no IP column; `10a` 10.14.2 item 2 (counters volatile, not in the database or backups) and 10.14.1 row "IP hash"; `10b:610` `AC-safety-01` ("only keyed counters exist, holding no member id"). Not searched: every other line of `05a`, `05b`, `04` for a stray `creation_ip_hash` (no search tool) |
 | 10 | CLOSED for the collision, one new defect | `10a` headings seen: 10.2, 10.3, 10.4, 10.11, 10.12, 10.13, 10.14, 10.15; `10b` headings seen: 10.21, 10.21.1 to 10.21.4, 10.23.1 to 10.23.8, 10.26.5 to 10.26.8, 10.27, 10.28 (`10b:5`, `10b:603`, `10b:632`). The two files no longer share a number in what was read. Stale references to the old numbers remain: `05a:124` ("10b 10.13.1 item 11 and 10.13.3") and `05a:141` ("10b 10.13.2"), `10a` 10.14.2 items 1 and 4 ("10b S10.14.2"); `10b` has no 10.13 or 10.14 in what was read, and `10a` 10.13 is session handling |
 | 11 | STILL OPEN (narrower) | Closed part: `MemberKey` is `purpose` and `status` in both (`05a:376-390`, `10a:32`); `AdminUser` matches (`05a` 5.6.8, `10a:40`); `secret.email_encryption_key` is the name in `05a:136-137` and `10b` 10.23.2. Still different: Device `10a:33` `token_hash`, `state`, `grants_issued` against `05a:397-401` `device_token_hash`, `status`, `grants_claimed`; Member `10a:31` `last_active_on`, `registration_device_id`, `email_index` against `05a:358-368` `last_active_day`, `creating_device_id`, `email_lookup_hash`; Session `10a:34` has `step_up_at`, `05a` 5.6.4 has none; AdminAction `10a:42` has `outcome` and the proposal state (`10a` two-person protocol: `state proposed`, `expires_at`), `05a` 5.6.10 has `seq`, `reason`, `payload`, `entry_hash` and no state, outcome or expiry. Not read: the S10.24.2 secrets inventory of `10b`, so `g1.secrets_inventory_complete` name equality is not confirmed |
-| 12 | CLOSED | `05a:124` ("Never computed for a public page: public surfaces are aggregates and show no `vol_` handle"); `10b` 10.23.3 rows `other_member`, `requester_malicious` (handle never shown to requesters or members) and 10.23.2 row "Hashes and manifests". The citation inside `05a:124` to "10b 10.13.1 item 11" points at no section (row 10) |
-| 13 | STILL OPEN (not yet re-read at this commit) | read pending: `05a` 5.8.2 Lease |
-| 14 | STILL OPEN (not yet re-read at this commit) | read pending: `05a` 5.7.5, 5.8.1 |
-| 15 | STILL OPEN (not yet re-read at this commit) | read pending: `05a` 5.9.2, 5.9.3 |
+| 12 | STILL OPEN (one of two statements fixed) | `05a:862` (5.9.1 "Public view": "The public ledger (S12.*) shows `vol_` handles computed on read from `member_id`") still says what row 12 reports; `05a:124` (5.3.2) was fixed to "Never computed for a public page", so 05a now contradicts itself, and `10b` 10.23.3 and 10.23.6 say public surfaces show aggregates and never a handle or a `lac_` or `mem_` id. | `05a:124` ("Never computed for a public page: public surfaces are aggregates and show no `vol_` handle"); `10b` 10.23.3 rows `other_member`, `requester_malicious` (handle never shown to requesters or members) and 10.23.2 row "Hashes and manifests". The citation inside `05a:124` to "10b 10.13.1 item 11" points at no section (row 10) |
+| 13 | CLOSED | `05a:712` (`hard_expires_at`, `expires_at + lease.submit_grace_s`, alias `grace_until` of S9), `05a:714` (`extensions`, `extensions_used` documented as alias), `05a:718` (`release_reason`), `05a:720` (reaper index on `hard_expires_at`, not `expires_at`) |
+| 14 | CLOSED in `05a`, not in S0 | `05a:594` (`closure_reason` with `cells_exhausted`), `05a:619-625` (`pause_causes`, `state_before_pause`, `pause_started_at`, `paused_total_s`, `held_ucr`, `levy_reserved_ucr`, `quote_id`), `05a:693` (`Cell.acceptance_deferred_until`). `05a:594` itself says `cells_exhausted` is "not yet in S0.9.2" (S0 not re-read here) |
+| 15 | CLOSED | `05a:893` (`LedgerTransaction.idempotency_key` unique, canonical, `natural_key` a documented alias), `05a:880` (`LedgerEntry.entry_key` unique, `<idempotency_key>#<leg>`) |
 | 16 | CHANGED | `05a:256-258` (`state_transitions` DDL with `occurred_at`, trigger line), `05a:261-288` (`mint_headroom` table, DDL, unique indexes), `05a` 5.4 intro ("plus the two additions of S5.4.1 ... that S0.7 does not list yet"). Both entities now exist in `05a`; `S0.7` still does not list them, by `05a`'s own statement (S0 not re-read here) |
-| 17 | STILL OPEN (not yet re-read at this commit) | `05a` 5.6.10 `reason` is still free text, `<= 1000 chars` in a `permanent` table (`05a` AdminAction table); `10b` 10.23.2 says "reason codes only" |
+| 17 | STILL OPEN (read: AdminAction and FlagAnswer; not read: KillSwitch.reason, CalibrationRecord.note) | `05a` 5.6.10 `reason` is still free text, `<= 1000 chars` in a `permanent` table (`05a` AdminAction table); `10b` 10.23.2 says "reason codes only" |
 | 18 | STILL OPEN (not yet re-read at this commit) | read pending: `00-conventions` 0.9.6, `05b` |
 | 19 | STILL OPEN (not yet re-read at this commit) | read pending: `05b` |
 | 20 | STILL OPEN (not yet re-read at this commit) | read pending: `05b` MT-06 |
@@ -28,16 +29,26 @@
 
 ## Verdict reasons
 
-1. NOT MET: not yet assessed; see the next commit.
+1. NOT MET (carried from `FINAL.md`, not yet re-read): the reconciliation edits 15c to 15g, 16d and 02e.
+2. NOT MET: the parts still disagree on the data model (rows 8, 11 and 12 above; findings 1 to 5). The IP-hash datum itself is now consistent (row 9 CLOSED).
+3. NOT MET (carried from `FINAL.md`, not yet re-read): safety parameters fail closed.
+4. NOT MET (carried from `FINAL.md`, not yet re-read): owner decisions.
 
 ## Owner decisions
 
-- Not yet listed.
+- D-01 to D-22 of `FINAL.md` section 4 are carried as open until `docs/decisions.md` is read; defaults are those written there.
 
 ## Findings
 
 | # | severity | file:line | defect | action |
 | --- | --- | --- | --- | --- |
-| 1 | minor | n/a | audit of this slice not finished at this commit | continue reading |
+| 1 | major | spec/05a-entities.md:862 | 5.9.1 "Public view" still says the public ledger shows `vol_` handles computed on read from `member_id`; `05a:124` and `10b` 10.23.3, 10.23.6 say public surfaces show none. FINAL row 12 is not closed, and 05a now contradicts itself | delete the sentence and its either-or at `05a:862`, keep the aggregate-only reading, or log as an owner decision |
+| 2 | major | spec/05a-entities.md:358,424,428,429 against spec/10a-identity.md:31,39 | Invite edge names differ and are declared aliases only (`invite_id`, `issuer_member_id`, `redeemed_by_member_id` against `invited_by_member_id`, `inviter_member_id`, `invitee_member_id`); the tree id has two types (`tree_root_member_id` and `invite_root_member_id` are `mem_` ids, `invite_tree_id` is an `inv_` id) | one name set and one id type for the tree, in both files |
+| 3 | major | spec/05a-entities.md:352-368,397-401 against spec/10a-identity.md:31-34,42 | Device, Member, Session and AdminAction columns still differ (`token_hash` and `device_token_hash`, `state` and `status`, `grants_issued` and `grants_claimed`, `last_active_on` and `last_active_day`, `registration_device_id` and `creating_device_id`, `email_index` and `email_lookup_hash`, `step_up_at` only in 10a, `outcome` and proposal state only in 10a, `seq`, `reason`, `payload`, `entry_hash` only in 05a). FINAL row 11 is only partly closed | one name set per entity; FIX-18 |
+| 4 | minor | spec/05a-entities.md:404 against spec/10a-identity.md:33 and 10a 10.14.1 | Device retention: 05a `short`, purge after `retention.session_days` (90) with a tombstone while a member holds it; 10a and 10b 10.23.2 say `member_bound` plus a grant-memory residue for `retention.member_inactive_days` (365) | state one rule; it decides how long `grant.max_per_device` is remembered |
+| 5 | minor | spec/05a-entities.md:124,141; spec/10a-identity.md 10.14.2 items 1 and 4 | cite `10b` sections 10.13.1, 10.13.2, 10.13.3 and 10.14.2 that no longer exist after 10b was renumbered to 10.21 to 10.29; `10a` 10.13 is session handling | change the citations to the 10.23 and 10.24 sections |
+| 6 | major | spec/05a-entities.md (5.6.10 `reason`, 5.10.6 `evidence_note`) against spec/10b-safety.md 10.23.2 and spec/10a-identity.md 10.14.1 | free text up to 1000 and 2000 characters in `permanent` append-only tables, while 10b says "reason codes only" and 10a says `adm_` ids only; FINAL row 17 stays open (owner decision D-12, default: free text stays with the limit stated) | decide codes or text; until then the three files must not claim "no free text" |
+| 7 | minor | spec/10a-identity.md:94 | registration check 4 requires challenge purpose `register_device`; the same section issues the challenge with purpose `create` (10a:67, 10a:79). A partial application of the 15c edit | use `create` in check 4 |
+| 8 | minor | spec/05a-entities.md:594 and the 5.4 intro | `cells_exhausted`, `state_transitions` and `mint_headroom` are used by 05a and 05b and are not in S0.7 and S0.9.2 (05a says so itself) | add them to S0 or keep the "convention addition" note in the assembly list |
 
 Verdict: NOT READY
