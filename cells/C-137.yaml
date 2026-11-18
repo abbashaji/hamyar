@@ -1,0 +1,27 @@
+id: C-137
+title: 'Re-audit round 2, final report: readiness report round 2'
+type: normal
+priority: 3
+lease_minutes: 60
+supersedes:
+  - C-099
+goal: "Independent re-audit after the fix round (cells FIX-01..FIX-27, docs/fix/FIX-*.md): combine the four slice reports into the final report. You did not write any of it. The files docs/audit/FINAL-2a.md, FINAL-2b.md, FINAL-2c.md and FINAL-2d.md are merged before this cell starts. Read all four completely, and read docs/audit/FINAL.md sections 5 and 5.1 and docs/decisions.md. Do not repeat the slice work, but spot-check at least 8 findings or claims of the slice files by opening the cited place in spec/ or docs/fix (prefer blocker and major rows and any slice that found nothing); a claim you cannot reproduce is dropped and the reason is written in '## Checked'. Be critical; do not soften earlier logs. Write docs/audit/FINAL-2.md with these parts in this order: a title line that names the four source files; '## Checked' (per slice: logs read, edits confirmed, false claims found; then the spot checks you did); '## Findings' with the table header | # | severity | file:line | defect | action | one row per distinct finding of the four slice files, each defect starting with the slice letter in square brackets, duplicates merged at the highest severity, numbered 1..n and ordered blocker, major, minor, with no finding silently dropped or lowered (if there is none write one row with severity minor, file:line n/a, defect no defect found, action none); '## Owner decisions' (the still-open list of FINAL-2d with its defaults); '## Next fix tasks' only when the verdict is not READY, one item per future cell with files, edit and acceptance command (use the existing checks in scripts/); and as the LAST line 'Verdict: READY' or 'Verdict: READY WITH LOGGED ITEMS' or 'Verdict: NOT READY'. Decide it so: NOT READY if any blocker row exists or FINAL-2d says any of the four verdict reasons is NOT MET; READY WITH LOGGED ITEMS if there is no blocker, all four reasons are MET and only other rows or open owner decisions remain; READY only with no row and no open owner decision. Do not use the placeholder words that check_audit.py rejects. Do not edit any other file."
+after:
+  - C-133
+  - C-134
+  - C-135
+  - C-136
+read:
+  - docs/decisions.md
+  - docs/audit/FINAL.md
+allowed_paths:
+  - docs/audit/FINAL-2.md
+outputs:
+  - docs/audit/FINAL-2.md
+acceptance:
+  - cmd: python scripts/check_audit.py docs/audit/FINAL-2.md
+  - cmd: python scripts/check_params.py
+  - cmd: python scripts/check_issues.py
+  - cmd: python scripts/check_stale.py
+  - cmd: python scripts/check_refs.py api
+notes: 'Audit cell: independent and critical. Read large files in chunks of at most 600 lines; do not paste file contents into chat. Nothing is executed by you; CI runs acceptance. Supersedes C-099, which was too large for one chat; the slices are C-133 to C-136.'

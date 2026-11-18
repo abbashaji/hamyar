@@ -1,0 +1,17 @@
+id: C-134
+title: 'Re-audit round 2, slice B: verify FIX-10 to FIX-18'
+type: normal
+priority: 3
+lease_minutes: 90
+goal: "Independent verification of one third of the fix round (slice B of 3). You did not write any of it. Scope: the logs docs/fix/FIX-10.md to docs/fix/FIX-18.md including FIX-11a.md (10 files; any other log whose number is 10 to 18 belongs here too). (1) Read every log in scope completely. (2) For FIX-17 open the cited place in the part file for EVERY edit marked applied and confirm the edit is really there. For the other logs in scope open at least one applied edit per log (every log that has one) and enough more that you have confirmed at least 14 applied edits in total over the slice, counting those of FIX-17. Spread the sample over several part files and include edits that look risky (renumbering, renamed ids, moved text). A false or missing edit is a finding. (3) While reading, note every new defect that a fix introduced (broken reference, wrong number, text that now contradicts a neighbour, duplicate heading). Be critical; do not soften the logs. Write docs/audit/FINAL-2b.md with these parts in this order: a title line; '## Checked' (what you opened and found right, with file:line, and the count of logs read and edits confirmed); '## Findings' with the table header | # | severity | file:line | defect | action | where severity is blocker, major or minor (if you have no finding write one row with severity minor, file:line n/a, defect no defect found, action none); '## Not checked' (what you did not open); and as the LAST line 'Verdict: READY' or 'Verdict: READY WITH LOGGED ITEMS' or 'Verdict: NOT READY' for this slice (NOT READY if any blocker row, READY WITH LOGGED ITEMS if any other row, READY only with no finding). Create the file early with all sections present and extend it with apply_changes as you go so that work survives a dead lease; keep the Verdict line last at every commit. Do not use the placeholder words that check_audit.py rejects. Do not edit any other file."
+after: []
+read:
+  - docs/decisions.md
+  - docs/audit/FINAL.md
+allowed_paths:
+  - docs/audit/FINAL-2b.md
+outputs:
+  - docs/audit/FINAL-2b.md
+acceptance:
+  - cmd: python scripts/check_audit.py docs/audit/FINAL-2b.md
+notes: 'Audit cell: independent and critical. Read large files in chunks of at most 600 lines; do not paste file contents into chat. Nothing is executed by you; CI runs acceptance. Replaces one third of the former cell C-099; the final report is written by C-137.'

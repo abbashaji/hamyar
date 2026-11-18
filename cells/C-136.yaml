@@ -1,0 +1,18 @@
+id: C-136
+title: 'Re-audit round 2, slice D: contradictions and the four verdict reasons'
+type: normal
+priority: 3
+lease_minutes: 90
+goal: "Independent re-check of the cross-part contradictions and of the verdict reasons of docs/audit/FINAL.md (slice D). You did not write any of it. Scope: the table under '## Findings' of docs/audit/FINAL.md, rows 8 to 21 and row 26 (15 rows), and its section '## 5 Overall verdict and the next fix round' with '## 4 Owner-only decisions'. (1) For each of the 15 rows open the files and lines it cites in spec/ and state whether it is CLOSED (cite the lines you saw that close it), STILL OPEN (cite the lines that still show it) or CHANGED (say what is different now). The line numbers in FINAL.md are from before the fix round: search for the quoted text when a line has moved. (2) Check the four reasons of the NOT READY verdict in section 5, one answer each: were the reconciliation edits (15c to 15g, 16d, 02e) applied; do the parts agree on the data model and on the IP-hash datum (05a Device, 10a 10.14.2, 10b AC-safety-01); do the safety parameters fail closed (read the S0 and S16 rows that FINAL.md cites in spec/00-conventions.md and spec/16-parameters.md); which owner decisions of section 4 are still open (list each with its default as written in docs/decisions.md or the spec). (3) Confirm that the rows with verdict NEW that the cells C-130, C-131 and C-132 added in spec/15c, spec/15f and spec/15e list only paths that the same file already defines in its operation tables and that they add no operation. (4) Note every new defect that the fix round introduced in the places you opened. Be critical; do not soften earlier logs. Write docs/audit/FINAL-2d.md with these parts in this order: a title line; '## Checked'; '## Contradictions' (table | FINAL row | status | lines seen |, 15 rows); '## Verdict reasons' (four numbered answers, each starting with MET or NOT MET); '## Owner decisions' (list of the still-open ones with defaults); '## Findings' with the table header | # | severity | file:line | defect | action | where severity is blocker, major or minor (every STILL OPEN or NOT MET item is a row; if there is no finding write one row with severity minor, file:line n/a, defect no defect found, action none); and as the LAST line 'Verdict: READY' or 'Verdict: READY WITH LOGGED ITEMS' or 'Verdict: NOT READY' for this slice (NOT READY if any blocker row or any NOT MET reason, READY WITH LOGGED ITEMS if any other row or open owner decision, READY only with none). Create the file early with all sections present and extend it with apply_changes as you go so that work survives a dead lease; keep the Verdict line last at every commit. Do not use the placeholder words that check_audit.py rejects. Do not edit any other file."
+after: []
+read:
+  - docs/decisions.md
+  - docs/audit/FINAL.md
+  - docs/source/prompt.md
+allowed_paths:
+  - docs/audit/FINAL-2d.md
+outputs:
+  - docs/audit/FINAL-2d.md
+acceptance:
+  - cmd: python scripts/check_audit.py docs/audit/FINAL-2d.md
+notes: 'Audit cell: independent and critical. Read large files in chunks of at most 600 lines; do not paste file contents into chat. Nothing is executed by you; CI runs acceptance. Replaces part of the former cell C-099; the final report is written by C-137.'
