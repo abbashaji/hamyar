@@ -74,7 +74,7 @@ Every screen below uses these rows: **Purpose**, **Entry conditions**, **Blocks*
 | `offline` | no connectivity | Banner; read-only view of the last loaded data of this visit; no write is attempted |
 | `auth_required` | `AUTH_REQUIRED`, `AUTH_INVALID`, `AUTH_EXPIRED` | Hand off to member session restore (S10.*); return to the same screen and step afterwards |
 | `gate_closed` | `403 LAUNCH_GATE_CLOSED` (`launch.member_jobs_enabled` is false) | Whole requester area shows `copy.req.err_gate_closed`; no form is rendered; nothing is charged |
-| `kill_switch` | `503 KILL_SWITCH_ENGAGED` (`kill.all_new_jobs`, `kill.template.<tpl_id>`, `kill.service.<svc_id>`) | Creation actions disabled with `copy.req.err_kill_switch`; existing jobs stay readable |
+| `kill_switch` | `503 KILL_SWITCH_ENGAGED` (`kill.all_new_jobs`, `kill.template.<tpl_id>`, `kill.service.<svc_id>`, `kill.member.<mem_id>`) | Creation and confirmation actions disabled with `copy.req.err_kill_switch`; existing jobs stay readable. The text is the same for every switch: it never says which switch applies, and a member switch (which refuses new leases, submissions and escrow holds, 11c 11.64.2, and pauses nothing) is never named or hinted at. A job pause caused by a switch is a different thing, shown by `pause_reason` (11.39.1) [A] |
 | `rate_limited` | `429 RATE_LIMITED` | Disabled action with a countdown from `Retry-After`; never auto-repeats faster than allowed |
 | `member_blocked` | `403 FORBIDDEN`, `status` (from `getMe`) `suspended` or `banned`, or `identity.recovery_cooldown_s` not elapsed | Read-only; shows the reason class and, for a cooldown, the end time in local time |
 
@@ -547,7 +547,7 @@ Pause and stop causes (`pause_reason` values are convention additions [A]; `clos
 
 | Value | Copy key | EN | FA |
 | --- | --- | --- | --- |
-| `kill_switch` | `copy.req.pause_kill` | The operators paused work for a moment. Your credit stays held and the request may continue when work resumes. | مدیران پلتفرم کار را موقتاً متوقف کرده‌اند. اعتبار شما همچنان نگه‌داشته می‌ماند و ممکن است با ازسرگیری کار ادامه یابد. |
+| `kill_switch` (reserved: no switch of 11c produces it, see the note after this table) | `copy.req.pause_kill` | The operators paused work for a moment. Your credit stays held and the request may continue when work resumes. | مدیران پلتفرم کار را موقتاً متوقف کرده‌اند. اعتبار شما همچنان نگه‌داشته می‌ماند و ممکن است با ازسرگیری کار ادامه یابد. |
 | `template_paused` | `copy.req.pause_template` | The template used by this request was paused for review. | قالبِ این درخواست برای بازبینی موقتاً متوقف شده است. |
 | `service_paused` | `copy.req.pause_service` | A service this request depends on was paused. | سرویسی که این درخواست به آن وابسته است موقتاً متوقف شده است. |
 | `policy_tightened` | `copy.req.pause_policy` | A rule was tightened and this request is being re-checked. | یکی از قواعد سخت‌تر شده و این درخواست دوباره بررسی می‌شود. |
@@ -556,6 +556,18 @@ Pause and stop causes (`pause_reason` values are convention additions [A]; `clos
 | `template_retired` | `copy.req.close_template` | The template of this request was retired. Finished results are kept; unspent credit returns to you. | قالبِ این درخواست بازنشسته شد. نتایج انجام‌شده حفظ می‌شود و اعتبار مصرف‌نشده به شما برمی‌گردد. |
 | `operator_killed` | `copy.req.close_operator` | The operators stopped this request. Finished results are kept; unspent credit returns to you. | مدیران پلتفرم این درخواست را متوقف کردند. نتایج انجام‌شده حفظ می‌شود و اعتبار مصرف‌نشده به شما برمی‌گردد. |
 | `overrun_timeout` | `copy.req.close_overrun` | This request reached its latest stop time ({stop}) before every cell was finished. Finished results are kept; unspent credit returns to you. | این درخواست پیش از پایان همهٔ سلول‌ها به آخرین زمان توقف ({stop}) رسید. نتایج انجام‌شده حفظ می‌شود و اعتبار مصرف‌نشده به شما برمی‌گردد. |
+
+Which switch produces which pause or refusal (11c 11.64.1 and 11.64.2 own the effects; this table is the display side) [A]:
+
+| Switch | What happens to the requester's work | `pause_reason` shown | Copy |
+| --- | --- | --- | --- |
+| `kill.template.<tpl_id>` | Jobs on the template get `job.paused`; new jobs on it are refused | `template_paused` | `copy.req.pause_template`; a refused new job shows `copy.req.err_kill_switch` |
+| `kill.service.<svc_id>` | Jobs pinned to the service get `job.paused` (S7.* 7.10.5 pauses a job when its eligible set empties; the server reports the pause either way) | `service_paused` | `copy.req.pause_service` |
+| `kill.all_new_jobs` | Running jobs continue; only creating or admitting a job is refused | none | `copy.req.err_kill_switch` on the refused action |
+| `kill.member.<mem_id>` | Nothing pauses; the account `status` stays `active`; balance and ledger are untouched; new leases, submissions and escrow holds are refused | none | `copy.req.err_kill_switch` on the refused confirmation, the same text as the global switch; a member switch is never named or hinted at (11c 11.64.1) |
+| `kill.all_minting` | No requester effect: transfers of member jobs are unaffected | none | none |
+
+`pause_reason` `kill_switch` and `copy.req.pause_kill` are kept but reserved: no switch of 11c produces that value. They stay as the display for the case that S14.* defines a job-pausing global switch; until then the screen shows them only if the server sends that value.
 
 ### 11.39.2 Map encoding, bottleneck and on-track rules [D][A]
 
@@ -599,6 +611,9 @@ The linear baseline is crude because volunteer supply arrives in daily batches; 
 - **AC-req-41** Given an unchanged progress `ETag`, When the poll runs, Then a `304` leaves the DOM untouched; given the tab is hidden, Then no poll is sent until it is visible again.
 - **AC-req-42** Given `on_track` = `behind` and the largest group is `awaiting_volunteer` with 150 cells, When the page renders, Then the banner says most remaining cells are waiting for volunteers and shows `at_risk_cells` when above zero.
 - **AC-req-43** Given `pause_reason` = `kill_switch`, When the page renders, Then the paused banner shows `copy.req.pause_kill`, Cancel stays available and the credit is stated as still held.
+- **AC-req-43a** Given a job paused by `kill.template.<tpl_id>` (11c `AC-kill-01`), When the page renders, Then `pause_reason` is `template_paused`, the banner shows `copy.req.pause_template`, Cancel stays available and the credit is stated as still held.
+- **AC-req-43b** Given a job paused by `kill.service.<svc_id>`, When the page renders, Then `pause_reason` is `service_paused` and the banner shows `copy.req.pause_service`.
+- **AC-req-43c** Given `kill.all_new_jobs` or `kill.member.<mem_id>` is engaged, When a running job's progress is read, Then no pause banner appears and the job's state is unchanged; When Confirm is pressed on a quote, Then the answer is `503 KILL_SWITCH_ENGAGED`, `copy.req.err_kill_switch` is shown, no credit moves and nothing on the page names a member switch.
 - **AC-req-44** Given the page direction is RTL, When the map renders, Then index 1 is at the right edge, arrow-key navigation moves visually, and the legend uses shapes, not colour alone.
 
 ### SCR-req-13 Cell sheet
@@ -864,7 +879,7 @@ All rows of 11.43 to 11.45 carry the marker `needs_human_and_legal_review` (S0.5
 
 Reasons arrive as `policy.<policy_rule_id>.<slug>` (S0.8.4) in `rejection.reasons` (a `Job` in `rejected`) or `details.reasons` (`422 POLICY_REJECTED`). Reasons are shown in the order received. `R10` is a change workflow, not a job rejection: it has no requester copy and appears only in the public change log.
 
-| Code | Copy key | EN (reason, then what to change) | FA |
+| Code | Copy key (alias of the owner key in spec/07 7.4.3) | EN: 11b wording, flagged and not rendered (the 7.4.3 wording is rendered) | FA: 11b wording, flagged and not rendered |
 | --- | --- | --- | --- |
 | `policy.R1.metadata_missing_or_inconsistent` | `copy.req.reason_r1` | Some declarations are missing or do not fit together, for example a purpose and a license that are not allowed together. Complete all four declarations and check the combination. | بعضی از اعلام‌ها ناقص است یا با هم سازگار نیست؛ برای نمونه هدف و مجوزی که با هم مجاز نیستند. هر چهار اعلام را کامل کنید و ترکیب آن‌ها را بررسی کنید. |
 | `policy.R2.sensitivity_not_accepted` | `copy.req.reason_r2` | This request was declared, or found by the checks, to contain sensitive material or personal data of other people. In this phase Hamyar accepts only public (S0) or private but non-sensitive (S1) material. Remove that material, or do not use Hamyar for this job. | این درخواست حاوی مطالب حساس یا اطلاعات شخصِی دیگران اعلام شده یا بررسی‌ها چنین نشانه‌ای یافته‌اند. همیار در این مرحله فقط مطالب عمومی (S0) یا خصوصیِ غیرحساس (S1) را می‌پذیرد. آن مطالب را حذف کنید، یا برای این کار از همیار استفاده نکنید. |
@@ -876,7 +891,7 @@ Reasons arrive as `policy.<policy_rule_id>.<slug>` (S0.8.4) in `rejection.reason
 | `policy.R8.volunteer_optin_mismatch` (not a rejection) | `copy.req.note_r8` | Few volunteers currently accept this kind of request, so the window may be longer. | اکنون داوطلبان کمی این نوع درخواست را می‌پذیرند، پس ممکن است بازهٔ زمانی بلندتر شود. |
 | `policy.R9.policy_version_stale` | `copy.req.err_policy_changed` | The rules changed after your request was checked. Check it again; nothing was charged. | پس از بررسی درخواست شما، قواعد تغییر کرد. دوباره بررسی کنید؛ هیچ اعتباری کسر نشده است. |
 
-`policy.R9.policy_version_stale` is shown as this row only when the policy changed before confirmation (nothing was charged). When a rule change stops work after admission, credit was held, so the screen shows the pause or closure copy of 11.39.1 and the receipt of `SCR-req-15`. The optional `details.sub_code` (S7.* 7.4.3) selects a hint key `copy.policy.<rule_id>.<sub_code>.hint` shown under the reason; an unknown sub-code is ignored. S7.* reports an empty eligible service set as `policy.R7.license_exceeds_service_flags` with sub-code `no_approved_service`; `copy.req.err_no_service` applies where the API answers `422 UNPROCESSABLE` with `details.reason` `no_approved_service` instead. S7.* 7.4.3 also defines `copy.policy.<rule_id>.<slug>` texts for these same codes; C-001 must keep one set (`ISS-114`); until then the `copy.req.reason_*` rows below are rendered.
+`policy.R9.policy_version_stale` is shown as this row only when the policy changed before confirmation (nothing was charged). When a rule change stops work after admission, credit was held, so the screen shows the pause or closure copy of 11.39.1 and the receipt of `SCR-req-15`. The optional `details.sub_code` (S7.* 7.4.3) selects a hint key `copy.policy.<rule_id>.<sub_code>.hint` shown under the reason; an unknown sub-code is ignored. An empty eligible service set is `422 POLICY_REJECTED` with `policy.R7.license_exceeds_service_flags` and `details.sub_code` `no_approved_service` (owner: spec/07 7.4.2 and 7.10.7 `E1`, `E4`). The screen shows the R7 reason with `copy.req.err_no_service` as its hint (alias of `copy.policy.R7.no_approved_service.hint`), says that nothing was charged and does not advise changing the license, because no license change creates an approved service. It appears where the code arrives: on `SCR-req-02` at `createJob` (no job exists) and on `SCR-req-06` after screening. The same screen and copy are used where an API answers `422 UNPROCESSABLE` with `details.reason` `no_approved_service` (fallback alias, 11.43.2). Owner of this copy: spec/07 7.4.3 defines `copy.policy.<rule_id>.<slug>` (EN and FA) for these codes and is the single owner (`ISS-114`); the screen renders those keys. The keys `copy.req.reason_r1` to `copy.req.reason_r7` and `copy.req.note_r8` in the table above are kept as aliases with the same meaning (mapping in 7.4.3). Where their wording differs from 7.4.3, the 7.4.3 wording is rendered and the 11b wording is flagged (kept in the table for the reviewers, not rendered). `copy.req.err_policy_changed` is not an alias: it covers a policy change before confirmation with nothing charged, whereas the 7.4.3 `R9` text describes work stopped after admission (default-pending D-19) [A].
 
 For an unknown code the screen shows `copy.req.reason_unknown` (EN "This request was not accepted. The code below identifies the reason.", FA «این درخواست پذیرفته نشد. کد زیر دلیل آن را مشخص می‌کند.») and still shows the code.
 
@@ -887,7 +902,7 @@ For an unknown code the screen shows `copy.req.reason_unknown` (EN "This request
 | Condition | Copy key | EN | FA |
 | --- | --- | --- | --- |
 | `403 LAUNCH_GATE_CLOSED` | `copy.req.err_gate_closed` | Requests are not open yet. Nothing has been charged. | ثبت درخواست هنوز باز نشده است. هیچ اعتباری کسر نشده است. |
-| `503 KILL_SWITCH_ENGAGED` | `copy.req.err_kill_switch` | New requests are paused by the operators. Try again later. Requests already running are not changed unless they show a pause. | ثبت درخواست جدید را مدیران پلتفرم موقتاً متوقف کرده‌اند. بعداً دوباره امتحان کنید. درخواست‌های در حال اجرا تغییر نمی‌کنند، مگر آنکه توقف نشان دهند. |
+| `503 KILL_SWITCH_ENGAGED` (`kill.all_new_jobs`, `kill.template.<tpl_id>`, `kill.service.<svc_id>` or `kill.member.<mem_id>`; the cause is never shown) | `copy.req.err_kill_switch` | New requests are paused by the operators. Try again later. Requests already running are not changed unless they show a pause. | ثبت درخواست جدید را مدیران پلتفرم موقتاً متوقف کرده‌اند. بعداً دوباره امتحان کنید. درخواست‌های در حال اجرا تغییر نمی‌کنند، مگر آنکه توقف نشان دهند. |
 | `422 INSUFFICIENT_CREDIT` | `copy.req.err_insufficient_credit` | You need {needed} credits and have {have}. You can request up to {affordable} cells now. | به {needed} اعتبار نیاز دارید و {have} اعتبار دارید. اکنون می‌توانید تا {affordable} سلول درخواست کنید. |
 | `422 CAP_EXCEEDED`, `cap` = `concurrent_jobs` | `copy.req.err_cap_jobs` | You already have the maximum number of active requests ({max}). Wait for one to finish or cancel one. | شما هم‌اکنون بیشترین تعداد درخواست فعال ({max}) را دارید. منتظر پایان یکی بمانید یا یکی را لغو کنید. |
 | `CAP_EXCEEDED`, `cap` = `job_cells` | `copy.req.err_cap_cells` | A request can have at most {max} cells; this one has {n}. | هر درخواست حداکثر {max} سلول دارد؛ این درخواست {n} سلول دارد. |
@@ -895,7 +910,7 @@ For an unknown code the screen shows `copy.req.reason_unknown` (EN "This request
 | `CAP_EXCEEDED`, `cap` = `reservations` | `copy.req.err_cap_reservations` | You already have the maximum number of reservations ({max}). | شما هم‌اکنون بیشترین تعداد رزرو ({max}) را دارید. |
 | `CAP_EXCEEDED`, `cap` = `reservation_cells` | `copy.req.err_cap_reservation_cells` | This request has more cells than your reservation covers ({max}). | این درخواست سلول بیشتری از مقدار پوشش رزرو شما ({max}) دارد. |
 | `422 NO_CAPACITY` | `copy.req.err_no_capacity` | There is no capacity for this request within the longest window now. You can join the waitlist or book a reservation. | اکنون برای این درخواست در بلندترین بازهٔ ممکن ظرفیتی نیست. می‌توانید در فهرست انتظار بمانید یا رزرو کنید. |
-| `422 UNPROCESSABLE`, `reason` = `no_approved_service` | `copy.req.err_no_service` | No approved service is available for this request right now. Nothing has been charged. | اکنون برای این درخواست سرویس تأییدشده‌ای در دسترس نیست. هیچ اعتباری کسر نشده است. |
+| `422 POLICY_REJECTED` with `policy.R7.license_exceeds_service_flags` and `details.sub_code` = `no_approved_service` (owner: spec/07 7.4.2, 7.10.7); also, as a fallback alias, `422 UNPROCESSABLE`, `reason` = `no_approved_service` | `copy.req.err_no_service` (hint under the R7 reason; alias of `copy.policy.R7.no_approved_service.hint`) | No approved service is available for this request right now. Nothing has been charged. | اکنون برای این درخواست سرویس تأییدشده‌ای در دسترس نیست. هیچ اعتباری کسر نشده است. |
 | `413 PAYLOAD_TOO_LARGE` | `copy.req.err_too_large` | The file is larger than the limit ({max}). | حجم فایل از حد مجاز ({max}) بیشتر است. |
 | `400 VALIDATION_FAILED` | `copy.req.err_validation` | Please check the marked fields. | لطفاً بخش‌های مشخص‌شده را بررسی کنید. |
 | `429 RATE_LIMITED` | `copy.req.err_rate_limited` | Too many attempts. Try again in {wait}. | تلاش‌ها زیاد بوده است. {wait} دیگر دوباره امتحان کنید. |
@@ -926,6 +941,7 @@ Appeal state labels (`copy.req.appeal_<state>`): `filed` Filed / ثبت شد; `a
 - **AC-req-64** Given a `rejected` job inside the window, When the person files with a note, Then one `createAppeal` with `kind` `job_rejection` is sent with its `Idempotency-Key`, an `Appeal` in `filed` is shown, and the form becomes read-only.
 - **AC-req-65** Given an appeal already filed for this decision and `appeal.max_per_decision` = 1, When the page loads, Then no second form is offered and the existing appeal's state is shown.
 - **AC-req-66** Given the appeal is `overturned`, When the person presses Continue, Then a new job is created with `copy_from_job_id`, no credit has moved, and the wizard resumes at the step the server returns.
+- **AC-req-66a** Given an empty eligible set answered as `422 POLICY_REJECTED` with `policy.R7.license_exceeds_service_flags` and `details.sub_code` `no_approved_service`, When the screen renders, Then it shows the 7.4.3 R7 reason, the hint `copy.req.err_no_service`, the statement that nothing was charged and no advice to change the license; given the same condition answered as `422 UNPROCESSABLE` with `details.reason` `no_approved_service`, Then the screen and copy are identical.
 
 ## 11.44 Plain-language explanations of P, L, S and M (declarations copy)
 
