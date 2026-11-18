@@ -317,24 +317,24 @@ English is a full locale, not a fallback. [D]
 | 1.4.12 Text spacing | Nothing is lost when a user stylesheet increases line, paragraph and word spacing. Letter spacing is never applied to Arabic-script text (S11.72). |
 | 1.4.13 Content on hover or focus | Dismissible, hoverable, persistent. |
 | 2.1.1, 2.1.2 Keyboard | Everything is operable by keyboard; nothing traps focus. The language switch, the prompt expansion, copy, paste-back and Submit are reachable in a short tab sequence. |
-| 2.2.1 Timing adjustable (known deviation) | A lease has a server-enforced time limit (`lease.timeout_s`) that exists so that cells are not hoarded. WCAG asks that a user can extend a limit many times; the product allows `lease.max_extensions` (initial configurable default 1) extensions of `lease.extend_s`. The deviation is mitigated by: a warning at `ui.lease.warn_remaining_s`; a default limit of ten times the expected time per cell (`lease.timeout_s` is 10 x 120 s, S0.10); a free decline at any moment; an immediate re-lease of the next cell; and local draft preservation (S11.49). The deviation is listed in the accessibility statement. [A][V: whether the essential-limit exception applies is for the accessibility auditor] |
+| 2.2.1 Timing adjustable (known deviation) | A lease has a server-enforced time limit (`lease.timeout_s`) that exists so that cells are not hoarded. WCAG asks that a user can extend a limit many times; the product allows `lease.max_extensions` (initial configurable default 1) extensions of `lease.extend_s`. The deviation is mitigated by: a warning at `ui.lease.warn_remaining_s`; a default limit of ten times the expected time per cell (`lease.timeout_s` is 10 x 120 s, S0.10); a free decline at any moment; an immediate re-lease of the next cell; and local draft preservation (S11.79). The deviation is listed in the accessibility statement. [A][V: whether the essential-limit exception applies is for the accessibility auditor] |
 | 2.2.2, 2.3.1, 2.3.3 Motion | Nothing blinks or flashes. Animation honors `prefers-reduced-motion`; the counter and progress indicators work without motion. |
-| 2.4.1, 2.4.2, 2.4.6 Navigation | Skip-to-content link; localized page titles (dynamic parts isolated, S11.45); descriptive headings and labels. |
+| 2.4.1, 2.4.2, 2.4.6 Navigation | Skip-to-content link; localized page titles (dynamic parts isolated, S11.75); descriptive headings and labels. |
 | 2.4.3, 2.4.7, 2.4.11 Focus | Logical focus order; a visible focus indicator on every control; focused elements are never hidden under sticky bars. |
 | 2.5.1, 2.5.2 Pointer gestures | No gesture is required (no path-based gestures); swipes and carousels have buttons. Actions fire on release and can be cancelled. |
 | 2.5.3 Label in name | A control's accessible name starts with its visible Persian or English label. |
 | 2.5.8 Target size | Targets are at least `ui.a11y.min_target_css_px` (initial configurable default 44; the WCAG 2.2 minimum is 24). |
-| 3.1.1, 3.1.2 Language | `lang` on the root and `lang` on every inline passage in the other language, so that speech output switches voice (S11.45). Persian speech availability differs by device [V: target phones]; no function depends on audio. |
+| 3.1.1, 3.1.2 Language | `lang` on the root and `lang` on every inline passage in the other language, so that speech output switches voice (S11.75). Persian speech availability differs by device [V: target phones]; no function depends on audio. |
 | 3.2.2 On input | Changing the language, digits or calendar setting changes only the display and never submits or navigates. |
 | 3.3.1 to 3.3.4 Errors | An error summary at the top receives focus, links to each field, and names the problem and the fix from `details.copy_key` and `details.fields[].path` (S0.11). Screens that move credit (escrow confirmation, reservation, cancellation) show a review step and can be reversed or cancelled where the ledger allows (S6.*). |
-| 3.3.7 Redundant entry | Nothing already entered is asked again; the paste-back draft survives reload and re-lease (S11.49). |
-| 3.3.8 Accessible authentication | No cognitive test, no transcription. The recovery key field accepts paste and password managers; its grouping, hyphens and case are tolerated (S11.46). |
+| 3.3.7 Redundant entry | Nothing already entered is asked again; the paste-back draft survives reload and re-lease (S11.79). |
+| 3.3.8 Accessible authentication | No cognitive test, no transcription. The recovery key field accepts paste and password managers; its grouping, hyphens and case are tolerated (S11.76). |
 | 4.1.2, 4.1.3 Name, role, value; status messages | Standard controls; custom ones carry ARIA roles. Result feedback (accepted, rejected, balance changed, draft saved, offline) is announced politely by a status region. The lease countdown is not announced every second: only at `ui.lease.warn_remaining_s` and at expiry. |
 | Mandatory prompt expansion (FD§5.5) | While a first-use or non-default prompt is unexpanded, Copy and Open stay focusable with `aria-disabled=true` and an adjacent explanation linked by `aria-describedby`; they are not removed from the tab order and not conveyed by color alone. Expanding moves focus to the start of the expanded text and announces it. |
-| Plain language | Notices follow the copy rules of S11.50: short sentences, one idea each, the actor named. |
+| Plain language | Notices follow the copy rules of S11.80: short sentences, one idea each, the actor named. |
 | Verification | An automated rules engine runs in CI on every screen in both locales (a failure fails the build); a manual pass with keyboard only, 200% zoom, and a screen reader on a real Android and a real iOS phone, in `fa` and in `en`, is a `LaunchGateItem` under G2 with evidence attached (S14.*). An accessibility statement page with a way to report problems exists before launch [A]. Automated checks find only part of the problems; the manual pass is not optional. |
 
-## 11.49 Low-bandwidth behavior and offline-tolerant paste-back
+## 11.79 Low-bandwidth behavior and offline-tolerant paste-back
 
 The design assumes slow, lossy and sometimes blocked connections without assuming any statistic about them. Reachability from Iran is [V] (FD§8.3 G2) and is measured, not assumed. [D]
 
@@ -342,11 +342,11 @@ The design assumes slow, lossy and sometimes blocked connections without assumin
 
 - **No third-party requests** from any member or public page: no CDN, font, script, style, tracker, map, embed, avatar or analytics service. The content security policy (S10.*) allows the page origin and the API origin only. A CI test loads every screen with all other origins blocked and fails on any attempt (AC-i18n-28). Opening a service in another tab is a member action and is not part of a page load.
 - **No heavy assets:** no video, no raster hero images; icons are one inline SVG sprite; share cards (S12.*) are generated only on explicit request and are outside the flows of this part.
-- **Notices and public pages work without JavaScript and without an identity:** the notices (S11.51) are static pages readable before an identity exists, in both languages; the first-contribution flow needs JavaScript because keys are generated and used on the device (S10.*).
+- **Notices and public pages work without JavaScript and without an identity:** the notices (S11.81) are static pages readable before an identity exists, in both languages; the first-contribution flow needs JavaScript because keys are generated and used on the device (S10.*).
 - **UTF-8 JSON is sent raw**, not ASCII-escaped: an escaped Persian letter costs six bytes against two. Text responses are compressed (brotli or gzip).
 - **Caching:** static assets have hashed names and immutable caching [A]; authenticated responses are `no-store` and public ones follow S0.11.7.
 - **Polling, not sockets:** public counters refresh every `public.counter_refresh_s`; polling pauses while the tab is hidden and backs off on failure. Where the browser signals a data-saver preference, optional refreshes and animations stop [V: browser support].
-- **Only the active locale's strings** are loaded; the other locale loads on switch. The consent manifest (S11.50) is small and carries hashes, not texts.
+- **Only the active locale's strings** are loaded; the other locale loads on switch. The consent manifest (S11.80) is small and carries hashes, not texts.
 - **Retries** use the same `Idempotency-Key` and exponential backoff with jitter: `delay_n = min(ui.retry.max_delay_s, ui.retry.base_delay_s x 2^(n-1)) x u`, with `u` uniform in [0.5, 1.0], and `Retry-After` wins when larger. After `ui.retry.max_attempts` the client stops retrying by itself and offers a manual retry.
 
 **Budgets** (every one is an `initial configurable default` or a formula; each is enforced in CI against the build and replaced by measurement on real phones and networks, `TEC`)
@@ -409,7 +409,7 @@ Storage and privacy [D]:
 - Two tabs: the draft is keyed by lease, the last write wins, and a `storage` event refreshes the other tab.
 - A service worker MAY cache the application shell and the notices for offline reading. It never caches API responses beyond the cell card of an active lease, which follows the same time-to-live. [A]
 
-## 11.50 Copy system
+## 11.80 Copy system
 
 **Storage and delivery** [D]. Copy is a set of versioned resource files shipped with the front-end build, one record per key, not rows in the database and not editable by the parameter editor: legal text changes only by a reviewed release. The build also emits a `copy_manifest` (key, version, hash, review status) that the API reads. Keys follow S0.5: `copy.<area>.<key>`, with an optional last segment (`.title`, `.body`, `.chip`, `.ack`).
 
@@ -431,7 +431,7 @@ copy_entry:
 | Value | Meaning | Allowed next values |
 | --- | --- | --- |
 | `needs_human_and_legal_review` | Initial value of every row; any text change returns here. Shown to no member of a launched system. | `human_reviewed` |
-| `human_reviewed` | A native-speaking reviewer for each language recorded that the text passes the checklist of S11.53 | `legal_reviewed`, `needs_human_and_legal_review` |
+| `human_reviewed` | A native-speaking reviewer for each language recorded that the text passes the checklist of S11.83 | `legal_reviewed`, `needs_human_and_legal_review` |
 | `legal_reviewed` | Counsel's memo is referenced in `reviewed.legal_ref` [V] | `approved`, `needs_human_and_legal_review` |
 | `approved` | Two distinct admins signed off (the rule of `launch.min_signoffs`, S14.*) | `withdrawn`, `needs_human_and_legal_review` |
 | `withdrawn` | Taken out of use; the key is not deleted | none |
@@ -447,9 +447,9 @@ Changing the text of either language resets both to `needs_human_and_legal_revie
 - No provider name, no law name, no URL inside a notice.
 - No absolute about something the project cannot show; *never* appears only inside a sentence that also says declared.
 - No tip for getting around a limit; no politics; no humor.
-- Any number that comes from a parameter is a placeholder (registry in S11.52). Literal digits do not appear in Persian copy.
+- Any number that comes from a parameter is a placeholder (registry in S11.82). Literal digits do not appear in Persian copy.
 - Paragraph break `¶`, list item `•` and placeholder `{name}` are the only markup. No HTML, no Markdown.
-- Persian orthography and terminology follow S11.53.
+- Persian orthography and terminology follow S11.83.
 
 **Copy checks in CI** (they fail the build; AC-i18n-31, AC-i18n-32)
 
@@ -464,13 +464,13 @@ Changing the text of either language resets both to `needs_human_and_legal_revie
 | No markup | No `<`, no URL, no Markdown |
 | Status | A key whose text changed without a version bump or a status reset fails |
 
-## 11.51 The notices: keyed copy table
+## 11.81 The notices: keyed copy table
 
-The table lists the copy of every policy, privacy and risk notice required by prompt scope F. Columns: `key`; `FA` (Persian first); `EN`; `review status`. The machine value of the review status of every row is `needs_human_and_legal_review` (S11.50), written in the last column as *needs human and legal review*. All rows have `promise: true` unless the text contains no promise-like sentence. `¶` is a paragraph break and `•` a list item. [D]
+The table lists the copy of every policy, privacy and risk notice required by prompt scope F. Columns: `key`; `FA` (Persian first); `EN`; `review status`. The machine value of the review status of every row is `needs_human_and_legal_review` (S11.80), written in the last column as *needs human and legal review*. All rows have `promise: true` unless the text contains no promise-like sentence. `¶` is a paragraph break and `•` a list item. [D]
 
 No text below has been checked by a lawyer, a safety advisor or a native-speaking reviewer. The wording of the contributor waiver and of every statement about law, terms or safety is a draft for counsel and for a qualified safety advisor [V: counsel in the operator's jurisdiction, FD§8.3 G0; a person qualified to advise on safety, FD§8.3 G1].
 
-### 11.51.A Account risk
+### 11.81.A Account risk
 
 | key | FA | EN | review status |
 | --- | --- | --- | --- |
@@ -478,7 +478,7 @@ No text below has been checked by a lawyer, a safety advisor or a native-speakin
 | `copy.risk.account_notice.body` | همیار از شما می‌خواهد با حساب شخصی خودتان در یک سرویس هوش مصنوعی، کارهای کوچکی به نام «سلول کار» را برای دیگران انجام دهید. هر سرویس شرایط استفادهٔ خودش را دارد. ممکن است آن شرایط چنین کاری را مجاز ندانند، بدون اطلاع قبلی تغییر کنند، یا در محل زندگی شما به شکل دیگری اعمال شوند. اگر سرویسی تشخیص دهد که شرایط آن را نقض کرده‌اید، ممکن است حساب شما را محدود یا مسدود کند. همیار نمی‌تواند جلوی این اتفاق را بگیرد، از طرف شما پیگیری نمی‌کند و هیچ سرویسی را کنترل نمی‌کند. ¶ • اعلام‌شده: هر سرویس تنها وقتی در همیار عرضه می‌شود که یک بازبین شرایط آن را ثبت کرده و نسخهٔ تاریخ‌دارش را ذخیره کرده باشد. این بازبینی اعلام‌شده است و تضمین نمی‌کند که سرویس کار شما را بپذیرد. • اعلام‌شده: دکمهٔ ارسال را همیشه خودتان می‌زنید. همیار هرگز گذرواژه‌تان را نمی‌خواهد، به حساب شما وصل نمی‌شود و صفحهٔ گفتگوی شما را نمی‌خواند. • اعلام‌شده: می‌توانید از هر سلول کار انصراف دهید و هر زمان که خواستید کنار بگذارید، بدون هیچ جریمه‌ای. • پیش از استفاده از هر سرویس، شرایط آن را خودتان بخوانید. اگر مطمئن نیستید، از آن استفاده نکنید. | Hamyar asks you to use your own account on a third-party AI service to do small tasks, called cells, for other people. That service has its own terms. Those terms may not allow this, may change without notice, or may be applied differently where you live. If a service decides that you broke its terms, it may limit or suspend your account. Hamyar cannot prevent that, cannot follow up with the service for you and does not control any service. ¶ • Declared: a service is offered in Hamyar only when a reviewer has recorded its terms and saved a dated copy. This is a declared review, not a guarantee that the service will accept what you do. • Declared: you press Send yourself every time. Hamyar never asks for your password, never connects to your account and never reads your chat page. • Declared: you may decline any cell and stop at any time, without penalty. • Read the terms of a service yourself before you use it. If you are not sure, do not use it. | needs human and legal review |
 | `copy.risk.service_review_line` | شرایط این سرویس آخرین بار در {review_date} بازبینی شده است. این بازبینی اعلام‌شده است و تضمین نیست. | The terms of this service were last reviewed on {review_date}. This is a declared review, not a guarantee. | needs human and legal review |
 
-### 11.51.B Privacy
+### 11.81.B Privacy
 
 | key | FA | EN | review status |
 | --- | --- | --- | --- |
@@ -487,7 +487,7 @@ No text below has been checked by a lawyer, a safety advisor or a native-speakin
 | `copy.privacy.pseudonymity_notice.body_not_collected` | اعلام‌شده: همیار نام واقعی، شمارهٔ تلفن یا هیچ مدرک هویتی از شما نمی‌خواهد. ¶ • اعلام‌شده: گذرواژه یا نشست ورود شما در هیچ سرویسی را ذخیره نمی‌کند و متن صفحهٔ گفتگوی شما را نگه نمی‌دارد. • اعلام‌شده: محل اعضا را نمایش نمی‌دهد و از ردیاب یا کوکی شخص ثالث استفاده نمی‌کند. • اعلام‌شده: درخواست‌دهندگان هرگز نمی‌بینند چه کسی سلول کار را انجام داده است. | Declared: Hamyar does not ask for your real name, phone number or any identity document. ¶ • Declared: it does not store your password or session for any service, and it does not keep the text of your chat page. • Declared: it does not show where members are, and it does not use third-party trackers or cookies. • Declared: requesters never see who completed a cell. | needs human and legal review |
 | `copy.privacy.pseudonymity_notice.body_limits` | آنچه همیار نمی‌تواند وعده دهد: ¶ • همیار «با نام مستعار» است، نه «ناشناس». ما وعده نمی‌دهیم که هیچ‌کس نتواند شما را شناسایی کند. • ارائه‌دهندهٔ میزبانی همیار و شبکه‌هایی که میان دستگاه شما و همیار قرار دارند ممکن است ببینند که دستگاه شما به همیار وصل شده است، هرچند طبق سیاست اعلام‌شدهٔ ما، نشانی خام شبکه ذخیره نمی‌شود. • اگر کسی با اختیار قانونی یا دسترسی فیزیکی داده‌ای بخواهد یا دستگاهی را بردارد، نتیجه به قانون و به چیزی که وجود دارد بستگی دارد. اعلام‌شده: ما تا جای ممکن کم نگه می‌داریم تا چیز کمتری برای تحویل وجود داشته باشد. • همیار نمی‌تواند اطلاعاتی را که خودتان بیرون از همیار منتشر می‌کنید کنترل کند. | What Hamyar cannot promise: ¶ • Hamyar is pseudonymous, not anonymous. We do not promise that nobody can identify you. • The provider that hosts Hamyar, and the networks between your device and Hamyar, may be able to see that your device connected, even though our declared policy is not to store raw network addresses. • If someone with legal power or physical access asks for data or takes a device, the outcome depends on the law and on what exists to be taken. Declared: we keep as little as we can, so that there is less to hand over. • Hamyar cannot control what other people do with information that you share outside Hamyar. | needs human and legal review |
 
-### 11.51.C Safety of members in Iran
+### 11.81.C Safety of members in Iran
 
 The notice is shown to every new member and does not depend on any guess about location: Hamyar never infers where a member is (S0.6, S10.*). It is also on the public notices page. [D]
 
@@ -496,7 +496,7 @@ The notice is shown to every new member and does not depend on any guess about l
 | `copy.safety.iran_notice.title` | یادداشتی ساده دربارهٔ ایمنی شخصی | A plain note on personal safety | needs human and legal review |
 | `copy.safety.iran_notice.body` | اگر در ایران هستید، یا در جایی که مشارکت می‌تواند خطرناک باشد، پیش از عضویت این یادداشت را بخوانید. اعلام‌شده: همیار تلاش نمی‌کند بفهمد شما کجا هستید و این یادداشت را به همهٔ اعضای جدید نشان می‌دهد. ¶ مشارکت ممکن است برای شما خطر شخصی داشته باشد؛ این به محل زندگی شما، قانون همان‌جا و شرایط سرویس‌هایی که استفاده می‌کنید بستگی دارد. همیار نمی‌تواند این را به‌جای شما ارزیابی کند و مشاورهٔ حقوقی نمی‌دهد. ¶ • همیار «با نام مستعار» است، نه «ناشناس». اعلام‌شده: ما تا جای ممکن کمترین اطلاعات را جمع می‌کنیم. وعده نمی‌دهیم که هیچ‌کس نتواند شما را شناسایی کند. • هر چیزی که در یک کار، گزارش یا درخواست بازبینی می‌نویسید ممکن است کسانی آن را بخوانند که ما کنترلی بر آن‌ها نداریم. نام، راه‌های تماس یا هر چیزی را که بتواند خودتان یا دیگری را شناسایی کند ننویسید. • هر چیزی که روی دستگاه شما ذخیره شود، مثل پیش‌نویس‌ها، برای هرکس که بتواند از دستگاه استفاده کند یا آن را بررسی کند قابل دیدن است. هر زمان می‌توانید آن را پاک کنید. • همیار از شما نمی‌خواهد و به شما توصیه نمی‌کند که محدودیتی را دور بزنید یا شرایط استفادهٔ سرویسی را نقض کنید. اگر سرویسی برای شما در دسترس یا مجاز نیست، از آن استفاده نکنید. • اعلام‌شده: همیار محل اعضا را نمایش نمی‌دهد و مدرک هویتی نمی‌خواهد. • می‌توانید از هر سلول کار انصراف دهید، کنار بگذارید یا حساب خود را ببندید. اگر احساس امنیت نمی‌کنید، کنار گذاشتن انتخابی معقول است. | If you are in Iran, or anywhere else where taking part may be risky, please read this note before you join. Declared: Hamyar does not try to work out where you are, and it shows this note to every new member. ¶ Taking part may carry personal risk, depending on where you are, what the law says there, and what the services you use allow. Hamyar cannot judge this for you and gives no legal advice. ¶ • Hamyar is pseudonymous, not anonymous. Declared: we collect as little as we can. We do not promise that nobody can identify you. • Anything you write in a job, a report or an appeal may be read by people we do not control. Do not include your name, your contacts or anything that could identify you or another person. • Anything saved on your device, such as drafts, can be seen by anyone who can use or inspect that device. You can clear it at any time. • Hamyar does not ask or advise you to get around any restriction or to break any service's terms. If a service is not available or not allowed for you, do not use it. • Declared: Hamyar does not show where members are, and it does not require an identity document. • You may decline any cell, stop, or close your account at any time. If you do not feel safe, stopping is a reasonable choice. | needs human and legal review |
 
-### 11.51.D Open license, declared not guaranteed, credit is not money
+### 11.81.D Open license, declared not guaranteed, credit is not money
 
 | key | FA | EN | review status |
 | --- | --- | --- | --- |
@@ -510,7 +510,7 @@ The notice is shown to every new member and does not depend on any guess about l
 | `copy.credit.not_money.title` | اعتبار، پول نیست | Credit is not money | needs human and legal review |
 | `copy.credit.not_money.body` | اعتبار در همیار واحد حسابِ کارهایی است که بررسی و پذیرفته شده‌اند. اعتبار پول نیست، دارایی نیست و حقِ وعده‌داده‌شده‌ای هم به شمار نمی‌رود. ¶ • اعلام‌شده: اعتبار با انجام کار به دست می‌آید یا به‌صورت هدیهٔ اعلام‌شده از ذخیرهٔ مشترک (مانند اعتبار آغازین) داده می‌شود. نه خرید و فروش می‌شود، نه مستقیم برای عضو دیگری فرستاده می‌شود و نه با پول مبادله می‌شود. • اعلام‌شده: اعتبار تاریخ انقضا دارد و هر موجودی تاریخ‌های انقضای خود را نشان می‌دهد. اعتبارِ حاصل از کار {credit_lifetime_days} روز ماندگار است، مگر آنکه قوانین با اطلاع قبلی در سابقهٔ تغییرات عوض شوند. • اعلام‌شده: قیمت هر کار پیش از تأیید درخواست‌دهنده نشان داده می‌شود و کار فقط وقتی پذیرفته می‌شود که ظرفیت اعلام‌شده اجازه بدهد. • همیار دربارهٔ اینکه قانون با اعتبار چگونه رفتار می‌کند هیچ ادعایی ندارد. | Credit in Hamyar is a unit of account for work that has been checked and accepted. It is not money, not property and not a promised entitlement. ¶ • Declared: credit is earned through completed work or given as a declared grant from the Commons Reserve (for example the starter grant). It is not bought or sold, it is not sent directly to another member, and it is not exchanged for money. • Declared: credit expires, and each balance shows its expiry dates. Credit earned by work lasts {credit_lifetime_days} days, unless the rules change with advance notice in the change log. • Declared: the price of a job is shown before the requester confirms, and a job is accepted only when the declared capacity allows it. • Hamyar makes no statement about how any law treats credit. | needs human and legal review |
 
-### 11.51.E Prompt-injection advice, decline, report and rejection
+### 11.81.E Prompt-injection advice, decline, report and rejection
 
 | key | FA | EN | review status |
 | --- | --- | --- | --- |
@@ -521,7 +521,7 @@ The notice is shown to every new member and does not depend on any guess about l
 | `copy.moderation.report_explainer` | اگر سلولی ناامن به نظر می‌رسد، چیزی بیشتر از کپی، ارسال و بازگرداندن متن می‌خواهد، به نظر می‌رسد اطلاعات شخصی دارد یا به هر شکل دیگری ایراد دارد، آن را گزارش کنید. ¶ • اعلام‌شده: یک بازبین هر گزارش را می‌بیند. هدف اعلام‌شده برای نخستین بررسی {report_triage_sla_days} روز است. • اعلام‌شده: درخواست‌دهنده نمی‌فهمد چه کسی گزارش داده است. • اعلام‌شده: گزارش‌ها تا {moderation_days} روز پس از رسیدگی نگه داشته می‌شوند و بعد به شمارش‌های کلی تقلیل می‌یابند. | Report a cell if it looks unsafe, asks for more than copying, pressing Send and returning text, seems to contain personal data, or is wrong in some other way. ¶ • Declared: a reviewer looks at every report. The declared target for a first look is {report_triage_sla_days} days. • Declared: the requester does not learn who reported. • Declared: reports are kept for {moderation_days} days after they are resolved, then reduced to counts. | needs human and legal review |
 | `copy.moderation.rejection_explainer` | نتیجه‌ای که رد‌شده باشد اعتباری نمی‌آورد. اعلام‌شده: دلیل رد را می‌بینید و تا {appeal_window_days} روز می‌توانید درخواست بازبینی بدهید. بازبینی را کسی انجام می‌دهد که تصمیم اول را نگرفته است. | A rejected result earns no credit. Declared: you can see the reason, and you can ask for a review within {appeal_window_days} days. A reviewer who did not make the first decision looks at it. | needs human and legal review |
 
-### 11.51.F Recovery key, consent and opt-in
+### 11.81.F Recovery key, consent and opt-in
 
 | key | FA | EN | review status |
 | --- | --- | --- | --- |
@@ -542,7 +542,7 @@ The notice is shown to every new member and does not depend on any guess about l
 | `copy.consent.optin.sensitive_topic` | سلول‌هایی با این موضوع به من نشان داده شود: {topic}. ممکن است محتوای سخت یا ناراحت‌کننده داشته باشند. اعلام‌شده: این گزینه به‌طور پیش‌فرض خاموش است و هر زمان می‌توانید خاموشش کنید. | Show me cells on this topic: {topic}. They may contain difficult material. Declared: this is off by default, and you can turn it off at any time. | needs human and legal review |
 | `copy.consent.optin.locked_purpose` | این نوع استفاده هنوز باز نشده است. اعلام‌شده: برای هر سرویس فقط پس از بازبینی شرایط آن باز می‌شود و تغییر در سابقهٔ تغییرات اعلام می‌شود. | This use is not open yet. Declared: it opens for a service only after that service's terms have been reviewed, and the change is announced in the change log. | needs human and legal review |
 
-### 11.51.G No circumvention and offline drafts
+### 11.81.G No circumvention and offline drafts
 
 | key | FA | EN | review status |
 | --- | --- | --- | --- |
@@ -551,14 +551,14 @@ The notice is shown to every new member and does not depend on any guess about l
 | `copy.offline.draft_local_only` | اعلام‌شده: متنی که چسبانده‌اید فقط روی همین دستگاه ذخیره می‌شود، تا وقتی که ارسال را بزنید، یا زمانِ سلول کار تمام شود، یا {draft_ttl}، هر کدام زودتر باشد. هر کسی که بتواند از این دستگاه استفاده کند آن را می‌بیند. همین حالا می‌توانید آن را پاک کنید. | Declared: your pasted text is saved only on this device, until you press Submit, until the cell's time runs out, or for {draft_ttl}, whichever comes first. Anyone who can use this device can see it. You can clear it now. | needs human and legal review |
 | `copy.offline.submit_queued` | شما آفلاین هستید. ارسال شما روی همین دستگاه منتظر مانده است. اعلام‌شده: اگر زمان سلول کار تمام نشده باشد، با برگشتن اتصال فرستاده می‌شود. هنوز پذیرفته نشده است. | You are offline. Your submission is waiting on this device. Declared: if the cell's time has not run out, it will be sent when the connection returns. It has not been accepted yet. | needs human and legal review |
 
-## 11.52 Where each notice appears, placeholders and the declared-claim register
+## 11.82 Where each notice appears, placeholders and the declared-claim register
 
 **Usage map** [D]
 
 | Notice group (keys) | Where it appears | Rule |
 | --- | --- | --- |
-| `copy.safety.iran_notice.*`, `copy.risk.account_notice.*`, `copy.privacy.pseudonymity_notice.*`, `copy.credit.not_money.*`, `copy.declared.not_guaranteed.*`, `copy.license.downstream_uncontrolled.body`, `copy.policy.no_circumvention.*` | The join page, in this order (safety first), displayed in full, not collapsed; then the consent keys | Static, readable without JavaScript and before an identity exists (S11.49) |
-| `copy.consent.join.*` | Below the notices on the join page | Every box starts unticked; all are required; no box is hidden or collapsed; the continue button stays focusable and explains what is missing (S11.48) |
+| `copy.safety.iran_notice.*`, `copy.risk.account_notice.*`, `copy.privacy.pseudonymity_notice.*`, `copy.credit.not_money.*`, `copy.declared.not_guaranteed.*`, `copy.license.downstream_uncontrolled.body`, `copy.policy.no_circumvention.*` | The join page, in this order (safety first), displayed in full, not collapsed; then the consent keys | Static, readable without JavaScript and before an identity exists (S11.79) |
+| `copy.consent.join.*` | Below the notices on the join page | Every box starts unticked; all are required; no box is hidden or collapsed; the continue button stays focusable and explains what is missing (S11.78) |
 | `copy.identity.recovery_key_warning.*` | Once, after the member's first accepted cell, as decided in `ISS-113` of S11 (`spec/11a-volunteer-ux.md`, 11.18; an owner decision); after a key rotation from settings a new key is shown once in the same way; a key is never shown a second time | The confirm step gates leaving the key screen, not the app; the unsaved-key marker stays until confirmed |
 | `copy.injection.advice.*` | The cell card, one tap away, and mandatory expansion on first use (FD§5.5); the help page | `copy.injection.clean_chat_hint.default` is the target of `adapter.clean_chat_hint_key` (S0.8.3) when an entry sets no hint of its own |
 | `copy.moderation.decline_explainer`, `copy.moderation.report_explainer` | Next to the decline and report buttons of the cell card; the help page | |
@@ -573,7 +573,7 @@ The notice is shown to every new member and does not depend on any guess about l
 
 The keys above are not API error texts. API errors use their own `copy.*` keys through `details.copy_key` (S0.11) and follow the same rules.
 
-**Placeholder registry** [D] (every placeholder in the table of S11.51; a placeholder with no row here is a build error)
+**Placeholder registry** [D] (every placeholder in the table of S11.81; a placeholder with no row here is a build error)
 
 | Placeholder | Type | Source |
 | --- | --- | --- |
@@ -617,12 +617,12 @@ The keys above are not API error texts. API errors use their own `copy.*` keys t
 | Locked purposes open only after a terms review and a change-log entry | Rules `R5`, `R6`, `R10` (S0.8.4) | consistent with S0 |
 | Inputs are reviewed and suspicious results are flagged | Screening and quarantine (S9.*) | [V] S9.* |
 | Published numbers carry the measurement date; changes with advance notice | `change.notice_days_default`; public change log (S12.*) | partly: a `tighten` change takes effect at once and is logged within `change.tighten_publish_within_s` (S0.10.3, R10), so 'advance notice' is not true for every change; the notice wording needs an owner decision [V] |
-| The safety note is shown to every new member and Hamyar does not infer location | S11.51.C; S0.6 (no IP-derived location) | consistent with this part |
-| Hamyar does not publish tips for getting around limits | Editorial rule; the copy checks of S11.50 | consistent with this part |
-| Drafts stay on the device for the stated time | S11.49; `ui.draft.ttl_s` | consistent with this part |
+| The safety note is shown to every new member and Hamyar does not infer location | S11.81.C; S0.6 (no IP-derived location) | consistent with this part |
+| Hamyar does not publish tips for getting around limits | Editorial rule; the copy checks of S11.80 | consistent with this part |
+| Drafts stay on the device for the stated time | S11.79; `ui.draft.ttl_s` | consistent with this part |
 | Opt-in changes apply to cells not yet opened | Rule `R8`; the lease-time opt-in check (S8.*) | [V] S8.* |
 
-## 11.53 Persian quality, terminology and the review procedure
+## 11.83 Persian quality, terminology and the review procedure
 
 The Persian must be correct, natural written Persian, not a word-for-word rendering of the English. [D]
 
