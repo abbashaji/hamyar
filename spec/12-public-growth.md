@@ -426,7 +426,7 @@ Copy: `copy.growth.referral_terms` (S12.14): bonuses are declared, may be delaye
 
 ## 12.11 Experiment framework for V1-V6
 
-Owned here: how growth flags are evaluated and how members are randomized. Owned by `S13.*`: the event schema, metric definitions, analysis, and the `PreRegistration` store and lock. The expiry arm (`ff.experiment.expiry_arm`) uses the same assignment mechanism and is specified in `S13.*`. **Precedence (A11 #1):** where this section and `S13.8` differ on lifecycle states (`locked` here is `registered` there), event names (`experiment.assigned` is `experiment.member_assigned`; `experiment.exposed` is `ui.variant_exposed`, also written server-side with `source` `server`; `experiment.locked` is `experiment.registered`), the block algorithm (the permuted blocks of `S13.8.4` apply to `hash_blocked`) or the pre-registration fields, `S13.8` governs. Two things of this section stay in force: lazy assignment on the first `GET /v1/members/me/features` for members who already exist when an experiment starts, and the stratifiers of 12.11.4 (13.8.1 lists them too).
+Owned here: how growth flags are evaluated and how members are randomized. Owned by `S13.*`: the event schema, metric definitions, analysis, and the `PreRegistration` store and lock. The expiry arm (`ff.experiment.expiry_arm`) uses the same assignment mechanism and is specified in `S13.*`. **One machine (FIX-23, A11 #2):** `S13.8` (the measurement owner) is canonical. This section uses its lifecycle states `draft`, `registered`, `running`, `stopped` (`registered` replaces the former `locked`), its event names (`experiment.created`, `experiment.registered`, `experiment.started`, `experiment.stopped`, `experiment.member_assigned`, and `ui.variant_exposed`, also written server-side with `source` `server`), its `ExperimentBlock` permuted blocks (`S13.8.4`) and its pre-registration fields; where any text here differs, `S13.8` governs. Two things of this section stay in force: lazy assignment on the first `GET /v1/members/me/features` for members who already exist when an experiment starts, and the stratifiers of 12.11.4 (13.8.1 lists them too).
 
 ### 12.11.1 Experiment record [D][A]
 
@@ -435,20 +435,20 @@ Owned here: how growth flags are evaluated and how members are randomized. Owned
 | Field | Rule |
 | --- | --- |
 | `flag_key` | one of `ff.growth.v1_fast_path` .. `ff.growth.v6_milestones` |
-| `status` | `draft`, `locked`, `running`, `stopped` (T). Events `experiment.locked`, `experiment.started`, `experiment.stopped` (reason `completed` or `killed`) (`ISS-128`) |
+| `status` | `draft`, `registered`, `running`, `stopped` (T), as `S13.8.2`. Events `experiment.created`, `experiment.registered`, `experiment.started`, `experiment.stopped` (reason `completed` or `killed`) (`ISS-128`) |
 | `arms` | ordered list `{arm_key, weight_ppm}`; weights sum to exactly 1,000,000; exactly one arm has `arm_key` = `control` |
 | `population` | `new_members` (created after start) or `all_members` (active at start or later) |
 | `eligibility` | `min_trust_tier`, `locales`, `status` (default `active` only) |
 | `unit` | always the member; never a device, IP hash or invite |
-| `assignment_mode` | `hash_bucket` or `hash_blocked` (12.11.3) |
+| `assignment_mode` | `hash_blocked`: the permuted blocks of `S13.8.4` (12.11.3), the only mode `S13.8` defines. `hash_bucket` stays a reserved name and is rejected with `VALIDATION_FAILED` until `S13.8` defines it |
 | `strata` | at most two of the allowed stratifiers (12.11.4) |
-| `block_size` | required for `hash_blocked`: for every arm `weight_ppm * block_size` must be divisible by 1,000,000 (two arms at 500,000 ppm admit 2, 4, 6, ...) |
-| `salt` | 128 bits from the OS CSPRNG, generated at creation, secret while `running`, published when `stopped` so anyone can recompute the arms |
+| `block_size` | derived and stored at `registered` by the rule of `S13.8.3` (weights reduced by their greatest common divisor; two arms at 500,000 ppm give 2); at most 100 |
+| `salt` | 32 bytes (256 bits) from the OS CSPRNG as in `S13.8.1`, generated at `draft`, secret until `stopped`, published then so anyone can recompute the blocks |
 | `seed_version` | copied at creation from `experiment.assignment_seed_version`; never changed for that experiment |
-| `pre_registration_id` | `prr_`; `running` requires a locked `PreRegistration` (12.11.7) |
+| `pre_registration_id` | `prr_` (`prereg_id` in `S13.8.1`); `registered` requires a locked `PreRegistration` (12.11.7) |
 | `starts_at`, `ends_at` | an experiment always has an end |
 
-After `locked`, `arms`, `weight_ppm`, `population`, `eligibility`, `assignment_mode`, `strata`, `block_size`, `salt` and `seed_version` are immutable (`VALIDATION_FAILED`). A different design is a new `Experiment`.
+After `registered`, `arms`, `weight_ppm`, `population`, `eligibility`, `assignment_mode`, `strata`, `block_size`, `salt` and `seed_version` are immutable (`VALIDATION_FAILED`). A different design is a new `Experiment`.
 
 ### 12.11.2 Flag evaluation and change classes [D]
 
@@ -459,11 +459,11 @@ function effective_variant(flag_key, member):
     exp = the experiment with status = running for flag_key
     if exp is none:                                                           return ON_FOR_ALL   # no assignment, no causal claim
     if not eligible(exp, member):                                             return ON_FOR_ALL_OR_OFF per exp.ineligible_behavior
-    a = get_or_create_assignment(exp, member)       # 12.11.3; emits experiment.assigned once
+    a = get_or_create_assignment(exp, member)       # 12.11.3; emits experiment.member_assigned once
     return a.arm_key
 ```
 
-`ineligible_behavior` is `off` for a new feature and `on` for a feature already shipped; it is fixed at lock. `GET /v1/members/me/features` (`getFeatures`) returns the member's effective flags as booleans, with no arm names, and is the only place assignment is created (lazily, on first evaluation after the experiment is `running`).
+`ineligible_behavior` is `off` for a new feature and `on` for a feature already shipped; it is fixed at lock. `GET /v1/members/me/features` (`getFeatures`) returns the member's effective flags as booleans, with no arm names. Members created while the experiment is `running` are assigned in the `member.created` transaction (`S13.8.4`); members who already exist (`eligibility.include_existing` true) are assigned lazily here, on first evaluation after the experiment is `running`, by the same block draw.
 
 | Operator action | Class (S0.8.6) | Rule |
 | --- | --- | --- |
@@ -474,32 +474,23 @@ function effective_variant(flag_key, member):
 
 ### 12.11.3 Assignment mechanism [D]
 
-Assignment is a deterministic function of logged inputs, so any assignment can be recomputed and audited. Hashing follows S0.6.4 (SHA-256 family; OS CSPRNG for the salt).
+Assignment is a deterministic function of logged inputs, so any assignment can be recomputed and audited. This section does not define its own algorithm: it uses the permuted blocks of `S13.8.4` (HMAC-SHA-256 stream, unbiased rejection sampling, S0.6.4), the same machine as the expiry arm `EXP-01`.
 
-**Mode `hash_bucket`** (stateless; default for large populations):
-
-```
-h      = HMAC-SHA-256(key = salt,
-                      data = seed_version || ':' || exp_id || ':' || member_id || ':' || stratum_key)
-u      = first 8 bytes of h as an unsigned big-endian integer
-bucket = u mod 1,000,000                    # ppm; modulo bias is below 10^6 / 2^64, about 5e-14
-arm    = first arm whose cumulative weight_ppm > bucket       # arms in stored order
-```
-
-**Mode `hash_blocked`** (permuted blocks within a stratum; recommended while members are few, because plain hashing then leaves arms unbalanced):
+**Mode `hash_blocked`** (the only mode; `ExperimentBlock` rows, `S13.8.1`):
 
 ```
-seq = next value of an atomic counter per (exp_id, stratum_key)       # serialized per pair
-k   = floor((seq - 1) / block_size);   j = (seq - 1) mod block_size
-block = arms repeated (weight_ppm * block_size / 1,000,000) times each
-Fisher-Yates shuffle of block, drawing r = u_i mod (i + 1), where each u_i is 8 bytes of
-    HMAC-SHA-256(key = salt, data = 'blk:' || seed_version || ':' || exp_id || ':' || stratum_key || ':' || k || ':' || i)
-arm = shuffled_block[j]
+stratum  = 'pilot_week:<k>' optionally with 'locale:<l>' (S13.8.4 item 2; strata of 12.11.4)
+block    = the open ExperimentBlock (experiment_id, stratum), locked with SELECT ... FOR UPDATE;
+           if none is open, create block_index = max + 1 with its permutation
+seed     = HMAC-SHA-256(key = salt, msg = 'v' || assignment_seed_version || 0x00 || stratum || 0x00 || block_index)
+permutation = arm keys with multiplicities weight_i / g, ascending arm_key, Fisher-Yates from j = B-1 down to 1
+           with r drawn from the stream HMAC-SHA-256(seed, counter) (S13.8.4 item 4)
+arm      = permutation[next_position]; next_position += 1
 ```
 
-In both modes the stored record makes the result reproducible: `ExperimentAssignment` (`asg_`, `permanent`, append-only, unique on `(experiment_id, member_id)`) holds `experiment_id`, `member_id` (opaque `mem_`), `arm_key`, `stratum_key`, `stratum_seq` (blocked mode), `bucket_ppm` (bucket mode), `seed_version`, `assigned_at`, and the `eligibility_snapshot` (the stratifier values used, nothing else). Assignment is exactly once under concurrency: the unique constraint makes concurrent evaluations return the same row and emit one `experiment.assigned`. Assignments are never changed, including when a flag is later disabled. When `experiment.assignment_log_enabled` is false (it is a constant true) assignment is refused.
+The stored record makes the result reproducible: `ExperimentAssignment` (`asg_`, `permanent`, unique on `(experiment_id, member_id)`) holds `experiment_id`, `member_id` (opaque `mem_`), `arm_key`, `stratum`, `block_id`, `position_in_block`, `assigned_at` and `source` (`random`, or `forced_by_admin` with an `AdminAction`), exactly as `S13.8.1`; the stratifier values used are the stratum string and nothing else. Assignment is exactly once under concurrency: the block row lock serializes the draw, and the unique constraint makes a replay return the existing row and emit one `experiment.member_assigned` (no member id in the event). Assignments are never changed, including when a flag is later disabled. When `experiment.assignment_log_enabled` is false (it is a constant true) assignment is refused.
 
-Blocked mode balances arms exactly within each complete block; the last incomplete block of a stratum can be off by at most one block.
+Within a stratum the count of any arm differs from `n * weight_i / 1,000,000` by less than `block_size` (`S13.8.4` item 6); complete blocks are exactly balanced.
 
 ### 12.11.4 Stratification [D]
 
@@ -507,7 +498,7 @@ Allowed stratifiers, all known at assignment time and none personal or location-
 
 ### 12.11.5 Exposure and analysis [D]
 
-- `experiment.assigned` records that a member was randomized. `experiment.exposed` records that the member reached the **decision point** where the variant applies; it fires **identically for every arm**, including `control` (where the treatment would have appeared), once per `(assignment, surface_key)`. Surface keys are listed per mechanic in S12.12.
+- `experiment.member_assigned` records that a member was randomized. `ui.variant_exposed` (also written server-side with `source` `server`) records that the member reached the **decision point** where the variant applies; it fires **identically for every arm**, including `control` (where the treatment would have appeared), once per `(assignment, surface_key)`. Surface keys are listed per mechanic in S12.12.
 - The client reports exposure with `POST /v1/experiment-exposures` (`surface_key`, `Idempotency-Key`; the server finds the member's own assignment and answers `204` whether or not an experiment applies); a server-side effect (for example an invitation created with a bonus) emits it from the server.
 - The primary analysis is intent-to-treat by assigned arm among eligible members. Exposure-conditioned analyses are secondary and labeled as such. Both are defined in `S13.*`.
 - Events carry no personal data (S12.13). Raw events are kept `retention.event_raw_days`; assignments are kept permanently and reference only the opaque `mem_` id, which is what the `member_bound` closure rule leaves behind (`ISS-129`).
@@ -550,7 +541,7 @@ Each mechanic below is a flag, an instrumented surface and, in Phase 2, a random
 | Variable | `fast_path`: the first Cell card appears right after identity creation and the explainer is deferred. `control` = `explained`: the explainer comes first. Unchanged in both: no install, no signup, recovery-key handling, every required notice, mandatory first-use prompt expansion. `S11.*` MUST implement both |
 | Unit, population, assignment | Member, `new_members`; randomization starts at `member.created` (nothing earlier can be randomized: there is no member yet). `hash_blocked`, strata `locale` and `join_source` |
 | Exposure surface key | `onboarding.first_card` |
-| Events | `member.created`, `experiment.assigned`, `experiment.exposed`, `lease.issued`, `lease.submission_received`, `submission.accepted` |
+| Events | `member.created`, `experiment.member_assigned`, `ui.variant_exposed`, `lease.issued`, `lease.submission_received`, `submission.accepted` |
 | Primary metric | `hamyar_growth_v1_created_to_first_verified_cell_ratio`: new members with a first accepted cell divided by new members |
 | Secondary | `hamyar_growth_v1_time_to_first_verified_cell_seconds`; `hamyar_growth_v1_contribution_under_threshold_ratio` (share of contributions strictly under `ui.fast_contribution_threshold_s`; exactly the threshold is not under it). Contribution time is defined by `MET-08` (S13.6.8): from `ui.card_opened` when received, else from `lease.issued`, to `lease.submission_received`, reported per `time_source`; the platform never reads the volunteer's chat page |
 | Guardrails | Rate of `reject.timing_anomaly` and `reject.schema_invalid` among a member's first cells; decline rate; copy-paste failures reported (a faster path must not buy errors) |
@@ -564,9 +555,9 @@ Each mechanic below is a flag, an instrumented surface and, in Phase 2, a random
 | Flag; hypothesis [H] | `ff.growth.v2_live_counter`; raises day-7 return |
 | Phase 1 / Phase 2 | Phase 1: public counter and in-app widget on for all, instrumented (FD§6.3). Phase 2: widget shown versus hidden |
 | Variable | The in-app counter widget only. The public counter page is public and cannot be hidden from a subset, so members can see it anyway; the estimate is diluted by that contamination and the analysis says so |
-| Unit, population, assignment | Member, `all_members`; `hash_bucket` or `hash_blocked`, strata `cohort_week` and `trust_tier` |
+| Unit, population, assignment | Member, `all_members`; `hash_blocked`, strata `cohort_week` and `trust_tier` |
 | Exposure surface key | `home.counter` (event payload `rendered` is false when the widget has nothing to show because figures are suppressed) |
-| Events | `experiment.assigned`, `experiment.exposed`; return is derived from `submission.accepted` |
+| Events | `experiment.member_assigned`, `ui.variant_exposed`; return is derived from `submission.accepted` |
 | Primary metric | `hamyar_growth_v2_day7_return_ratio` (definition in `S13.*`) |
 | Guardrails | Share of exposures with `rendered` false; reports about the counter |
 | Success / kill criteria | Unset until locked |
@@ -578,9 +569,9 @@ Each mechanic below is a flag, an instrumented surface and, in Phase 2, a random
 | Flag; hypothesis [H] | `ff.growth.v3_share_card`; brings new first contributions |
 | Phase 1 / Phase 2 | Phase 1: off. Phase 2: on, randomized offer |
 | Variable | Whether the share offer appears on the result-feedback screen after a first accepted cell or a new badge. The share control inside settings stays reachable for everyone while the flag is on |
-| Unit, population, assignment | Member, `all_members` with at least one accepted cell; `hash_bucket`, strata `locale` |
+| Unit, population, assignment | Member, `all_members` with at least one accepted cell; `hash_blocked`, strata `locale` |
 | Exposure surface key | `result.share_offer` |
-| Events | `sharecard.rendered` (preview shown), `sharecard.shared` (the member tapped share or copy; the platform cannot know a post happened), `experiment.assigned`, `experiment.exposed`; arrivals tagged `join_source` = `card` on `member.created` |
+| Events | `sharecard.rendered` (preview shown), `sharecard.shared` (the member tapped share or copy; the platform cannot know a post happened), `experiment.member_assigned`, `ui.variant_exposed`; arrivals tagged `join_source` = `card` on `member.created` |
 | Primary metric | `hamyar_growth_v3_share_tap_ratio`: members with `sharecard.shared` divided by exposed members, by arm |
 | Secondary (descriptive, not randomized) | `hamyar_growth_v3_card_source_arrivals_total` over time (`ISS-124`) |
 | Guardrails | Reports, any exposure or de-anonymization report about cards (a universal kill condition) |
@@ -595,7 +586,7 @@ Each mechanic below is a flag, an instrumented surface and, in Phase 2, a random
 | Variable | The in-app offer to create or join a team (randomize the offer, because joiners self-select: FD§6.2). Joining by code stays available to everyone |
 | Unit, population, assignment | Member, `all_members` at tier not `restricted`; `hash_blocked`, strata `trust_tier` and `cohort_week` |
 | Exposure surface key | `home.team_offer` |
-| Events | `team.created`, `team.joined`, `team.left`, `team.locked`, `experiment.assigned`, `experiment.exposed` |
+| Events | `team.created`, `team.joined`, `team.left`, `team.locked`, `experiment.member_assigned`, `ui.variant_exposed` |
 | Primary metric | `hamyar_growth_v4_week2_return_ratio` by assigned arm (intent-to-treat) |
 | Guardrails | Reports and `team.locked` per team; share of members in teams below `team.min_public_members` |
 | Success / kill criteria | Unset until locked |
@@ -607,9 +598,9 @@ Each mechanic below is a flag, an instrumented surface and, in Phase 2, a random
 | Flag; hypothesis [H] | `ff.growth.v5_referral`; raises activation without enabling farming |
 | Phase 1 / Phase 2 | Phase 1: off. Phase 2: randomized bonus |
 | Variable | `bonus` versus `control`: the referral link works in both arms; only the bonus pair differs (`Referral.bonus_enabled`) |
-| Unit, population, assignment | The referrer (member), `all_members` with tier not `restricted`; the newcomer inherits the referrer's arm through the `Referral`; `hash_bucket`, strata `trust_tier` |
+| Unit, population, assignment | The referrer (member), `all_members` with tier not `restricted`; the newcomer inherits the referrer's arm through the `Referral`; `hash_blocked`, strata `trust_tier` |
 | Exposure surface key | `invite.referral_offer`; also emitted server-side at `referral.created` |
-| Events | `referral.created`, `referral.joined`, `referral.qualified`, `referral.paid`, `referral.blocked`, `referral.expired`, `referral.clawed_back`, `experiment.assigned`, `experiment.exposed` |
+| Events | `referral.created`, `referral.joined`, `referral.qualified`, `referral.paid`, `referral.blocked`, `referral.expired`, `referral.clawed_back`, `experiment.member_assigned`, `ui.variant_exposed` |
 | Primary metric | `hamyar_growth_v5_referred_activation_ratio`: `referral.qualified` divided by `referral.created`, by arm |
 | Guardrails | `hamyar_growth_v5_blocked_total` share; Reserve draw against `growth.referral.reserve_draw_cap_ratio`; `hamyar_growth_referral_unrecovered_ucr_total`; farming flags |
 | Success / kill criteria | Unset until locked. Enabling the flag is a `loosen` change with two operators (S12.11.2) |
@@ -621,9 +612,9 @@ Each mechanic below is a flag, an instrumented surface and, in Phase 2, a random
 | Flag; hypothesis [H] | `ff.growth.v6_milestones`; strengthens mission motivation and sharing |
 | Phase 1 / Phase 2 | Phase 1: pages and in-app announcements on for all, instrumented. Phase 2: randomized announcement |
 | Variable | The in-app announcement of a reached or published milestone. Public pages cannot be hidden, so they stay visible to all |
-| Unit, population, assignment | Member, `all_members`; `hash_bucket`, strata `cohort_week` |
+| Unit, population, assignment | Member, `all_members`; `hash_blocked`, strata `cohort_week` |
 | Exposure surface key | `inbox.milestone` |
-| Events | `milestone.reached`, `milestone.published`, `milestone.withdrawn`, `badge.awarded`, `experiment.assigned`, `experiment.exposed` |
+| Events | `milestone.reached`, `milestone.published`, `milestone.withdrawn`, `badge.awarded`, `experiment.member_assigned`, `ui.variant_exposed` |
 | Primary metric | `hamyar_growth_v6_return_after_milestone_ratio`: members active within the pre-registered window after a milestone event, by arm (randomized part) |
 | Descriptive only | Return and arrivals tagged `join_source` = `milestone` around milestone dates, read as an interrupted time series; not a causal estimate |
 | Success / kill criteria | Unset until locked |
@@ -636,9 +627,9 @@ Names follow S0.9.1 (`<entity>.<past_participle>`); the analytics `Event` entity
 
 | Event | Emitted when | Payload beyond the envelope |
 | --- | --- | --- |
-| `experiment.assigned` | An assignment row is created | `experiment_id`, `assignment_id`, `arm_key`, `stratum_key` |
-| `experiment.exposed` | First arrival at a decision point per assignment and surface | `experiment_id`, `assignment_id`, `arm_key`, `surface_key`, `rendered` (bool) |
-| `experiment.locked`, `experiment.started`, `experiment.stopped` | Experiment status changes | `experiment_id`, `reason` on stop |
+| `experiment.member_assigned` | An assignment row is created (`S13.8.4`) | `experiment_id`, `assignment_id`, `arm_key`, `stratum`; no member id |
+| `ui.variant_exposed` | First arrival at a decision point per assignment and surface (client, or server with `source` `server`) | `experiment_id`, `assignment_id`, `arm_key`, `surface_key`, `rendered` (bool) |
+| `experiment.created`, `experiment.registered`, `experiment.started`, `experiment.stopped` | Experiment status changes (`S13.8.2`) | `experiment_id`, `reason` on stop |
 | `milestone.reached`, `milestone.published`, `milestone.withdrawn` | Milestone state changes | `milestone_key`, `reached_value` |
 | `badge.awarded`, `badge.revoked` | Award state changes | `badge_key` (the member reference is the actor) |
 | `team.created`, `team.joined`, `team.left`, `team.locked`, `team.unlocked`, `team.disbanded` | Team changes | `team_id` |
