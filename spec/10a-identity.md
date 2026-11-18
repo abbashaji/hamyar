@@ -29,17 +29,17 @@ A `Member` is a pseudonym: one row plus public keys. One person may hold several
 | Entity (prefix) | Identity-relevant fields | Retention class (S0.7) | Note |
 | --- | --- | --- | --- |
 | `Member` (`mem_`) | `status`, `trust_tier`, `tier_before_restriction`, `created_at`, `last_active_on` (UTC date only), `registration_device_id`, `invite_tree_id`, `invited_by_member_id` (nullable), `invite_depth`, `recovery_confirmed_at`, `recovery_cooldown_until`, `email_ciphertext`, `email_index`, `email_verified_at`, `email_purposes`, `locale`, `digits`, `calendar`, `row_version` | `member_bound` | No name, phone or clear e-mail; member-level activity is a date; `Session`, lease and submission rows carry precise times (10.14.1) |
-| `MemberKey` (`mky_`) | `member_id`, `device_id` (null for recovery), `kind` (`device`, `recovery`), `alg` (`ed25519`), `public_key` (32 bytes), `state` (`active`, `retiring`, `revoked`), `not_after`, `revoked_reason`, `authorized_by_key_id`, `authorization_signature`, `key_storage` (`hardware_backed`, `software`, `unknown`; self-reported), `created_at` | `member_bound` | Each key addition carries the signature that authorized it (10.7) |
+| `MemberKey` (`mky_`) | `member_id`, `device_id` (null for recovery), `purpose` (`auth`, `recovery`), `algorithm` (`ed25519`), `public_key` (32 bytes), `status` (`active`, `rotated`, `revoked`), `not_after`, `revoked_reason`, `authorized_by_key_id`, `authorization_signature`, `key_storage` (`hardware_backed`, `software`, `unknown`; self-reported), `created_at` | `member_bound` | Each key addition carries the signature that authorized it (10.7) |
 | `Device` (`dev_`) | `token_hash`, `platform_class` (`ios`, `android`, `desktop`, `other`), `first_seen_on` (date), `registrations_count`, `grants_issued`, `state` (`active`, `blocked`) | `member_bound` plus grant-memory residue (10.9) | Random token, never derived from hardware |
-| `Session` (`ses_`) | `principal_type`, `member_id` or `admin_user_id`, `key_id`, `token_hash`, `created_at`, `last_used_at`, `idle_expires_at`, `abs_expires_at`, `step_up_at`, `state` | `short` | Hash of the token only (10.13) |
+| `Session` (`ses_`) | `principal_type`, `member_id` or `admin_user_id`, `key_id` (member) or `credential_id` (admin), `token_hash`, `created_at`, `last_used_at`, `idle_expires_at`, `abs_expires_at`, `step_up_at`, `revoked_at`, `revoked_reason` | `short` | Hash of the token only (10.13) |
 | `AuthChallenge` (`chl_`) [A] | `purpose`, `nonce`, `audience`, `expires_at`, `used_at` | `short` | Deleted on use or expiry |
 | `DeviceLinkOffer` (`dlo_`) [A] | `member_id`, `secret_hash`, `state`, `attempts`, `claimed_key_hash`, `expires_at` | `short` | 10.7 |
 | `RecoveryRequest` (`rcv_`) [A] | `recovery_key_id`, `outcome`, `created_at`, `completed_at` | `member_bound`, rows older than 90 days deleted (the window in `identity.recovery_max_per_90d`) | No IP, no device data |
 | `SecurityNotice` (`snt_`) [A] | `member_id`, `kind`, `created_at`, `seen_at` | `member_bound`, deleted `retention.session_days` after `created_at` | Shown on every device at next sign-in |
 | `Invite` (`inv_`) | `kind` (`seed`, `member`), `code_hash`, `inviter_member_id`, `invitee_member_id`, `invite_tree_id`, `state`, `expires_at`, `redeemed_at` | `member_bound` plus edge-clearing rule (10.10) | Code stored as SHA-256 only |
-| `AdminUser` (`adm_`) | `label` (pseudonym), `roles` (subset of `reviewer`, `operator`), `state` (`active`, `locked`, `disabled`), `declared_member_ids` (optional, 10.11) | `permanent` | No e-mail, no password |
-| `AdminCredential` (`acr_`) | `admin_user_id`, `credential_id`, `public_key`, `sign_count`, `transports`, `label`, `state` (`pending`, `active`, `locked`, `revoked`), `last_used_on` | `permanent` | WebAuthn, 10.12 |
-| `AdminAction` (`act_`) | `admin_user_id`, `action`, `target_ref`, `params_hash`, `proposed_by`, `approved_by`, `outcome`, `request_id`, `created_at` | `permanent` | Hash-chained like the ledger [A] |
+| `AdminUser` (`adm_`) | `label` (pseudonym), `roles` (subset of `reviewer`, `operator`), `status` (`invited`, `active`, `disabled`), `declared_member_ids` (optional, 10.11) | `permanent` | No e-mail, no password |
+| `AdminCredential` (`acr_`) | `admin_user_id`, `credential_id`, `public_key`, `sign_count`, `transports`, `label`, `status` (`pending`, `active`, `locked`, `revoked`), `last_used_at` | `permanent` | WebAuthn, 10.12 |
+| `AdminAction` (`act_`) | `principal_type`, `admin_user_id` (the actor: the proposer on the first row, the approver on the approving row), `action`, `subject_type`, `subject_id` (replace `target_ref`), `subject_hash` (stores the `params_hash`), `approves_action_id` (replaces `proposed_by` and `approved_by`), `outcome`, `request_id`, `created_at` | `permanent` | Hash-chained like the ledger [A] |
 
 **Never stored, by design** [D]: names, phone numbers, passwords, clear-text e-mail, raw IP addresses, hardware or advertising identifiers, browser fingerprints, precise or coarse location, provider credentials or sessions, volunteers' chat pages, private keys and the recovery key. Reason: IC3, IC4.
 
@@ -50,7 +50,7 @@ A `Member` is a pseudonym: one row plus public keys. One person may hold several
 | Key | Algorithm | Generated | Kept on the device | Kept on the server |
 | --- | --- | --- | --- | --- |
 | Device key | Ed25519 (S0.6.4) | In the browser at first use | WebCrypto `CryptoKey` with `extractable = false` in IndexedDB where the browser supports Ed25519 [V: support on the target phones]; otherwise a bundled audited Ed25519 implementation with the seed in IndexedDB and `key_storage` = `software` [V] | `MemberKey.public_key` |
-| Recovery key | Ed25519 keypair derived from the recovery secret (10.4) | Same moment | Never stored; shown once | `MemberKey.public_key`, `kind` = `recovery` |
+| Recovery key | Ed25519 keypair derived from the recovery secret (10.4) | Same moment | Never stored; shown once | `MemberKey.public_key`, `purpose` = `recovery` |
 | Device token | 128-bit CSPRNG value | First visit | IndexedDB; random, not derived from hardware | `Device.token_hash` = SHA-256 of the token |
 | Session token | 256-bit CSPRNG value | Server | IndexedDB, never a cookie (S0.11.4) | SHA-256 only |
 
@@ -136,7 +136,7 @@ The server holds `recovery_pub` only. Verification is a signature over a fresh c
 | --- | --- |
 | Recovery key never confirmed | Replaceable with a device-key step-up alone; the old key was never proven held |
 | Recovery key confirmed | Replacing it needs a device-key step-up AND a signature by the current recovery key, so a thief holding only an unlocked phone cannot lock the owner out (the `recovery_signature` of `rotateKey`, S15.B.9) |
-| Effect | New key `pending` and `active` after `identity.key_rotation_grace_s` (both work meanwhile); old key `retiring` until then, then `revoked`; a `SecurityNotice` on every device |
+| Effect | New key `pending` and `active` after `identity.key_rotation_grace_s` (both work meanwhile); old key `rotated` until then, then `revoked`; a `SecurityNotice` on every device |
 | After a recovery (10.8) | The key used is revoked at once and a new one is mandatory in the same request (it was typed on a device that may be hostile) |
 
 ## 10.5 Optional e-mail
@@ -145,7 +145,7 @@ The server holds `recovery_pub` only. Verification is a signature over a fresh c
 
 | Aspect | Decision |
 | --- | --- |
-| Storage | Never clear text (S0.7). `email_ciphertext` = AES-256-GCM with a per-row random nonce under `secret.email_enc_key[version]`; `email_index` = HMAC-SHA-256 of the normalized address under `secret.email_index_key[version]` (one address maps to one member; no address can be looked up without the key) [A] |
+| Storage | Never clear text (S0.7). `email_ciphertext` = AES-256-GCM with a per-row random nonce under `secret.email_encryption_key[version]`; `email_index` = HMAC-SHA-256 of the normalized address under `secret.email_lookup_key[version]` (one address maps to one member; no address can be looked up without the key) [A] |
 | Verification | A one-time code of 8 Crockford base32 characters, stored as SHA-256, valid `identity.email_code_ttl_s`, burned after `identity.code_max_attempts` wrong tries; proves the member controls the address |
 | Change and removal | Setting or changing needs a device step-up and is blocked during the recovery cooldown (10.8); removal deletes ciphertext and index at once; the sender integration receives the plain address only at send time |
 | Content of mail | Neutral subject, no member id, no handle, no job details, no links carrying tokens; the mail says only that something happened and to open the app |
@@ -159,7 +159,7 @@ The server holds `recovery_pub` only. Verification is a signature over a fresh c
 
 ## 10.6 Key rotation
 
-`MemberKey` states: `active`, `retiring`, `revoked`. Events: `member.key_rotated` (a successor was added, the old key moves to `retiring`), `member.key_revoked` [A] (any move to `revoked`). Signature algorithm changes are treated as rotation (the `alg` column exists for this). Rotation never changes `mem_` id, balances, trust tier or the recovery key. [D]
+`MemberKey` `status` values: `active`, `rotated`, `revoked`. Events: `member.key_rotated` (a successor was added, the old key moves to `rotated`), `member.key_revoked` [A] (any move to `revoked`). Signature algorithm changes are treated as rotation (the `algorithm` column exists for this). Rotation never changes `mem_` id, balances, trust tier or the recovery key. [D]
 
 ```
 planned rotation of device key K_old -> K_new            # step-up required (10.13)
@@ -167,10 +167,10 @@ planned rotation of device key K_old -> K_new            # step-up required (10.
   POST /v1/member-keys/rotations {kind: 'device', key_id: K_old.id, challenge, signature, new_public_key: K_new.pub, new_key_proof}
         signed by K_old (purpose rotate_device_key) AND by K_new (proof of possession)
   server: txn { K_new = MemberKey(active, authorized_by = K_old);
-                K_old.state = retiring, K_old.not_after = now + identity.key_rotation_grace_s;
+                K_old.status = rotated, K_old.not_after = now + identity.key_rotation_grace_s;
                 SecurityNotice; emit member.key_rotated }
   client: authenticates once with K_new (purpose session) -> 'confirmed'
-  server: on that first K_new session: K_old.state = revoked, its sessions revoked, emit member.key_revoked
+  server: on that first K_new session: K_old.status = revoked, its sessions revoked, emit member.key_revoked
           if never confirmed: sweep revokes K_old at not_after
 ```
 
@@ -204,7 +204,7 @@ B (new device, no session): generate device key and device token;
 A: shows platform_class and the 6 digits; the person confirms they match B's screen;
     POST /v1/device-links/{device_id}/approval {sas}, with the Step-Up header of A's key
         (purpose link_approve, context_hash covers offer_id and claimed_key_hash)
-server: txn { MemberKey(device, active, authorized_by_key_id = A.key, authorization_signature);
+server: txn { MemberKey(auth, active, authorized_by_key_id = A.key, authorization_signature);
               upsert Device; SecurityNotice to all devices; emit member.device_linked }
 B: next step is an ordinary session by challenge (10.13); B inherits nothing
 ```
@@ -231,7 +231,7 @@ client (new device, no session): person types the recovery key; normalize; verif
         proof (new_dk), new_recovery_proof (new_rk)}
 server:
   1. rate limits: ratelimit.recovery_attempts_per_day per IP hash and per device token
-  2. verify challenge and all three signatures; find MemberKey(kind recovery, state active|retiring)
+  2. verify challenge and all three signatures; find MemberKey(purpose recovery, status active|rotated)
      by public_key; unknown key and bad signature give the same 401 AUTH_INVALID
   3. count completed RecoveryRequest of this member in the last 90 days;
      if >= identity.recovery_max_per_90d: 422 CAP_EXCEEDED, details.copy_key copy.identity.recovery_limit
@@ -489,8 +489,8 @@ sign-in:  POST /v1/admin/auth/challenges  -> {challenge_id, public_key_options, 
 **Two-person protocol** [D]
 
 ```
-propose:  AdminAction(state proposed, action, target_ref, params_hash = SHA-256(canonical params),
-          proposed_by = P, expires_at = now + security.two_person_ttl_s)      # needs X8
+propose:  AdminAction(state proposed, action, subject_type and subject_id, params_hash (stored as subject_hash) = SHA-256(canonical params),
+          admin_user_id = P, expires_at = now + security.two_person_ttl_s)      # needs X8
 approve:  admin Q (Q != P, required role, X8) completes a WebAuthn assertion whose challenge =
           SHA-256(action_id || params_hash || nonce), so the assertion itself attests approval of that exact payload
 execute:  only after approval and before expiry; parameters cannot change after proposal;
@@ -519,9 +519,9 @@ Admin surface hardening [D]: strict Content-Security-Policy with no third-party 
 
 ```
 h = SHA-256(token); s = sessions.get(h)                         # constant-time compare on the hash
-reject AUTH_INVALID  if s is null, s.state != active, or s.principal_type != endpoint auth_scheme
+reject AUTH_INVALID  if s is null, s.revoked_at is not null, or s.principal_type != endpoint auth_scheme
 reject AUTH_EXPIRED  if now > s.abs_expires_at or now > s.idle_expires_at
-reject AUTH_INVALID  if the bound key is revoked, or retiring and past not_after
+reject AUTH_INVALID  if the bound key is revoked, or rotated and past not_after
 reject FORBIDDEN     if the permission or a condition X3..X8 fails (10.11)
 then: touch last_used_at (rate-limited); idle_expires_at = last_used_at + idle TTL, never past abs_expires_at
 ```
@@ -760,7 +760,7 @@ New cross-parameter constraint `C9` [A]: `session.member_abs_ttl_s <= retention.
 
 ### 10.18.4 Hooks this part needs from other S10 files [A]
 
-1. Secrets inventory: add `secret.email_enc_key`, `secret.email_index_key` (new) next to `secret.volunteer_handle_key` and `secret.ip_hash_key`; all rotate per `security.secret_rotation_days` and before any public exposure (`security.rotate_before_public_exposure`); a rotation of `secret.email_enc_key` re-encrypts addresses without member action.
+1. Secrets inventory: add `secret.email_encryption_key`, `secret.email_lookup_key` (new) next to `secret.volunteer_handle_key` and `secret.ip_hash_key`; all rotate per `security.secret_rotation_days` and before any public exposure (`security.rotate_before_public_exposure`); a rotation of `secret.email_encryption_key` re-encrypts addresses without member action.
 2. Threat model: rows for account takeover, de-anonymization, compelled disclosure, fake accounts and invite-tree abuse, insider and operator risk, reviewer capture and DoS must cite 10.8 to 10.15 as their mitigations and keep the residual risks of 10.16.
 3. Ban process: define the `reason class` values `credit_farming`, `forgery`, `sybil` used in 10.10, the two-person ban, the appeal path and the effect of `member.banned` on sessions (10.13).
 4. Hosting: the requirements of 10.14.2 item 5 (no client IP in host logs; trusted client-address header) and the reachability checks marked [V].
@@ -773,4 +773,4 @@ New cross-parameter constraint `C9` [A]: `session.member_abs_ttl_s <= retention.
 | `ISS-102` | major | FD§3.2, FD§8.3 | The FD makes e-mail optional without saying what it is for, names no account recovery besides the key, and names no admin approval mechanism; a one-person Phase 1 team cannot meet two-person approval | E-mail is for opt-in notices only and never a recovery or login factor; recovery is by key only and no operator can restore access; `security.two_person_actions` is extended (10.12); at least two distinct admins are required before any two-person action, including launch sign-off, can run | needs_owner |
 | `ISS-103` | minor | FD§4.6 | `S0.7` gives `Device` the retention class `short` and calls it a keyed-hash record, but `grant.max_per_device` is a lifetime limit and the token is a 128-bit random value that needs only SHA-256 | `Device` is `member_bound` with a residue of `{token_hash, grants_issued}` kept `retention.member_inactive_days` after closure (10.9.1); the hash is plain SHA-256 | proposed |
 
-Convention additions made by this part (not issues, listed so `S0.*` can fold them back): entities `AuthChallenge` (`chl_`), `DeviceLinkOffer` (`dlo_`), `RecoveryRequest` (`rcv_`), `SecurityNotice` (`snt_`); `Invite` states and the events in 10.18.2; `MemberKey` states and the `kind` values; the kill switch `kill.optional_pii`; secrets `secret.email_enc_key` and `secret.email_index_key`; the parameters of 10.18.3 and constraint `C9`; the permission names of 10.11 and the conditions `X1`..`X11`; the copy keys of 10.15.4 and `copy.invite.invalid`, `copy.ratelimit.try_later`, `copy.identity.recovery_limit`, `copy.identity.recovery_typo`, `copy.identity.recovered_elsewhere`.
+Convention additions made by this part (not issues, listed so `S0.*` can fold them back): entities `AuthChallenge` (`chl_`), `DeviceLinkOffer` (`dlo_`), `RecoveryRequest` (`rcv_`), `SecurityNotice` (`snt_`); `Invite` states and the events in 10.18.2; `MemberKey` `status` and `purpose` values (named as in `S5.2.5`); the kill switch `kill.optional_pii`; secrets `secret.email_encryption_key` and `secret.email_lookup_key`; the parameters of 10.18.3 and constraint `C9`; the permission names of 10.11 and the conditions `X1`..`X11`; the copy keys of 10.15.4 and `copy.invite.invalid`, `copy.ratelimit.try_later`, `copy.identity.recovery_limit`, `copy.identity.recovery_typo`, `copy.identity.recovered_elsewhere`.
