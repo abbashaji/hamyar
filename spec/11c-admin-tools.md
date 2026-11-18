@@ -429,7 +429,7 @@ The appellant receives a reason code rendered as copy, never reviewer notes.
 | `AC-appl-05` | An appeal older than `appeal.reviewer_sla_days` | The queue loads | The overdue badge shows; nothing is auto-decided |
 | `AC-appl-06` | An appellant statement containing markup | Rendered | Escaped literal text |
 
-## 11.49 Tool 5: Abuse flags and reports
+## 11.59 Tool 5: Abuse flags and reports
 
 **Purpose.** Triage reports from volunteers and requesters and system abuse flags, and take proportionate, logged, appealable action. [D]
 **Roles and permissions.** `reviewer`: `perm.report.triage`, `perm.member.sanction`, `perm.member.ban`, `perm.cell.void`, `perm.cell.overturn`, `perm.job.stop`; `operator` holds the same plus `perm.cell.release`.
@@ -471,7 +471,7 @@ When reports on a template reach `template.autopause_report_count` inside `templ
 | `AC-abuse-05` | A `createCellOverturn` for accepted cells | Approved by a second admin | For each cell `cell.overturned`, a ledger `reversal` and a `rework` cell (S0 `ISS-05`) exist, or the whole request is rejected by the guard of 11.50.3 |
 | `AC-abuse-06` | An item older than `report.triage_sla_days` | The queue loads | The overdue badge shows |
 
-## 11.50 Tool 6: Ledger explorer and reversal
+## 11.60 Tool 6: Ledger explorer and reversal
 
 **Purpose.** Let an operator read the ledger exactly as stored, see invariant and hash-chain status, acknowledge alarms, and request a reversal. The explorer cannot edit, insert or delete anything; the only write path to the ledger from any admin screen is the two-person reversal (S0.8.5). [D]
 **Roles and permissions.** `operator`: `perm.ledger.read`, `perm.ledger.reverse`, `perm.alarm.acknowledge`. `reviewer`: read-only views of entries and transactions reached through an open appeal, report or alarm (a `context`, 11.55).
@@ -488,7 +488,7 @@ When reports on a template reach `template.autopause_report_count` inside `templ
 
 **`SCR-ops-06` Invariants and checkpoints.** One row per `INV-L<nn>` (definitions owned by S6.*): last result, last check time (sampled every `ledger.invariant_check_interval_s`, full recompute every `ledger.full_recompute_interval_s`), linked alarm. Daily checkpoint hashes (`ledger.checkpoint_interval_s`) are listed beside the hash shown on the public ledger page (`ff.public.ledger_page`) so a mismatch is visible. "Run verification now" starts a chain check or a full recompute (`InvariantCheck` row); one runs at a time. Acknowledging an `Alarm` records who and why but never clears a violation: the row stays red until a later check passes (`ledger.invariants_passed`).
 
-### 11.50.3 Reversal flow [D]
+### 11.60.3 Reversal flow [D]
 
 1. From an entry or transaction the operator opens the dialog and supplies a `context` (a cell overturn, an appeal or an alarm), a reason code (`fraud_finding`, `appeal_overturn`, `system_error`, `duplicate_posting`, `other`) [A] and text.
 2. `previewAdminAction` returns the mirror entries (`entry_type` `reversal`, same amount, accounts swapped), the lot effects, the resulting balances and these guards: (a) the target is not itself a `reversal` and not already reversed (`STATE_CONFLICT`); (b) no account would break its constraint, given `ledger.allow_negative_balance` = false; a member who already spent the credit makes the preview return `would_overdraw` and the request is refused with `422 UNPROCESSABLE` (what then happens to the loss is an owner decision, `ISS-119`; the screen offers `kill.member.<mem_id>` to stop further spending, 11.54).
@@ -525,7 +525,7 @@ No `PUT`, `PATCH` or `DELETE` route exists on any ledger resource.
 | `AC-ledgerx-07` | A seeded edit of one entry (the BM1 corruption test) | `createLedgerVerification` runs | The first broken `seq` is named and `ledger.invariant_violated` is raised |
 | `AC-ledgerx-08` | A balance of 9007199254740993 `ucr` | Displayed | Shown exactly, as a string, never through a JavaScript number |
 
-## 11.51 Tool 7: Parameter editor
+## 11.61 Tool 7: Parameter editor
 
 **Purpose.** Change configuration parameters with versioning, prospective effect, advance notice and a public change log, so credit and rules are never altered secretly (FD Principle 5; FD§4.9). [D]
 **Roles and permissions.** `perm.parameter.read` for any admin; `perm.parameter.edit` only for the owner role of the area (S0.10.5). Areas owned by `founders` need two distinct `operator` approvers whatever the direction [A]; `launch.*` areas always need two approvers (S0.10.5); a parameter referenced by a locked `PreRegistration` is read-only (`STATE_CONFLICT`, lock owned by S13.*).
@@ -574,12 +574,12 @@ No `PUT`, `PATCH` or `DELETE` route exists on any ledger resource.
 | `AC-param-11` | A threshold in a locked `PreRegistration` | An edit is attempted | `409 STATE_CONFLICT` |
 | `AC-param-12` | A `CAL` replacement with fewer than `calibration.min_samples_per_service` records per service (fixture 29 against 30) | Submitted | `422 UNPROCESSABLE` |
 
-## 11.52 Tool 8: Capacity dashboard
+## 11.62 Tool 8: Capacity dashboard
 
 **Purpose.** Show the operator, in one read-only screen, whether supply, demand and the credit economy are inside their declared limits, so decisions on parameters or kill switches rest on measured numbers (Principle 10). It shows aggregates only. [D]
 **Roles and permissions.** `operator`: `perm.capacity.read`. A `reviewer` call returns `403 FORBIDDEN`.
 
-### 11.52.1 `SCR-ops-10` tiles [D]
+### 11.62.1 `SCR-ops-10` tiles [D]
 
 Every tile shows its value, the time it was computed, and the parameter it is compared with. Rollup tiles come from `MetricSnapshot` (`metrics.rollup_interval_s`) and are marked stale when older than that interval; live tiles refresh every `ui.capacity_dashboard_refresh_s`. Breakdowns by category, template or service suppress any cohort smaller than `analytics.min_cohort_k`, showing "fewer than k" instead of a number (`AD8`).
 
@@ -601,7 +601,7 @@ Every tile shows its value, the time it was computed, and the parameter it is co
 
 A breach turns the tile red and raises an `Alarm`; each tile links to the parameter in `SCR-ops-08` and to the matching kill switch with the tile as `context`. The dashboard changes nothing itself. Worked fixture (the FD§3.3 inputs, not measurements): 40 active donors, 8 cells per donor per day, a 2-day window, `phi` 500,000 ppm and haircut 0 give capacity `floor(40 * 8 * 2 * 500,000 * (10^6 - 0) / 10^12)` = 320 cells; committed 264 cells (S0.6.1) leave a headroom of 56 cells.
 
-### 11.52.3 Bottleneck banner (carried over from the Panel concept) [D][A]
+### 11.62.3 Bottleneck banner (carried over from the Panel concept) [D][A]
 
 The Panel highlights the not-done item with the most dependents (panel-review §3.5; FD§10) [V]. Here the banner names the open admin item that blocks the most work:
 
@@ -626,7 +626,7 @@ show: name, blocked count, age, link to its screen
 | `AC-capdash-05` | A reviewer principal | `getCapacitySnapshot` is called | `403 FORBIDDEN` |
 | `AC-capdash-06` | A template awaiting review that blocks 3 backlog entries and a service that blocks 5 waitlisted jobs | `getBottleneck` is called | The service is named with blocked count 5 |
 
-## 11.53 Tool 9: Launch-gate checklist
+## 11.63 Tool 9: Launch-gate checklist
 
 **Purpose.** Make BUILDING separate from LAUNCHING: the three `launch.*` switches stay off until the gates G0..G5 that `launch.required_gate_ids` names are signed off by distinct admins with evidence (prompt; FD§8.3). Gate content, the exit rule and the switch rule are owned by S14.*; this part specifies the screens and actions. [D]
 **Roles and permissions.** `operator`: `perm.launch.evidence`, `perm.launch.signoff`. Reads for `reviewer`.
@@ -665,11 +665,11 @@ A `launch.signoff` request is the only way to turn a switch on: the initiator's 
 | `AC-gate-07` | One active `operator` | The sign-off dialog opens | `fail_closed` is true and the button is disabled |
 | `AC-gate-08` | `kill.all_minting` engaged and `launch.minting_enabled` true | The switches block loads | Effective minting shows off |
 
-## 11.54 Tool 10: Kill switches
+## 11.64 Tool 10: Kill switches
 
 **Purpose.** Stop a template, a service, a member, all minting or all new jobs at once, with a logged reason, and bring work back only with a second admin (`AD2`). [D]
 
-### 11.54.1 Switches, who may press them [D]
+### 11.64.1 Switches, who may press them [D]
 
 | Switch (S0.10.6) | Engage (one admin, `CT2`) | Release (two admins, `CT3`) | Published |
 | --- | --- | --- | --- |
@@ -681,7 +681,7 @@ A `launch.signoff` request is the only way to turn a switch on: the initiator's 
 
 The system may also engage a switch (for example S6.* or S14.* automation on `ledger.invariant_violated`); the board shows actor `system` and the same release rule applies [A]. Reason codes: `ledger_integrity`, `abuse_wave`, `policy_or_legal_concern`, `provider_notice`, `safety_incident`, `operational`, `drill` [A]; only the code appears in a public entry, never the free text.
 
-### 11.54.2 Effects (names only; S14.* owns the full rules) [A]
+### 11.64.2 Effects (names only; S14.* owns the full rules) [A]
 
 | Switch | While engaged | On release |
 | --- | --- | --- |
