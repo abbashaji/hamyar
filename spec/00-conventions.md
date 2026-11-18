@@ -174,6 +174,8 @@ If the verification pool is not a whole number of cells, `floor` applies and the
 | `moderation` | Kept `retention.moderation_days` after resolution, then reduced to counts |
 | `short` | Days (`retention.session_days`, `retention.ip_hash_ttl_days`) |
 | `ops` | Operational telemetry, `retention.ops_log_days` |
+| `request_log` | Server request logs; not an entity table, what they may contain is set by S4.* and S10.*; `retention.request_log_days` |
+| `event_raw` | Raw analytics events (`Event`); `retention.event_raw_days` |
 
 **Entities named by the prompt (scope B)**
 
@@ -233,7 +235,7 @@ If the verification pool is not a whole number of cells, `floor` applies and the
 | `Experiment` | `experiments` | `exp_` | `permanent` | An arm configuration, including the accelerated-expiry arm |
 | `ExperimentAssignment` | `experiment_assignments` | `asg_` | `permanent` | Logged, randomized assignment (scope G) |
 | `PreRegistration` | `pre_registrations` | `prr_` | `permanent` | Thresholds and decision rules recorded before launch, then locked |
-| `Event` | `events` | `evt_` | `ops` | Analytics event without personal data |
+| `Event` | `events` | `evt_` | `event_raw` | Analytics event without personal data |
 | `MetricSnapshot` | `metric_snapshots` | `mts_` | `permanent` | Aggregated published metric (v, η, claim ratio, ...) |
 | `CalibrationRecord` | `calibration_records` | `cal_` | `permanent` | Phase 0 calibration observation |
 | `Referral` | `referrals` | `ref_` | `member_bound` | Referral link and its two-sided bonus state |
@@ -390,13 +392,13 @@ quoted       --job.quote_expired-->        quote_expired
 quoted       --job.waitlisted-->           waitlisted     capacity cannot honor the window now
 waitlisted   --job.waitlist_released-->    quoted         re-quoted
 waitlisted   --job.waitlist_expired-->     cancelled
-quoted       --job.escrow_confirmed-->     admitted       escrow_hold posted; cells created and queued
+quoted       --job.escrow_confirmed-->     admitted       member job: escrow_hold posted; Commons job: confirmed by an admin, no hold and no Escrow (05b 5.22.3); cells created and queued
 admitted     --job.started-->              running        first cell leased
 admitted|running --job.paused-->           suspended      kill switch, template or service pause, policy tightening
 suspended    --job.resumed-->              admitted|running (the state it left)
 running      --job.all_cells_accepted-->   assembling
 assembling   --job.assembled-->            settling
-admitted|running|suspended --job.stop_requested--> settling   closure_reason: policy_stopped, service_revoked, template_retired, operator_killed, overrun_timeout
+admitted|running|suspended --job.stop_requested--> settling   closure_reason: policy_stopped, service_revoked, template_retired, operator_killed, overrun_timeout, cells_exhausted (no primary cell non-terminal and at least one exhausted; non-primary cells are cancelled, 05b 5.22.1)
 settling     --job.settled-->              completed      all primary cells accepted
 settling     --job.settled_partial-->      failed         not all accepted; refunds and payouts posted
 admitted|running|suspended --job.cancel_requested--> cancelling
@@ -421,7 +423,7 @@ submitted         --cell.checks_failed-->      rejected
 flagged_for_audit --cell.audit_passed-->       accepted
 flagged_for_audit --cell.audit_failed-->       rejected
 rejected|expired  --cell.requeued-->           queued          attempt + 1
-rejected|expired  --cell.attempts_exhausted--> exhausted
+rejected|expired  --cell.attempts_exhausted--> exhausted   a primary cell that ends here can never be accepted; the job then leaves through the early exit `job.stop_requested` with `cells_exhausted` (0.9.2)
 queued|leased     --cell.paused-->             suspended       a leased cell's lease is revoked first
 suspended         --cell.resumed-->            queued
 *                 --cell.cancelled-->          cancelled       job cancelled; lease revoked
@@ -432,6 +434,20 @@ accepted          --cell.overturned-->         overturned      appeal or fraud f
 Lease states: `active`, `submitted`, `expired`, `released`, `revoked`. Events: `lease.issued` (none -> `active`), `lease.submission_received` (`active` -> `submitted`; also `expired` -> `submitted` inside `lease.submit_grace_s` while the cell is not re-leased), `lease.extended` (`active` -> `active`; at most `lease.max_extensions` times, each adding `lease.extend_s`), `lease.expired` (`active` -> `expired`), `lease.released` (`active` -> `released`), `lease.revoked` (`active` -> `revoked`).
 
 Submission states: `received`, `schema_failed` (T), `checks_failed` (T), `checks_passed`, `quarantined`, `accepted` (T), `rejected` (T). Events: `submission.received`, `submission.schema_failed`, `submission.checks_passed`, `submission.checks_failed`, `submission.quarantined` (output with links, code to run or requests for action; withheld from results, FD§5.5), `submission.accepted`, `submission.rejected`, `submission.released_from_quarantine`. A replayed submission with the same lease and nonce returns the stored outcome and emits nothing.
+
+Submission transitions [D][A]. `checks_failed` means a check failed before acceptance (the cell becomes `rejected`); `rejected` means the checks passed and the cell was then rejected or voided afterwards. While a submission is `quarantined` the cell stays `submitted`: it has no state of its own, the output is withheld from results, and the quarantine is bounded by `screen.quarantine_max_age_days` (the age-out is `submission.checks_failed`), never by a job timeout. A quarantined submission never auto-releases.
+
+```
+(none)         --submission.received-->                   received
+received       --submission.schema_failed-->              schema_failed    output fails the template's output schema; the cell becomes rejected
+received       --submission.checks_passed-->              checks_passed    schema and automatic checks pass and output flagging finds nothing
+received       --submission.checks_failed-->              checks_failed    an automatic check, gold comparison or screening fails; the cell becomes rejected
+received       --submission.quarantined-->                quarantined      links, code to run or requests for action (FD§5.5); cell stays submitted
+quarantined    --submission.released_from_quarantine-->   received         a reviewer clears it; it returns to verification (gold, audit, automatic checks), not to checks_passed
+quarantined    --submission.checks_failed-->              checks_failed    a reviewer confirms the finding, or the age-out elapses; reject.forbidden_content; the cell requeues
+checks_passed  --submission.accepted-->                   accepted         the cell is accepted (cell.checks_passed or cell.audit_passed)
+checks_passed  --submission.rejected-->                   rejected         the cell is rejected after its checks passed (audit failed) or voided at the acceptance gate
+```
 
 ### 0.9.4 Member trust tier and status (owner S10.*, S8.*)
 
@@ -476,13 +492,13 @@ States: `unreviewed` (initial for every service; counts as no), `in_review`, `ap
 ```
 (none)       --service.created-->         unreviewed
 unreviewed|rejected|review_due|suspended|revoked --service.review_started--> in_review   a service suspended by a review lapse (not a kill switch) leaves only this way
-in_review    --service.approved-->        approved       guard: `third_party_task_use` and `prohibited_content_compatible` are `yes` (0.8.3), TermsCopy saved, reviewer recorded
+in_review    --service.approved-->        approved       guard: `third_party_task_use` and `prohibited_content_compatible` are `yes` (0.8.3), TermsCopy saved, `service.min_approvers` distinct reviewers have each recorded approval (a count, not a state: the service stays `in_review` until the count is reached)
 in_review    --service.rejected-->        rejected
 approved     --service.review_due-->      review_due     timer: service.review_max_age_days
 review_due   --service.review_lapsed-->   suspended      timer: service.review_grace_days
 approved|review_due --service.suspended--> suspended     kill switch
 suspended    --service.resumed-->         approved       only when the cause was a kill switch
-approved|review_due|suspended --service.revoked--> revoked   in-flight cells handled per S7.*
+approved|review_due|in_review|suspended --service.revoked--> revoked   in-flight cells handled per S7.*; the revocation carries `inflight_policy` (`drain` or `void`) and jobs pinned only to this service get `job.stop_requested` with `service_revoked`; from `in_review` the same effects apply, so a re-review that ends in revocation does not leave pinned jobs running
 ```
 
 ### 0.9.7 Appeal (owner S10.*, S8.*)
@@ -504,13 +520,30 @@ filed|assigned|in_review|awaiting_second_review --appeal.withdrawn-->    withdra
 
 | Machine | States | Events |
 | --- | --- | --- |
-| `Audit` (S8.*) | `pending`, `second_executed`, `matched` (T), `mismatched`, `third_pending`, `resolved` (T), `cancelled` (T) | `audit.created`, `audit.second_submitted`, `audit.matched`, `audit.mismatched`, `audit.third_requested`, `audit.third_submitted`, `audit.resolved`, `audit.cancelled` |
+| `Audit` (S8.*) | `pending`, `second_executed`, `matched` (T), `mismatched`, `third_pending`, `third_executed`, `resolved` (T), `cancelled` (T) | `audit.created`, `audit.second_submitted`, `audit.matched`, `audit.mismatched`, `audit.third_requested`, `audit.third_submitted`, `audit.resolved`, `audit.cancelled` |
 | `Escrow` (S6.*) | `open`, `settling`, `closed` (T) | `escrow.opened`, `escrow.settling_started`, `escrow.closed` |
 | `Reservation` (S6.*) | `held`, `activated` (T), `cancelled` (T), `expired` (T) | `reservation.held`, `reservation.activated`, `reservation.cancelled`, `reservation.expired` |
 | `Report` (S10.*) | `open`, `triaged`, `actioned` (T), `dismissed` (T) | `report.filed`, `report.triaged`, `report.actioned`, `report.dismissed` |
 | `LaunchGateItem` (S14.*) | `open`, `evidence_attached`, `signed_off`, `reopened` | `gate.evidence_attached`, `gate.signed_off`, `gate.reopened` |
 | Kill switch (S14.*) | `released`, `engaged` | `killswitch.engaged`, `killswitch.released` |
+| `Referral` (S6.*, S12.*) [A] | `held`, `released` (T), `revoked` (T) | `referral.created`, `referral.released`, `referral.revoked` |
+| `Alarm` (S4.*, S13.*) [A] | `raised`, `acknowledged` (T) | `alarm.raised`, `alarm.acknowledged` |
+| `Invite` (S10.*) [A] | `issued`, `redeemed` (T), `expired` (T), `revoked` (T) | `invite.issued`, `invite.redeemed`, `invite.expired`, `invite.revoked` |
 | Ledger and configuration events | not machines | `ledger.entry_committed`, `ledger.invariants_passed`, `ledger.invariant_violated`, `parameter.changed`, `policy.version_published`, `changelog.entry_published`, `launch.members_may_join_changed` |
+
+Transitions of the smaller machines [D][A] (the Audit third state and the three added machines are convention additions; the owning parts confirm the names at assembly):
+
+```
+Audit     (none) --audit.created--> pending --audit.second_submitted--> second_executed --audit.matched--> matched (T)
+Audit     second_executed --audit.mismatched--> mismatched --audit.third_requested--> third_pending --audit.third_submitted--> third_executed --audit.resolved--> resolved (T)
+Audit     pending|second_executed|mismatched|third_pending --audit.cancelled--> cancelled (T)
+Referral  (none) --referral.created--> held     the two-sided bonus is recorded and held for growth.referral.hold_s
+Referral  held --referral.released--> released (T)   hold elapsed; the two grant entries of the bonus are posted (0.8.5)
+Referral  held --referral.revoked--> revoked (T)     abuse finding or revokeReferral before release; nothing is posted
+Alarm     (none) --alarm.raised--> raised --alarm.acknowledged--> acknowledged (T)   an acknowledged alarm is not reopened; a new occurrence raises a new Alarm
+Invite    (none) --invite.issued--> issued     expires after invite.ttl_days
+Invite    issued --invite.redeemed--> redeemed (T) ; issued --invite.expired--> expired (T) ; issued --invite.revoked--> revoked (T)
+```
 
 ## 0.10 Configuration parameters
 
@@ -733,9 +766,9 @@ The list below is the FULL set of parameter names; names are stable and C-022 co
 | `screen.review_rate_established_requester` | ratio | 0.20 | 0..1 | `OPS` |
 | `service.review_max_age_days` | days | 90 | 1..365 | `CNS` |
 | `service.review_grace_days` | days | 14 | 0..90 | `CNS` |
-| `service.min_approvers` | int | 1 (FD§5.3: a reviewer records the answers); 2 is an owner decision [A] | 1..5 | `FND` |
+| `service.min_approvers` | int | 1 (FD§5.3: a reviewer records the answers); 2 is an owner decision [A] | 1..2; 0.9.6 | `FND` |
 | `service.terms_copy_max_bytes` | int | 5,242,880 | 1024..52428800 | `OPS` |
-| `template.min_reviewers_new` | int | 2 (FD§5.7 failure mode 10) | 1..5 | `FND` |
+| `template.min_reviewers_new` | int | 2 (FD§5.7 failure mode 10) | 1..2; 0.9.5 | `FND` |
 | `template.min_reviewers_edit` | int | 1 | 1..5 | `FND` |
 | `template.autopause_report_count` | int | 5 reports inside `template.autopause_window_s` | 1..1000 | `OPS` |
 | `template.autopause_window_s` | duration_s | 3600 | 60..604800 | `OPS` |
@@ -747,7 +780,7 @@ The list below is the FULL set of parameter names; names are stable and C-022 co
 | `appeal.window_days` | days | 14 | 1..90 | `FND` |
 | `appeal.max_per_decision` | int | 1 | 1..5 | `FND` |
 | `appeal.reviewer_sla_days` | days | 7 (target, published) | 1..60 | `OPS` |
-| `appeal.ban_min_reviewers` | int | 2 | 1..5 | `FND` |
+| `appeal.ban_min_reviewers` | int | 2 | 1..2; 0.9.7 | `FND` |
 | `report.triage_sla_days` | days | 3 (target, published) | 1..30 | `OPS` |
 | `report.max_per_member_per_day` | int | 20 | 1..1000 | `OPS` |
 
@@ -888,7 +921,7 @@ Build milestones are written `BM0`..`BM9` (see `ISS-01` for why not `M0..Mn`). T
 | --- | --- | --- | --- | --- |
 | `BM0` | `foundation` | Repo, CI, environments, migrations, the ID, time and hash libraries of 0.6, error model, idempotency, pagination, rate-limit headers, config-store schema, observability skeleton, storage and host interfaces | none | An API that serves `/v1/public/health` in the 0.11 shapes; migrations and API conformance tests run in CI |
 | `BM1` | `ledger_and_invariants` | Append-only double-entry ledger in integer `ucr`, lots and oldest-first spending, hash chain, continuous invariant checks with alarms, reversal entries (the internal interface requires `ledger.reversal_min_approvers` approver ids; admin identities arrive in `BM2`) | `BM0` | A ledger driven only through its internal interface; the FD§3.3 example passes as `AC-ledger-01`; a seeded corruption raises `ledger.invariant_violated` |
-| `BM2` | `admin_gates_and_config` | Admin passkey authentication and sessions, `AdminAction` log, the two-admin approval flow for ledger reversal on top of the `BM1` interface, parameter editor with versions and public change log, kill switches, feature flags with logged assignment, `LaunchGateItem` checklist and sign-off, `launch.*` enforcement, pre-registration lock, Phase 0 calibration tool | `BM0`, `BM1` | An operator can change a parameter prospectively, engage a kill switch, record calibration observations and sign off a gate; a `launch.*` switch refuses to turn on unless the rule in S14.* holds |
+| `BM2` | `admin_gates_and_config` | Admin passkey authentication and sessions, `AdminAction` log, the two-admin approval flow for ledger reversal on top of the `BM1` interface, parameter editor with versions and public change log, kill switches, feature flags with logged assignment, `LaunchGateItem` checklist and sign-off, `launch.*` enforcement, pre-registration lock, Phase 0 calibration tool | `BM0`, `BM1` | An operator can change a parameter prospectively, engage a kill switch, record calibration observations and sign off a gate; a `launch.*` switch refuses to turn on unless the rule in S14.* holds; before `BM3` there is no Service Registry, so the approved-service count is 0, `launch.min_approved_services` (at least 1) is unmet and the S14.* rule cannot pass in `BM2` [A] |
 | `BM3` | `registry_and_policy` | Service Registry with every service `unreviewed`, `TermsCopy` capture, dated `FlagAnswer`s, service review machine, rules `R1`..`R10` as data plus the evaluator, metadata validation, allowlist, reason codes, opt-in data model | `BM2` | A job-shaped request is accepted or rejected with `policy.<rule>.<slug>` reasons; no service can reach `approved` without a saved terms copy |
 | `BM4` | `identity_and_access` | Anonymous identity, `MemberKey`, recovery key, device linking, key rotation, optional e-mail, invites and invite trees, per-device, per-tree and per-day limits, roles and permission matrix, retention jobs, IP-hash handling | `BM2` | A member can be created, recovered and rate-limited; the permission-matrix suite passes; no raw IP appears in storage or logs |
 | `BM5` | `templates_and_commons_jobs` | `Template` and `TemplateVersion` review with the second-reviewer rule, the first template set, upload and screening, Commons backlog authoring, the `Job` machine for Commons jobs, cell creation | `BM3`, `BM4` | A reviewer approves a template; a Commons job splits into queued cells; job creation is refused for every `unreviewed` service |
@@ -918,7 +951,7 @@ One row per spec file. File names are proposals [A]: the `allowed_paths` of the 
 | S8 | Templates and verification pipeline | `spec/08a-templates.md`, `spec/08b-verification.md` | `plan` | `ISS-81`..`ISS-83` (08a), `ISS-84`..`ISS-86` (08b) |
 | S9 | Result return, anti-forgery and abuse defenses | `spec/09-result-return.md` | `plan` | `ISS-91`..`ISS-99` |
 | S10 | Identity, access, privacy and safety, with the threat model table | `spec/10a-identity.md`, `spec/10b-safety.md` | `plan` | `ISS-101`..`ISS-103` (10a), `ISS-104`..`ISS-106` (10b) |
-| S11 | Volunteer, Requester, Reviewer and Operator experiences, Persian first | `spec/11-experiences.md` | `plan` | `ISS-111`..`ISS-119` |
+| S11 | Volunteer, Requester, Reviewer and Operator experiences, Persian first | `spec/11a-volunteer-ux.md`, `spec/11b-requester-ux.md`, `spec/11c-admin-tools.md`, `spec/11d-i18n-copy.md` | `plan` | `ISS-111`..`ISS-119` |
 | S12 | Public surfaces and growth experiments | `spec/12-public-growth.md` | `plan` | `ISS-121`..`ISS-129` |
 | S13 | Measurement, experiment support and pre-registration | `spec/13-measurement.md` | `plan` | `ISS-131`..`ISS-139` |
 | S14 | Launch gates G0..G5, exit rule, kill switches | `spec/14-launch-gates.md` | `plan` | `ISS-141`..`ISS-149` |
@@ -934,6 +967,7 @@ Notes [D]
 
 - `plan` means the owner cell is not named in the text available to `C-027`, and this file does not guess it; `C-001` fills the column at assembly [V]. The ids `C-001`..`C-006` come from the cell engine's dependents listing for this cell, which was truncated, and `C-022` and `C-023` from this cell's goal text [V].
 - A part split over several files uses the issue sub-blocks of 0.4 in file sort order. A part that is not split uses all nine ids.
+- Files outside the 21 parts: `docs/audit/` holds the audit logs (`A01`..`A15`, `FINAL`) and `docs/fix/` the fix logs (`FIX-nn`); they carry no part number, no issue block and no normative text [A].
 - Cross-part ownership of names: entities and enums are owned by `S0` (0.7, 0.8); states and events by `S0` (0.9) with guards and effects in `S5.*`..`S9.*`; parameters by `S0` (0.10.6) and `S16`; API conventions by `S0` (0.11) and operations by `S15`. A part that needs a missing name reports a convention gap (0.1).
 
 ## Issues raised

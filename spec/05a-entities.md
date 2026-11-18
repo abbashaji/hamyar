@@ -104,7 +104,7 @@ All foreign keys are `ON DELETE RESTRICT ON UPDATE RESTRICT`; no cascade exists.
 
 | Never stored in any table, column, log or event | Why | Where the nearest permitted thing lives |
 | --- | --- | --- |
-| A raw IP address | FD Principle 8; `retention.raw_ip_stored` = false (constant) | A keyed hash with a TTL: `devices.creation_ip_hash` and the rate-limit counters (S5.3.3) |
+| A raw IP address | FD Principle 8; `retention.raw_ip_stored` = false (constant) | A keyed hash with a TTL, held only in the volatile rate-limit counters, never in a table or a backup (S5.3.3, 10a 10.14.2) |
 | A clear-text e-mail address | S0.7 naming rules; `identity.email_optional` = true | Field-encrypted ciphertext plus a keyed lookup hash on `members` |
 | A provider credential, cookie, session, API key or account identifier | Ground rule 3 | Nothing. A volunteer reports only the service and a model label, as text |
 | The text of a volunteer's chat page, a chat share-link, a clipboard capture, a screenshot | Ground rule 3; the panel's automatic chat-link capture was removed (FD§10) | `submissions.output_text` holds only what the volunteer pasted back into the form |
@@ -121,7 +121,7 @@ Provenance (FD§5.6) records "a salted-hash volunteer ID that requesters never s
 | Item | Decision |
 | --- | --- |
 | Salt scope | One system-wide secret per key version `v`. It is not per job, per requester or per template |
-| Stored in | `submissions.volunteer_handle` with `handle_key_version`, and in the internal manifest (S5.8.8). Computed on read, never stored, for `vol_` shown on public pages (S5.9.2) |
+| Stored in | `submissions.volunteer_handle` with `handle_key_version`, and in the internal manifest (S5.8.8). Never computed for a public page: public surfaces are aggregates and show no `vol_` handle (10b 10.13.1 item 11 and 10.13.3); the handle is read only from `submissions.volunteer_handle` and the internal manifest, by verifier and admin paths |
 | Never exposed to | Any requester surface, including the exported manifest (the export is a redacted rendering, `ISS-53`) |
 | Linkability | Within one key version all of a member's handles are linkable to each other by anyone holding the data, but not to `member_id` without the key. The platform needs this linkage: detection of one donor acting as both primary and auditor, and copy detection |
 | Rotation | Rotating the key creates version `v+1`; old handles stay as written and become unlinkable to new ones. Rotation before any public exposure is required (`security.rotate_before_public_exposure`) |
@@ -133,13 +133,12 @@ Provenance (FD§5.6) records "a salted-hash volunteer ID that requesters never s
 | Column | Computed as | Key (secret, S10.* owns the list) [A] | Kept for |
 | --- | --- | --- | --- |
 | `devices.device_token_hash` | HMAC-SHA-256 of a random 256-bit token the client keeps in its own storage | `secret.device_hash_key[v]` | `retention.session_days` after last use |
-| `devices.creation_ip_hash` | HMAC-SHA-256 of the client IP at identity creation | `secret.ip_hash_key[v]` | `retention.ip_hash_ttl_days` (default 1 day), then set to NULL |
 | `members.email_lookup_hash` | HMAC-SHA-256 of the lower-cased address | `secret.email_lookup_key[v]` | while the member is not `closed` |
 | `members.email_ciphertext` | AES-256-GCM field encryption of the address | `secret.email_encryption_key[v]` | as above |
 | `sessions.token_hash`, `leases.nonce_hash`, `invites.code_hash` | SHA-256 of a 128- or 256-bit CSPRNG value (no key needed, S0.6.4) | none | their TTLs |
 | `submissions.volunteer_handle` | S5.3.2 | `secret.volunteer_handle_key[v]` | with the submission row (a hash, so it stays after payload purge) |
 
-Rate-limit counters (per member, per IP hash, per invite tree) are infrastructure state keyed by these hashes with a TTL equal to their window; they live in the cache or in a `rate_counters` table that is not a domain entity, and they hold no payload (S4.*, S10.*). [A]
+The creation-time IP hash is not a column of any table of this model (FIX-17, audit A04 finding 15). Rate-limit counters (per member, per IP hash, per invite tree) are infrastructure state keyed per UTC day or window by the daily-rolling hash (`secret.ip_hash_key`, 10a 10.14.2), with a TTL no longer than their window and never beyond `retention.ip_hash_ttl_days`; they live only in the volatile `CounterStore`, not in a relational table and not in backups, and they hold no member id and no payload (S4.*, 10a 10.14.2 item 2, 10b 10.13.2). Data-minimization consequence [A]: the per-day limits keyed by IP hash or by invite tree (the daily IP limits and `ratelimit.invite_tree_new_members_per_day`) use the volatile counter only, so they cannot be audited or replayed from the database and a counter-store restart resets them; limits that read stored columns (`grant.max_per_device` through `devices.grants_claimed`, `ratelimit.device_new_members_per_day` through `members.creating_device_id`, `invite.tree_*` through the tree columns) are unaffected. [A]
 
 ### 5.3.4 What a database dump reveals [D]
 
@@ -357,7 +356,7 @@ A pseudonymous identity. Holds the `donor` and `requester` capabilities (S0.8.2)
 | `locale`, `digits`, `calendar` | enum | NN while `status <> 'closed'`; NULL on a closed tombstone (DDL `CHECK`) | defaults from `i18n.*`; member can change |
 | `time_zone` | text | null | IANA name chosen by the member; never inferred from an IP |
 | `creating_device_id` | id `dev_` | null, FK | the device that created the identity; used for `ratelimit.device_new_members_per_day` |
-| `invite_id` | id `inv_` | null, FK (deferred) | the invite redeemed, if any |
+| `invite_id` | id `inv_` | null, FK (deferred) | the invite redeemed, if any; with `Invite.issuer_member_id` it is the edge that 10a calls `Member.invited_by_member_id` (alias, 10a names canonical); set to NULL by the edge-clearing sweep of S5.6.5 [A] |
 | `invite_root_member_id`, `invite_depth` | id `mem_`, int | root null for a founder; depth >= 0 | denormalized tree position for `invite.tree_*` limits |
 | `team_id`, `team_joined_at` | id `tem_`, ts | null | a member is in at most one team [A] |
 | `email_ciphertext`, `email_key_version`, `email_lookup_hash`, `email_verified_at` | bytes, int, bytes32, ts | all null or `ciphertext` and `lookup_hash` both set | optional e-mail (FD§3.2); S5.3.3 |
@@ -400,11 +399,10 @@ A keyed-hash record of a client installation for rate limits, anti-farming and l
 | `hash_key_version` | int | NN | |
 | `status` | enum(`device_status`) | NN, default `active` | `blocked` after a farming finding (S10.*) |
 | `first_seen_day`, `last_seen_day` | day | NN | |
-| `creation_ip_hash`, `ip_hash_key_version`, `creation_ip_hash_expires_at` | bytes32, int, ts | all null or all set | expiry = creation + `retention.ip_hash_ttl_days` |
 | `grants_claimed` | int | NN, default 0 | counts toward `grant.max_per_device` (lifetime) |
 
-**Unique** `device_token_hash`. **Indexes** `(creation_ip_hash, created_at)` where not null; `(last_seen_day)`. **Retention.** After `retention.session_days` without use the row is purged: hashes are set to NULL; a row with `grants_claimed > 0` is kept as a tombstone `(id, grants_claimed)` while any non-closed member has it as `creating_device_id` so the lifetime grant limit cannot be reset by waiting [A].
-**Stored** keyed hashes, day-granular first and last use, a grant counter. **Not stored** raw IP, user-agent, screen size, fonts, canvas or audio fingerprints, hardware ids, anything beyond the list the threat model (S10.*) admits.
+**Unique** `device_token_hash`. **Indexes** `(last_seen_day)`. **Retention.** After `retention.session_days` without use the row is purged: hashes are set to NULL; a row with `grants_claimed > 0` is kept as a tombstone `(id, grants_claimed)` while any non-closed member has it as `creating_device_id` so the lifetime grant limit cannot be reset by waiting [A].
+**Stored** keyed hashes, day-granular first and last use, a grant counter. **Not stored** raw IP, any IP hash (the creation-time hash lives only in the volatile counter, S5.3.3), user-agent, screen size, fonts, canvas or audio fingerprints, hardware ids, anything beyond the list the threat model (S10.*) admits.
 
 ### 5.6.4 `Session` · `sessions` · `ses_` · `MUT` · `short`
 
@@ -423,12 +421,14 @@ A keyed-hash record of a client installation for rate limits, anti-farming and l
 
 | Field | Type | Null / constraint | Note |
 | --- | --- | --- | --- |
-| `issuer_member_id` | id `mem_` | NN, FK | issuing needs `invite.min_accepted_cells_to_issue` accepted cells |
+| `issuer_member_id` | id `mem_` | NN, FK; NULL once the edge is cleared (S5.6.5 edge clearing) | issuing needs `invite.min_accepted_cells_to_issue` accepted cells; alias of 10a `inviter_member_id` (10a name canonical) |
 | `code_hash` | bytes32 | NN | SHA-256 of a 128-bit code; the code is shown once to the issuer |
 | `status` | enum(`invite_status`) | NN, default `issued` | |
 | `expires_at` | ts | NN | `created_at + invite.ttl_days` |
-| `redeemed_by_member_id`, `redeemed_at` | id, ts | null, both set or both null | |
+| `redeemed_by_member_id`, `redeemed_at` | id, ts | null, both set or both null; after edge clearing `redeemed_by_member_id` is NULL and `redeemed_at` holds its UTC date | `redeemed_by_member_id` is the alias of 10a `invitee_member_id` (10a name canonical) |
 | `tree_root_member_id`, `tree_depth` | id, int | NN | the new member's position; depth <= `invite.tree_max_depth` |
+
+**Edge clearing** [A] (default-pending D-12; 10a 10.10, `invite.accountability_days`). That many days after the invitee's `Member.created_at`, the retention sweep sets `Member.invite_id`, `Invite.issuer_member_id` and `Invite.redeemed_by_member_id` of the redeemed invite to NULL and reduces `Invite.redeemed_at` to its UTC date; unredeemed invites keep their issuer. `tree_root_member_id`, `tree_depth`, `Member.invite_root_member_id` and `Member.invite_depth` stay, so after the window accountability is at tree level only and creation order inside a tree still permits partial inference (10a 10.15.2). If either side of the edge is banned inside the window, the edge is kept until `retention.moderation_days` after the resolution. Operators alone see edges while they exist (`perm.invite.view_tree_edges`, 10a 10.10).
 
 **Unique** `code_hash`; `redeemed_by_member_id`. **Indexes** `(issuer_member_id, status)` (for `invite.max_active_per_member`); `(tree_root_member_id)` (for `invite.tree_max_members`). **Stored** hash, tree position. **Not stored** the clear code, any note about the invitee, any contact detail.
 

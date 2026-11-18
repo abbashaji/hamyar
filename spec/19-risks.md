@@ -305,6 +305,27 @@ Only the owner can decide these. They are listed with the default that applies i
 
 **S3.* by reference.** The consolidated register of open decisions is S3.* (`needs_owner` issues from every part, 0.4). This part restates none of them. The `needs_owner` issues raised here are `ISS-192`, `ISS-194`, `ISS-196`, `ISS-197` and `ISS-198`, and they correspond, in that order, to `OD-01`, `OD-03`, `OD-02`, `OD-04` and `OD-11` of this part (not of S3.2: the `OD-nn` ids of S19.9 are numbered locally and differ in meaning from those of S3.2, so a cross-part reference is written `S19.OD-nn` or `S3.OD-nn`); where S3.* holds the same decision, S3.* is authoritative and the `OD-nn` row is only a pointer. Overlaps with S3.2, for C-001 to merge (`ISS-195`): `S19.OD-02` with `S3.OD-02`, `S19.OD-05` with `S3.OD-01`, `S19.OD-08` with `S3.OD-03`, `S19.OD-10` with `S3.OD-05`, `S19.OD-11` with `S3.OD-11`, `S19.OD-12` with `S3.OD-12`; `S19.OD-01`, `OD-03`, `OD-06`, `OD-07` and `OD-09` have no S3.2 row. [A]
 
+**Cross-reference S19 OD-nn and S3 OD-nn.** The two series are numbered separately and the same number often means a different decision. Neither series is renumbered. From this table on, prose that cites an id writes `S19 OD-nn` or `S3 OD-nn`, never a bare `OD-nn`. The last column is the spec's reading of which decisions are the same [A]; where S3.2 holds the decision, S3.2 is authoritative and the S19.9 row is a pointer (`ISS-195`). The sentence above predates `S3 OD-27`, which now holds `S19 OD-03` and `S19 OD-04`; `S19 OD-01`, `S19 OD-06`, `S19 OD-07` and `S19 OD-09` still have no S3.2 row. The same table is in S3 (3.6). [D]
+
+| nn | `S19 OD-nn` means (19.9) | `S3 OD-nn` means (3.2) | Same decision? Counterpart |
+| --- | --- | --- | --- |
+| 01 | Build while G0 and G1 are open | Operator jurisdiction, entity form, legal exposure | No. No S3.2 row; the FD§8.3 exit-rule question stays with `ISS-31`, `ISS-171`, `ISS-192` and `ASM-26` |
+| 02 | Second-reviewer rule for a template one founder wrote | Who reviews templates, services and policy; second reviewer and second sign-off | Yes: `S19 OD-02` = `S3 OD-02` (S3 is wider) |
+| 03 | Who is on call, who may engage a kill switch, alarm escalation | Hosting, storage, countries the service must be reachable from | No. `S19 OD-03` = `S3 OD-27` |
+| 04 | How the reachability test from Iran is run | Which services to review first; fallback if none is Commons-capable | No. `S19 OD-04` = `S3 OD-27`; `S3 OD-03` covers the countries (related) |
+| 05 | Which counsel, in which jurisdiction | The Commons backlog (author, license, target, sponsor label) | No. `S19 OD-05` overlaps `S3 OD-01` (jurisdiction and entity decide which counsel) |
+| 06 | Stop-loss and fallback among FD§8.3 (i) to (iv) | Reserve start | No. No S3.2 row for the stop-loss; `S3 OD-04` (fallback when no service is Commons-capable) is related |
+| 07 | Keep, wrap or replace the existing panel | Whether `ff.channel.human_review` is on | No. No S3.2 row; `S3 OD-19` (human review of the panel repository for G4) is adjacent |
+| 08 | Hosting and storage vendors | Whether platform-side sandboxed execution is ever allowed | No. `S19 OD-08` = `S3 OD-03` |
+| 09 | Who advises on the threat model and member-facing notice | Who bears three costs the FD leaves open | No. No S3.2 row; `S3 OD-12` (safety adviser reviews the retention numbers) is adjacent |
+| 10 | A Commons sponsor or another source of Commons jobs | Volunteer-handle derivation | No. `S19 OD-10` = `S3 OD-05` |
+| 11 | Phase 1 thresholds and decision rules | Founders' thresholds recorded before Phase 1 | Yes: `S19 OD-11` = `S3 OD-11` |
+| 12 | Stance on legal demands for member data | Retention, logging and compelled-disclosure posture | Yes: `S19 OD-12` = `S3 OD-12` (S3 also holds the `retention.*` numbers) |
+| 13 | none | Who reviews the Persian and English copy | Not applicable: `S3 OD-13` has no S19 counterpart |
+| 14 | none | Project name and public descriptor | Not applicable: `S3 OD-14` has no S19 counterpart |
+
+`S3 OD-15` to `S3 OD-31` were added to S3.2 after the audit (`docs/audit/A13.md` findings 2 and 22); only `S3 OD-27` matches an S19 decision. [D]
+
 ## 19.10 What this part does and does not promise
 
 - **Minimization, never anonymity.** The platform promises to store as little as it can (`retention.raw_ip_stored` = `false`, keyed hashes, no mandatory identity). It does not promise that a member cannot be identified, and no user-facing text says it does (`RISK-05`, `RISK-30`, `RISK-31`). [D]

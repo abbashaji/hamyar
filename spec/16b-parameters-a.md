@@ -14,6 +14,7 @@ The 31 names below are used in other parts and are defined in neither S0 0.10.6 
 | RB-4 Constraint ids | New cross-parameter constraints are `S16B-C1`..`S16B-C9` (16.B.9), written like `S9-C1` so they cannot collide with `C13`..`C20` of 16.3 or with the `C9` that S10a used for a different rule (`ISS-16007`). [D] |
 | RB-5 What was read | For each name the passage cited by the cell was read with about 15 lines around it, and S0 0.10.1 to 0.10.5, Tables A and B and most of Table C of S0 0.10.6, and all of S16 were read. The part S11 console file that holds `11c:67`, `11c:126` and `11c:729` could not be opened: its file name is not given in the cell, in S0 0.13 or in the sibling parts, and every guessed path returned NOT_FOUND. The two rows that rest on it are marked [V] and recorded as `ISS-16015`. [A][V] |
 | RB-6 Folding | Like every convention addition (`ISS-169`), these rows are folded into S0 0.10.6 and S16 by C-001 at assembly; until then this file is part of the table, so `AC-param-01` and `AC-param-15` apply to its names. [A] |
+| RB-7 Rows added by FIX-04 | 16.B.11 adds canonical rows for names that parts S10a, S10b, S12, S13, S14, S15a and S15b use and that no table defined (`docs/audit/A12.md` finding 29, `A03.md` finding 29, `A11.md` finding 16, `spec/16d-parameter-consistency.md` CR-13), and 16.B.7 gains three alias rows. The counts of 16.B.1 (31 names, 26 canonical rows, 5 aliases) describe the cell that wrote this file and are not changed. [D] |
 
 ### 16.B.1.1 Columns
 
@@ -82,7 +83,7 @@ Owner `reviewer` for `report.*` and `appeal.*` (S0 0.10.5, 10b parameter table);
 | `report.transparency_publish_days` | days | days between two publications of aggregate counts of reports, actions, appeals and outcomes | 1..365 | 30 (S10b); publication may be delayed on counsel's advice [V] | reviewer | `T↓` | yes: read when the publication job runs | `FND`: founders' decision before day 1 | 10b:598, 10b:643 |
 | `report.urgent_triage_sla_s` | duration_s | seconds from `filed_at` to `triaged_at` for urgent categories (`safety_of_person`, `injection_attempt`, `suspected_sensitive_data`, `legal_notice`) | 600..86400; `S16B-C9` | 14,400 (4 hours, S10b; a declared target, not a promise) | reviewer | `T↓` | yes: read when the SLA clock is evaluated; after a tightening an open report may become overdue, which raises the alarm only | `OPS`: time to triage seen in Phase 1 | 10b:516, 10b:640 |
 | `appeal.reason_max_chars` | int | chars of the reason a member types when filing an appeal | 100..10000; `S16B-C4` | 1000 (S11a) | reviewer | `N` (a member's right to be heard has no safe lower end) | yes: applies to filings after the change | `OPS`: lengths of real appeals | 11a:203, 11a:1384 |
-| `abuse.admin_lookup_rate` | int [V] | [V] lookups per admin per time unit; the name does not fix the unit | [V] | none stated: no value is invented here; the passage `11c:729` was not read (`ISS-16015`) | operator [A] | `T↓` [A] (fewer admin lookups of member data is the tightening) | yes [A] | `OPS` [A]: lookups per admin seen in Phase 1 | 11c:729 |
+| `abuse.admin_lookup_rate` | int [V] | [V] lookups per admin per time unit; the name does not fix the unit | [V] | none stated: no value is invented here; the passage `11c:729` was not read (`ISS-16015`); not seeded, and a write is refused as an unknown name, until type, unit and default are supplied (16d CR-13, `AC-paramd-09`; default-pending D-22) | operator [A] | `T↓` [A] (fewer admin lookups of member data is the tightening) | yes [A] | `OPS` [A]: lookups per admin seen in Phase 1 | 11c:729 |
 
 Notes [D][A]: (1) `report.urgent_triage_sla_s` is the second SLA of 10.16.3; the first is `report.triage_sla_days` (3 days, S16 16.12), and `S16B-C9` keeps the urgent one shorter. (2) Aggregate counts published every `report.transparency_publish_days` are subject to the small-cohort suppression of `analytics.min_cohort_k` (S10b item 11), so at a pilot of 30 to 50 members most counts will be suppressed; that is the intended trade [A][H]. (3) The three `_chars` limits count characters by one rule that no part states yet (`ISS-16013`).
 
@@ -109,6 +110,9 @@ An alias is not seeded, is refused on write as an unknown name (`AC-param-14`), 
 | `retention.backup_days` | `ops.backup_retention_days` | 35 days, 1..365, `T↓` (16.16) | no | 10b:146, 10b:169 | Same number, same range, same promise (data is gone from backups within this many days). `ISS-16005` |
 | `retention.sweep_interval_s` | `ops.purge_interval_s` [V] | 3600 s, 60..86400, `T↓` (16.16) | no | 10a:529, 10a:757; 10b:146 | Same default and range; the sweep that deletes expired and closed rows is the purge job. `ISS-16006` |
 | `session.admin_stepup_s` | `session.step_up_max_age_s` [V] | 300 s, 30..3600, `T↓` | no | 11c:67, 11c:126 | Assumed from the name and from S10a X8 (one step-up window for admin writes); the 11c text was not read. `ISS-16004`, `ISS-16015` |
+| `invite.required_to_join` | `identity.registration_mode` [A][V] | `true` means `invite_only` and `false` means `open`; both defaults agree (`true` in 15a, `invite_only` in 10a) | no | 15a:882 | Same setting in two forms: a boolean in S15a and an enum in S10a. One stored value avoids a second setting that could contradict the first; S15a is amended to the canonical name at assembly. S10 and S15a owners confirm [V] (added by FIX-04) |
+| `security.approval_ttl_s` | `security.two_person_ttl_s` | 86,400 s, 600..604,800, `T↓` (16.B.11.3) | no | 15b:1138 | Same default and the same quantity: how long a pending two-person approval stays open. The S10a name is the first definer and is canonical (16d 16.D.5, decided there). `launch.approval_window_s` stays a separate row (14.8.1). `ISS-16017` (added by FIX-04) |
+| `security.secret_rotation_max_age_days` | `security.secret_rotation_days` | 90 days, 1..365, `T↓` (16.16) | no | 14:653 | Same default 90; S14 14.13 names it differently and says S16 keeps one name (16d 16.D.5, `ISS-147`, `ISS-16018`). No rename (added by FIX-04) |
 
 ## 16.B.8 Why the safety limits are safe
 
@@ -160,6 +164,80 @@ Worked check of the initial defaults [D]: `S16B-C1` 7,776,000 <= 90 x 86,400 = 7
 **Assumptions [A]** (with the decision that could overturn each): canonical-versus-alias choices follow 'already defined in S0 or S16 wins'; `invite.accountability_days` is treated like retention for lowering; ranges not given by a source part (`session.max_active_per_member` 1..100, `session.admin_stepup_ttl_s` 10..600, `launch.*` ranges) are chosen here; owner `operator` for the area `abuse`.
 
 **What this file cannot promise** [D]: a default is a guess until its replacing measurement exists; none of these values shows that a limit is safe for real members, legal in any jurisdiction or enough at a pilot of 30 to 50 members.
+
+## 16.B.11 Rows added by FIX-04 (cell C-075)
+
+The names below are used in S10a (10.18.3), S10b (10.18), S12 (12.13.3), S13 (13.13), S14 (14.13), S15a (convention list and 15.12) and S15b (15.21.2, `ISS-154`) and are defined in none of S0 0.10.6, S16, 16.B (16.B.2 to 16.B.6) or 16.C. Rule RB-1 to RB-6 apply unchanged. Every default is the value the using part states, labeled `initial configurable default`; a range, a direction or a unit that the using part does not state is chosen here and marked [A]. No name is renamed. Coverage is limited to the parameter lists and tables named above; a parameter name found in another passage and missing from every table is a gap by R16-4 (`AC-param-01`). [D][A]
+
+### 16.B.11.1 Identity and invite
+
+Owner `operator`. Binding: read at the event the row governs; nothing is stamped on an object. [D]
+
+| name | type | unit | validation | initial configurable default | owner role | change policy | prospective-only | calibration | used in |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `identity.registration_mode` | enum | how a new member may register | `invite_only`, `open` | `invite_only` (S10a) | operator | `T→invite_only` (`open` is the loosening: notice and a second operator) | yes: read when a member is created; no existing member changes | `FND`: whether registration ever opens in Phase 1 is a founders' decision | 10a:742 |
+| `identity.code_max_attempts` | int | wrong guesses allowed against one e-mail verification code | 1..20 | 5 (S10a; the guess bound of 16.B.8 is 5 / 2^40 per code) | operator | `T↓` | yes: read when a code is checked; a code already voided stays void | `SEC` | 10a:745 |
+| `invite.strikes_to_revoke_issuing` | int | strikes inside `invite.strike_window_days` that suspend a member's right to issue invites [A] | 1..20 | 2 (S10a, no derivation) | operator | `T↓` | yes: evaluated when a strike is recorded | `OPS`: strikes and suspensions in the Phase 1 abuse queue | 10a:751 |
+| `invite.tree_freeze_ban_threshold` | int | banned members of one invite tree inside `invite.strike_window_days` that freeze the tree [A] | 1..100 | 3 (S10a, no derivation) | operator | `T↓` | yes: evaluated when a ban is recorded | `OPS`: tree bans in the Phase 1 abuse queue | 10a:752 |
+
+### 16.B.11.2 Rate limits and API
+
+Owner `operator`. Binding: read per request (S16 16.10); nothing is stamped. The three auth and link limits are anti-abuse values and are proposed for the hidden list of S16 16.17.5, like `ratelimit.*new_members_per_day` [A]. A cost is the number of tokens a request spends from the bucket of its class (15a 15.12, 15b 15.21.2). [D]
+
+| name | type | unit | validation | initial configurable default | owner role | change policy | prospective-only | calibration | used in |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `ratelimit.write_weight` | int | tokens one member write spends from the `ratelimit.member_api_rpm` bucket | 1..100 [A]; `S16B-C11` | 4 (S15a; at 120 rpm that is 30 writes a minute, derived) | operator | `T↑` (a higher cost allows fewer writes) | yes: read per request | `OPS`: write rate of honest clients | 15a:706, 15a:882 |
+| `ratelimit.member_uploads_per_hour` | int | uploads and glossaries a member may create per rolling hour | 1..1000 [A] | 10 (S15a, no derivation) | operator | `T↓` | yes: read per request | `OPS`: uploads per member seen in Phase 1 | 15a:709, 15a:882 |
+| `ratelimit.admin_write_cost` | int | tokens one admin write, preview or heavy scan spends from the `ratelimit.admin_api_rpm` bucket | 1..100 [A]; `S16B-C11` | 2 (S15b `ISS-154`) | operator | `T↑` | yes: read per request | `OPS` | 15b:38, 15b:1138 |
+| `ratelimit.admin_auth_attempts_per_hour` | int | unauthenticated admin requests (challenges, enrollment) per IP hash per hour; failures are counted and the only consequence is `429`, never a locked account (15b 15.21.2) | 1..1000 [A] | 10 (S15b `ISS-154`) | operator | `T↓` | yes: read per request | `OPS`, `SEC` | 15b:36, 15b:1138 |
+| `ratelimit.public_verify_cost` | int | tokens one public manifest verification spends from the `ratelimit.public_rpm` bucket | 1..100 [A]; `S16B-C11` | 5 (S15b `ISS-154`; a verification hashes a client-supplied document) | operator | `T↑` | yes: read per request | `OPS`: cost of a verification | 15b:40, 15b:1138 |
+| `ratelimit.device_link_offers_per_day` | int | device-link offers one member may create per UTC day | 1..100 | 5 (S10a) | operator | `T↓` | yes: read per request | `OPS` | 10a:747 |
+| `ratelimit.auth_failures_per_hour` | int | failed member sign-in requests per IP hash per hour | 1..1000 | 20 per IP hash (S10a) | operator | `T↓` | yes: read per request | `OPS`, `SEC` | 10a:748 |
+| `api.deprecation_window_days` | days | days a deprecated operation keeps working after its announcement | 30..3650 [A] | 180 (S15a 15.13, no derivation) | operator | `T↑` (a longer window protects clients; a shorter one is the loosening) | yes: an announced deprecation keeps the window it was announced with [A] | `OPS`: client migration time | 15a:721, 15a:882 |
+
+Notes [D][A]: (1) At the defaults a member write costs 4 of 120 tokens, an admin write 2 of 300 and a verification 5 of 60 (`S16B-C11`). (2) `ratelimit.auth_failures_per_hour` (member) and `ratelimit.admin_auth_attempts_per_hour` (admin) are two limits on two surfaces and are not merged: the first counts failures, the second counts attempts. (3) `ratelimit.write_weight` bounds the rate of every member write that has no class of its own; the lease, submit, upload and report limits apply in addition (15a 15.12).
+
+### 16.B.11.3 Security and launch
+
+Owner `operator` (area table of S0 0.10.5); an edit of a `launch.*` row needs `launch.min_signoffs` distinct admins (16.2.3). All `security.*` rows are `public: no` (S16 16.17.5). Binding: a pending approval stores its own expiry when proposed; the other rows are read at the event. [D]
+
+| name | type | unit | validation | initial configurable default | owner role | change policy | prospective-only | calibration | used in |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `security.two_person_ttl_s` | duration_s | seconds a pending two-person approval stays open (generic; `launch.approval_window_s` is the launch flow's own) | 600..604,800 (the range of `launch.approval_window_s`, 16.B.6); `S16B-C12` | 86,400 (S10a; S15b `ISS-154` gives the same value under the alias `security.approval_ttl_s`; default-pending D-22) | operator | `T↓` | yes: each approval stores its `expires_at` when it is proposed | `SEC` | 10a:755; alias use 15b:1138 |
+| `security.admin_min_credentials` | int | passkeys an `AdminUser` must hold [A] | 1..5 | 2 (S10a) | operator | `T↑` [A] (more credentials is the tightening: no single lost device locks an admin out) | yes: read when a credential is removed or an admin is enrolled; no admin is removed by a change | `SEC` | 10a:756 |
+| `security.emergency_access_ttl_s` | duration_s | seconds an emergency access grant stays valid | 60..86400 | 3,600 (S10b) | operator | `T↓` | yes: each grant stores its `expires_at` | `SEC` | 10b:639 |
+| `security.reachability_check_interval_days` | days | days between two reachability checks of the service from the target network (10b 10.15.4) | 1..365 | 30 (S10b) | operator | `T↓` | yes: read when the next check is scheduled | `OPS`; the result of each check is [V] and never invented | 10b:640 |
+| `launch.require_locked_preregistration` | bool | whether opening a launch switch needs a locked `PreRegistration` (S13.7.6) | constant `true` in Phase 1 (FD§9 requires the lock before day 1; S14 14.7.1 tests it with no parameter read) [A] | true (S15b `ISS-154` says bool, true; default-pending D-17) | operator | `C` (S15b does not say it is editable; as a constant no edit can drop the FD§9 condition, and the owner may make it editable by a spec change) | not editable | `CON` | 14:461, 15b:1138 |
+
+Notes [D][A]: (1) `launch.require_locked_preregistration` follows the pattern of `mint.requires_launch_gate` (a constant `true`): 14.7.1 states the lock clause without reading a parameter, so an editable `false` would contradict S14 and the FD. (2) `security.admin_min_credentials` is read against the count of credentials per admin; its relation to `ISS-168` (one admin) is unchanged. (3) 16.17.5 already hides `security.*`; the four rows above need no new entry. [A]
+
+### 16.B.11.4 Growth, public, report and template
+
+Owners as stated in the row (S0 0.10.5: `founders` for thresholds, `operator` otherwise in `growth` and `public`; `reviewer` for `report` and `template`, as 10b states). Binding: read at the event; nothing is stamped. [D]
+
+| name | type | unit | validation | initial configurable default | owner role | change policy | prospective-only | calibration | used in |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `growth.share_card_max_active` | int | stored, revocable share cards a member may hold at once (15b 15.33.5) | 0..100 [A] | 3 (S15b `ISS-154`; default-pending D-15: if the stored cards of 15b are deleted in favor of the computed card of 15a, the row has no reader and stays unused) | operator | `T↓` | yes: read when a card is created; existing cards stay | `OPS`: cards per member | 15b:1138 |
+| `growth.badge.thresholds` | json | cell, day and review-cell counts at which a badge is awarded | an object with lists `cells`, `days`, `review_cells`; each list ascending positive integers | `{"cells": [1, 10, 100, 1000], "days": [7, 30, 100], "review_cells": [1, 10, 100]}` (S12) | founders (a threshold) | `N` [A] (no tightening direction: badges are recognition, not a limit) | yes: a badge already awarded is kept | `FND` | 12:666 |
+| `public.change_log_service_labels` | bool | whether the public change log shows service labels | bool | false (S12) | operator | `T→false` [A] (hiding the labels is the tightening) | yes: applies to entries published after the change | `CNS` and `SEC` | 12:668 |
+| `report.external_contact` | string | the contact a reporter outside the product can use (10b) | non-empty before launch; the launch gate item stays open while it is empty (10b) | empty string (S10b) | operator (S10b) | `N` | yes: read when the contact is shown | `CON` as S10b states [V]: set once by the operator before launch, which a constant cannot be; the S10 owner confirms the code | 10b:646 |
+| `report.reporter_identity_hidden` | bool | whether a reporter's identity is hidden from the reported member | constant | true (S10b) | operator | `C` | not editable | `CON` | 10b:647 |
+| `template.autopause_min_distinct_reporters` | int | distinct reporting members needed to pause a template automatically (16d `F-19`) | 1..1000; `S16B-C10` | 3 (S10b) | reviewer | `T↓` (fewer reporters pause sooner) | yes: read when a report is counted | `OPS` | 10b:648 |
+| `template.autopause_min_reporter_tier` | enum | lowest trust tier whose reports count toward an automatic pause | `new`, `established`, `trusted` | `established` (S10b) | reviewer | `T→new` [A] (counting reports from `new` members pauses sooner; the opposite end of `team.create_min_tier`) | yes: read when a report is counted | `OPS` | 10b:649 |
+
+Notes [D][A]: (1) `template.autopause_report_count` (S16 16.12) counts reports and `template.autopause_min_distinct_reporters` counts distinct members among them; both must hold for a pause (`S16B-C10`). (2) `growth.badge.thresholds` has no unit suffix because it is a json object of three lists; each list is checked ascending at write time. (3) `public.change_log_service_labels` is `CNS` and `SEC` because a label could name a provider. [V]
+
+### 16.B.11.5 Constraints added
+
+Evaluated on every write like `S16B-C1` to `S16B-C9` (16.B.9), against the configuration as it will be at `effective_from`. [D]
+
+| Id | Constraint | Kind |
+| --- | --- | --- |
+| `S16B-C10` | `template.autopause_min_distinct_reporters <= template.autopause_report_count` (10b: it must not exceed the count) | error |
+| `S16B-C11` | `ratelimit.write_weight <= ratelimit.member_api_rpm`; `ratelimit.admin_write_cost <= ratelimit.admin_api_rpm`; `ratelimit.public_verify_cost <= ratelimit.public_rpm` (a cost above its bucket would refuse every request of the class) | error |
+| `S16B-C12` | `launch.approval_window_s <= security.two_person_ttl_s` (the launch proposal must not outlive the generic approval default; 16d 16.D.5) | warning |
+
+Worked check of the initial defaults [D]: `S16B-C10` 3 <= 5; `S16B-C11` 4 <= 120, 2 <= 300, 5 <= 60; `S16B-C12` 86,400 <= 86,400 (equal, zero margin). All pass.
 
 ## Issues raised
 
