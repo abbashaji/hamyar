@@ -960,6 +960,7 @@ Every event has this envelope; the catalog below lists only the payload.
 | `reservation.held`, `reservation.activated`, `reservation.cancelled`, `reservation.expired` | `reservation_id`, `member_id`, `window_start` | `job_svc` | `ledger_svc`, `metrics_svc` |
 | `report.filed` | `report_id`, `category`, `subject_ref` | `identity_svc` | `config_svc` (template autopause counter) |
 | `report.triaged`, `report.actioned`, `report.dismissed` | `report_id`, `action_ids?` | `admin_svc` | `inbox_proj` |
+| `team.locked`, `team.unlocked` | `team_id`, `action_id`, `report_id?` | `admin_svc` | `identity_svc`, `public_proj` |
 
 ### 15.34.4 Catalog: ledger, configuration, launch, kill switches
 
