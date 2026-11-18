@@ -290,6 +290,23 @@ Reason code `policy.<rule_id>.<slug>`; the optional `sub_code` travels in `detai
 
 `R10` text is shown to reviewers and operators, not requesters. `R8` text is shown to requesters as a quote warning (`details.coverage`), never as a rejection. [D]
 
+**Single owner of requester rejection copy.** This table is the only owner of the requester-facing rejection and warning copy. S11.* (spec/11b 11.43.1) renders these keys and keeps its own keys only as documented aliases with the same meaning; where the wording of an alias differs from this table, this table wins and the S11 text is flagged, not rendered. The marker `needs_human_and_legal_review` applies to every alias. [D]
+
+| Alias key (S11.*) | Owner key (this table) | Note |
+| --- | --- | --- |
+| `copy.req.reason_r1` to `copy.req.reason_r7` | `copy.policy.R1.metadata_missing_or_inconsistent` to `copy.policy.R7.license_exceeds_service_flags` (same rule number) | same rule, same meaning |
+| `copy.req.note_r8` | `copy.policy.R8.volunteer_optin_mismatch` | quote warning |
+| `copy.req.err_no_service` | `copy.policy.R7.no_approved_service.hint` (below) | hint under the R7 reason when `details.sub_code` is `no_approved_service` |
+| `copy.req.err_policy_changed` | none (not an alias) | shown only when the policy changed before confirmation, with nothing charged; the `R9` text above is the wording for work stopped after admission (default-pending D-19) |
+
+The hint key `copy.policy.R7.no_approved_service.hint` has this text:
+
+| Copy key | `en` | `fa` |
+| --- | --- | --- |
+| `copy.policy.R7.no_approved_service.hint` | No approved service is available for this request right now. Nothing has been charged. | اکنون برای این درخواست سرویس تأییدشده‌ای در دسترس نیست. هیچ اعتباری کسر نشده است. |
+
+**Empty eligible set.** An empty eligible service set is `R7` with `details.sub_code` `no_approved_service` (7.4.2, 7.10.7 `E1` and `E4`): `422 POLICY_REJECTED`, the R7 reason shown with the hint above, nothing charged, and no advice to change the license, because no license change creates an approved service. S11.* shows no other screen for this condition; a `422 UNPROCESSABLE` with `details.reason` `no_approved_service` is only a fallback alias for it. [D]
+
 ## 7.5 Job metadata schema, validation and acknowledgements
 
 ### 7.5.1 Declared fields (requester) [D]
