@@ -657,7 +657,7 @@ The Persian must be correct, natural written Persian, not a word-for-word render
 | rejected, accepted | رد‌شده، پذیرفته‌شده | |
 | recovery key | کلید بازیابی | |
 | pseudonymous, anonymous | با نام مستعار، ناشناس | the two are never mixed up |
-| declared | اعلام‌شده | the required word of S11.50 |
+| declared | اعلام‌شده | the required word of S11.80 |
 | guarantee | تضمین | only in negated sentences |
 | opt-in | انتخاب | |
 | change log | سابقهٔ تغییرات | |
@@ -673,11 +673,11 @@ The Persian must be correct, natural written Persian, not a word-for-word render
 
 1. The author writes the English first, as the source of meaning for counsel, and writes the Persian natively from the meaning, not from the English words.
 2. A native-speaking reviewer for Persian and one for English each go through the checklist below and are recorded in `reviewed.fa_by` and `reviewed.en_by`; status becomes `human_reviewed`.
-3. The notices are rendered on real phones in both locales and checked against S11.42 to S11.46 (this is also the G2 item on RTL rendering, FD§8.3).
+3. The notices are rendered on real phones in both locales and checked against S11.72 to S11.76 (this is also the G2 item on RTL rendering, FD§8.3).
 4. A person qualified to advise on safety reads the safety and privacy-limits keys (FD§8.3 G1); counsel in the operator's jurisdiction reads all keys, the contributor waiver, and the declared-claim register [V]. Their memo reference goes into `reviewed.legal_ref`; status becomes `legal_reviewed`.
-5. Two distinct admins sign off; status becomes `approved`. The launch rule that depends on this is in S11.57.
+5. Two distinct admins sign off; status becomes `approved`. The launch rule that depends on this is in S11.87.
 6. For the consent keys and the safety keys, a second native speaker who has not seen the English reads the Persian and says in their own words what it asks the member to accept; a mismatch returns the key to step 1 [A].
-7. Any text change, in either language, resets both to `needs_human_and_legal_review` (S11.50). A change of a parameter that fills a placeholder goes through the parameter change log and the loosen-with-notice rule (`R10`, S0.8.4); it does not reset the copy, but the claim register row is re-read by the reviewer.
+7. Any text change, in either language, resets both to `needs_human_and_legal_review` (S11.80). A change of a parameter that fills a placeholder goes through the parameter change log and the loosen-with-notice rule (`R10`, S0.8.4); it does not reset the copy, but the claim register row is re-read by the reviewer.
 
 **Checklist** [D]
 
@@ -689,10 +689,10 @@ The Persian must be correct, natural written Persian, not a word-for-word render
 | Terms | Every term as in the table above |
 | Orthography | ZWNJ, ezafe, yeh and kaf, punctuation as above |
 | Fear and blame | The safety and privacy texts neither scare nor reassure beyond the facts; no blame |
-| Rendering | On a real phone: joined letters, ZWNJ pairs, digits, isolates, no boxes (S11.46) |
-| Length | Fits its container at 200% zoom in both languages (S11.48) |
+| Rendering | On a real phone: joined letters, ZWNJ pairs, digits, isolates, no boxes (S11.76) |
+| Length | Fits its container at 200% zoom in both languages (S11.78) |
 
-## 11.54 Acceptance criteria
+## 11.84 Acceptance criteria
 
 Test cases are named here by acceptance id; S18.* assigns `T-*` ids and layers (`rtl`, `unit`, `e2e`, `load`, `inj`). Every item stays in CI once added (S0.12 ordering rule 5). [D]
 
@@ -728,15 +728,15 @@ Test cases are named here by acceptance id; S18.* assigns `T-*` ids and layers (
 | `AC-i18n-28` | the first-contribution flow in the harness | it runs on the test profile with other origins blocked | it completes, with no third-party request |
 | `AC-i18n-29` | a draft and the network switched off | Submit is pressed, and the network returns | exactly one submission is accepted by the server; a retry of the same press replays the stored response; no submission happens before the press |
 | `AC-i18n-30` | drafts in every state | the time-to-live passes, *clear local data* is pressed, or the identity is closed | the records are purged; the member key is not deleted by *clear local data* |
-| `AC-i18n-31` | the copy files | the build runs | a missing key or placeholder mismatch in either language, a failed check of S11.50, or a placeholder with no registry row fails the build |
+| `AC-i18n-31` | the copy files | the build runs | a missing key or placeholder mismatch in either language, a failed check of S11.80, or a placeholder with no registry row fails the build |
 | `AC-i18n-32` | every key with `promise: true` | the declared check runs | `اعلام‌شده` is present in `fa` and `declared` in `en`; guarantee words occur only in allowlisted negated sentences |
 | `AC-i18n-33` | an approved key | its Persian or English text is edited | its version increases, both languages return to `needs_human_and_legal_review`, and the hash in the manifest changes |
-| `AC-i18n-34` | a request to set `launch.members_may_join` to true | any required key of S11.51 is not `approved` | the request is refused with `LAUNCH_GATE_CLOSED` |
+| `AC-i18n-34` | a request to set `launch.members_may_join` to true | any required key of S11.81 is not `approved` | the request is refused with `LAUNCH_GATE_CLOSED` |
 | `AC-i18n-35` | a member accepts the consent boxes | the consent is recorded | the stored record holds `copy_key`, `copy_hash` and `accepted_at` for each box and no text; a hash that is in neither the current nor the previous manifest is refused |
-| `AC-i18n-36` | the join page | it loads | all notices are shown in full in the order of S11.52, every box is unticked, and the continue button stays focusable and says what is missing |
+| `AC-i18n-36` | the join page | it loads | all notices are shown in full in the order of S11.82, every box is unticked, and the continue button stays focusable and says what is missing |
 | `AC-i18n-37` | a new member from any network | the join page is shown | the safety note appears for everyone, and no code path reads or derives a location |
 
-## 11.55 Parameters introduced by this part
+## 11.85 Parameters introduced by this part
 
 Names follow S0.10.1 (areas `i18n`, `ui`, `screen`, `identity`). Every default is an `initial configurable default` or a formula shown in the row; S16.* completes the rows without renaming (convention gap, `ISS-119` and the note after the issues table). Owner is `operator` except `screen.*`, which is `reviewer`. `Replaced by` uses the codes of S0.10.4. [D]
 
@@ -772,27 +772,27 @@ Names follow S0.10.1 (areas `i18n`, `ui`, `screen`, `identity`). Every default i
 
 Existing parameters used by this part: `i18n.default_locale`, `i18n.supported_locales`, `i18n.digits_default_fa`, `i18n.dual_calendar_detail`, `public.counter_refresh_s`, `lease.timeout_s`, `lease.max_extensions`, `lease.extend_s`, `lease.submit_grace_s`, `cell.envelope.*`, `retention.*`, `identity.recovery_cooldown_s`, `report.triage_sla_days`, `appeal.window_days`, `analytics.third_party_trackers`, `analytics.cookies_enabled`, `launch.min_signoffs`.
 
-## 11.56 Assumptions and items to verify
+## 11.86 Assumptions and items to verify
 
 **Assumptions [A] introduced by this part** (S3.* collects them; the right column is the owner decision that could overturn each)
 
 | Assumption | Could be overturned by |
 | --- | --- |
-| Heading numbers of this file start at 11.40; issue ids `ISS-117` to `ISS-119` are used (S11.40) | the plan, at assembly |
-| WCAG 2.2 level AA is the target, with the lease-timing deviation (S11.48) | the owner choosing another level, or a lower one for operator tools |
-| `fa` defaults to Persian digits (S11.43) | the Phase 1 interview result |
-| The clock is 24-hour in both locales (S11.44) | the owner or interview feedback |
-| Public pages carry a `/fa/` or `/en/` path prefix (S11.41) | the stack decision in S4.* |
-| Locale, digits, calendar and time zone live on the device, not on the server (S11.41) | a decision to sync preferences |
-| The calendar range to validate is 2026-01-01 to 2040-12-31 (S11.44) | the longest horizon that S6.* decides |
-| The copy review statuses and the manifest (S11.50) | `ISS-118` resolution |
-| `appeal` is rendered `درخواست بازبینی` (S11.53) | the native-speaking reviewer |
-| English is written first for counsel, no precedence clause is written (S11.47) | counsel |
-| Hashed font files are cached as immutable; a service worker may cache the shell (S11.46, S11.49) | S10.* policy on service workers |
-| Six round trips in the first-interactive formula (S11.49) | measurement on real networks (`TEC`) |
-| Time axes run in reading direction (S11.42) | the interview read test, an [H] |
-| The safety note is shown to every new member, not by location (S11.51.C) | the safety advisor (G1) |
-| The `opt-in`, `escrow` and `operator` terms in Persian (S11.53) | the native-speaking reviewer |
+| Heading numbers of this file start at 11.70; issue ids `ISS-117` to `ISS-119` are used (S11.70) | the plan, at assembly |
+| WCAG 2.2 level AA is the target, with the lease-timing deviation (S11.78) | the owner choosing another level, or a lower one for operator tools |
+| `fa` defaults to Persian digits (S11.73) | the Phase 1 interview result |
+| The clock is 24-hour in both locales (S11.74) | the owner or interview feedback |
+| Public pages carry a `/fa/` or `/en/` path prefix (S11.71) | the stack decision in S4.* |
+| Locale, digits, calendar and time zone live on the device, not on the server (S11.71) | a decision to sync preferences |
+| The calendar range to validate is 2026-01-01 to 2040-12-31 (S11.74) | the longest horizon that S6.* decides |
+| The copy review statuses and the manifest (S11.80) | `ISS-118` resolution |
+| `appeal` is rendered `درخواست بازبینی` (S11.83) | the native-speaking reviewer |
+| English is written first for counsel, no precedence clause is written (S11.77) | counsel |
+| Hashed font files are cached as immutable; a service worker may cache the shell (S11.76, S11.79) | S10.* policy on service workers |
+| Six round trips in the first-interactive formula (S11.79) | measurement on real networks (`TEC`) |
+| Time axes run in reading direction (S11.72) | the interview read test, an [H] |
+| The safety note is shown to every new member, not by location (S11.81.C) | the safety advisor (G1) |
+| The `opt-in`, `escrow` and `operator` terms in Persian (S11.83) | the native-speaking reviewer |
 
 **Items to verify [V]** (every inline [V] in this file maps to one row)
 
@@ -809,14 +809,14 @@ Existing parameters used by this part: `i18n.default_locale`, `i18n.supported_lo
 | Week start and regional picker defaults | a native-speaking reviewer | `i18n.week_start_fa` and its change-log entry |
 | Claims marked [V] in the declared-claim register (S8.*, S9.*, S10.*, operator procedure) | the owners of those parts and the operator | this file's register until closed, then S14.* launch items |
 
-## 11.57 Requirements on other parts
+## 11.87 Requirements on other parts
 
 Each row is a requirement that this part places on another part. If the owner of that part cannot meet it, they record an issue in their own block. [D]
 
 | Part | Requirement |
 | --- | --- |
-| S4.* | Choose the calendar library to the requirement of S11.44; keep fonts behind the storage and host interface; decide the service-worker policy of S11.49 |
-| S5.*, S7.*, S8.* | Member-visible human-authored strings are `{fa, en}` pairs or copy keys (S11.41); templates declare `lang` on slots and output fields (S11.45); comparators declare their `fold_fa` options; declines are never counted in reliability or trust (declared-claim register) |
+| S4.* | Choose the calendar library to the requirement of S11.74; keep fonts behind the storage and host interface; decide the service-worker policy of S11.79 |
+| S5.*, S7.*, S8.* | Member-visible human-authored strings are `{fa, en}` pairs or copy keys (S11.71); templates declare `lang` on slots and output fields (S11.75); comparators declare their `fold_fa` options; declines are never counted in reliability or trust (declared-claim register) |
 | S9.* | Screen bidi controls per `screen.bidi_control_action` and quarantine flagged submissions; judge size and schema on the raw text, with no trimming (S11.45); lease responses carry `expires_at` and `server_time` (S11.49) |
 | S10.* | Content security policy limited to the page and API origins; recovery key alphabet without ambiguous characters; *clear local data* versus key deletion (S11.49); e-mail storage form; validate consent hashes against the current and previous `copy_manifest`; no code path that derives location; add `identity.min_age_years` |
 | S12.* | A public notices page (S11.52); weekly aggregates labeled as UTC weeks; share-card text follows S11.42 to S11.45; a change-log kind for notice text that changes a promise (`ISS-118`) |
