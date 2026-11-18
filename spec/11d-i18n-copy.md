@@ -1,49 +1,49 @@
 # 11. Experiences, part d: Persian first, accessibility, low bandwidth and notices copy
 
-*Spec part 11d (the fourth file of part 11) · written against Founding Document draft v0.1 (FD) · vocabulary from `spec/00-conventions.md` (S0), used exactly. Nothing here is legal advice. Every notice in S11.51 needs human and legal review before any member can see it; none of it has been read by a lawyer, a safety advisor or a native-speaking reviewer.*
+*Spec part 11d (the fourth file of part 11) · written against Founding Document draft v0.1 (FD) · vocabulary from `spec/00-conventions.md` (S0), used exactly. Nothing here is legal advice. Every notice in S11.81 needs human and legal review before any member can see it; none of it has been read by a lawyer, a safety advisor or a native-speaking reviewer.*
 
-## 11.40 Scope, status and how to read this part
+## 11.70 Scope, status and how to read this part
 
 This part completes the last bullet of prompt scope F: Persian first (full RTL, numerals, Jalali and Gregorian dates, mixed-direction text, fonts), English, accessibility, low-bandwidth behavior, and the copy of every policy, privacy and risk notice in both languages. Screens, states and flows live in the other files of S11; this file sets the cross-cutting rules that every screen obeys, and it owns the notice texts. [D]
 
 | Prompt item (scope F) | Where decided |
 | --- | --- |
-| Full RTL | S11.42 |
-| Persian numerals option; storage always ASCII digits | S11.43 |
-| Jalali and Gregorian dates; UTC storage | S11.44 |
-| Mixed-direction text in prompts and outputs; clipboard | S11.45 |
-| Fonts | S11.46 |
-| English | S11.47 |
-| Accessibility | S11.48 |
-| Low-bandwidth behavior; offline-tolerant paste-back drafts | S11.49 |
-| Copy of all notices: keyed table, review process | S11.50 to S11.53 |
-| Acceptance criteria (Given / When / Then) | S11.54 |
-| New parameters | S11.55 |
-| Assumptions, items to verify, requirements on other parts | S11.56, S11.57 |
+| Full RTL | S11.72 |
+| Persian numerals option; storage always ASCII digits | S11.73 |
+| Jalali and Gregorian dates; UTC storage | S11.74 |
+| Mixed-direction text in prompts and outputs; clipboard | S11.75 |
+| Fonts | S11.76 |
+| English | S11.77 |
+| Accessibility | S11.78 |
+| Low-bandwidth behavior; offline-tolerant paste-back drafts | S11.79 |
+| Copy of all notices: keyed table, review process | S11.80 to S11.83 |
+| Acceptance criteria (Given / When / Then) | S11.84 |
+| New parameters | S11.85 |
+| Assumptions, items to verify, requirements on other parts | S11.86, S11.87 |
 
 **Reading rules** [D]
 
 - Persian first: wherever a table lists both locales, `fa` comes before `en`.
-- MUST, MUST NOT, SHOULD and MAY carry their RFC 2119 meaning (S0.2). Evidence tags are those of S0.2; `[A]` assumptions are collected in S11.56.
+- MUST, MUST NOT, SHOULD and MAY carry their RFC 2119 meaning (S0.2). Evidence tags are those of S0.2; `[A]` assumptions are collected in S11.86.
 - Persian text uses the zero-width non-joiner (ZWNJ, U+200C) where Persian orthography needs it, for example after the verb prefix and before the plural suffix. It is invisible; a file where it is missing is wrong, not different.
-- Every number is derived by a formula shown next to it or labeled `initial configurable default` and listed in S11.55. Copy contains no hard-coded number that comes from a parameter (S11.50).
-- Heading numbers of this file start at 11.40 so that they cannot collide with the other files of S11 [A]; see `ISS-117`.
+- Every number is derived by a formula shown next to it or labeled `initial configurable default` and listed in S11.85. Copy contains no hard-coded number that comes from a parameter (S11.80).
+- Heading numbers of this file start at 11.70 so that they cannot collide with the other files of S11 [A]; see `ISS-117`.
 
 **The decisions of this part in one table** [D]
 
 | Decision | Section |
 | --- | --- |
-| Locale, digits, calendar and time zone are four independent settings kept on the device; the API is language-neutral and returns copy keys, never prose | S11.41 |
-| Layout uses logical CSS only; direction is set once at the root and changed only by isolates around foreign text | S11.42, S11.45 |
-| Persian digits exist only at the display edge; storage, API, exports, hashes and the clipboard carry ASCII digits and byte-exact text | S11.43, S11.45 |
-| Jalali is the primary display calendar for `fa`, Gregorian is shown in detail views; the server never sees a Jalali string; cap periods are labeled in UTC, never with Jalali month names | S11.44 |
-| Text from other people is never altered, only isolated; invisible bidi controls inside it are made visible and screened | S11.45 |
-| Fonts are self-hosted and subset with shaping tables intact, with system fallbacks; no third-party font, script or style request on any member page | S11.46, S11.49 |
-| WCAG 2.2 level AA is the declared target [A], with one known deviation (lease timing) stated openly | S11.48 |
-| Budgets are initial configurable defaults enforced in CI; a paste-back draft stays on the device and is sent only after an explicit Submit | S11.49, S11.55 |
-| Notices are one keyed table in `fa` and `en`, every row `needs human and legal review`; each promise-like sentence says declared (`اعلام‌شده`) | S11.50 to S11.53 |
+| Locale, digits, calendar and time zone are four independent settings kept on the device; the API is language-neutral and returns copy keys, never prose | S11.71 |
+| Layout uses logical CSS only; direction is set once at the root and changed only by isolates around foreign text | S11.72, S11.75 |
+| Persian digits exist only at the display edge; storage, API, exports, hashes and the clipboard carry ASCII digits and byte-exact text | S11.73, S11.75 |
+| Jalali is the primary display calendar for `fa`, Gregorian is shown in detail views; the server never sees a Jalali string; cap periods are labeled in UTC, never with Jalali month names | S11.74 |
+| Text from other people is never altered, only isolated; invisible bidi controls inside it are made visible and screened | S11.75 |
+| Fonts are self-hosted and subset with shaping tables intact, with system fallbacks; no third-party font, script or style request on any member page | S11.76, S11.79 |
+| WCAG 2.2 level AA is the declared target [A], with one known deviation (lease timing) stated openly | S11.78 |
+| Budgets are initial configurable defaults enforced in CI; a paste-back draft stays on the device and is sent only after an explicit Submit | S11.79, S11.85 |
+| Notices are one keyed table in `fa` and `en`, every row `needs human and legal review`; each promise-like sentence says declared (`اعلام‌شده`) | S11.80 to S11.83 |
 
-## 11.41 Locale model
+## 11.71 Locale model
 
 Supported locales are the `locale` enum of S0.8.6 (`fa`, `en`), listed in `i18n.supported_locales`; the default is `i18n.default_locale` (`fa`). [D]
 
@@ -52,8 +52,8 @@ Supported locales are the `locale` enum of S0.8.6 (`fa`, `en`), listed in `i18n.
 | Setting | Values | Default for `fa` | Default for `en` | Kept | Effect of a change |
 | --- | --- | --- | --- | --- | --- |
 | `locale` | `fa`, `en` | see first-visit rule | see first-visit rule | on the device | Immediate re-render; no reload; no input lost |
-| `digits` | `latin`, `persian` | `i18n.digits_default_fa` (`persian` [A][H]) | `i18n.digits_default_en` (`latin`) | on the device | Display only (S11.43) |
-| `calendar` | `jalali`, `gregorian` | `i18n.calendar_default_fa` (`jalali`) | `i18n.calendar_default_en` (`gregorian`) | on the device | Display only (S11.44) |
+| `digits` | `latin`, `persian` | `i18n.digits_default_fa` (`persian` [A][H]) | `i18n.digits_default_en` (`latin`) | on the device | Display only (S11.73) |
+| `calendar` | `jalali`, `gregorian` | `i18n.calendar_default_fa` (`jalali`) | `i18n.calendar_default_en` (`gregorian`) | on the device | Display only (S11.74) |
 | `time_zone` | an IANA zone | the device zone | the device zone | on the device | Display only; never inferred from an IP address (S0.6) |
 
 The four settings are independent: a member may use `en` with Persian digits, or `fa` with Gregorian dates. They are stored on the device, not on the server, to collect less [D]; if S15.* offers a member settings resource, these four fields are the only i18n fields in it [A].
@@ -80,9 +80,9 @@ The preference list is read on the client only and is never sent to the server. 
 - Any human-authored, member-visible string that the system stores (template display name, topic category name, badge name, service display name, reviewer-written reject reason) MUST be stored as a `{fa, en}` pair or as a copy key. S5.*, S8.* and S7.* apply this to their fields.
 - Missing-translation policy: static copy with a missing key in either locale fails the build (AC-i18n-31). For human-authored dynamic strings with a missing `fa` or `en`, the UI shows the other locale's text inside an element carrying its own `lang` and `dir` (never an empty string, never the raw key). No telemetry about missing strings is sent, to avoid collecting reading behavior.
 
-## 11.42 Right-to-left rules
+## 11.72 Right-to-left rules
 
-RTL is the primary layout, not a mirrored afterthought: the design is made in `fa` first and checked in `en` second. [D] Each rule is testable; the test cases are named in S11.54.
+RTL is the primary layout, not a mirrored afterthought: the design is made in `fa` first and checked in `en` second. [D] Each rule is testable; the test cases are named in S11.84.
 
 | Area | Rule | Test |
 | --- | --- | --- |
