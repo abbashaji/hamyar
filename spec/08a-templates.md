@@ -841,7 +841,7 @@ The tests are never run by or for the volunteer, and never by the platform. They
 | Slug | `execution.mode` | Who runs the tests | `risk_class` | Verification of a cell |
 | --- | --- | --- | --- | --- |
 | `code_change_tests` | `requester_side` | The requester, on their own machine, after delivery | `high` | Static checks (8.13.3), gold, sampled audit against a second donor's output with comparator `patch_normalized_equal`; the deliverable is labeled "tests not run by the platform" |
-| `code_change_tests_rs` | `requester_side` | The requester, on their own machine, after download | `high` | Non-executing checks only (`static_parse`); blanket redundancy (`verify.blanket_redundancy_n`) with comparator `patch_normalized_equal`; the deliverable is labeled "tests not run by the platform" |
+| `code_change_tests_rs` | `requester_side` | The requester, on their own machine, after download | `high` | The same static checks (8.13.3); blanket redundancy (`verify.blanket_redundancy_n`) with comparator `patch_normalized_equal`; the deliverable is labeled "tests not run by the platform" |
 
 Both slugs are kept because this fix renames and deletes no id (FIX-27); with the runner removed they have the same `execution`, `risk_class`, `checks` and `comparator`, and merging them is an owner matter (`OD-08`). In `requester_side` mode a requester's later test report is stored as an outcome rating only; it never creates or reverses a ledger entry (credit was paid at acceptance, `ISS-09` of `S0`) and never counts as a reliability observation by itself [D][A].
 
@@ -1095,7 +1095,7 @@ Because the target is deterministic for grounded fields, two correct executions 
 | `classify_extract` | `json` | Schema, id set and span grounding | Label correctness is unverified except by gold and audits | `item_agreement` | `standard` | `mixed` |
 | `summarize_schema` | `json` | Entity and numeral grounding | Faithfulness of statements is unverified | `summary_overlap` (weak) | `standard` | `subjective` |
 | `code_change_tests` | `text` | Static checks: `static_parse`, `diff_applies_cleanly`, `path_allowlist` | No automatic quality signal; nothing is executed | `patch_normalized_equal` (weak) | `high` | `objective` |
-| `code_change_tests_rs` | `text` | `static_parse` only | No automatic quality signal | `patch_normalized_equal` (weak) | `high` | `objective` |
+| `code_change_tests_rs` | `text` | Static checks, as `code_change_tests` | No automatic quality signal | `patch_normalized_equal` (weak) | `high` | `objective` |
 | `format_convert_validator` | `jsonl` | Row id match and field grounding | `none`-grounded fields are type-checked only | `record_equal` | `standard` | `objective` |
 
 Cross-template hypotheses [H]
