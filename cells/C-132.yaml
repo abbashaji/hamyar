@@ -1,0 +1,18 @@
+id: C-132
+title: "FIX-12b: give the 15.D.4 paths that 11c cites a NEW verdict row in 15e (check_refs)"
+type: normal
+supersedes: [C-100]
+goal: "scripts/check_refs.py api counts a path from a reconcile file (15c-15g) as defined only when a table row has a backticked path that starts with /v1/ and a cell that is exactly NEW. Five paths of operations that spec/15e-api-reconcile-admin.md defines in 15.D.4 are written there only as `METHOD /v1/...` in op tables, so check_refs reports them as undefined when part 11c cites them: /v1/admin/capacity/operations (getOperationsSnapshot, 15.D.4.6), /v1/admin/quarantined-submissions (listQuarantinedSubmissions), /v1/admin/quarantined-submissions/{sub_id}/content (getQuarantinedSubmissionContent), /v1/admin/quarantined-submissions/{sub_id}/releases (releaseQuarantinedSubmission), /v1/admin/quarantined-submissions/{sub_id}/rejections (rejectQuarantinedSubmission) (the last four in 15.D.4.2). TASK: in spec/15e-api-reconcile-admin.md, directly after the paragraph that lists the 20 new operations (end of 15.D.1), add ONE short paragraph and ONE table with the columns | Path | Verdict | Operation | Defined at |. Add exactly five rows, one per path above, in this form: | `/v1/admin/capacity/operations` | NEW | `getOperationsSnapshot` | 15.D.4.6 |. The path is the first thing inside the backticks (no method) and the verdict cell is exactly NEW. Say in the paragraph that these rows only list paths already defined in 15.D.4 so that scripts/check_refs.py can see them, that they change no operation and add none (the count of 20 stays). Use apply_changes with one small old->new edit; do not touch any other line of the file. Do not run anything; CI runs the acceptance. NOTE: the earlier cell C-100 had the same task but also ran check_stale.py on 15e itself, which cannot pass because 15e's own ALIAS rows list the replaced paths by design; that check is not part of this cell."
+after:
+  - C-039
+read:
+  - docs/decisions.md
+  - scripts/check_refs.py
+  - spec/15e-api-reconcile-admin.md
+allowed_paths:
+  - spec/15e-api-reconcile-admin.md
+outputs:
+  - spec/15e-api-reconcile-admin.md
+acceptance:
+  - cmd: python scripts/check_spec.py spec/15e-api-reconcile-admin.md --min-lines 332 --min-tags 1
+notes: Fix cell. Edit only inside allowed_paths. Minimal edit. Heading format and evidence tags as in docs/decisions.md.
