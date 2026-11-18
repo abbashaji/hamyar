@@ -717,12 +717,12 @@ The system may also engage a switch (for example S6.* or S14.* automation on `le
 | `AC-kill-09` | A template switch and a member switch engaged | The public change log is read | The template entry (reason code only) is present within `change.tighten_publish_within_s`; no entry exists for the member switch |
 | `AC-kill-10` | The preview counts before engaging | The switch is engaged | The counts of paused objects equal the preview |
 
-## 11.55 Tool 11: Member lookup (minimal data)
+## 11.65 Tool 11: Member lookup (minimal data)
 
 **Purpose.** Show a reviewer or operator the least about one member that a report, appeal or alarm needs, and make every look accountable. The design assumes an insider, a compelled-disclosure request and a seized admin laptop are all possible (prompt I; FD Principle 8). [D]
 **Roles and permissions.** `reviewer` and `operator`: `perm.member.lookup`. `operator`: `perm.member.resolve_handle` (two-person).
 
-### 11.55.1 Entry and limits [D]
+### 11.65.1 Entry and limits [D]
 
 | Limit | Rule |
 | --- | --- |
@@ -733,7 +733,7 @@ The system may also engage a switch (for example S6.* or S14.* automation on `le
 | Logging | Each view is an `AdminAction` `member.lookup` with the `mem_` id and the context ids (`AD6`); operators can review who looked at whom in `SCR-ops-03` |
 | No persistence | `Cache-Control: no-store`; the view has no print, copy-all or export control (`AD8`) |
 
-### 11.55.2 `SCR-rev-12` What is shown and what never is [D]
+### 11.65.2 `SCR-rev-12` What is shown and what never is [D]
 
 | Shown | Never shown by any admin screen or API |
 | --- | --- |
@@ -745,7 +745,7 @@ The system may also engage a switch (for example S6.* or S14.* automation on `le
 
 The screen states "only minimal data is shown and every view is logged" (`copy.admin.member_minimal_view`).
 
-### 11.55.3 Handle resolution [D][A]
+### 11.65.3 Handle resolution [D][A]
 
 | `op` | Method and path | Notes |
 | --- | --- | --- |
@@ -762,11 +762,11 @@ The screen states "only minimal data is shown and every view is logged" (`copy.a
 | `AC-lookup-07` | A handle resolution requested by operator A | A approves their own request | `403 FORBIDDEN`; with operator B's approval the `mem_` id is shown once and one `AdminAction` exists |
 | `AC-lookup-08` | The key version of the handle has been destroyed | Resolution executes | `422 UNPROCESSABLE` with `handle_unresolvable` |
 
-## 11.56 Tool 12: Release / Hand over
+## 11.66 Tool 12: Release / Hand over
 
 **Purpose.** Carry over the Panel's Release and Hand over for stuck work: a reviewer or operator who is gone must not block a queue item, and a member's stuck lease must not block a cell. [D]
 
-### 11.56.1 What carries over and what does not (panel-review facts, all [V]) [D]
+### 11.66.1 What carries over and what does not (panel-review facts, all [V]) [D]
 
 | Panel behavior (panel-review section) | Hamyar equivalent | Decision |
 | --- | --- | --- |
@@ -780,7 +780,7 @@ The screen states "only minimal data is shown and every view is logged" (`copy.a
 | One shared panel password plus an admin key typed per action and optionally kept in the browser (§4.1, §4.2, §4.5 items 1, 5) | Passkeys and step-up (`AD1`, `CT2`) | Replace |
 | Bottleneck highlight (§3.5) | Bottleneck banner (11.52.3) | Keep, re-scoped |
 
-### 11.56.2 `WorkClaim` [A]
+### 11.66.2 `WorkClaim` [A]
 
 Entity `WorkClaim`, table `work_claims`, prefix `clm_`, retention `moderation`. Fields: `subject_type` (`template_version`, `service`, `report`, `alarm`, `appeal`, `audit_item`), `subject_id`, `admin_user_id`, `acquired_at`, `expires_at` (= last renewal + `ui.admin_claim_ttl_s`), `ended_at`, `end_kind` (`released`, `handed_over`, `expired`, `taken_over`, `completed`), `handed_to_admin_id`. A partial unique index on `(subject_type, subject_id) WHERE ended_at IS NULL` gives exactly one active claim per item, so two simultaneous claims cannot both succeed. Events `workclaim.acquired`, `workclaim.released`, `workclaim.handed_over`, `workclaim.taken_over`, `workclaim.expired`. A write to a claimed item by anyone but the holder is `409 STATE_CONFLICT` with `details.reason` `claim_held`; the second reviewer of a two-reviewer flow claims after the first has finished (11.45). For appeals, handing over is the state machine's `appeal.reassigned` with the conflict guard of 11.48.
 
@@ -788,7 +788,7 @@ Entity `WorkClaim`, table `work_claims`, prefix `clm_`, retention `moderation`. 
 
 **`SCR-ops-15` Work board.** "My work" and, for operators, "All claims": item, type, holder, time left, state, with Release, Hand over and Take over; queue order is released first, then oldest.
 
-### 11.56.3 Lease release for member-held cells [D][A]
+### 11.66.3 Lease release for member-held cells [D][A]
 
 `SCR-ops-16` Lease inspector (operator): lists active leases by `cel_` id, job or template with template, attested service, age and time left, and no member id. `cell.release` (`CT2`, `perm.cell.release`) is allowed only for a lease in state `active`: it emits `lease.revoked`, and the cell returns to `queued` through the existing `leased --cell.declined--> queued` transition, recorded with actor `admin` and reason `operator_release`, so there is no penalty to the member (FD§5.5; no new event, `ISS-118`). A revoked lease gets no `lease.submit_grace_s`: a late paste-back is rejected with `reject.lease_expired`. A lease in `submitted` returns `409 STATE_CONFLICT`. Release is per cell; a larger stop is a kill switch (11.54), not a bulk release.
 
@@ -812,7 +812,7 @@ Entity `WorkClaim`, table `work_claims`, prefix `clm_`, retention `moderation`. 
 | `AC-claim-08` | A release with `requeue_at_front` | The next lease in that template queue is issued | It is that cell |
 | `AC-claim-09` | `listLeases` | The response is checked against its schema | It contains no `mem_` or `vol_` id |
 
-## 11.57 Admin copy keys (Persian and English)
+## 11.67 Admin copy keys (Persian and English)
 
 Admin screens use the `copy.admin.*` keys below; each has `fa` and `en` text and is marked `needs_human_and_legal_review` (S0.5). Persian is written right to left with the zero-width non-joiner where the language needs it. Copy says "declared" and never "guaranteed" (FD Principle 11). [D]
 
@@ -836,7 +836,7 @@ Admin screens use the `copy.admin.*` keys below; each has `fa` and `en` text and
 | `copy.admin.claim_taken_over` | این مورد از شما به مدیر دیگری منتقل شد. | This item was taken over by another admin. | `needs_human_and_legal_review` |
 | `copy.admin.launch_blocked` | تا امضای همهٔ دروازه‌های لازم، پذیرش عضو و کارهای اعضا فعال نمی‌شود. | Member admission and member jobs stay off until the required gates are signed off. | `needs_human_and_legal_review` |
 
-## 11.58 Parameters added by this part (convention gaps)
+## 11.68 Parameters added by this part (convention gaps)
 
 S0.10.6 says names are stable and S16.* completes the table. This part needs the parameters below; each default is an `initial configurable default` and each area and owner already exists in S0.10.5. [D][A]
 
@@ -852,7 +852,7 @@ S0.10.6 says names are stable and S16.* completes the table. This part needs the
 
 The `security.two_person_actions` default grows from four names to nine: `ledger.reversal`, `launch.signoff`, `parameter.loosen`, `killswitch.release` (S0.10.6) plus `member.ban`, `audit.accept`, `quarantine.release`, `cell.overturn`, `member.resolve_handle`; the list therefore adds five new names (`ISS-117`).
 
-## 11.59 Dependencies on other parts and open [V] items
+## 11.69 Dependencies on other parts and open [V] items
 
 | Item | Owner part | What this part needs | Tag |
 | --- | --- | --- | --- |
