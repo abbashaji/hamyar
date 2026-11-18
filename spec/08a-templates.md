@@ -33,7 +33,7 @@ Reading rules [D]
 | 5 | The model is asked to echo the per-render token inside its result block; the token is a format check and a weak copy-paste-of-another-cell signal, never proof of anything | Cheap, deterministic, anti-forgery support (FD§8.2 risk 9) |
 | 6 | Verification is declared per template: ordered automatic checks, a deterministic comparator, a gold-cell construction method, a risk class | FD§4.4 |
 | 7 | Checks and comparators are deterministic functions of data; no model call ever decides acceptance or credit | `verify.model_judge_mints_credit` = false |
-| 8 | Checks that execute code run only in an isolated runner, only for `code_change_tests`, only after non-executing checks pass, and never on the volunteer's device | `ISS-81`; ground rule 3 |
+| 8 | No check ever executes submitted content: code-change checks are static (parse, diff applies cleanly to the supplied snapshot, path allowlist, size, forbidden patterns) plus a sampled audit against a second donor's output; the requester runs the supplied tests on their own machine | `ISS-12` (rules over `ISS-81`); ground rule 3 |
 | 9 | A template version is immutable once review starts; any edit is a new version | Reviewers approve a hash, not a draft |
 | 10 | New templates need `template.min_reviewers_new` approvals from distinct reviewers who are not the author; the first set is not pre-approved | FD§5.7 failure mode 10 |
 | 11 | Loosening a template (larger envelope, weaker check, added profile) is announced and delayed; tightening is immediate | R10 applied to templates [A] |
@@ -122,7 +122,7 @@ The document is authored as YAML and stored and hashed as canonical JSON. This i
       "properties": { "id": { "type": "string" }, "claim": { "type": "string" }, "measurement": { "type": "string" },
         "success": { "type": "string" }, "kill": { "type": "string" } } } },
     "execution": { "type": "object", "additionalProperties": false, "required": ["mode"],
-      "properties": { "mode": { "enum": ["none","server_sandbox","requester_side"] }, "runner_profile": { "type": "string" } } }
+      "properties": { "mode": { "enum": ["none","requester_side"] } } }
   },
   "$defs": {
     "i18n": { "type": "object", "required": ["en"], "properties": { "en": { "type": "string" }, "fa": { "type": "string" } } },
@@ -276,13 +276,13 @@ extract(raw, tv, lease) -> Extracted | CheckFail
         marked_segments ([[id]] at line start), text (unchanged)
 ```
 
-The fallback exists because chat services often drop wrapper lines; whether the fallback is needed and how often the token is reproduced correctly are measured [H] (8.15). Submitted text is data: it is never executed on the web or API tier, never interpreted as markup, and escaped on display (`S9.*`); the only exception is the isolated runner of 8.13 [D].
+The fallback exists because chat services often drop wrapper lines; whether the fallback is needed and how often the token is reproduced correctly are measured [H] (8.15). Submitted text is data: it is never executed on the web or API tier, never interpreted as markup, and escaped on display (`S9.*`); there is no exception and no runner exists (8.13) [D].
 
 ## 8.6 Automatic-check and comparator catalogs
 
 ### 8.6.1 Check registry [D]
 
-A check is a deterministic function `(extracted, cell, template) -> pass \| fail \| inconclusive`. Types are platform code; a new type needs a code change and a convention edit. `inconclusive` means infrastructure failure (for example the runner is unavailable): it never rejects and never accepts, and its resolution belongs to the verification part (`S8.*`).
+A check is a deterministic function `(extracted, cell, template) -> pass \| fail \| inconclusive`. Types are platform code; a new type needs a code change and a convention edit. `inconclusive` means infrastructure failure (for example a check cannot be evaluated): it never rejects and never accepts, and its resolution belongs to the verification part (`S8.*`).
 
 | `type` | Does | Params | Default `reason` | Required for |
 | --- | --- | --- | --- | --- |
@@ -300,16 +300,18 @@ A check is a deterministic function `(extracted, cell, template) -> pass \| fail
 | `orthography_variants` | Counts Arabic-variant yeh (U+064A) and kaf (U+0643) in Persian output | `max_ppm` | none: `on_fail` = `note` | `fa` outputs |
 | `length_ratio` | Output length over input length within bounds | `min_ppm`, `max_ppm` | `reject.length_out_of_bounds` | translation, summarization |
 | `static_parse` | Parses code without executing it | `language` | `reject.schema_invalid` | code |
-| `test_run` | Runs tests in the isolated runner (8.13) | `runner_profile`, `tests_slots` | `reject.test_failed` | `execution.mode` = `server_sandbox` |
+| `diff_applies_cleanly` | The platform computes the unified diff between the supplied snapshot and the returned file and applies it to the snapshot; the result must equal the returned file byte for byte; nothing is executed | `snapshot_slot` | `reject.schema_invalid` | code |
+| `path_allowlist` | Every path named in the computed diff is in the declared set (the one file of the cell) | `allowed_paths_from` | `reject.schema_invalid` | code |
+| `forbidden_patterns` | Matches the returned text against a data pattern set (pattern sets owned by `S9.*`); a match is never executed or followed | `pattern_set` | none: `on_fail` = `quarantine` | code |
 
 ### 8.6.2 Evaluation order [D]
 
 ```
 1 size_bounds  2 output_flag_scan  3 refusal_pattern  4 extract_result  5 json_schema | jsonl_records_match | marked_segments_match
-6 glossary_adherence | grounded_span | numbers_grounded  7 script_ratio, length_ratio, orthography_variants  8 static_parse  9 test_run
+6 glossary_adherence | grounded_span | numbers_grounded  7 script_ratio, length_ratio, orthography_variants  8 static_parse, diff_applies_cleanly, path_allowlist, forbidden_patterns
 ```
 
-Checks run in this order and evaluation stops at the first `reject` or `quarantine`. `output_flag_scan` always precedes any check that parses, and `test_run` is last, so nothing flagged is ever executed. The result of every check (id, outcome, reason) is stored in the `VerificationRecord` (`method` = `auto_check`) and is what the volunteer sees as the reason for a rejection (FD§4.4) [D].
+Checks run in this order and evaluation stops at the first `reject` or `quarantine`. `output_flag_scan` always precedes any check that parses or diffs, so nothing flagged is parsed or diffed; nothing is ever executed. The result of every check (id, outcome, reason) is stored in the `VerificationRecord` (`method` = `auto_check`) and is what the volunteer sees as the reason for a rejection (FD§4.4) [D].
 
 ### 8.6.3 Comparator registry [D]
 
@@ -322,8 +324,7 @@ A comparator serves audits (`audit_second`, `audit_third`): `compare(a, b, sourc
 | `item_agreement` | Share of items with the same label >= `label_min_ppm` and extracted fields equal after normalization on agreeing items >= `field_min_ppm` | classify_extract |
 | `summary_overlap` | Word-set F1 on content words >= `f1_min_ppm`, entity-set Jaccard >= `jaccard_min_ppm`, key-point counts within `count_delta` | summarize_schema |
 | `record_equal` | Per row, all grounded fields equal and all computed fields equal after normalization; match iff every row matches | format_convert_validator |
-| `test_outcome_equal` | Both executions have the same pass or fail result on every test id (needs `test_run`) | code_change_tests (sandbox) |
-| `patch_normalized_equal` | Equal after stripping comments and whitespace; low agreement expected | code_change_tests (`requester_side`) |
+| `patch_normalized_equal` | Equal after stripping comments and whitespace; low agreement expected | code_change_tests, code_change_tests_rs |
 
 All thresholds are template data (`initial configurable default`, `calibration_source` = `CAL`, then `P1M`), seeded in 8.10 to 8.14, and are replaced by measured agreement between independent executions of gold cells [H].
 
@@ -835,43 +836,43 @@ A small, self-contained change to one source file so that supplied tests pass: f
 
 The volunteer's task is identical to every other template: copy the prompt, press Send, copy the answer, paste it back (R3). The prompt contains the task description, the source file and the visible tests as data inside delimiters, and asks the model for the complete new file as plain text. No step asks the volunteer to run, compile, install or open anything, and no variant contains an imperative of that kind (the R3 lint of 8.7 enforces this on the skeleton). The volunteer does not need the programming language [D].
 
-The tests are never run by or for the volunteer. They are run by exactly one of two parties, fixed by the template's `execution.mode`:
+The tests are never run by or for the volunteer, and never by the platform. They are run by the requester, on their own machine, after delivery (`execution.mode` = `requester_side`):
 
 | Slug | `execution.mode` | Who runs the tests | `risk_class` | Verification of a cell |
 | --- | --- | --- | --- | --- |
-| `code_change_tests` | `server_sandbox` | The platform's isolated runner (8.13.3), on its own side | `standard` | Non-executing checks, then `test_run`; gold; audit comparator `test_outcome_equal` |
+| `code_change_tests` | `requester_side` | The requester, on their own machine, after delivery | `high` | Static checks (8.13.3), gold, sampled audit against a second donor's output with comparator `patch_normalized_equal`; the deliverable is labeled "tests not run by the platform" |
 | `code_change_tests_rs` | `requester_side` | The requester, on their own machine, after download | `high` | Non-executing checks only (`static_parse`); blanket redundancy (`verify.blanket_redundancy_n`) with comparator `patch_normalized_equal`; the deliverable is labeled "tests not run by the platform" |
 
-The second slug exists because `risk_class` and `checks` are fixed per version (LR-08); the two templates share slots, prompt and output schema and differ only in `execution`, `risk_class`, `checks` and `comparator`. In `requester_side` mode a requester's later test report is stored as an outcome rating only; it never creates or reverses a ledger entry (credit was paid at acceptance, `ISS-09` of `S0`) and never counts as a reliability observation by itself [D][A].
+Both slugs are kept because this fix renames and deletes no id (FIX-27); with the runner removed they have the same `execution`, `risk_class`, `checks` and `comparator`, and merging them is an owner matter (`OD-08`). In `requester_side` mode a requester's later test report is stored as an outcome rating only; it never creates or reverses a ledger entry (credit was paid at acceptance, `ISS-09` of `S0`) and never counts as a reliability observation by itself [D][A].
 
-### 8.13.3 Runner contract (interface `TestRunner`) [D]
+### 8.13.3 Static verification contract; no runner [D]
 
-The runner is a platform component, not part of any template and not part of the API or web tier; the template only names a `runner_profile`. Its design and threat model belong to `S4.*`, `S10.*` and the G1 safety work; this file states what a template may rely on.
+No runner exists. The platform never executes submitted content, so no `TestRunner` interface, `runner_profile` or isolated process is part of any template or of the platform (`ISS-12`; `OD-08` default applied). The table states what a template may rely on instead.
 
 | Requirement | Statement |
 | --- | --- |
-| Isolation | Separate process boundary and origin from the API; no network; no access to secrets, the database or other jobs' data; ephemeral filesystem destroyed after each run |
-| Limits | CPU time `template.exec.timeout_s`, memory `template.exec.memory_bytes`, captured output `template.exec.max_output_bytes`; exceeding any is a test failure (`reject.test_failed`), not an infrastructure error |
-| Inputs | The donor's replacement file in place of the source file, the visible tests and the hold-out tests (`server_only`), and a fixed, platform-chosen command per `runner_profile`; neither requester nor donor supplies a command |
-| Profiles | A profile names a language and its fixed runner image; the supported languages are runner configuration entered by an operator [V: which languages the runner can safely support, decided in the G1 review and stored in the runner profile table] |
-| Order | Runs only after every non-executing check passed; a quarantined or statically unparsable submission is never executed |
-| Outage | Runner unavailable or timed out on the platform side yields `inconclusive`, never a rejection |
-| Gate | Feature flag `ff.template.code_change_sandbox` is off by default; while it is off, `code_change_tests` cannot reach `approved` and only `code_change_tests_rs` can |
-| Approval item | RC-13 (extra for this template): the sandbox design was reviewed in the G1 threat model and the review is attached [V] |
+| Checks | Static only: `size_bounds`, `output_flag_scan`, `refusal_pattern`, `extract_result`, `static_parse` (parses, never runs), `diff_applies_cleanly`, `path_allowlist`, `forbidden_patterns` (8.6.1) |
+| Limits | No check starts a process; sizes are bounded by `size_bounds` and `cell.envelope.max_submission_bytes` |
+| Inputs | The donor's replacement file, the supplied snapshot of the source file and the declared allowed path; the visible tests are data in the prompt and are never run; nobody supplies a command |
+| Languages | `static_parse` supports the languages the reviewers allow (template data) [V: which languages have a safe parser, decided in the template review] |
+| Order | `output_flag_scan` precedes every check that parses or diffs; a quarantined submission is never parsed |
+| Outage | No external component is called; a check that cannot be evaluated is `inconclusive`, never a rejection |
+| Audit | A sampled share of accepted cells is repeated by a second donor and compared with `patch_normalized_equal`; blanket where `risk_class` = `high` (`S8.*`) |
+| Approval item | RC-13 (extra for this template): the reviewer confirmed that no check or component executes submitted content |
 
-This is the one place where the platform executes submitted text. It conflicts with the rule "never execute submitted content" of `S9.*` and the FD§10 item on result return; `ISS-81` records the conflict and the scoped exception, and the owner may decline the exception, in which case only the `_rs` template exists [D].
+This file contains no place where the platform executes submitted text, in line with the rule "never execute submitted content" of `S9.*` and the FD§10 item on result return. `ISS-81` is resolved by `ISS-12`; if the owner ever allows a sandbox (`OD-08`), a new flag name and a threat-model entry are needed first [D].
 
 ### 8.13.4 Input schema (slots)
 
 | Slot | Kind | Source | Visibility | Block | Rules |
 | --- | --- | --- | --- | --- | --- |
-| `language` | enum | requester | `prompt` | none | Values are the runner profiles (8.13.3); for `_rs` the list of languages the reviewers allow |
+| `language` | enum | requester | `prompt` | none | The list of languages the reviewers allow (template data) |
 | `task` | text | requester | `prompt` | `TASK` | `budget_share_ppm` 150,000 |
 | `source_file` | code | upload_split | `prompt` | `SOURCE_FILE` | `budget_share_ppm` 450,000; `split.strategy` = `file_unit` (one file per cell) |
 | `tests` | code | requester | `prompt` | `TESTS` | `budget_share_ppm` 350,000 |
-| `tests_holdout` | code | requester | `server_only` | none | Optional; never rendered; used only by `test_run` (`server_sandbox`) |
+| `tests_holdout` | code | requester | `server_only` | none | Optional; never rendered; stored with the cell and read by no check (no `test_run` exists); the requester may use it on their own machine; its removal is an owner matter (`OD-08`) |
 
-Upload-time validation for `server_sandbox` [D]: the runner executes the visible and hold-out tests against the unmodified source; at least one test must fail (a red baseline), the run must be repeatable (the baseline is run at least twice with the same outcome, otherwise the tests are flaky and the upload is refused with field code `flaky_tests`). This executes requester-supplied code in the same sandbox and under the same limits. If the sandbox is off, no baseline can be established and only `_rs` jobs are accepted.
+Upload-time validation [D]: the platform runs nothing at upload. It checks sizes, that the snapshot parses (`static_parse`) where a parser exists, and that `tests` is non-empty text. No red baseline and no flakiness check exist, because the requester runs the tests on their own machine; the field code `flaky_tests` is unused.
 
 ### 8.13.5 Prompt skeleton (`en`)
 
@@ -925,7 +926,7 @@ RESULT {{dlm}}>>>
 
 ### 8.13.7 Output schema
 
-`output.kind` = `text`; `max_chars_share_ppm` = 1,000,000. The payload is the whole file; the platform computes any unified diff itself for the deliverable, because a model-written patch header is an extra failure mode [H: patch-format failure rate, measured in Phase 0 before this choice is relied on]. Text is stored as data, displayed escaped, and never interpreted outside the runner [D].
+`output.kind` = `text`; `max_chars_share_ppm` = 1,000,000. The payload is the whole file; the platform computes any unified diff itself for the deliverable, because a model-written patch header is an extra failure mode [H: patch-format failure rate, measured in Phase 0 before this choice is relied on]. Text is stored as data, displayed escaped, and never interpreted or executed [D].
 
 ### 8.13.8 Automatic checks and comparator
 
