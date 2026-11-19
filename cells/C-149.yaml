@@ -1,0 +1,43 @@
+id: C-149
+title: 'R3-12: reconcile files: one operation for metric snapshots, calibration proposals'
+type: normal
+priority: 4
+lease_minutes: 90
+goal: 'You apply a fixed list of audit findings to spec parts and write docs/fix/R3-12.md. SOURCES: docs/audit/FINAL-2.md (the ''Findings'' table: each row you are assigned states file:line, defect and the proposed fix; READ each of your rows first), docs/owner-decisions.md (the owner''s accepted decisions D-01..D-34: they are binding, apply them, never invent another choice), and the parts named below. AUTHORITY WHEN SOURCES CONFLICT: docs/owner-decisions.md, then the Founding Document, then S0 (spec/00-conventions.md), then the part that owns the concept per D-30 (entities and columns: S5a; enums and states: S0; operations and paths: S15a/S15b; copy keys for requester rejections: S7), then all other parts. METHOD: for each assigned row, locate the cited text by reading about 30 lines around the cited line (lines drift; search nearby, never guess); make the MINIMAL edit in place (apply_changes with small old/new strings; never rewrite sections, never delete content that is not part of the fix); after an edit, check that every other place in YOUR files that states the same fact now agrees (search by reading the neighbouring sections and any table that repeats it); do not touch anything not named by your rows; if you notice another defect list it under ''## Noticed, not fixed'' with file:line and do not fix it. Names: edits may change only the identifiers your row says to change; never rename any other id, parameter, endpoint, state or enum; never mention retired names in the new text. If an edit would contradict the Founding Document, a ground rule of docs/decisions.md or a decision of docs/owner-decisions.md, do not make it: record skipped-needs-owner with the reason. STATUS WORDS: applied / already-applied / skipped-needs-owner / skipped-not-found (with what you searched). LOG docs/fix/R3-12.md: a table with columns exactly: edit | file:line | before | after | status (one row per edit, row numbers of FINAL-2 in the first column), then ''## Read-back'' (after ALL edits re-open every edited place and state in a phrase what you now read; also state, for each row, which other places you checked for the same fact), then ''## Noticed, not fixed'', then a last line ''Result: DONE'' or ''Result: DONE WITH SKIPS''. Mark every edit that follows a decision as default-pending in the ''after'' column. Do not run anything; CI runs the acceptance commands.
+
+
+  TASK R3-12: Rows 32 and 69. Row 69: 15e verdict row `listAdminMetricSnapshots` and 15f verdict row `listMetricSnapshots` are both NEW for `GET /v1/admin/metric-snapshots`: keep ONE operation (the one 15f/spec/13-measurement.md uses, `listMetricSnapshots`), make the other row an ALIAS of it (verdict ALIAS, pointing at the kept id) and fix 15e''s text that defines it. Row 32: in 15.E.13 (15f ~:233) the verdict row `/v1/admin/calibration-proposals` holds a whole operation definition: move the definition (`getCalibrationProposals`, `perm.calibration.read`, class, rule 13.9.4) into an operation table of 15f in the same format as the other new operations of 15f, and leave the verdict row as an index row pointing to it. Check after both: every path of a NEW verdict row has exactly one operation definition and every ALIAS row names an existing operation.
+
+  '
+after:
+- C-148
+- C-039
+- C-040
+- C-100
+- C-131
+- C-132
+read:
+- docs/decisions.md
+- docs/owner-decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- docs/audit/FINAL-2.md
+- spec/15b-api-admin.md
+- spec/13-measurement.md
+- spec/15e-api-reconcile-admin.md
+- spec/15f-api-reconcile-measurement.md
+allowed_paths:
+- docs/fix/R3-12.md
+- spec/15e-api-reconcile-admin.md
+- spec/15f-api-reconcile-measurement.md
+outputs:
+- docs/fix/R3-12.md
+acceptance:
+- cmd: python scripts/check_fixlog.py docs/fix/R3-12.md
+- cmd: python scripts/check_spec.py spec/15e-api-reconcile-admin.md --min-lines 290 --min-tags 1
+- cmd: python scripts/check_spec.py spec/15f-api-reconcile-measurement.md --min-lines 206 --min-tags 1
+- cmd: python scripts/check_params.py
+- cmd: python scripts/check_issues.py
+- cmd: python scripts/check_stale.py
+- cmd: python scripts/check_refs.py api
+notes: 'Round-3 fix cell. Edits only inside allowed_paths. Large files: read in chunks of at most 600 lines with read_files; commit (apply_changes) after every ~10 edits and keep the log table current. Evidence tags and heading format as in docs/decisions.md. Acceptance is partly structural: completeness is what the goal says.'

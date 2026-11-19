@@ -1,0 +1,41 @@
+id: C-141
+title: 'R3-04: admin tools: acceptance rows and op ids'
+type: normal
+priority: 4
+lease_minutes: 90
+goal: 'You apply a fixed list of audit findings to spec parts and write docs/fix/R3-04.md. SOURCES: docs/audit/FINAL-2.md (the ''Findings'' table: each row you are assigned states file:line, defect and the proposed fix; READ each of your rows first), docs/owner-decisions.md (the owner''s accepted decisions D-01..D-34: they are binding, apply them, never invent another choice), and the parts named below. AUTHORITY WHEN SOURCES CONFLICT: docs/owner-decisions.md, then the Founding Document, then S0 (spec/00-conventions.md), then the part that owns the concept per D-30 (entities and columns: S5a; enums and states: S0; operations and paths: S15a/S15b; copy keys for requester rejections: S7), then all other parts. METHOD: for each assigned row, locate the cited text by reading about 30 lines around the cited line (lines drift; search nearby, never guess); make the MINIMAL edit in place (apply_changes with small old/new strings; never rewrite sections, never delete content that is not part of the fix); after an edit, check that every other place in YOUR files that states the same fact now agrees (search by reading the neighbouring sections and any table that repeats it); do not touch anything not named by your rows; if you notice another defect list it under ''## Noticed, not fixed'' with file:line and do not fix it. Names: edits may change only the identifiers your row says to change; never rename any other id, parameter, endpoint, state or enum; never mention retired names in the new text. If an edit would contradict the Founding Document, a ground rule of docs/decisions.md or a decision of docs/owner-decisions.md, do not make it: record skipped-needs-owner with the reason. STATUS WORDS: applied / already-applied / skipped-needs-owner / skipped-not-found (with what you searched). LOG docs/fix/R3-04.md: a table with columns exactly: edit | file:line | before | after | status (one row per edit, row numbers of FINAL-2 in the first column), then ''## Read-back'' (after ALL edits re-open every edited place and state in a phrase what you now read; also state, for each row, which other places you checked for the same fact), then ''## Noticed, not fixed'', then a last line ''Result: DONE'' or ''Result: DONE WITH SKIPS''. Mark every edit that follows a decision as default-pending in the ''after'' column. Do not run anything; CI runs the acceptance commands.
+
+
+  TASK R3-04: Rows 4, 7, 8, 9, 42, 43, 44. Row 4: `AC-appr-02`: the approval body is `{step_up}` with no payload hash; a step-up bound to another payload is `401 AUTH_INVALID` (:207): rewrite the Given/When/Then to that. Row 7: `AC-lookup-02` uses `getMemberAdmin` (no context object); delete `AC-lookup-07` and `AC-lookup-08` (handle resolution no longer exists) and rename heading 11.65.3 to what the remaining text is (read it). Row 8: delete `AC-claim-04` (hand over) and `AC-claim-08` (`requeue_at_front`): the features were removed; keep ids of other rows. Row 9: bring the 11.63/11.64 prose, `AC-gate-02`..`AC-gate-04` and the `changeLaunchSwitch` row into line with the table: one `signOffGateItem` per item, no bulk sign-off that sets switches; `changeLaunchSwitch` covers `value: false` and the two-person `value = true` path of S15b (read spec/15b-api-admin.md 15.27-15.28 for the exact operation, auth and approval rule); replace the op ids `createLaunchGateEvidence`, `createLaunchGateReopening`, `createKillSwitchEngagement`, `createKillSwitchRelease` by the 15b ids (`attachGateEvidence`, `reopenGateItem`, and for the kill switches the ids 15b 15.28 defines: read them). Row 42: one set of operation ids and event names across 10a, 11c and S15b: the operation ids of S15b 15.21-15.22 are canonical (`approveApproval`, `rejectApproval`, `withdrawApproval`, D-30); event names: those of S15b 15.34 (read it; where 10a 10.18.2 differs S15b wins): make 11c use them; edit only 11c (log any 10a difference under Noticed). Row 43: `AC-appr-03` uses `security.two_person_ttl_s` (canonical per spec/16b-parameters-a.md). Row 44: `AC-abuse-02` Given: a sanction body without `reason_code` (the body at :460 has no `context`).
+
+  '
+after:
+- C-015
+- C-051
+- C-080
+- C-081
+- C-092
+read:
+- docs/decisions.md
+- docs/owner-decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- docs/audit/FINAL-2.md
+- spec/15b-api-admin.md
+- spec/10a-identity.md
+- spec/16b-parameters-a.md
+- spec/11c-admin-tools.md
+allowed_paths:
+- docs/fix/R3-04.md
+- spec/11c-admin-tools.md
+outputs:
+- docs/fix/R3-04.md
+acceptance:
+- cmd: python scripts/check_fixlog.py docs/fix/R3-04.md
+- cmd: python scripts/check_spec.py spec/11c-admin-tools.md --min-lines 744 --min-tags 1
+- cmd: python scripts/check_text.py spec/11c-admin-tools.md --absent 'security\.admin_two_person_pending_ttl_s' 'createMemberView' 'requeue_at_front' 'createLaunchGateEvidence' 'createLaunchGateReopening' 'createKillSwitchEngagement' 'createKillSwitchRelease' 'approveApprovalRequest'
+- cmd: python scripts/check_params.py
+- cmd: python scripts/check_issues.py
+- cmd: python scripts/check_stale.py
+- cmd: python scripts/check_refs.py api
+notes: 'Round-3 fix cell. Edits only inside allowed_paths. Large files: read in chunks of at most 600 lines with read_files; commit (apply_changes) after every ~10 edits and keep the log table current. Evidence tags and heading format as in docs/decisions.md. Acceptance is partly structural: completeness is what the goal says.'

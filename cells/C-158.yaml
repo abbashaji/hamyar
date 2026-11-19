@@ -1,0 +1,49 @@
+id: C-158
+title: 'Re-audit round 3, slice C: logs R3-13..R3-18'
+type: normal
+priority: 3
+lease_minutes: 90
+goal: 'INDEPENDENT re-audit slice (you did not write the parts or the fixes). Method: read in chunks of at most 600 lines; do not paste file contents into chat; every claim names file:line you saw. Write docs/audit/FINAL-3c.md with: ''## Checked'' (what you opened and found correct), a findings table with columns exactly ''# | severity | file:line | defect | action'' (severity blocking/major/minor; action: the exact proposed fix), ''## Not verified'', and a last line ''Verdict: READY'' or ''Verdict: READY WITH LOGGED ITEMS'' or ''Verdict: NOT READY''. Be critical; a log that says DONE is a claim, not evidence. Owner decisions are in docs/owner-decisions.md (accepted; do not report them as open). SLICE: Open docs/fix/R3-13.md .. R3-18.md. For at least 30 applied edits (all of R3-13 and R3-18) confirm the edit; check FINAL-2 rows 15, 33, 52, 53, 67, 16, 59, 60, 21, 30, 48, 54, 57, 63, 22 are closed; for row 22 open 15 of the pointers you find in docs/fix/sweep-candidates.md of your own choosing in 10a and 11b and confirm each points to the right section.'
+after:
+- C-138
+- C-139
+- C-140
+- C-141
+- C-142
+- C-143
+- C-144
+- C-145
+- C-146
+- C-147
+- C-148
+- C-149
+- C-150
+- C-151
+- C-152
+- C-153
+- C-154
+- C-155
+read:
+- docs/decisions.md
+- docs/owner-decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- docs/audit/FINAL-2.md
+- docs/fix/R3-13.md
+- docs/fix/R3-14.md
+- docs/fix/R3-15.md
+- docs/fix/R3-16.md
+- docs/fix/R3-17.md
+- docs/fix/R3-18.md
+- docs/fix/sweep-candidates.md
+allowed_paths:
+- docs/audit/FINAL-3c.md
+outputs:
+- docs/audit/FINAL-3c.md
+acceptance:
+- cmd: python scripts/check_audit.py docs/audit/FINAL-3c.md
+- cmd: python scripts/check_params.py
+- cmd: python scripts/check_issues.py
+- cmd: python scripts/check_stale.py
+- cmd: python scripts/check_refs.py api
+notes: Audit cell. Independent and critical. Nothing is executed by you; CI runs acceptance.

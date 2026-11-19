@@ -39,3 +39,9 @@ Cells C-030..C-057 audit and reconcile the merged spec. Objective checks run in 
 
 ## Fix round (owner note)
 Cells C-072..C-099 apply the fix tasks of docs/audit/FINAL.md section 5.1 and end with a re-audit (docs/audit/FINAL-2.md). Fix logs live in `docs/fix/`. New CI checks: `scripts/check_stale.py` (paths the reconciliation replaced or removed must not be cited), `scripts/check_refs.py api` is now strict (only S15a/S15b paths and NEW verdict rows of 15c..15f count as defined), `scripts/check_text.py` (regex assertions), `scripts/check_fixlog.py` (fix log structure). Owner decisions D-01..D-22 are in FINAL.md section 4; fix cells apply the stated defaults and mark them default-pending.
+
+## Owner decisions (recorded 2026-11-19)
+The owner accepted the defaults of docs/audit/FINAL.md section 4 (D-01..D-22). They and the supplement resolutions D-18a..D-34 are in `docs/owner-decisions.md`: that file, not this one, is where cells read decisions. Earlier cell texts that say the defaults are in docs/decisions.md mean docs/owner-decisions.md.
+
+## Round 3 (owner note)
+Cells C-138..C-160 apply the findings of docs/audit/FINAL-2.md (one cell per file group, every finding assigned to exactly one cell, files sequenced with `after` edges) and end with an independent re-audit in four slices plus a merge (docs/audit/FINAL-3.md). Fix logs: docs/fix/R3-*.md. Decisions: docs/owner-decisions.md.

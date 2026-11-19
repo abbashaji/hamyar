@@ -1,0 +1,45 @@
+id: C-153
+title: 'R3-16: growth and gates: feature visibility, service id, stratum rule'
+type: normal
+priority: 4
+lease_minutes: 90
+goal: 'You apply a fixed list of audit findings to spec parts and write docs/fix/R3-16.md. SOURCES: docs/audit/FINAL-2.md (the ''Findings'' table: each row you are assigned states file:line, defect and the proposed fix; READ each of your rows first), docs/owner-decisions.md (the owner''s accepted decisions D-01..D-34: they are binding, apply them, never invent another choice), and the parts named below. AUTHORITY WHEN SOURCES CONFLICT: docs/owner-decisions.md, then the Founding Document, then S0 (spec/00-conventions.md), then the part that owns the concept per D-30 (entities and columns: S5a; enums and states: S0; operations and paths: S15a/S15b; copy keys for requester rejections: S7), then all other parts. METHOD: for each assigned row, locate the cited text by reading about 30 lines around the cited line (lines drift; search nearby, never guess); make the MINIMAL edit in place (apply_changes with small old/new strings; never rewrite sections, never delete content that is not part of the fix); after an edit, check that every other place in YOUR files that states the same fact now agrees (search by reading the neighbouring sections and any table that repeats it); do not touch anything not named by your rows; if you notice another defect list it under ''## Noticed, not fixed'' with file:line and do not fix it. Names: edits may change only the identifiers your row says to change; never rename any other id, parameter, endpoint, state or enum; never mention retired names in the new text. If an edit would contradict the Founding Document, a ground rule of docs/decisions.md or a decision of docs/owner-decisions.md, do not make it: record skipped-needs-owner with the reason. STATUS WORDS: applied / already-applied / skipped-needs-owner / skipped-not-found (with what you searched). LOG docs/fix/R3-16.md: a table with columns exactly: edit | file:line | before | after | status (one row per edit, row numbers of FINAL-2 in the first column), then ''## Read-back'' (after ALL edits re-open every edited place and state in a phrase what you now read; also state, for each row, which other places you checked for the same fact), then ''## Noticed, not fixed'', then a last line ''Result: DONE'' or ''Result: DONE WITH SKIPS''. Mark every edit that follows a decision as default-pending in the ''after'' column. Do not run anything; CI runs the acceptance commands.
+
+
+  TASK R3-16: Rows 48, 54, 57 with D-28. Row 48: `getFeatures` returns booleans with no arm names (FIX-08): make 12.11.5 (~:506) agree: members do not see their arm; edit the settings-screen text accordingly. Row 54: `reasons: [''service_gate_regressed:'' + svc_id]` at ~:550: the id goes to `details.service_id` and the reason string is `service_gate_regressed` (15a catalogue; paragraph ~:544). Row 57 (D-28): one stratum rule: spec/13-measurement.md 13.8.4 is canonical (`pilot_week` and `locale`): rewrite 12.11.3/12.11.4 and rows V2, V4, V6 (they name `cohort_week`, `stratum_key`, `trust_tier`) to it, and fix 12.11.2''s `eligibility.include_existing` against the eligibility row of 12.11.1 (add the item to the row or remove the use).
+
+  '
+after:
+- C-148
+- C-017
+- C-019
+- C-044
+- C-052
+- C-079
+- C-086
+- C-094
+read:
+- docs/decisions.md
+- docs/owner-decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- docs/audit/FINAL-2.md
+- spec/13-measurement.md
+- spec/15a-api-core.md
+- spec/12-public-growth.md
+- spec/14-launch-gates.md
+allowed_paths:
+- docs/fix/R3-16.md
+- spec/12-public-growth.md
+- spec/14-launch-gates.md
+outputs:
+- docs/fix/R3-16.md
+acceptance:
+- cmd: python scripts/check_fixlog.py docs/fix/R3-16.md
+- cmd: python scripts/check_spec.py spec/12-public-growth.md --min-lines 681 --min-tags 1
+- cmd: python scripts/check_spec.py spec/14-launch-gates.md --min-lines 572 --min-tags 1
+- cmd: python scripts/check_params.py
+- cmd: python scripts/check_issues.py
+- cmd: python scripts/check_stale.py
+- cmd: python scripts/check_refs.py api
+notes: 'Round-3 fix cell. Edits only inside allowed_paths. Large files: read in chunks of at most 600 lines with read_files; commit (apply_changes) after every ~10 edits and keep the log table current. Evidence tags and heading format as in docs/decisions.md. Acceptance is partly structural: completeness is what the goal says.'

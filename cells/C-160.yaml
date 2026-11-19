@@ -1,0 +1,32 @@
+id: C-160
+title: 'Re-audit round 3: final readiness report'
+type: normal
+priority: 3
+lease_minutes: 90
+goal: 'INDEPENDENT re-audit slice (you did not write the parts or the fixes). Method: read in chunks of at most 600 lines; do not paste file contents into chat; every claim names file:line you saw. Write docs/audit/FINAL-3.md with: ''## Checked'' (what you opened and found correct), a findings table with columns exactly ''# | severity | file:line | defect | action'' (severity blocking/major/minor; action: the exact proposed fix), ''## Not verified'', and a last line ''Verdict: READY'' or ''Verdict: READY WITH LOGGED ITEMS'' or ''Verdict: NOT READY''. Be critical; a log that says DONE is a claim, not evidence. Owner decisions are in docs/owner-decisions.md (accepted; do not report them as open). SLICE: MERGE of docs/audit/FINAL-3a.md, FINAL-3b.md, FINAL-3c.md, FINAL-3d.md (read all four completely) into docs/audit/FINAL-3.md: totals; every open finding deduplicated with the slice that logged it; spot-check 10 findings you pick from different slices by opening the cited file:line; the owner questions that are STILL open (decisions are in docs/owner-decisions.md; list only questions not covered there); the next fix tasks if not ready (one per cell: files, edit, acceptance); and the overall verdict. Do not soften the slices.'
+after:
+- C-156
+- C-157
+- C-158
+- C-159
+read:
+- docs/decisions.md
+- docs/owner-decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- docs/audit/FINAL-2.md
+- docs/audit/FINAL-3a.md
+- docs/audit/FINAL-3b.md
+- docs/audit/FINAL-3c.md
+- docs/audit/FINAL-3d.md
+allowed_paths:
+- docs/audit/FINAL-3.md
+outputs:
+- docs/audit/FINAL-3.md
+acceptance:
+- cmd: python scripts/check_audit.py docs/audit/FINAL-3.md
+- cmd: python scripts/check_params.py
+- cmd: python scripts/check_issues.py
+- cmd: python scripts/check_stale.py
+- cmd: python scripts/check_refs.py api
+notes: Audit cell. Independent and critical. Nothing is executed by you; CI runs acceptance.

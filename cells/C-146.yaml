@@ -1,0 +1,45 @@
+id: C-146
+title: 'R3-09: ledger: hard-pool wording, payout guard, small jobs, restitution'
+type: normal
+priority: 4
+lease_minutes: 90
+goal: 'You apply a fixed list of audit findings to spec parts and write docs/fix/R3-09.md. SOURCES: docs/audit/FINAL-2.md (the ''Findings'' table: each row you are assigned states file:line, defect and the proposed fix; READ each of your rows first), docs/owner-decisions.md (the owner''s accepted decisions D-01..D-34: they are binding, apply them, never invent another choice), and the parts named below. AUTHORITY WHEN SOURCES CONFLICT: docs/owner-decisions.md, then the Founding Document, then S0 (spec/00-conventions.md), then the part that owns the concept per D-30 (entities and columns: S5a; enums and states: S0; operations and paths: S15a/S15b; copy keys for requester rejections: S7), then all other parts. METHOD: for each assigned row, locate the cited text by reading about 30 lines around the cited line (lines drift; search nearby, never guess); make the MINIMAL edit in place (apply_changes with small old/new strings; never rewrite sections, never delete content that is not part of the fix); after an edit, check that every other place in YOUR files that states the same fact now agrees (search by reading the neighbouring sections and any table that repeats it); do not touch anything not named by your rows; if you notice another defect list it under ''## Noticed, not fixed'' with file:line and do not fix it. Names: edits may change only the identifiers your row says to change; never rename any other id, parameter, endpoint, state or enum; never mention retired names in the new text. If an edit would contradict the Founding Document, a ground rule of docs/decisions.md or a decision of docs/owner-decisions.md, do not make it: record skipped-needs-owner with the reason. STATUS WORDS: applied / already-applied / skipped-needs-owner / skipped-not-found (with what you searched). LOG docs/fix/R3-09.md: a table with columns exactly: edit | file:line | before | after | status (one row per edit, row numbers of FINAL-2 in the first column), then ''## Read-back'' (after ALL edits re-open every edited place and state in a phrase what you now read; also state, for each row, which other places you checked for the same fact), then ''## Noticed, not fixed'', then a last line ''Result: DONE'' or ''Result: DONE WITH SKIPS''. Mark every edit that follows a decision as default-pending in the ''after'' column. Do not run anything; CI runs the acceptance commands.
+
+
+  TASK R3-09: Rows 17, 18, 20, 64 with D-03, D-04, D-26. Row 17: three places still say the levy pays for verification (6.7.3 properties and the N = 7 example ~:359-362, the 6.11.2 cap row ~:506, the `ISS-61` resolution ~:880): rewrite them to the hard-pool rule (ISS-16, LD-05, 6.7.2: the levy budget never pays verification; the job stops when the pool cannot pay), and make the 6.7.3 N = 7 example agree with `AC-ledger-03(b)`; recompute the arithmetic by hand in your Read-back. Row 18 (D-26): rewrite the payout-guard text at 6.x ~:299 and ~:149-156: acceptance is deferred (`acceptance_deferred_until`, 05b) and at the end of the deferral the job stops with `funding_shortfall` (S0 0.9.2, added by R3-07; read S0 and 05b first); nothing is silently rolled back. Row 20 (D-04): state the small-job consequence in 06a 6.x near :761 and in the quote section: a job whose N x v is below one credit cannot pay a verification cell, so its first mandatory verification event stops it with partial results (show the N = 7 case) and the quote must say so before escrow; add one Given/When/Then. Row 64 (D-03): the 6.6.3 row for a `transfer` into a closed escrow posts NO restitution (default: the donor bears the gap) and INV-L15 no longer allows restitution reversals; edit the row, INV-L15 and any worked example that uses restitution. If an edit in 05b is needed for consistency, make it minimal and log it.
+
+  '
+after:
+- C-144
+- C-004
+- C-005
+- C-042
+- C-047
+- C-077
+- C-096
+- C-097
+read:
+- docs/decisions.md
+- docs/owner-decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- docs/audit/FINAL-2.md
+- spec/00-conventions.md
+- spec/08b-verification.md
+- spec/06a-ledger.md
+- spec/05b-state-machines.md
+allowed_paths:
+- docs/fix/R3-09.md
+- spec/06a-ledger.md
+- spec/05b-state-machines.md
+outputs:
+- docs/fix/R3-09.md
+acceptance:
+- cmd: python scripts/check_fixlog.py docs/fix/R3-09.md
+- cmd: python scripts/check_spec.py spec/06a-ledger.md --min-lines 751 --min-tags 1
+- cmd: python scripts/check_spec.py spec/05b-state-machines.md --min-lines 695 --min-tags 1
+- cmd: python scripts/check_params.py
+- cmd: python scripts/check_issues.py
+- cmd: python scripts/check_stale.py
+- cmd: python scripts/check_refs.py api
+notes: 'Round-3 fix cell. Edits only inside allowed_paths. Large files: read in chunks of at most 600 lines with read_files; commit (apply_changes) after every ~10 edits and keep the log table current. Evidence tags and heading format as in docs/decisions.md. Acceptance is partly structural: completeness is what the goal says.'

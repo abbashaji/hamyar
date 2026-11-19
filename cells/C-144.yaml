@@ -1,0 +1,59 @@
+id: C-144
+title: 'R3-07: state machines: closure reasons, shortfall exits, anomaly rule, S0.7 entities'
+type: normal
+priority: 4
+lease_minutes: 90
+goal: 'You apply a fixed list of audit findings to spec parts and write docs/fix/R3-07.md. SOURCES: docs/audit/FINAL-2.md (the ''Findings'' table: each row you are assigned states file:line, defect and the proposed fix; READ each of your rows first), docs/owner-decisions.md (the owner''s accepted decisions D-01..D-34: they are binding, apply them, never invent another choice), and the parts named below. AUTHORITY WHEN SOURCES CONFLICT: docs/owner-decisions.md, then the Founding Document, then S0 (spec/00-conventions.md), then the part that owns the concept per D-30 (entities and columns: S5a; enums and states: S0; operations and paths: S15a/S15b; copy keys for requester rejections: S7), then all other parts. METHOD: for each assigned row, locate the cited text by reading about 30 lines around the cited line (lines drift; search nearby, never guess); make the MINIMAL edit in place (apply_changes with small old/new strings; never rewrite sections, never delete content that is not part of the fix); after an edit, check that every other place in YOUR files that states the same fact now agrees (search by reading the neighbouring sections and any table that repeats it); do not touch anything not named by your rows; if you notice another defect list it under ''## Noticed, not fixed'' with file:line and do not fix it. Names: edits may change only the identifiers your row says to change; never rename any other id, parameter, endpoint, state or enum; never mention retired names in the new text. If an edit would contradict the Founding Document, a ground rule of docs/decisions.md or a decision of docs/owner-decisions.md, do not make it: record skipped-needs-owner with the reason. STATUS WORDS: applied / already-applied / skipped-needs-owner / skipped-not-found (with what you searched). LOG docs/fix/R3-07.md: a table with columns exactly: edit | file:line | before | after | status (one row per edit, row numbers of FINAL-2 in the first column), then ''## Read-back'' (after ALL edits re-open every edited place and state in a phrase what you now read; also state, for each row, which other places you checked for the same fact), then ''## Noticed, not fixed'', then a last line ''Result: DONE'' or ''Result: DONE WITH SKIPS''. Mark every edit that follows a decision as default-pending in the ''after'' column. Do not run anything; CI runs the acceptance commands.
+
+
+  TASK R3-07: Rows 19, 26, 27, 28, 29, 62, 66 with decisions D-26, D-29, D-31 (read them in docs/owner-decisions.md). Row 19: add a Job `closure_reason` value for the verification-shortfall stop (`verification_shortfall`) to S0 0.9.2 AND to the 05b table JT-15, and add the second value `funding_shortfall` for the payout-guard stop (D-26) in both; S0 0.9.2 then holds the final closure_reason list; record the final list in your log (later cells copy it into 05a and 15a). Row 62 (D-29): the Job state `assembling` gets a failure exit through `job.stop_requested` (add `assembling` to its source states in S0 and 05b, with a closure reason from the list); add no events for the two launch switches. Row 18 is in a later cell (06a) but its exit is decided here (D-26): in 05b define, for a Cell `submitted` whose acceptance is blocked by the payout guard: deferral with the existing `acceptance_deferred_until`; at the end of the deferral the Job stops through `job.stop_requested` with `funding_shortfall`; accepted work already paid stays paid. Row 26 (D-31): MT-06: restriction needs `anomaly.restrict_count` S9 anomaly findings within `anomaly.restrict_window_days`; one hard duplicate or timing finding alone never restricts. Row 27 (D-31): Commons job overrun deadline `commons.job_overrun_days` (the job closes `expired`, accepted cells paid) and `flagged_for_audit` age-out after `audit.flag_age_out_days` (escalate to the audit queue, release the headroom reservation); add the transitions and events in 05b and S0 0.9. Add the four parameters (`anomaly.restrict_count` 3, `anomaly.restrict_window_days` 14, `commons.job_overrun_days` 30, `audit.flag_age_out_days` 14) as rows of spec/16c-parameters-b.md in the full format of that file (type, unit, validation, default labeled ''initial configurable default'' [A], owner, change policy, prospective-only, calibration, used in). Row 28: SVT-04: add the transition `in_review` -> `revoked` and the effect of a rejected re-review on jobs pinned to the service (S0 0.9.6 and 05b, same text). Row 29: SBT-06: spec/09-result-return.md (~:392) is canonical for what happens to a released submission (it returns to verification before acceptance; read it): make SBT-06 in 05b and the Submission machine in S0 0.9.3 send a released submission to the verification stage with the state names S0 uses, never to `checks_passed`; edit only S0 and 05b (09 is not an allowed path here and must not need a change; if it does, log it under Noticed). Row 66: add `state_transitions` (`stt_`) and `mint_headroom` to S0.7 with a one-line purpose each and remove the ''convention addition'' disclaimers only in S0.
+
+  '
+after:
+- C-000
+- C-004
+- C-027
+- C-035
+- C-047
+- C-056
+- C-059
+- C-062
+- C-064
+- C-065
+- C-066
+- C-072
+- C-074
+- C-075
+- C-077
+- C-090
+- C-091
+read:
+- docs/decisions.md
+- docs/owner-decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- docs/audit/FINAL-2.md
+- spec/06a-ledger.md
+- spec/09-result-return.md
+- spec/00-conventions.md
+- spec/05b-state-machines.md
+- spec/16c-parameters-b.md
+allowed_paths:
+- docs/fix/R3-07.md
+- spec/00-conventions.md
+- spec/05b-state-machines.md
+- spec/16c-parameters-b.md
+outputs:
+- docs/fix/R3-07.md
+acceptance:
+- cmd: python scripts/check_fixlog.py docs/fix/R3-07.md
+- cmd: python scripts/check_spec.py spec/00-conventions.md --min-lines 840 --min-tags 1
+- cmd: python scripts/check_spec.py spec/05b-state-machines.md --min-lines 695 --min-tags 1
+- cmd: python scripts/check_spec.py spec/16c-parameters-b.md --min-lines 155 --min-tags 1
+- cmd: python scripts/check_text.py spec/16c-parameters-b.md --present 'anomaly\.restrict_count' 'anomaly\.restrict_window_days' 'commons\.job_overrun_days' 'audit\.flag_age_out_days'
+- cmd: python scripts/check_text.py spec/00-conventions.md --present 'verification_shortfall' 'funding_shortfall' 'state_transitions' 'mint_headroom'
+- cmd: python scripts/check_params.py
+- cmd: python scripts/check_issues.py
+- cmd: python scripts/check_stale.py
+- cmd: python scripts/check_refs.py api
+notes: 'Round-3 fix cell. Edits only inside allowed_paths. Large files: read in chunks of at most 600 lines with read_files; commit (apply_changes) after every ~10 edits and keep the log table current. Evidence tags and heading format as in docs/decisions.md. Acceptance is partly structural: completeness is what the goal says.'

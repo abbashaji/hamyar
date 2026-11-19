@@ -1,0 +1,42 @@
+id: C-159
+title: 'Re-audit round 3, slice D: contradictions across parts'
+type: normal
+priority: 3
+lease_minutes: 90
+goal: 'INDEPENDENT re-audit slice (you did not write the parts or the fixes). Method: read in chunks of at most 600 lines; do not paste file contents into chat; every claim names file:line you saw. Write docs/audit/FINAL-3d.md with: ''## Checked'' (what you opened and found correct), a findings table with columns exactly ''# | severity | file:line | defect | action'' (severity blocking/major/minor; action: the exact proposed fix), ''## Not verified'', and a last line ''Verdict: READY'' or ''Verdict: READY WITH LOGGED ITEMS'' or ''Verdict: NOT READY''. Be critical; a log that says DONE is a claim, not evidence. Owner decisions are in docs/owner-decisions.md (accepted; do not report them as open). SLICE: No fix log is in your scope. Re-read the cross-part facts FINAL-2 found contradictory and test whether the parts now agree, each by reading BOTH sides: (1) IP hash and rate-limit counters: 05a, 10a, 10b; (2) the names of Member, Device, Invite, MemberKey, Session, AdminAction in 05a and 10a; (3) closure_reason lists in S0, 05a, 05b, 15a, 06a; (4) the verification-shortfall rule in 06a, 08b, 05b, 18; (5) join and consent flow in 11a and 11d; (6) the security.two_person_actions minimum list in S0, S16, 10a, 14, 15b; (7) every path cited in 10a, 11b, 11c, 12, 13 exists in 15a/15b/15c-15f as an operation (not only as a path). Also check the four reasons of docs/audit/FINAL.md section 5 and say for each whether it is met.'
+after:
+- C-138
+- C-139
+- C-140
+- C-141
+- C-142
+- C-143
+- C-144
+- C-145
+- C-146
+- C-147
+- C-148
+- C-149
+- C-150
+- C-151
+- C-152
+- C-153
+- C-154
+- C-155
+read:
+- docs/decisions.md
+- docs/owner-decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- docs/audit/FINAL-2.md
+allowed_paths:
+- docs/audit/FINAL-3d.md
+outputs:
+- docs/audit/FINAL-3d.md
+acceptance:
+- cmd: python scripts/check_audit.py docs/audit/FINAL-3d.md
+- cmd: python scripts/check_params.py
+- cmd: python scripts/check_issues.py
+- cmd: python scripts/check_stale.py
+- cmd: python scripts/check_refs.py api
+notes: Audit cell. Independent and critical. Nothing is executed by you; CI runs acceptance.

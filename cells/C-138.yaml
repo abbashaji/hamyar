@@ -1,0 +1,40 @@
+id: C-138
+title: 'R3-01: identity: registration check, purposes, key states, attempts'
+type: normal
+priority: 4
+lease_minutes: 90
+goal: 'You apply a fixed list of audit findings to spec parts and write docs/fix/R3-01.md. SOURCES: docs/audit/FINAL-2.md (the ''Findings'' table: each row you are assigned states file:line, defect and the proposed fix; READ each of your rows first), docs/owner-decisions.md (the owner''s accepted decisions D-01..D-34: they are binding, apply them, never invent another choice), and the parts named below. AUTHORITY WHEN SOURCES CONFLICT: docs/owner-decisions.md, then the Founding Document, then S0 (spec/00-conventions.md), then the part that owns the concept per D-30 (entities and columns: S5a; enums and states: S0; operations and paths: S15a/S15b; copy keys for requester rejections: S7), then all other parts. METHOD: for each assigned row, locate the cited text by reading about 30 lines around the cited line (lines drift; search nearby, never guess); make the MINIMAL edit in place (apply_changes with small old/new strings; never rewrite sections, never delete content that is not part of the fix); after an edit, check that every other place in YOUR files that states the same fact now agrees (search by reading the neighbouring sections and any table that repeats it); do not touch anything not named by your rows; if you notice another defect list it under ''## Noticed, not fixed'' with file:line and do not fix it. Names: edits may change only the identifiers your row says to change; never rename any other id, parameter, endpoint, state or enum; never mention retired names in the new text. If an edit would contradict the Founding Document, a ground rule of docs/decisions.md or a decision of docs/owner-decisions.md, do not make it: record skipped-needs-owner with the reason. STATUS WORDS: applied / already-applied / skipped-needs-owner / skipped-not-found (with what you searched). LOG docs/fix/R3-01.md: a table with columns exactly: edit | file:line | before | after | status (one row per edit, row numbers of FINAL-2 in the first column), then ''## Read-back'' (after ALL edits re-open every edited place and state in a phrase what you now read; also state, for each row, which other places you checked for the same fact), then ''## Noticed, not fixed'', then a last line ''Result: DONE'' or ''Result: DONE WITH SKIPS''. Mark every edit that follows a decision as default-pending in the ''after'' column. Do not run anything; CI runs the acceptance commands.
+
+
+  TASK R3-01: Rows 1, 34, 35, 36. Row 1: registration check 4 must require purpose `create` (the client requests `create`, :79). Row 34: the purposes at ~:168, :200, :206 must be the seven purposes of :67 / S15.B.3.1 (spec/15c-api-reconcile-core.md 15.B.3.1): replace each old purpose by the one of that list with the same meaning (`rotate_device_key` -> `rotate`; `link_claim` and `link_approve` -> the device-link purposes of the list; read the list). Row 35: one set of key-state names: S0 0.9 / S15.B.3.1 is canonical (read how S0 names MemberKey states); make :139, :162, :182 agree with it and with each other. Row 36: the ''attempts exhausted'' -> denied transition and counter at :192/:201: edit 8e removed the only limit row; define the limit by reusing an existing `ratelimit.*` parameter that S16 already defines for device-link attempts if one exists (read spec/16-parameters.md, 16b, 16c), else remove the transition and the counter and say so. In the new text never write the retired purpose names.
+
+  '
+after:
+- C-011
+- C-045
+- C-076
+- C-089
+read:
+- docs/decisions.md
+- docs/owner-decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- docs/audit/FINAL-2.md
+- spec/15c-api-reconcile-core.md
+- spec/00-conventions.md
+- spec/16-parameters.md
+- spec/10a-identity.md
+allowed_paths:
+- docs/fix/R3-01.md
+- spec/10a-identity.md
+outputs:
+- docs/fix/R3-01.md
+acceptance:
+- cmd: python scripts/check_fixlog.py docs/fix/R3-01.md
+- cmd: python scripts/check_spec.py spec/10a-identity.md --min-lines 659 --min-tags 1
+- cmd: python scripts/check_text.py spec/10a-identity.md --absent '`register_device`' '`rotate_device_key`' '`link_claim`' '`link_approve`'
+- cmd: python scripts/check_params.py
+- cmd: python scripts/check_issues.py
+- cmd: python scripts/check_stale.py
+- cmd: python scripts/check_refs.py api
+notes: 'Round-3 fix cell. Edits only inside allowed_paths. Large files: read in chunks of at most 600 lines with read_files; commit (apply_changes) after every ~10 edits and keep the log table current. Evidence tags and heading format as in docs/decisions.md. Acceptance is partly structural: completeness is what the goal says.'

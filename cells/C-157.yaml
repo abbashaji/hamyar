@@ -1,0 +1,48 @@
+id: C-157
+title: 'Re-audit round 3, slice B: logs R3-07..R3-12'
+type: normal
+priority: 3
+lease_minutes: 90
+goal: 'INDEPENDENT re-audit slice (you did not write the parts or the fixes). Method: read in chunks of at most 600 lines; do not paste file contents into chat; every claim names file:line you saw. Write docs/audit/FINAL-3b.md with: ''## Checked'' (what you opened and found correct), a findings table with columns exactly ''# | severity | file:line | defect | action'' (severity blocking/major/minor; action: the exact proposed fix), ''## Not verified'', and a last line ''Verdict: READY'' or ''Verdict: READY WITH LOGGED ITEMS'' or ''Verdict: NOT READY''. Be critical; a log that says DONE is a claim, not evidence. Owner decisions are in docs/owner-decisions.md (accepted; do not report them as open). SLICE: Open docs/fix/R3-07.md .. R3-12.md. For at least 30 applied edits (all of R3-07) confirm the edit in the part file. Check that S0 0.9.2 closure_reason, 05b JT-15, 05a Job and 15a Job show the SAME list; that the four new parameters exist in spec/16c-parameters-b.md and are used consistently in 05b; that FINAL-2 rows 10-12, 17-20, 26-29, 31, 37, 39, 45-47, 55, 56, 61, 62, 64, 66, 6, 50, 32, 69 are closed.'
+after:
+- C-138
+- C-139
+- C-140
+- C-141
+- C-142
+- C-143
+- C-144
+- C-145
+- C-146
+- C-147
+- C-148
+- C-149
+- C-150
+- C-151
+- C-152
+- C-153
+- C-154
+- C-155
+read:
+- docs/decisions.md
+- docs/owner-decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- docs/audit/FINAL-2.md
+- docs/fix/R3-07.md
+- docs/fix/R3-08.md
+- docs/fix/R3-09.md
+- docs/fix/R3-10.md
+- docs/fix/R3-11.md
+- docs/fix/R3-12.md
+allowed_paths:
+- docs/audit/FINAL-3b.md
+outputs:
+- docs/audit/FINAL-3b.md
+acceptance:
+- cmd: python scripts/check_audit.py docs/audit/FINAL-3b.md
+- cmd: python scripts/check_params.py
+- cmd: python scripts/check_issues.py
+- cmd: python scripts/check_stale.py
+- cmd: python scripts/check_refs.py api
+notes: Audit cell. Independent and critical. Nothing is executed by you; CI runs acceptance.

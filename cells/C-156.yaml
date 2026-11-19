@@ -1,0 +1,48 @@
+id: C-156
+title: 'Re-audit round 3, slice A: logs R3-01..R3-06'
+type: normal
+priority: 3
+lease_minutes: 90
+goal: 'INDEPENDENT re-audit slice (you did not write the parts or the fixes). Method: read in chunks of at most 600 lines; do not paste file contents into chat; every claim names file:line you saw. Write docs/audit/FINAL-3a.md with: ''## Checked'' (what you opened and found correct), a findings table with columns exactly ''# | severity | file:line | defect | action'' (severity blocking/major/minor; action: the exact proposed fix), ''## Not verified'', and a last line ''Verdict: READY'' or ''Verdict: READY WITH LOGGED ITEMS'' or ''Verdict: NOT READY''. Be critical; a log that says DONE is a claim, not evidence. Owner decisions are in docs/owner-decisions.md (accepted; do not report them as open). SLICE: Open docs/fix/R3-01.md .. R3-06.md. For at least 30 edits marked applied (all of R3-01 and R3-06), open the cited place in the part file and confirm the edit is there and that no sentence elsewhere in the same file still states the old fact; check that FINAL-2 rows 1-5, 7-9, 14, 23-25, 34-36, 42-44, 51, 65 and 2, 13 are closed (cite lines).'
+after:
+- C-138
+- C-139
+- C-140
+- C-141
+- C-142
+- C-143
+- C-144
+- C-145
+- C-146
+- C-147
+- C-148
+- C-149
+- C-150
+- C-151
+- C-152
+- C-153
+- C-154
+- C-155
+read:
+- docs/decisions.md
+- docs/owner-decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- docs/audit/FINAL-2.md
+- docs/fix/R3-01.md
+- docs/fix/R3-02.md
+- docs/fix/R3-03.md
+- docs/fix/R3-04.md
+- docs/fix/R3-05.md
+- docs/fix/R3-06.md
+allowed_paths:
+- docs/audit/FINAL-3a.md
+outputs:
+- docs/audit/FINAL-3a.md
+acceptance:
+- cmd: python scripts/check_audit.py docs/audit/FINAL-3a.md
+- cmd: python scripts/check_params.py
+- cmd: python scripts/check_issues.py
+- cmd: python scripts/check_stale.py
+- cmd: python scripts/check_refs.py api
+notes: Audit cell. Independent and critical. Nothing is executed by you; CI runs acceptance.

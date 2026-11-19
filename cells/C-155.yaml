@@ -1,0 +1,93 @@
+id: C-155
+title: 'R3-18: sweep pointers to old heading numbers'
+type: normal
+priority: 4
+lease_minutes: 90
+goal: 'You apply a fixed list of audit findings to spec parts and write docs/fix/R3-18.md. SOURCES: docs/audit/FINAL-2.md (the ''Findings'' table: each row you are assigned states file:line, defect and the proposed fix; READ each of your rows first), docs/owner-decisions.md (the owner''s accepted decisions D-01..D-34: they are binding, apply them, never invent another choice), and the parts named below. AUTHORITY WHEN SOURCES CONFLICT: docs/owner-decisions.md, then the Founding Document, then S0 (spec/00-conventions.md), then the part that owns the concept per D-30 (entities and columns: S5a; enums and states: S0; operations and paths: S15a/S15b; copy keys for requester rejections: S7), then all other parts. METHOD: for each assigned row, locate the cited text by reading about 30 lines around the cited line (lines drift; search nearby, never guess); make the MINIMAL edit in place (apply_changes with small old/new strings; never rewrite sections, never delete content that is not part of the fix); after an edit, check that every other place in YOUR files that states the same fact now agrees (search by reading the neighbouring sections and any table that repeats it); do not touch anything not named by your rows; if you notice another defect list it under ''## Noticed, not fixed'' with file:line and do not fix it. Names: edits may change only the identifiers your row says to change; never rename any other id, parameter, endpoint, state or enum; never mention retired names in the new text. If an edit would contradict the Founding Document, a ground rule of docs/decisions.md or a decision of docs/owner-decisions.md, do not make it: record skipped-needs-owner with the reason. STATUS WORDS: applied / already-applied / skipped-needs-owner / skipped-not-found (with what you searched). LOG docs/fix/R3-18.md: a table with columns exactly: edit | file:line | before | after | status (one row per edit, row numbers of FINAL-2 in the first column), then ''## Read-back'' (after ALL edits re-open every edited place and state in a phrase what you now read; also state, for each row, which other places you checked for the same fact), then ''## Noticed, not fixed'', then a last line ''Result: DONE'' or ''Result: DONE WITH SKIPS''. Mark every edit that follows a decision as default-pending in the ''after'' column. Do not run anything; CI runs the acceptance commands.
+
+
+  TASK R3-18: Row 22. FIX-21 renumbered the headings of 10b, 11c and 11d but pointers elsewhere were never mapped. docs/fix/sweep-candidates.md lists 156 candidate pointers in your files with the map and the rule for deciding (read its header paragraph first). For EVERY candidate decide: stale (points into 10b, 11c or 11d under the OLD number) -> change to the NEW number (map: 10b 10.11..10.19 -> 10.21..10.29; 11c 11.41..11.59 -> 11.51..11.69; 11d 11.40..11.57 -> 11.70..11.87; map sub-numbers the same way; verify the target heading exists by reading the heading list of the target file); or correct (own-file pointer or already new) -> leave. Log one row per STALE pointer you changed, and in a second table ''Candidates left unchanged'' give the count per file and the reason class. Known ones: 05a:124 (`10b 10.13.1`, `10.13.3`), 05a:141 (`10b 10.13.2`), 10a 10.14.2 items 1 and 4 (`10b S10.14.2`). Line numbers have drifted: use the snippet.
+
+  '
+after:
+- C-138
+- C-139
+- C-140
+- C-141
+- C-142
+- C-143
+- C-144
+- C-145
+- C-146
+- C-147
+- C-148
+- C-149
+- C-150
+- C-151
+- C-152
+- C-153
+- C-154
+- C-003
+- C-007
+- C-011
+- C-013
+- C-014
+- C-034
+- C-035
+- C-044
+- C-045
+- C-046
+- C-050
+- C-051
+- C-075
+- C-076
+- C-077
+- C-078
+- C-087
+- C-088
+- C-089
+- C-092
+- C-093
+read:
+- docs/decisions.md
+- docs/owner-decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- docs/audit/FINAL-2.md
+- docs/fix/sweep-candidates.md
+- docs/fix/FIX-21.md
+- spec/10b-safety.md
+- spec/11c-admin-tools.md
+- spec/11d-i18n-copy.md
+- spec/05a-entities.md
+- spec/07-policy.md
+- spec/10a-identity.md
+- spec/11a-volunteer-ux.md
+- spec/11b-requester-ux.md
+- spec/16b-parameters-a.md
+- spec/16c-parameters-b.md
+allowed_paths:
+- docs/fix/R3-18.md
+- spec/05a-entities.md
+- spec/07-policy.md
+- spec/10a-identity.md
+- spec/11a-volunteer-ux.md
+- spec/11b-requester-ux.md
+- spec/16b-parameters-a.md
+- spec/16c-parameters-b.md
+outputs:
+- docs/fix/R3-18.md
+acceptance:
+- cmd: python scripts/check_fixlog.py docs/fix/R3-18.md
+- cmd: python scripts/check_spec.py spec/05a-entities.md --min-lines 1714 --min-tags 1
+- cmd: python scripts/check_spec.py spec/07-policy.md --min-lines 941 --min-tags 1
+- cmd: python scripts/check_spec.py spec/10a-identity.md --min-lines 659 --min-tags 1
+- cmd: python scripts/check_spec.py spec/11a-volunteer-ux.md --min-lines 1179 --min-tags 1
+- cmd: python scripts/check_spec.py spec/11b-requester-ux.md --min-lines 923 --min-tags 1
+- cmd: python scripts/check_spec.py spec/16b-parameters-a.md --min-lines 227 --min-tags 1
+- cmd: python scripts/check_spec.py spec/16c-parameters-b.md --min-lines 155 --min-tags 1
+- cmd: python scripts/check_params.py
+- cmd: python scripts/check_issues.py
+- cmd: python scripts/check_stale.py
+- cmd: python scripts/check_refs.py api
+notes: 'Round-3 fix cell. Edits only inside allowed_paths. Large files: read in chunks of at most 600 lines with read_files; commit (apply_changes) after every ~10 edits and keep the log table current. Evidence tags and heading format as in docs/decisions.md. Acceptance is partly structural: completeness is what the goal says.'
