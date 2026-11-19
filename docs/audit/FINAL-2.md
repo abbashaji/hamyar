@@ -110,3 +110,59 @@ No claim was dropped. One claim was reproduced only in part (spot check 9, the f
 | 67 | minor | spec/15c-api-reconcile-core.md:1 | [D] Edit 25 and edit 27 are still unapplied instructions (for a later cell to apply); `AC-rec-03` asserts that no part cites a path this file marks REMOVE, which holds only after FIX-05 to FIX-07 | keep FIX-28 (strict `check_refs`) on the list; a green `check_refs.py api` is not agreement |
 | 68 | minor | docs/audit/FINAL.md:205 | [D] The cell text says the defaults are in `docs/decisions.md`; that file (protected) has no decision list, the defaults are in `FINAL.md` section 4 (reproduced) | owner changes the cell text of later cells to point at `FINAL.md` section 4; no file edit |
 | 69 | minor | spec/15e-api-reconcile-admin.md:1 | [D] 15e verdict row 34 (`listAdminMetricSnapshots`) and 15f verdict row 9 (`listMetricSnapshots`) both give verdict NEW for `GET /v1/admin/metric-snapshots` with two operation ids; 15g was not checked for a resolution | keep one operation id and make the other row an ALIAS |
+
+## Owner decisions
+
+`docs/decisions.md` holds no decision list; the 22 groups and their defaults are in `docs/audit/FINAL.md` section 4, and the fix round marks them default-pending (`decisions.md`, Fix round note). All 22 are still open and none is accepted in writing (FINAL-2d). `FINAL.md` section 5 says READY WITH LOGGED ITEMS needs D-01, D-03, D-05, D-07, D-12, D-15, D-17, D-18 and D-20 taken or their defaults accepted in writing. Each line gives the default meanwhile.
+
+- D-01 admins and reviewers in Phase 1, bootstrap, `launch.min_signoffs` of 1: two-person actions unavailable below two admins, numbers not lowered, no gate can be signed with one admin.
+- D-02 Reserve seed: the Reserve starts empty and grants pause; at least 150 credits proposed as a launch precondition [V].
+- D-03 restitution, closed-escrow reversal, expired slice, levy on overturn, lot clock: the Reserve pays nothing beyond grants, `appeal_restitution` stays off, the donor bears the gap (row 64).
+- D-04 verification cost beyond the pool: hard pool, the job stops; quote at max(measured v, `price.v_prior`, floor) [A] (rows 17, 19, 20).
+- D-05 escrow and ageing, reservations in the 14-day arm: escrow counts toward K, `ff.job.reservations` off for the arm, trial jobs from the standard arm [H].
+- D-06 K against `price.v_cap`: defaults stand, the quote returns the largest holdable job for the tier.
+- D-07 mint-cap meaning: 4,800 unchanged (equal at phi = 0.5).
+- D-08 the 11 operation-id collisions: both rules written down, no id renamed.
+- D-09 reservation and waiting rules, Commons overrun and audit age-out, MT-06 criterion: no money, a cooldown, one live reservation, no criterion (rows 26 and 27).
+- D-10 ledger invariant brake: engages `kill.all_minting` and `kill.all_new_jobs` only; one ledger, one chain.
+- D-11 cancelled or failed job: in-flight cells finish, accepted ones are paid, partial `Deliverable`, no retrieval after `cancelled` in 15a.
+- D-12 free text in permanent tables and other minimization points: free text stays with the limit stated, backups encrypted in two places, edges treated like retention (rows 25 and 13).
+- D-13 counters and teams: residuals disclosed, team default 5 (below k of 10) with a warning (row 6).
+- D-14 e-mail purpose, minimum age, automation flag: in-app notices, e-mail opt-in notices only, age 0 with the line not rendered.
+- D-15 share cards: computed card, no stored link, V3 descriptive, no rewards.
+- D-16 approval predicates and registry: stricter S7 guard, region never blocks, no `P2` or `P3` rows, G4 open, no sandbox, ratio 0.34 hidden, operator-authored backlog (row 16 touches the sandbox default).
+- D-17 exit rule and launch thresholds: the rule governs launch, every tripwire names who acts, pilot size held by invite supply, no minimum interviews.
+- D-18 recovery key timing and join consent: after the first accepted cell with a marker [H]; no single join flow adopted (row 30).
+- D-19 copy choices: text as written, flagged for human and legal review (row 47).
+- D-20 two-person scope: one admin with step-up for audit accept and release, the member read is logged, not justified (row 31, row 6).
+- D-21 template and naming details: as written.
+- D-22 open S3 and parameter values: defaults stand, no value invented; the effect of `retention.ip_hash_ttl_days` = 0 is open (row 2, row 43).
+
+Choices raised by slices A to C that have no D id and need the owner: the anti-farming rule of row 13 (FIX-17 S2), `Job.rating.comment` (row 11), the check types of row 16, the payout guard of row 18, the unique issue ids of row 21, the stratum rule of row 57, the `assembling` failure exit and the launch events of row 62. Row 68 is a change of the cell text, which only the owner makes.
+
+## Next fix tasks
+
+Each item is one future cell. None renames an id, parameter, endpoint or state; where a rename is needed it is logged. Where an owner decision is named, the cell applies the default of the section above and marks it default-pending. Every cell also ends with a read-back: it opens the cited lines after the edit and states what it saw. The structural scripts do not show consistency (rows 32, 33, 67), so the read-back is part of acceptance.
+
+- R2-01. Files: `spec/10a-identity.md`. Edit: rows 1, 34, 35, 36 (check 4 to `create`; purposes, key-state names and the attempts limit against S15.B.3.1). Acceptance: `python scripts/check_refs.py api` and `python scripts/check_stale.py`; read-back of :95.
+- R2-02. Files: `spec/05a-entities.md`, `spec/10a-identity.md`. Edit: rows 14, 24, 51, 65 (one name set per entity, one tree-id type, nullable `issuer_member_id`, one Device retention rule). Acceptance: `python scripts/check_params.py` and `python scripts/check_stale.py`; read-back of both name lists.
+- R2-03. Files: `spec/05a-entities.md`, `spec/10a-identity.md`. Edit: rows 22 and 23 (search all parts for the old 10b, 11c, 11d numbers and point them to the new numbers; delete the `vol_` sentence at 05a:863). Acceptance: `python scripts/check_stale.py`; read-back of each changed pointer.
+- R2-04. Files: `spec/10a-identity.md`, `spec/05a-entities.md`, `spec/10b-safety.md`. Edit: rows 2, 13, 25 (apply D-22 and D-12 defaults; for row 13 drop the rule unless the owner chooses a persisted flag; state the free-text limits in the three files). Acceptance: `python scripts/check_params.py`; read-back.
+- R2-05. Files: `spec/11c-admin-tools.md`. Edit: rows 4, 7, 8, 9, 42, 43, 44 (rewrite or delete `AC-appr-02`, `AC-lookup-02/07/08`, `AC-claim-04/08`, `AC-gate-02` to `AC-gate-04`, `AC-abuse-02`; one set of op ids, event names and the TTL parameter name). Acceptance: `python scripts/check_refs.py api` and `python scripts/check_params.py`; read-back.
+- R2-06. Files: `spec/11b-requester-ux.md`, `spec/07-policy.md`, `spec/11c-admin-tools.md`. Edit: rows 5, 40, 41, 58 (stale `AC-req-*` rows, `listJobResults`, `listServices` response, one `kill.service.<svc_id>` rule). Acceptance: `python scripts/check_refs.py api` and `python scripts/check_stale.py`.
+- R2-07. Files: `spec/06b-admission.md`, `spec/09-result-return.md`. Edit: row 3 (`AC-admission-15` to the `null` and `suppressed` form) and the 09 side of row 39 (`AC-submit-16`, `ISS-94`). Acceptance: `python scripts/check_params.py` and `python scripts/check_issues.py`.
+- R2-08. Files: `spec/00-conventions.md`, `spec/16-parameters.md`, `spec/16c-parameters-b.md`. Edit: rows 31, 37, 39 (S16 side), 45, 46, 47, 61 (fixed minimum list and floor of 2; `reservation` in the area list; `lease.max_validations`; `S16D-C2` kind; the relation at 16:416; `ui.draft.ttl_s` baseline; caps of the two reviewer parameters). Acceptance: `python scripts/check_params.py`.
+- R2-09. Files: `spec/13-measurement.md`, `spec/15f-api-reconcile-measurement.md`. Edit: rows 6 and 50 (`AN-09` and 15.E.4 together under D-13 and D-20; 13.7.2 in terms of the approval). Acceptance: `python scripts/check_params.py` and `python scripts/check_refs.py api`.
+- R2-10. Files: `spec/05a-entities.md`, `spec/15a-api-core.md`. Edit: rows 10, 11, 12, 55, 56 (one `closure_reason` list; `rating.comment` decision; partial lease key; key for `mint_headroom`; extend `AC-api-18`). Acceptance: `python scripts/check_refs.py api` and `python scripts/check_params.py`.
+- R2-11. Files: `spec/15b-api-admin.md`, `spec/15c-api-reconcile-core.md`, `spec/15d-api-reconcile-requester.md`. Edit: rows 15, 33, 52, 53, 67 (add the missing events; `/v1/policy` to ALIAS and reorder; extend the list at 15.34.5; mark the 15d appeal rows moved). Acceptance: `python scripts/check_refs.py api` and `python scripts/check_stale.py`.
+- R2-12. Files: `spec/15e-api-reconcile-admin.md`, `spec/15f-api-reconcile-measurement.md`. Edit: rows 32 and 69 (define `getCalibrationProposals` in an operation table; one operation id for `/v1/admin/metric-snapshots`). Acceptance: `python scripts/check_refs.py api`.
+- R2-13. Files: `spec/06a-ledger.md`, `spec/05b-state-machines.md`. Edit: rows 17, 18, 20, 64 (hard-pool wording in 6.7.3, 6.11.2 and `ISS-61`; exit for the payout guard; small-job effect under D-04; restitution row under D-03). Acceptance: `python scripts/check_params.py` and `python scripts/check_issues.py`; hand-check of the N = 7 example against `AC-ledger-03(b)`.
+- R2-14. Files: `spec/00-conventions.md`, `spec/05b-state-machines.md`. Edit: rows 19, 26, 27, 28, 29, 62, 66 (`closure_reason` value for the verification stop in S0 0.9.2 and JT-15; MT-06 count and window; Commons overrun and audit age-out; SVT-04 effect; SBT-06 path; `assembling` exit; S0.7 additions). Acceptance: `python scripts/check_params.py` and `python scripts/check_stale.py`.
+- R2-15. Files: `spec/08a-templates.md`, `spec/08b-verification.md`. Edit: rows 16, 59, 60 (the two check types, one audit rule, runner leftovers and `H-CC-3`). Acceptance: `python scripts/check_params.py`; read-back.
+- R2-16. Files: `spec/11c-admin-tools.md`, `spec/11d-i18n-copy.md`, `spec/02-issues.md`. Edit: rows 21 and 30 (own id per issue in the register and in both files; document the join-flow conflict under D-18). Acceptance: `python scripts/check_issues.py`.
+- R2-17. Files: `spec/12-public-growth.md`, `spec/14-launch-gates.md`. Edit: rows 48, 54, 57 (`getFeatures` against 12.11.5; `details.service_id`; one stratum rule). Acceptance: `python scripts/check_params.py` and `python scripts/check_refs.py api`.
+- R2-18. Files: `spec/03-assumptions.md`, `spec/19-risks.md`. Edit: row 63 (align the two cross-reference tables and the dotted form at 19:306). Acceptance: `python scripts/check_issues.py`.
+- R2-19. Files: `docs/fix/FIX-01.md`, `docs/fix/FIX-07.md`, `docs/fix/FIX-10.md`, `docs/fix/FIX-13.md`, `docs/fix/FIX-14.md`. Edit: rows 38 and 49 (line-offset notes, the 33-row count). Acceptance: `python scripts/check_audit.py docs/audit/FINAL-2.md` for this file and the fix-log structure check of CI.
+- R2-20. Files: `docs/audit/FINAL-3.md`. Edit: a re-audit written after R2-01 to R2-19 that rereads rows 1 to 33 and the four reasons of `FINAL.md` section 5. Acceptance: `python scripts/check_audit.py docs/audit/FINAL-3.md`, `python scripts/check_params.py`, `python scripts/check_issues.py`, `python scripts/check_stale.py`, `python scripts/check_refs.py api`.
+
+Verdict: NOT READY
