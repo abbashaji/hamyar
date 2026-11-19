@@ -5,7 +5,7 @@
 ## Checked
 
 - Reads so far: `05a` lines 100-200, 250-520, 545-640, 676-780, 842-990, 1052-1100; `10a` lines 24-135, 318-400, 470-600; `10b` lines 1-70, 150-280, 540-640. Line numbers are counted from the start of each read range and can be off by up to 3; every row gives a quoted anchor next to the number.
-- This file was extended in steps; rows 18 to 21 and 26 and reasons 1, 3 and 4 are carried from `FINAL.md` where marked and not yet re-read.
+- Later reads: `00-conventions` 744-850; `16-parameters` 74-94, 308-316, 385-440; `05b` 86-112, 122-150, 186-216, 225-305; `09` 384-400; `11d` 555-585; `FINAL.md` 38-69, 118-150. Rows 8 to 21 and 26 are all re-read, with the gaps named in each row. Reasons 1 and 4, the Owner decisions list and item (3) (the NEW rows of C-130, C-131, C-132) are not done at this commit.
 
 ## Contradictions
 
@@ -31,7 +31,7 @@
 
 1. NOT MET (carried from `FINAL.md`, not yet re-read): the reconciliation edits 15c to 15g, 16d and 02e.
 2. NOT MET: the parts still disagree on the data model (rows 8, 11 and 12 above; findings 1 to 5). The IP-hash datum itself is now consistent (row 9 CLOSED).
-3. NOT MET (carried from `FINAL.md`, not yet re-read): safety parameters fail closed.
+3. NOT MET: the fail-closed floors of FINAL row 5 are partly applied. Applied: `launch.min_signoffs` 2..5 (`00:795`, `16:413`), `launch.min_approved_services` 1..20 (`00:796`, `16:414`), `change.notice_days_default` and `change.notice_days_price` 1..90 (`16:415-416`), gold and audit rate floors above 0 (`16:78`, C2), `retention.ip_hash_ttl_days` 1..30 (`00:750`). Not applied: `security.two_person_actions` (`00:829`) is still a free subset of the action names, so `launch.signoff` and `killswitch.release` can be dropped; `appeal.ban_min_reviewers` accepts 1 (`00:783`, range 1..2). I did not open the S16 row for `security.two_person_actions`.
 4. NOT MET (carried from `FINAL.md`, not yet re-read): owner decisions.
 
 ## Owner decisions
