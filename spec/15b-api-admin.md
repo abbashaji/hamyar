@@ -987,11 +987,18 @@ Every event has this envelope; the catalog below lists only the payload.
 | `experiment.assigned` | `experiment_id`, `assignment_id` | `config_svc` | `analytics` |
 | `experiment.exposed` | `experiment_id`, `surface_key`, `assignment_id` | `config_svc` | `analytics` |
 | `calibration.recorded` | `calibration_id`, `service_id` | `admin_svc` | (audit only) |
+| `calibration.report_frozen` | `calibration_report_id`, `report_hash`, `record_count` | `admin_svc` | (audit only) |
+| `decision_report.created` | `decision_report_id`, `prereg_id`, `content_hash` | `admin_svc` | (audit only) |
+| `incident.recorded` | `incident_id`, `incident_type`, `severity` | `admin_svc` | `metrics_svc` |
+| `incident.resolved` | `incident_id`, `resolution_code` | `admin_svc` | `metrics_svc` |
+| `interview.recorded` | `interview_id`, `segment` | `admin_svc` | `metrics_svc` |
 | `milestone.published` | `milestone_id`, `key` | `config_svc` | `public_proj` |
 | `sharecard.created`, `sharecard.revoked` | `share_card_id` (not the token) | `api` | `public_proj` |
 | `sharecard.viewed` | `share_card_id`, `date` | `public_proj` | `analytics` |
 | `alarm.raised` | `alarm_id`, `category`, `kind`, `severity` | any component | `admin_svc` |
 | `alarm.acknowledged` | `alarm_id`, `admin_id` | `admin_svc` | (audit only) |
+
+The rows `calibration.report_frozen`, `decision_report.created`, `incident.recorded`, `incident.resolved` and `interview.recorded` carry the events that 15f (15.E.5, 15.E.6, 15.E.8, 15.E.9) names for `createCalibrationReport`, `createDecisionReport`, `createIncident`, `resolveIncident` and `createInterview`. 15f gives the event name and not the payload, so the field names are proposed; every field is an id, an enum, a count or a hash (15.34.1) [A].
 
 ### 15.34.5 Catalog: admin and timers
 
@@ -1001,8 +1008,9 @@ Every event has this envelope; the catalog below lists only the payload.
 | `admin.step_up_verified` | `admin_id`, `op` | `admin_svc` | (audit only) |
 | `admin.user_enrolled`, `admin.user_deactivated`, `admin.roles_changed`, `admin.credential_added`, `admin.credential_removed` | `admin_id`, `by_admin_id` | `admin_svc` | (audit only) |
 | `admin.approval_requested`, `admin.approval_granted`, `admin.approval_rejected`, `admin.approval_withdrawn`, `admin.approval_expired`, `admin.approval_failed` | `approval_id`, `action_name`, `admin_id?` | `admin_svc`, `scheduler` for `expired` | `inbox_proj` (the other admins) |
+| `workclaim.expired` | `claim_id`, `subject_type`, `subject_id` | `scheduler` | `admin_svc` (the item sorts first in its queue, 11c `AC-claim-02`) |
 
-Timers are produced by the `scheduler` and are events like any other: `quote_expired`, `waitlist_released`, `waitlist_expired`, `lease_expired`, `service.review_due`, `service.review_lapsed`, `parameter.activated`, `policy.version_activated` (for `loosen`), `admin.approval_expired`, the daily ledger checkpoint, the lot-expiry `expire` postings and `reserve` `retire` postings (S6.*). Names listed here that are not in S0 0.9 (`service.terms_copy_sealed`, `service.flags_recorded`, `policy.version_activated`, `policy.version_cancelled`, `parameter.activated`, `parameter.change_withdrawn`, `feature_flag.changed`, `launch.member_jobs_enabled_changed`, `launch.minting_enabled_changed`, `preregistration.locked`, `experiment.started`, `experiment.stopped`, `calibration.recorded`, `milestone.published`, `sharecard.*`, `alarm.*`, `admin.*`) are convention additions (`ISS-154`).
+Timers are produced by the `scheduler` and are events like any other: `quote_expired`, `waitlist_released`, `waitlist_expired`, `lease_expired`, `service.review_due`, `service.review_lapsed`, `parameter.activated`, `policy.version_activated` (for `loosen`), `admin.approval_expired`, `workclaim.expired`, the daily ledger checkpoint, the lot-expiry `expire` postings and `reserve` `retire` postings (S6.*). Names listed here that are not in S0 0.9 (`service.terms_copy_sealed`, `service.flags_recorded`, `policy.version_activated`, `policy.version_cancelled`, `parameter.activated`, `parameter.change_withdrawn`, `feature_flag.changed`, `launch.member_jobs_enabled_changed`, `launch.minting_enabled_changed`, `preregistration.locked`, `experiment.started`, `experiment.stopped`, `experiment.registered`, `experiment.assigned`, `experiment.exposed`, `job.cancelled`, `team.locked`, `team.unlocked`, `calibration.recorded`, `calibration.report_frozen`, `decision_report.created`, `incident.recorded`, `incident.resolved`, `interview.recorded`, `workclaim.expired`, `milestone.published`, `sharecard.*`, `alarm.*`, `admin.*`) are convention additions (`ISS-154`).
 
 ### 15.34.6 Catalog: events proposed by part a [A]
 
