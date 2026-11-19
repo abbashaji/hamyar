@@ -92,7 +92,7 @@ Server checks, in this order; the first failure stops the request: [D]
 | 1 | `launch.members_may_join` is true | `403 LAUNCH_GATE_CLOSED` |
 | 2 | Rate limits of 10.9 (device token, IP hash, invite tree) | `429 RATE_LIMITED` |
 | 3 | Both public keys are valid 32-byte Ed25519 points and differ from each other | `400 VALIDATION_FAILED` |
-| 4 | Challenge exists, unused, unexpired, `purpose` = `register_device`, audience matches | `401 AUTH_EXPIRED` or `AUTH_INVALID` |
+| 4 | Challenge exists, unused, unexpired, `purpose` = `create`, audience matches | `401 AUTH_EXPIRED` or `AUTH_INVALID` |
 | 5 | Both signatures verify over the same `context_hash` (proof of possession of both private keys: a typo or bug cannot register a recovery key nobody holds) | `401 AUTH_INVALID` |
 | 6 | If `identity.registration_mode` = `invite_only`: code hash matches an `Invite` in state `active`, unexpired, its tree not frozen, tree size below `invite.tree_max_members`, depth at most `invite.tree_max_depth` | `422 UNPROCESSABLE` with one uniform `copy.invite.invalid` for unknown, expired or used codes; `422 CAP_EXCEEDED` for a full tree |
 | 7 | One transaction: insert `Member` (`status` `active`, `trust_tier` `new`), two `MemberKey` rows (`authorized_by_key_id` = the key itself), upsert `Device`, redeem the `Invite`, mark the challenge used, emit `member.created` | `409 STATE_CONFLICT` on a lost race |
@@ -136,7 +136,7 @@ The server holds `recovery_pub` only. Verification is a signature over a fresh c
 | --- | --- |
 | Recovery key never confirmed | Replaceable with a device-key step-up alone; the old key was never proven held |
 | Recovery key confirmed | Replacing it needs a device-key step-up AND a signature by the current recovery key, so a thief holding only an unlocked phone cannot lock the owner out (the `recovery_signature` of `rotateKey`, S15.B.9) |
-| Effect | New key `pending` and `active` after `identity.key_rotation_grace_s` (both work meanwhile); old key `rotated` until then, then `revoked`; a `SecurityNotice` on every device |
+| Effect | New key `pending` and `active` after `identity.key_rotation_grace_s` (both work meanwhile); old key `retiring` until then, then `revoked`; a `SecurityNotice` on every device |
 | After a recovery (10.8) | The key used is revoked at once and a new one is mandatory in the same request (it was typed on a device that may be hostile) |
 
 ## 10.5 Optional e-mail
@@ -159,15 +159,15 @@ The server holds `recovery_pub` only. Verification is a signature over a fresh c
 
 ## 10.6 Key rotation
 
-`MemberKey` `status` values: `active`, `rotated`, `revoked`. Events: `member.key_rotated` (a successor was added, the old key moves to `rotated`), `member.key_revoked` [A] (any move to `revoked`). Signature algorithm changes are treated as rotation (the `algorithm` column exists for this). Rotation never changes `mem_` id, balances, trust tier or the recovery key. [D]
+`MemberKey` `status` values: `pending`, `active`, `retiring`, `revoked`. Events: `member.key_rotated` (a successor was added, the old key moves to `retiring`), `member.key_revoked` [A] (any move to `revoked`). Signature algorithm changes are treated as rotation (the `algorithm` column exists for this). Rotation never changes `mem_` id, balances, trust tier or the recovery key. [D]
 
 ```
 planned rotation of device key K_old -> K_new            # step-up required (10.13)
   client: generate K_new; persist it locally as 'pending' BEFORE sending anything
   POST /v1/member-keys/rotations {kind: 'device', key_id: K_old.id, challenge, signature, new_public_key: K_new.pub, new_key_proof}
-        signed by K_old (purpose rotate_device_key) AND by K_new (proof of possession)
+        signed by K_old (purpose rotate) AND by K_new (proof of possession)
   server: txn { K_new = MemberKey(active, authorized_by = K_old);
-                K_old.status = rotated, K_old.not_after = now + identity.key_rotation_grace_s;
+                K_old.status = retiring, K_old.not_after = now + identity.key_rotation_grace_s;
                 SecurityNotice; emit member.key_rotated }
   client: authenticates once with K_new (purpose session) -> 'confirmed'
   server: on that first K_new session: K_old.status = revoked, its sessions revoked, emit member.key_revoked
@@ -189,7 +189,7 @@ Purpose: add a second device (new phone, desktop) to the same member without mov
 
 ```
 Offer states: pending --claim--> awaiting_approval --approval--> linked (T)
-              pending|awaiting_approval --ttl--> expired (T);  pending|awaiting_approval --cancel or attempts exhausted--> denied (T)
+              pending|awaiting_approval --ttl--> expired (T);  pending|awaiting_approval --cancel--> denied (T)
 
 A (signed in, step-up):  POST /v1/device-links
     -> {device_id, code (128 random bits, QR and 26-character Crockford text),
@@ -197,13 +197,13 @@ A (signed in, step-up):  POST /v1/device-links
     server stores SHA-256(link_secret) only
 B (new device, no session): generate device key and device token;
     POST /v1/device-links/redemptions {code, new_public_key, proof, device_token,
-        platform_class, key_storage}  signed by B's key (purpose link_claim)
-    server: constant-time compare of the secret hash; attempts += 1; state awaiting_approval;
+        platform_class, key_storage}  signed by B's key (purpose device_link)
+    server: constant-time compare of the secret hash; state awaiting_approval;
             claimed_key_hash = SHA-256(device_pub); only the first valid claim wins
     B and A both display  sas = (first 4 bytes of SHA-256(offer_id || device_pub) as uint32) mod 1,000,000, 6 digits
 A: shows platform_class and the 6 digits; the person confirms they match B's screen;
     POST /v1/device-links/{device_id}/approval {sas}, with the Step-Up header of A's key
-        (purpose link_approve, context_hash covers offer_id and claimed_key_hash)
+        (purpose step_up, context_hash covers offer_id and claimed_key_hash)
 server: txn { MemberKey(auth, active, authorized_by_key_id = A.key, authorization_signature);
               upsert Device; SecurityNotice to all devices; emit member.device_linked }
 B: next step is an ordinary session by challenge (10.13); B inherits nothing
@@ -231,7 +231,7 @@ client (new device, no session): person types the recovery key; normalize; verif
         proof (new_dk), new_recovery_proof (new_rk)}
 server:
   1. rate limits: ratelimit.recovery_attempts_per_day per IP hash and per device token
-  2. verify challenge and all three signatures; find MemberKey(purpose recovery, status active|rotated)
+  2. verify challenge and all three signatures; find MemberKey(purpose recovery, status active|retiring)
      by public_key; unknown key and bad signature give the same 401 AUTH_INVALID
   3. count completed RecoveryRequest of this member in the last 90 days;
      if >= identity.recovery_max_per_90d: 422 CAP_EXCEEDED, details.copy_key copy.identity.recovery_limit
@@ -521,7 +521,7 @@ Admin surface hardening [D]: strict Content-Security-Policy with no third-party 
 h = SHA-256(token); s = sessions.get(h)                         # constant-time compare on the hash
 reject AUTH_INVALID  if s is null, s.revoked_at is not null, or s.principal_type != endpoint auth_scheme
 reject AUTH_EXPIRED  if now > s.abs_expires_at or now > s.idle_expires_at
-reject AUTH_INVALID  if the bound key is revoked, or rotated and past not_after
+reject AUTH_INVALID  if the bound key is revoked, or retiring and past not_after
 reject FORBIDDEN     if the permission or a condition X3..X8 fails (10.11)
 then: touch last_used_at (rate-limited); idle_expires_at = last_used_at + idle TTL, never past abs_expires_at
 ```
