@@ -54,6 +54,12 @@ Phase 0 numbers become evidence only when frozen (13.9.3). `getCalibrationSummar
 
 Idempotency: key required; the natural idempotency underneath is `(sorted service_ids, last_cal_id)`, so a double click or a key reused by mistake never writes two reports for the same data. Records contain sizes, counts and enums only (15.32.3); the report adds no prompt or output text and no account identifier. [D]
 
+**Calibration proposals.** `getCalibrationProposals` is the read-only list of parameter proposals of 13.9.4. It is derived from the live computation of `getCalibrationSummary` (15.E.3) by the rules of 13.9.4 and has no write path: a person applies a proposal in the parameter editor, never through this operation (the hard limits of 13.9). It stays at the path part 13 cites; the owner of S15 may re-point it later [A].
+
+| op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `getCalibrationProposals` | `GET /v1/admin/calibration-proposals` | `admin` `perm.calibration.read` | - | list of proposals, one per parameter of the table in 13.9.4, each with the parameter, its current value, the proposed value, the rule, the records behind it, `ready` and the `insufficient` services | - | n/a | - | `A-R` |
+
 ## 15.E.6 Decision reports [D]
 
 The decision report of 13.7.7 is a generated document for the founders: locked hash and time, each threshold with observed value, interval, `n` and outcome, each rule outcome, every incident row (type, severity, resolution code), interview coverage, experiment arms and the balance table, `post_lock` and `post_launch_amendment` items under both versions, suppressed cells, and the limits statement of 13.11. It has no recommendation line. `DecisionReport` (`dcr_`, permanent) = `{dcr_id, prereg_id: id<prr>, created_at, source_watermark: ts, window_closed: bool, content_hash, formats: ["json", "markdown"]}`. The API is JSON only (S0 0.11.1), so the content is returned inside a JSON body as `{markdown: string, json: object, content_hash}` with `Content-Type: application/json` and `X-Content-Type-Options: nosniff`; the Operator tools offer it as a download. The report contains no member id and no volunteer identifier by construction (13.7.7); incident `note` text is never included.
@@ -229,7 +235,7 @@ new: | `createInterview`, `getInterviewCoverage` | `POST /v1/admin/interviews`, 
 
 ## 15.E.13 Path index for the verdict check
 
-The paths below are the item and sub-resource paths of the operations defined in 15.E.5 to 15.E.11 and the path of `recordClientEvents`; they are listed so that every path cited by parts 11c and 13 has a verdict row. No operation changes. [D]
+The paths below are the item and sub-resource paths of the operations defined in 15.E.5 to 15.E.11 and the paths of `recordClientEvents` and `getCalibrationProposals`; they are listed so that every path cited by parts 11c and 13 has a verdict row. No operation changes. [D]
 
 | Path | Verdict | Operation |
 | --- | --- | --- |
@@ -240,4 +246,4 @@ The paths below are the item and sub-resource paths of the operations defined in
 | `/v1/admin/incidents/{inc_id}` | NEW | `getIncident`, `updateIncident` (15.E.8) |
 | `/v1/admin/incidents/{inc_id}/investigations` | NEW | `startIncidentInvestigation` (15.E.8) |
 | `/v1/admin/incidents/{inc_id}/resolutions` | NEW | `resolveIncident` (15.E.8) |
-| `/v1/admin/calibration-proposals` | NEW | `getCalibrationProposals`: read-only list of parameter proposals derived from `getCalibrationSummary` by the rules of 13.9.4; permission `perm.calibration.read`; class `A-R`; no write path. Kept at the path part 13 cites; the owner of S15 may re-point it later [A] |
+| `/v1/admin/calibration-proposals` | NEW | `getCalibrationProposals` (15.E.5) |

@@ -10,7 +10,7 @@ For each cited path the surrounding 12 lines of the citing part were read to lea
 - **NEW**: S15 has no such capability and the capability is legitimate. It is defined in full in 15.D.4 in the S15 table format.
 - **REMOVE**: the cited use must not exist (15.D.5), with what the citing part does instead.
 
-Result for the 38 cited paths: 23 ALIAS, 13 NEW, 1 REMOVE, and 1 split (`audit-queue-items`: audits are ALIAS, quarantine is NEW, `gold-views` is REMOVE). Four sub-decisions inside ALIAS rows are also removals (the bulk sign-off, the transaction list, non-public change-log entries, `requeue_at_front`); they are named in 15.D.5. This file adds 20 operations to S15; every one is an admin-surface operation and none touches the member or public surface [D].
+Result for the 38 cited paths: 24 ALIAS, 12 NEW, 1 REMOVE, and 1 split (`audit-queue-items`: audits are ALIAS, quarantine is NEW, `gold-views` is REMOVE). Four sub-decisions inside ALIAS rows are also removals (the bulk sign-off, the transaction list, non-public change-log entries, `requeue_at_front`); they are named in 15.D.5. This file adds 19 operations to S15; every one is an admin-surface operation and none touches the member or public surface [D].
 
 | # | Cited path | Cited at | Decision | Resolves to |
 | --- | --- | --- | --- | --- |
@@ -47,15 +47,15 @@ Result for the 38 cited paths: 23 ALIAS, 13 NEW, 1 REMOVE, and 1 split (`audit-q
 | 31 | `/v1/admin/ledger-transactions` | 11c:504 | ALIAS (list removed) | `getLedgerTransaction`; list is `listLedgerEntries?txn_kind=` |
 | 32 | `/v1/admin/ledger-verifications` | 11c:507 | ALIAS | `startHashChainVerification`, `runInvariant` |
 | 33 | `/v1/admin/member-views` | 11c:751 | ALIAS | `getMemberAdmin` |
-| 34 | `/v1/admin/metric-snapshots` | 11c:615, 13:51, 13:921 | NEW | `listAdminMetricSnapshots` |
+| 34 | `/v1/admin/metric-snapshots` | 11c:615, 13:51, 13:921 | ALIAS | `listMetricSnapshots` (defined in 15.E.10 of `spec/15f-api-reconcile-measurement.md`) |
 | 35 | `/v1/admin/parameter-change-sets` | 11c:555 | NEW | `createParameterChangeSet` |
 | 36 | `/v1/admin/template-versions/{}/check-runs` | 11c:266 | NEW | `runTemplateChecks` |
 | 37 | `/v1/admin/work-claims` | 11c:797, 11c:798, 11c:799 | NEW | `listWorkClaims`, `createWorkClaim` |
 | 38 | `/v1/admin/work-claims/{}/releases` | 11c:799 | NEW | `releaseWorkClaim` (and `takeoverWorkClaim`) |
 
-The 20 new operations: `previewAdminAction`, `startAdminActionVerification`, `listQuarantinedSubmissions`, `getQuarantinedSubmissionContent`, `releaseQuarantinedSubmission`, `rejectQuarantinedSubmission`, `getBottleneck`, `getOperationsSnapshot`, `overturnCells`, `voidCell`, `stopJob`, `listLeases`, `releaseLease`, `listAdminMetricSnapshots`, `createParameterChangeSet`, `runTemplateChecks`, `listWorkClaims`, `createWorkClaim`, `releaseWorkClaim`, `takeoverWorkClaim` (20 operations) [D].
+The 19 new operations: `previewAdminAction`, `startAdminActionVerification`, `listQuarantinedSubmissions`, `getQuarantinedSubmissionContent`, `releaseQuarantinedSubmission`, `rejectQuarantinedSubmission`, `getBottleneck`, `getOperationsSnapshot`, `overturnCells`, `voidCell`, `stopJob`, `listLeases`, `releaseLease`, `createParameterChangeSet`, `runTemplateChecks`, `listWorkClaims`, `createWorkClaim`, `releaseWorkClaim`, `takeoverWorkClaim` (19 operations) [D].
 
-The five paths below are already defined in 15.D.4, where they appear only as `METHOD /v1/...` in the operation tables. These rows only list them, with a plain path and a NEW verdict, so that `scripts/check_refs.py` can see that part 11c cites defined paths. They change no operation and add none: the count of 20 stays [D].
+The five paths below are already defined in 15.D.4, where they appear only as `METHOD /v1/...` in the operation tables. These rows only list them, with a plain path and a NEW verdict, so that `scripts/check_refs.py` can see that part 11c cites defined paths. They change no operation and add none: the count of 19 stays [D].
 
 | Path | Verdict | Operation | Defined at |
 | --- | --- | --- | --- |
@@ -80,7 +80,7 @@ The five paths below are already defined in 15.D.4, where they appear only as `M
 | `perm.cell.void`, `perm.cell.overturn`, `perm.cell.release` | operator (`perm.cell.void` also reviewer) | `voidCell`, `overturnCells`, `releaseLease` |
 | `perm.lease.read` | operator | `listLeases` |
 | `perm.claim.write` | operator, reviewer | work claims |
-| `perm.metrics.view` | operator | `listAdminMetricSnapshots` |
+| `perm.metrics.view` | operator | `listMetricSnapshots` (15.E.10 of 15f) |
 | `perm.audit.read`, `perm.audit.resolve` (15.21.4) | reviewer | quarantine operations |
 
 ## 15.D.3 ALIAS decisions [D]
@@ -124,6 +124,7 @@ Each row: the cited path (and method), the S15 operation it means, and the diffe
 | `POST /v1/admin/kill-switch-releases` | `releaseKillSwitch`: `POST /v1/admin/kill-switches/{switch_key}/releases` | `switch` in the path; body `{reason, verification: [{check, passed}], public_text?}`; `202` carries an `AdminApproval`. The `release_guard_failed` error lists `details.missing`. |
 | `GET /v1/admin/change-log-entries` (includes non-public entries) | Reads: `listPublicChangeLog`, `getPublicChangeLogEntry`: `GET /v1/public/change-log[/{chg_id}]`. Writes: `annotateChangeLog`: `POST /v1/admin/changelog-entries` | S15 spells the admin collection `changelog-entries` (no hyphen between `change` and `log`); 11c's spelling is wrong. S15 has no non-public change-log entries (15.D.5), so an admin list would duplicate the public list; an admin uses the public endpoint (no credential needed). A change awaiting its human explanation is found through the alarm `changelog.explanation_overdue` and `explanation_due_at` on the entry. |
 | `GET /v1/admin/capacity-dashboard` | `getCapacitySnapshot` (`GET /v1/admin/capacity`), `listCapacityDays` (`.../capacity/days`), `listSupplyGauges` (`.../capacity/supply-gauges`) | Tiles that S15 does not carry (queue depth, lease health, verification estimates, open alarms and engaged switches in one call) come from the NEW `getOperationsSnapshot` (15.D.4.6) and from `listAlarms`, `listKillSwitches`, `getLaunchStatus`. 11c's "fewer than k" rule is the same as S15's `suppressed: true` with `donors: null`. |
+| `GET /v1/admin/metric-snapshots` | `listMetricSnapshots`: `GET /v1/admin/metric-snapshots`, defined once, in 15.E.10 of `spec/15f-api-reconcile-measurement.md` | Path unchanged. The operation is the one part 13 uses; this file defines no second operation for the path. Filters, the `MetricSnapshot` shape and the rule that a `suppressed` value is `null` for every caller are those of 15.E.10 and of 15.D.4.6 rule 1. |
 | `POST /v1/admin/member-views` with `{member_id, context:{kind, id}, reason_code, reason_text}` | `getMemberAdmin`: `GET /v1/admin/members/{mem_id}` | S15 makes it a `GET` (logged as an `AdminAction` of kind `read`, 15.21.3 rule 3, so "a POST because it writes a log row" is not needed). The `context` link and the reason are not part of S15; see the open point on member reads. 11c's "no `GET` list or search of members" (`AC-lookup-01`) contradicts S15's `listMembersAdmin` (`GET /v1/admin/members`, filters by status, tier, open report; no search by name, e-mail or handle). S15 is canonical: the list exists and 11c's acceptance criterion is rewritten to "no search by name, e-mail, handle or free text". |
 
 ## 15.D.4 NEW operations [D]
@@ -228,15 +229,16 @@ Set class [D]: `tighten` when every item is `tighten`; `loosen` when at least on
 
 ### 15.D.4.6 Metrics, bottleneck and operations snapshot
 
+`GET /v1/admin/metric-snapshots` is not defined in this table: it is the operation `listMetricSnapshots`, defined once in 15.E.10 of `spec/15f-api-reconcile-measurement.md`, and its verdict in 15.D.1 (row 34) is ALIAS (15.D.3.3). The two operations below are NEW.
+
 | op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `listAdminMetricSnapshots` | `GET /v1/admin/metric-snapshots` | `admin` `perm.metrics.view` | `?kind` (a kind of the S13.* catalogue), `?from`, `?to` (UTC, at most 366 days), `?dimension` | list of `MetricSnapshot` as S13.5 defines it (`kind`, window, dimensions, value, `suppressed`); a suppressed row has `value: null` | `VALIDATION_FAILED` (unknown kind; range) | n/a | cursor | `A-R` |
 | `getBottleneck` | `GET /v1/admin/bottleneck` | `admin` `perm.capacity.read` | - | `{as_of, bottleneck: {kind (template_version, service, approval, launch_gate_item), id, blocked_count, open_age_s}/null, candidates: [same shape, those with blocked_count > 0, at most `api.page_size_max`]}` | - | n/a | - | `A-R` |
 | `getOperationsSnapshot` | `GET /v1/admin/capacity/operations` | `admin` `perm.capacity.read` | - | `{as_of, queue_depth: [{template_id, service_requirement, purpose, sensitivity, queued_cells, oldest_age_s}], lease_health: {active, expiry_rate_ppm, decline_rate_ppm, submission_lag_p50_s, submission_lag_p95_s, reaper_lag_s}, verification: {v_ppm/null, false_accept_estimate_ppm/null, false_reject_estimate_ppm/null, oldest_open_age_s: {audit, quarantine, appeal, report}}, alarms_open: {info, warning, critical}, kill_switches_engaged: [switch_key]}` | - | n/a | - | `A-R` |
 
 Rules [D]:
 
-1. **No small-cell override.** `listAdminMetricSnapshots` never returns a value that S13 `AN-06` and `AN-07` suppressed, and the permission `perm.metrics.view_small_cells` of 13:921 does not exist. The 15b dashboards (supply gauges, experiment summary) already return `null` below `analytics.min_cohort_k` to admins; an operator who could read small cells would be a differencing oracle against S13 `AN-08` and against every cohort the public sees. If S13.* needs a small-cell view for a stated purpose, that is a separate decision with its own threat model, not a permission flag.
+1. **No small-cell override.** `listMetricSnapshots` never returns a value that S13 `AN-06` and `AN-07` suppressed, and the permission `perm.metrics.view_small_cells` of 13:921 does not exist. The 15b dashboards (supply gauges, experiment summary) already return `null` below `analytics.min_cohort_k` to admins; an operator who could read small cells would be a differencing oracle against S13 `AN-08` and against every cohort the public sees. If S13.* needs a small-cell view for a stated purpose, that is a separate decision with its own threat model, not a permission flag.
 2. **Same table, two records.** 15.33.4 defines the public `MetricSnapshot` (`mts_`) published every `price.publish_period_days`; S13 defines a wider family of snapshots with the same id prefix. The public record is the snapshot of kind `price_publication`; the admin list returns it and the others. `S13.*` and `C-041` reconcile the two field lists; this file fixes only the path and the suppression rule [A].
 3. **No row-level export.** There is still no endpoint that returns rows about one member (S13 `AN-03`); `getBottleneck` and `getOperationsSnapshot` return counts, ages and ids of admin work items only.
 4. **Bottleneck.** `blocked(c)` is computed on the server with the rule of 11c 11.52.3: the number of waitlisted or draft jobs, Commons backlog entries and launch switches that cannot move only because candidate `c` is open; candidates are open `TemplateVersion`s (`in_review`, `awaiting_second_review`, `changes_requested`), `Service`s (`unreviewed`, `in_review`, `review_due`), pending `AdminApproval`s and `LaunchGateItem`s required by `launch.required_gate_ids` that are not `signed_off`; the bottleneck is the candidate with the largest `blocked_count`, ties broken by the oldest `open_age_s`. The response never names a member or a requester.
@@ -273,7 +275,7 @@ Rules [D]:
 | id | Given | When | Then |
 | --- | --- | --- | --- |
 | `AC-recon-13` | The admin route table | Any request to `POST /v1/admin/handle-resolutions`, or to any admin path that accepts a `vol_` handle | `404 NOT_FOUND`; no admin endpoint accepts a volunteer handle or returns a member id for one |
-| `AC-recon-14` | A conforming build | The route table is diffed against S15 and this file | Every `/v1/admin/*` path cited by 11c or 13 after the edits below is either an S15 endpoint or one of the 20 operations of 15.D.4 |
+| `AC-recon-14` | A conforming build | The route table is diffed against S15 and this file | Every `/v1/admin/*` path cited by 11c or 13 after the edits below is either an S15 endpoint or one of the 19 operations of 15.D.4 or the one ALIAS to 15f (row 34, `listMetricSnapshots`) |
 
 ## Edits required in citing parts
 
@@ -307,7 +309,7 @@ For a later cell to apply; nothing below has been applied by this cell. Format: 
 | 11c:509 | `createLedgerReversal` ... `POST /v1/admin/ledger-reversals` ... `202` with an `ApprovalRequest` | `reverseLedgerEntry` ... `POST /v1/admin/ledger/reversals` ... `202` with an `AdminApproval` |
 | 11c:555 | `createParameterChangeSet` ... `202` when an `ApprovalRequest` is needed; `If-Match` per item | `createParameterChangeSet` ... `202` with an `AdminApproval` (loosening set); `expected_version` per item; one parameter is `proposeParameterChange` at `POST /v1/admin/parameter-changes` (15.D.4.5) |
 | 11c:557 | `listChangeLogEntries` ... `GET /v1/admin/change-log-entries` ... Includes non-public entries | `GET /v1/public/change-log[/{chg_id}]` (`listPublicChangeLog`); all entries are public; annotations are `POST /v1/admin/changelog-entries` |
-| 11c:615 | `getCapacityDashboard` `GET /v1/admin/capacity-dashboard`; `listMetricSnapshots` `GET /v1/admin/metric-snapshots?kind=`; `getBottleneck` `GET /v1/admin/bottleneck` | `getCapacitySnapshot` `GET /v1/admin/capacity`, `listCapacityDays`, `listSupplyGauges`, `getOperationsSnapshot` `GET /v1/admin/capacity/operations`; `listAdminMetricSnapshots` `GET /v1/admin/metric-snapshots?kind=`; `getBottleneck` `GET /v1/admin/bottleneck` (15.D.4.6) |
+| 11c:615 | `getCapacityDashboard` `GET /v1/admin/capacity-dashboard`; `listMetricSnapshots` `GET /v1/admin/metric-snapshots?kind=`; `getBottleneck` `GET /v1/admin/bottleneck` | `getCapacitySnapshot` `GET /v1/admin/capacity`, `listCapacityDays`, `listSupplyGauges`, `getOperationsSnapshot` `GET /v1/admin/capacity/operations`; `listMetricSnapshots` `GET /v1/admin/metric-snapshots?kind=` (15.E.10 of 15f); `getBottleneck` `GET /v1/admin/bottleneck` (15.D.4.6) |
 | 11c:647 | `GET /v1/admin/launch-gates`, `GET /v1/admin/launch-gate-items/{lgi_id}` | `GET /v1/admin/launch/gates[/{gate_id}]`, `GET /v1/admin/launch/gate-items/{lgi_id}` |
 | 11c:648 | `POST /v1/admin/launch-gate-items/{lgi_id}/evidence` ... `CT1`; `If-Match` | `POST /v1/admin/launch/gate-items/{lgi_id}/evidence` ... no `If-Match`; `Idempotency-Key` required |
 | 11c:649 | `POST .../{lgi_id}/reopenings` | `POST /v1/admin/launch/gate-items/{lgi_id}/reopenings` |
@@ -325,7 +327,7 @@ For a later cell to apply; nothing below has been applied by this cell. Format: 
 | 11c:AC-appr-03 | `security.admin_two_person_pending_ttl_s` | `security.approval_ttl_s` (the S15 name, 15.22.4) |
 | 11c:AC-appr-01, AC-abuse-02, AC-lookup-02 | an `AdminAction` with `result` `refused` is written / a refused `AdminAction` is written | no row and no event for a guard refusal; a refused `AdminAction` only for authorization failures (15.34.1) |
 | 11c:AC-lookup-01 | Any `GET` list or search of members is requested ... `404 NOT_FOUND`; no such route exists | A request that searches members by name, e-mail, handle or free text ... `404`; `GET /v1/admin/members` filters by `status`, `trust_tier`, `has_open_report` only |
-| 13:51 | `Admin API exposes only `GET /v1/admin/metric-snapshots` and report endpoints (S13.10)` | unchanged path; the endpoint is defined in 15.D.4.6 |
+| 13:51 | `Admin API exposes only `GET /v1/admin/metric-snapshots` and report endpoints (S13.10)` | unchanged path; the endpoint is the operation `listMetricSnapshots` defined in 15.E.10 of 15f |
 | 13:921 | `perm.metrics.view`; `perm.metrics.view_small_cells` for `suppressed` values | `perm.metrics.view`; suppressed values are never returned |
 
 ## Open points for the whole-API consistency cell (C-041) and the owners of S10.*, S13.*, 15b
