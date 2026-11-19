@@ -21,11 +21,11 @@
 | 15 | CLOSED | `05a:893` (`LedgerTransaction.idempotency_key` unique, canonical, `natural_key` a documented alias), `05a:880` (`LedgerEntry.entry_key` unique, `<idempotency_key>#<leg>`) |
 | 16 | CHANGED | `05a:256-258` (`state_transitions` DDL with `occurred_at`, trigger line), `05a:261-288` (`mint_headroom` table, DDL, unique indexes), `05a` 5.4 intro ("plus the two additions of S5.4.1 ... that S0.7 does not list yet"). Both entities now exist in `05a`; `S0.7` still does not list them, by `05a`'s own statement (S0 not re-read here) |
 | 17 | STILL OPEN (read: AdminAction and FlagAnswer; not read: KillSwitch.reason, CalibrationRecord.note) | `05a` 5.6.10 `reason` is still free text, `<= 1000 chars` in a `permanent` table (`05a` AdminAction table); `10b` 10.23.2 says "reason codes only" |
-| 18 | STILL OPEN (not yet re-read at this commit) | read pending: `00-conventions` 0.9.6, `05b` |
-| 19 | STILL OPEN (not yet re-read at this commit) | read pending: `05b` |
-| 20 | STILL OPEN (not yet re-read at this commit) | read pending: `05b` MT-06 |
-| 21 | STILL OPEN (not yet re-read at this commit) | read pending: `05b` SBT-06, `09` |
-| 26 | STILL OPEN (not yet re-read at this commit) | read pending: `11a` F2/F3, `11d` S11.51, S11.52 |
+| 18 | CHANGED, still open | `05b:288` (SVT-02: `suspended` to `in_review` added as convention addition 13, only when `suspended_cause` = `review_lapsed`); `05b:278-282` (diagram has no `in_review` to `revoked`); `05b:290` (SVT-04 `in_review` to `rejected`: side effects "none", no pause of pinned jobs, no `inflight_policy`); `05b:295` (SVT-09 `revoked` only from approved, review_due, suspended). S0.9.6 itself was not opened |
+| 19 | STILL OPEN | `05b:90` (JT-15 overrun deadline = `admitted_at` + `job.max_overrun_ratio` x quoted window); `05b:217` (end of 5.23.4: "a Commons job has no overrun deadline (5.22.3)", now stated openly, not fixed); `05b:135` (the cancel path excludes `submitted` and `flagged_for_audit`) and `05b:127-130` (`flagged_for_audit` leaves only by `audit_passed`, `audit_failed` or `voided`, no time-based exit). Section 5.22.3 was not opened |
+| 20 | STILL OPEN | `05b:238` (MT-06: "or an anomaly finding of S9.* (forged nonce attempts, timing anomalies, duplicate-of-other-output)", no count and no window); `09:395-396` (9.11.1 D2 and D3 make a duplicate output a hard reject, so one such hit can feed MT-06) |
+| 21 | STILL OPEN on the 05b side, the 09 side not located | `05b:210` (SBT-06 `quarantined` to `checks_passed`, "quarantine is the last automatic step, so no check remains", unchanged); `05b:217` (the age-out and "never auto-releases" are new); `09:392` is now the header of the 9.11.1 duplicate table, so the cited text about returning a released submission to verification was not found at the old line and was not searched for elsewhere |
+| 26 | STILL OPEN (11d side unchanged, 11a F2/F3 not re-read) | `11d:559-560` (usage map: every join notice "displayed in full, not collapsed"; `copy.consent.join.*` "Every box starts unticked; all are required; no box is hidden or collapsed"). The conflict with the one three-fact notice of 11a F2/F3 stands unless 11a changed; I did not open 11a |
 
 ## Verdict reasons
 
