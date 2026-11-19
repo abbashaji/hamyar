@@ -5,7 +5,7 @@
 ## Checked
 
 - Reads so far: `05a` lines 100-200, 250-520, 545-640, 676-780, 842-990, 1052-1100; `10a` lines 24-135, 318-400, 470-600; `10b` lines 1-70, 150-280, 540-640. Line numbers are counted from the start of each read range and can be off by up to 3; every row gives a quoted anchor next to the number.
-- Later reads: `00-conventions` 744-850; `16-parameters` 74-94, 308-316, 385-440; `05b` 86-112, 122-150, 186-216, 225-305; `09` 384-400; `11d` 555-585; `FINAL.md` 38-69, 118-150. Rows 8 to 21 and 26 are all re-read, with the gaps named in each row. Reasons 1 and 4, the Owner decisions list and item (3) (the NEW rows of C-130, C-131, C-132) are not done at this commit.
+- Later reads: `00-conventions` 744-850; `16-parameters` 74-94, 308-316, 385-440; `05b` 86-112, 122-150, 186-216, 225-305; `09` 384-400; `11d` 555-585; `FINAL.md` 38-69, 118-150. Rows 8 to 21 and 26 are all re-read, with the gaps named in each row. Reasons 1 to 4 and the Owner decisions list are answered. Item (3) is only partly done: of the NEW rows, only the path index 15.E.13 of `15f` was read (`15f:190-243`); the NEW rows of `15c` (C-130) and `15e` (C-132) and the operation tables 15.E.5 to 15.E.11 were not opened, so for those two files the check that NEW rows add no operation was not made.
 
 ## Contradictions
 
@@ -29,14 +29,37 @@
 
 ## Verdict reasons
 
-1. NOT MET (carried from `FINAL.md`, not yet re-read): the reconciliation edits 15c to 15g, 16d and 02e.
+1. NOT MET: the reconciliation edits are only partly applied. Seen applied: `launch.min_signoffs`, `launch.min_approved_services`, `change.notice_days_*`, `retention.ip_hash_ttl_days` ranges (FIX-01); `10a:79` and `10a:67` use `identity-challenges` and purpose `create` (15c edits 1 and 2); the 10b renumbering to 10.21-10.29 (FIX-21); the 05a columns and tables of rows 13 to 16 (FIX-16); the IP hash removal of row 9 (FIX-17). Seen not applied or half applied: FIX-17 `vol_` on public reads (`05a:862`), FIX-18 names (rows 8 and 11), FIX-19 for S0.9.6 (row 18), the `register_device` leftover at `10a:94`, stale 10b numbers in 05a and 10a (finding 5). Not opened: 11c, 12, 13, 15g and 16d edit targets, so no claim is made for them.
 2. NOT MET: the parts still disagree on the data model (rows 8, 11 and 12 above; findings 1 to 5). The IP-hash datum itself is now consistent (row 9 CLOSED).
 3. NOT MET: the fail-closed floors of FINAL row 5 are partly applied. Applied: `launch.min_signoffs` 2..5 (`00:795`, `16:413`), `launch.min_approved_services` 1..20 (`00:796`, `16:414`), `change.notice_days_default` and `change.notice_days_price` 1..90 (`16:415-416`), gold and audit rate floors above 0 (`16:78`, C2), `retention.ip_hash_ttl_days` 1..30 (`00:750`). Not applied: `security.two_person_actions` (`00:829`) is still a free subset of the action names, so `launch.signoff` and `killswitch.release` can be dropped; `appeal.ban_min_reviewers` accepts 1 (`00:783`, range 1..2). I did not open the S16 row for `security.two_person_actions`.
-4. NOT MET (carried from `FINAL.md`, not yet re-read): owner decisions.
+4. NOT MET: all 22 groups of owner decisions are open (section above). `FINAL.md` says READY WITH LOGGED ITEMS needs D-01, D-03, D-05, D-07, D-12, D-15, D-17, D-18 and D-20 taken or their defaults accepted in writing; `decisions.md` only says fix cells apply the defaults and mark them default-pending, which is not an acceptance by the owner. I did not re-check the register state of `ISS-11` and `ISS-12`.
 
 ## Owner decisions
 
-- D-01 to D-22 of `FINAL.md` section 4 are carried as open until `docs/decisions.md` is read; defaults are those written there.
+`docs/decisions.md` holds no decision list; the 22 groups and their defaults are in `FINAL.md` section 4 (lines 205-236), and the fix round marks them default-pending (`decisions.md`, Fix round note). All 22 are still open, none is accepted in writing. Each line is the default meanwhile.
+
+- D-01 admins and reviewers in Phase 1, bootstrap, `launch.min_signoffs` of 1: two-person actions unavailable below two admins, numbers not lowered, no gate can be signed with one admin.
+- D-02 Reserve seed: the Reserve starts empty and grants pause; at least 150 credits proposed as a launch precondition [V].
+- D-03 restitution, closed-escrow reversal, expired slice, levy on overturn, lot clock: the Reserve pays nothing beyond grants, `appeal_restitution` stays off, the donor bears the gap.
+- D-04 verification cost beyond the pool: hard pool, the job stops; quote at max(measured v, `price.v_prior`, floor) [A].
+- D-05 escrow and ageing, reservations in the 14-day arm: escrow counts toward K, `ff.job.reservations` off for the arm, trial jobs from the standard arm [H].
+- D-06 K against `price.v_cap`: defaults stand, the quote returns the largest holdable job for the tier.
+- D-07 mint-cap meaning: 4,800 unchanged (equal at phi = 0.5).
+- D-08 the 11 operation-id collisions: both rules written down, no id renamed.
+- D-09 reservation and waiting rules, Commons overrun and audit age-out, MT-06 criterion: no money, a cooldown, one live reservation, no criterion (rows 19 and 20 above).
+- D-10 ledger invariant brake: engages `kill.all_minting` and `kill.all_new_jobs` only; one ledger, one chain.
+- D-11 cancelled or failed job: in-flight cells finish, accepted ones are paid, partial `Deliverable`, no retrieval after `cancelled` in 15a.
+- D-12 free text in permanent tables and other minimization points: free text stays with the limit stated, backups encrypted in two places, edges treated like retention (findings 1 and 6).
+- D-13 counters and teams: residuals disclosed, team default 5 (below k of 10) with a warning.
+- D-14 e-mail purpose, minimum age, automation flag: in-app notices, e-mail opt-in notices only, age 0 with the line not rendered.
+- D-15 share cards: computed card, no stored link, V3 descriptive, no rewards.
+- D-16 approval predicates and registry: stricter S7 guard, region never blocks, no `P2` or `P3` rows, G4 open, no sandbox, ratio 0.34 hidden, operator-authored backlog.
+- D-17 exit rule and launch thresholds: the rule governs launch, every tripwire names who acts, pilot size held by invite supply, no minimum interviews.
+- D-18 recovery key timing and join consent: after the first accepted cell with a marker [H]; no single join flow adopted (row 26 above).
+- D-19 copy choices: text as written, flagged for human and legal review.
+- D-20 two-person scope: one admin with step-up for audit accept and release, the member read is logged, not justified (finding 14).
+- D-21 template and naming details: as written.
+- D-22 open S3 and parameter values: defaults stand, no value invented; the effect of `retention.ip_hash_ttl_days` = 0 is open (finding 15).
 
 ## Findings
 
@@ -57,5 +80,8 @@
 | 13 | major | spec/11d-i18n-copy.md:559-560 | join page shows every notice in full and required unticked boxes; 11a F2/F3 specify one three-fact notice (FINAL row 26); 11a side not re-read | owner decision between the two join flows |
 | 14 | major | spec/00-conventions.md:829,783 | `security.two_person_actions` can still drop `launch.signoff` and `killswitch.release`; `appeal.ban_min_reviewers` accepts 1 | set a fixed minimum list and a floor of 2 |
 | 15 | minor | spec/10a-identity.md 10.14.2 item 3 against spec/00-conventions.md:750 | 10a says a value of 0 for `retention.ip_hash_ttl_days` turns the daily IP limits off; S0 now allows 1..30 only | remove the sentence or widen the range on purpose |
+| 16 | major | spec/15f-api-reconcile-measurement.md 15.E.13 (last row, `/v1/admin/calibration-proposals`) | the NEW row carries a whole operation definition for `getCalibrationProposals` (permission `perm.calibration.read`, class `A-R`, derivation rule 13.9.4, no write path) and E12 says its path is "not reconciled here"; a NEW row is meant to add no operation, and `check_refs.py api` counts NEW rows as defining a path. Whether 15.E.5 to 15.E.11 define the operation was not read | define the operation in an operation table of 15.E and make the row a path index entry only, or log it as a new operation |
+| 17 | minor | spec/15c-api-reconcile-core.md, edit 25 and edit 27 | edit 25 and edit 27 are still unapplied instructions ("For a later cell to apply"); `AC-rec-03` asserts that no part cites a path this file marks REMOVE, which holds only after FIX-05 to FIX-07 | keep FIX-28 (strict `check_refs`) on the list; do not read a green `check_refs` as agreement |
+| 18 | minor | docs/decisions.md, docs/audit/FINAL.md section 4 | the cell text says defaults are in `docs/decisions.md`; that file has no decision list, they are in `FINAL.md` section 4 | point later cells at `FINAL.md` section 4 |
 
 Verdict: NOT READY
