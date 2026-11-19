@@ -24,8 +24,8 @@ Column `Cited at` is `part:line` where the cell gave a line; `12.9.2 table` is t
 
 | # | Cited path | Cited at | Decision | S15 endpoint or new operation | Difference, or what the citing part must do |
 | --- | --- | --- | --- | --- | --- |
-| 1 | `/v1/appeals` | 11b:151 | NEW | `createAppeal`, `listAppeals` (15.C.4.1) | S15a 15.1 says member-facing appeals live in the sibling file, and S15b only has the admin queue `/v1/admin/appeals`: the member side was never defined. 11b body field `appeal_kind` becomes `kind`. |
-| 2 | `/v1/appeals/{appeal_id}` | 11b:151 | NEW | `getAppeal`, `withdrawAppeal` (15.C.4.1) | Same gap. `withdrawAppeal` is added because S15b already emits `appeal.withdrawn`. |
+| 1 | `/v1/appeals` | 11b:151 | NEW | `createAppeal`, `listAppeals` (15.C.4.1) | S15a 15.1 says member-facing appeals live in the sibling file, and S15b only has the admin queue `/v1/admin/appeals`: the member side was never defined. 11b body field `appeal_kind` becomes `kind`. Moved to 15b 15.29.7. |
+| 2 | `/v1/appeals/{appeal_id}` | 11b:151 | NEW | `getAppeal`, `withdrawAppeal` (15.C.4.1) | Same gap. `withdrawAppeal` is added because S15b already emits `appeal.withdrawn`. Moved to 15b 15.29.7. |
 | 3 | `/v1/deliverables/{deliverable_id}/files/{file_name}` | 11b:148 | ALIAS | `getJobDeliverableContent` `GET /v1/jobs/{job_id}/deliverable/content` | One text file per deliverable (`Deliverable.format`); the answer is JSON `{media_type, encoding, content, content_hash}`, never raw bytes, so a browser never renders it; the client saves it under a name it builds. No `file_name` segment and no `deliverable_id` in the path. Only in `completed` or `failed` jobs until `available_until`. |
 | 4 | `/v1/experiment-exposures` | 12:38, 12:511 | NEW | `recordExperimentExposure` (15.C.4.2) | Request carries `surface_key` only; `assignment_id` is dropped because no S15 response exposes assignment ids. |
 | 5 | `/v1/flags` | 12:38, 12:466 | ALIAS | `getFeatures` `GET /v1/members/me/features` | Returns `{flags: {name: bool}}`, no arm names; the 'effective variants' of 12.11 collapse to booleans. Assignment stays lazy and logged: evaluating a flag bound to a `running` experiment writes the deterministic assignment, which is the one side effect of this GET and the only place assignment is created. Multi-arm mechanics are an open point (15.C.7). |
@@ -68,14 +68,16 @@ Column `Cited at` is `part:line` where the cell gave a line; `12.9.2 table` is t
 
 ### 15.C.4.1 Member appeals (rows 1 and 2)
 
+*Moved to 15b 15.29.7: `createAppeal`, `listAppeals`, `getAppeal` and `withdrawAppeal` are defined there; the rows below are kept as the record of the reconciliation, and the definition in 15b governs.*
+
 S15b already has the admin queue (15.29.2), the events `appeal.filed`, `appeal.withdrawn`, `appeal.upheld`, `appeal.overturned` and the id prefix `apl_`. What is missing is the member side. A `suspended` or `banned` member may use all four operations (S15a 15.4: they can still file appeals). They are not marked active only. [D]
 
 | op | Method and path | Auth | Idem | RL | OK | Events |
 | --- | --- | --- | --- | --- | --- | --- |
-| `createAppeal` | `POST /v1/appeals` | member | R | `RL-WRITE` | 201 | `appeal.filed` |
-| `listAppeals` | `GET /v1/appeals` | member | - | `RL-READ` | 200 | - |
-| `getAppeal` | `GET /v1/appeals/{appeal_id}` | member | - | `RL-READ` | 200 | - |
-| `withdrawAppeal` | `POST /v1/appeals/{appeal_id}/withdrawals` | member | R | `RL-WRITE` | 200 | `appeal.withdrawn` |
+| `createAppeal` | `POST /v1/appeals` | member | R | `RL-WRITE` | 201 | `appeal.filed`; moved to 15b 15.29.7 |
+| `listAppeals` | `GET /v1/appeals` | member | - | `RL-READ` | 200 | -; moved to 15b 15.29.7 |
+| `getAppeal` | `GET /v1/appeals/{appeal_id}` | member | - | `RL-READ` | 200 | -; moved to 15b 15.29.7 |
+| `withdrawAppeal` | `POST /v1/appeals/{appeal_id}/withdrawals` | member | R | `RL-WRITE` | 200 | `appeal.withdrawn`; moved to 15b 15.29.7 |
 
 ```
 Appeal        { id: id<apl>, kind: enum<appeal_kind>, subject: { kind: "submission"/"job"/"member", id: id<sub>/id<job>/null },
