@@ -275,7 +275,7 @@ Owner `operator`. Binding: `timeout_s`, `extend_s` and `max_extensions` are stam
 | `lease.extend_s` | duration_s | 60..3600; `C14` | 600 | `T↓` | `CAL` | S9.4.4 |
 | `lease.submit_grace_s` | duration_s | 0..900; `C14` | 120 (a late paste-back is accepted if the cell is not yet re-leased) | `T↓` | `CAL`: copy-paste timing | S9.4.4 |
 | `lease.reap_interval_s` | duration_s | 5..300 | 30 | `N` | `OPS` | S5.23, S4.19.1 |
-| `lease.max_gate_failures` | int | 1..100; `S9-C3` | 5 | `T↓` | `OPS`: honest retry counts | S9.7 |
+| `lease.max_gate_failures` | int | 1..100 | 5 | `T↓` | `OPS`: honest retry counts | S9.7 |
 | `lease.max_validations` | int | 0..100; retired (see `S9-C3`) | 10 | `T↓` | `CAL`: copy-paste error rate; retired: no consumer, because the validations call was removed; the row stays so that no citing part breaks [default-pending] | none (retired) |
 | `lease.max_nonce_rotations` | int | 0..10 | 2 | `T↓` | `OPS`: reload frequency on phones | S9.4 |
 | `lease.nonce_bytes` | int | constant | 16 | `C` | `CON` | S9.4.1 |
