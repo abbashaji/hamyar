@@ -41,11 +41,11 @@
 | `/v1/members/me/recovery-confirmations` | NEW | `confirmRecoveryKey` (15.B.5) |
 | `/v1/members/me/recovery-keys` | ALIAS | `rotateKey` with `kind` = `recovery` |
 | `/v1/members/me/session-revocations` | NEW | `revokeAllSessions` (15.B.5) |
-| `/v1/policy` | NEW | `getPublicPolicy` at `/v1/public/policy` (15.B.8) |
-| `/v1/public/policy` | NEW | `getPublicPolicy` (15.B.8) |
+| `/v1/policy` | ALIAS | `getPublicPolicy` (`GET /v1/public/policy`, 15.B.8.1) |
 | `/v1/policy-previews` | ALIAS | `checkJobPolicy` |
 | `/v1/public/capacity` | NEW | `getPublicCapacity` (15.B.8) |
 | `/v1/public/health` | NEW | `getPublicHealth` (15.B.8) |
+| `/v1/public/policy` | NEW | `getPublicPolicy` (15.B.8.1) |
 | `/v1/recovery` | REMOVE | not an endpoint: a key-derivation label |
 | `/v1/recovery-checksum` | REMOVE | not an endpoint: a checksum label |
 
@@ -335,6 +335,8 @@ Given / When / Then, testable against the generated contract suite (`BM0`); ids 
 ## Edits required in citing parts
 
 For a later cell to apply. Format: part:line, old text, new text. Lines are those of the files when this cell read them; where a line was not read, the section is named. "Wherever cited" means search the part for the old text. All other lines of the citing parts stay as they are [D].
+
+**Status note (cell R3-13, FINAL-2 row 67).** Edit 25 is applied in part: `15b` 15.33.1 rule 9 names `GET /v1/public/health` and rule 6 lists policy, capacity and health as always on, but the table of 15.21.4 has no row for `perm.screening.read` and `perm.screening.decide`, so that third part is still open. Edit 27 is not applied in the parts this cell could read (15b, 15d, 15e, 15f, 11c): the approvals row of 11c 11.54.4 already carries the S15 path, no lease-path or screening-path string was found in those five files, and 11a and the other citing parts were not read, so for them the edit stays open. Both edits remain instructions for a later cell; this cell changed no citing part [D].
 
 1. **10a:63, 10a:67, 10a:69** (challenge shape). Old `|| challenge_id || 0x00 || nonce || 0x00 || context_hash` , new `|| challenge || 0x00 || context_hash`. Old `` `purpose` is one of `register_device`, `register_recovery`, `session`, `step_up`, `rotate_device_key`, `rotate_recovery_key`, `link_claim`, `link_approve`, `recover`, `confirm_recovery`, `revoke_key`, `set_email`, `close_account`. `` , new `` `purpose` is one of `create`, `session`, `rotate`, `recover`, `device_link`, `step_up`, `confirm_recovery` (S15.B.3.1 maps the former 13 names; sensitive actions use `step_up` with the `Step-Up` header of S15.B.4). `` Old `` `POST /v1/auth-challenges` (auth `none`, rate limited by IP hash) returns `{challenge_id, nonce, expires_at}`. The nonce is 128 random bits, `` , new `` `POST /v1/identity-challenges` (auth `none`, rate limited by IP hash) returns `{challenge, expires_at}`. The challenge is 256 random bits, ``
 2. **10a:79**. Old `ch = POST /v1/auth-challenges {purpose: 'register_device'}` , new `ch = POST /v1/identity-challenges {purpose: 'create'}`. In 10a:80 to 86 apply the field-name map of S15.B.9 (`device_pub` to `public_key`, `device_signature` to `proof`, `challenge_id` to `challenge`, and both signatures sign the `create` message).

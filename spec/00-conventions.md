@@ -243,8 +243,10 @@ If the verification pool is not a whole number of cells, `floor` applies and the
 | `BadgeAward` | `badge_awards` | `baw_` | `member_bound` | A badge held by a member |
 | `InvariantCheck` | `invariant_checks` | `ivc_` | `ops` | Result of one run of a ledger invariant |
 | `Alarm` | `alarms` | `alm_` | `ops` | A raised alarm and its acknowledgement |
+| `StateTransition` | `state_transitions` | `stt_` | the class of the parent entity (`job_bound`, `member_bound`, `moderation` or `permanent`), kept in the column `retention_class` | Append-only, gapless history of every state change of every machine in 0.9, so an appeal or a provenance question can outlive the raw event log (S5b 5.21.3) |
+| `MintHeadroom` | `mint_headroom` | none (a counter table without a primary key, S5a) | `permanent` | Counter of Commons mint capacity per UTC month and member day: minted and reserved amounts against the cap, changed only by conditional update (S5b 5.29.3, S6.*) |
 
-Every prefix above is unique and exactly three letters; the only other prefixes in use are `req_` (request ids, a ULID after the underscore) and `vol_` (provenance handles, 32 hexadecimal characters, 0.6.4); neither names an entity. [D]
+Every prefix above is unique and exactly three letters, except that `mint_headroom` has none (a counter table without a primary key, S5a) [V: S5a confirms the entity name]; the only other prefixes in use are `req_` (request ids, a ULID after the underscore) and `vol_` (provenance handles, 32 hexadecimal characters, 0.6.4); neither names an entity. [D]
 
 ## 0.8 Enumerations
 
@@ -398,9 +400,9 @@ admitted|running --job.paused-->           suspended      kill switch, template 
 suspended    --job.resumed-->              admitted|running (the state it left)
 running      --job.all_cells_accepted-->   assembling
 assembling   --job.assembled-->            settling
-admitted|running|suspended --job.stop_requested--> settling   closure_reason: policy_stopped, service_revoked, template_retired, operator_killed, overrun_timeout, cells_exhausted (no primary cell non-terminal and at least one exhausted; non-primary cells are cancelled, 05b 5.22.1)
-settling     --job.settled-->              completed      all primary cells accepted
-settling     --job.settled_partial-->      failed         not all accepted; refunds and payouts posted
+admitted|running|suspended|assembling --job.stop_requested--> settling   closure_reason (final list): policy_stopped, service_revoked, template_retired, operator_killed, overrun_timeout, cells_exhausted (no primary cell non-terminal and at least one exhausted; non-primary cells are cancelled, 05b 5.22.1), verification_shortfall (the verification pool cannot pay a mandatory verification cell, 06a 6.7.2) [default-pending D-26], funding_shortfall (the payout guard still blocks an acceptance when its deferral ends, 05b 5.23.2) [default-pending D-26], expired (a Commons job past `commons.job_overrun_days`, accepted cells paid) [default-pending D-31]; from `assembling` only `operator_killed` [default-pending D-29]
+settling     --job.settled-->              completed      all primary cells accepted and the job did not enter settling from `assembling` by `job.stop_requested`
+settling     --job.settled_partial-->      failed         not all accepted, or the job entered settling from `assembling` by `job.stop_requested` (no deliverable); refunds and payouts posted
 admitted|running|suspended --job.cancel_requested--> cancelling
 waitlisted|draft|quoted --job.cancel_requested--> cancelled
 cancelling   --job.cancel_settled-->       cancelled      unstarted cells refunded, in-flight cells drained
@@ -422,6 +424,7 @@ submitted         --cell.flagged_for_audit-->  flagged_for_audit   sampled, anom
 submitted         --cell.checks_failed-->      rejected
 flagged_for_audit --cell.audit_passed-->       accepted
 flagged_for_audit --cell.audit_failed-->       rejected
+flagged_for_audit --cell.audit_escalated-->    flagged_for_audit   unaudited for `audit.flag_age_out_days`: the Audit goes to the audit queue's escalation and a Commons cell's mint-headroom reservation is released; the state does not change (05b CT-19) [default-pending D-31]
 rejected|expired  --cell.requeued-->           queued          attempt + 1
 rejected|expired  --cell.attempts_exhausted--> exhausted   a primary cell that ends here can never be accepted; the job then leaves through the early exit `job.stop_requested` with `cells_exhausted` (0.9.2)
 queued|leased     --cell.paused-->             suspended       a leased cell's lease is revoked first
@@ -459,7 +462,7 @@ new          --member.tier_promoted-->     established
 established  --member.tier_promoted-->     trusted
 trusted      --member.tier_demoted-->      established
 established  --member.tier_demoted-->      new
-new|established|trusted --member.restricted--> restricted   anomaly or gold failures; sampling rises, caps fall
+new|established|trusted --member.restricted--> restricted   gold failures, or `anomaly.restrict_count` S9 anomaly findings within `anomaly.restrict_window_days` (one hard duplicate or timing finding alone never restricts) [default-pending D-31]; sampling rises, caps fall
 restricted   --member.restriction_lifted-->  the tier recorded as tier_before_restriction
 status: active --member.suspended--> suspended --member.reinstated--> active
 status: active|suspended --member.banned--> banned   (appealable)
@@ -493,7 +496,7 @@ States: `unreviewed` (initial for every service; counts as no), `in_review`, `ap
 (none)       --service.created-->         unreviewed
 unreviewed|rejected|review_due|suspended|revoked --service.review_started--> in_review   a service suspended by a review lapse (not a kill switch) leaves only this way
 in_review    --service.approved-->        approved       guard: `third_party_task_use` and `prohibited_content_compatible` are `yes` (0.8.3), TermsCopy saved, `service.min_approvers` distinct reviewers have each recorded approval (a count, not a state: the service stays `in_review` until the count is reached)
-in_review    --service.rejected-->        rejected
+in_review    --service.rejected-->        rejected       from a re-review that began from `review_due` or `suspended`, the rejection carries `inflight_policy` (`drain` or `void`) as a revocation does and jobs pinned only to this service get `job.stop_requested` with `service_revoked` [A]; a review of a service that was never approved pins no job
 approved     --service.review_due-->      review_due     timer: service.review_max_age_days
 review_due   --service.review_lapsed-->   suspended      timer: service.review_grace_days
 approved|review_due --service.suspended--> suspended     kill switch

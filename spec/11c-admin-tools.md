@@ -113,17 +113,17 @@ Entity `ApprovalRequest`, table `approval_requests`, prefix `apr_` (unused in S0
 | `required_approvals` | int | Looked up at creation from the rule of the action (11.54.5) and frozen |
 | `reason_code`, `reason_text` | text | `AD3` |
 | `state` | enum | `pending`, `executed`, `rejected`, `expired`, `withdrawn` |
-| `expires_at` | timestamptz | `created_at + security.admin_two_person_pending_ttl_s` seconds (server time) |
+| `expires_at` | timestamptz | `created_at + security.two_person_ttl_s` seconds (server time) |
 
 ```
-(none)  --approval.requested-->  pending
-pending --approval.executed-->   executed    approvals >= required_approvals and the action's own guards still pass
-pending --approval.rejected-->   rejected    any eligible admin, reason required; or system when a guard fails at execution
-pending --approval.expired-->    expired     timer
-pending --approval.withdrawn-->  withdrawn   initiator only
+(none)  --admin.approval_requested-->  pending
+pending --admin.approval_granted-->   executed    approvals >= required_approvals and the action's own guards still pass
+pending --admin.approval_rejected-->   rejected    any eligible admin, reason required; or system when a guard fails at execution
+pending --admin.approval_expired-->    expired     timer
+pending --admin.approval_withdrawn-->  withdrawn   initiator only
 ```
 
-Guards on approve [D]: (1) request is `pending` and not expired; (2) approver is a different `AdminUser` from the initiator and from every earlier approver; (3) approver holds the permission and, if the catalog says so, the `operator` role; (4) the approver's dialog shows the identical `payload_hash` and the approval carries it back (a changed payload is a new request, never an edit); (5) step-up passkey assertion fresher than `session.admin_stepup_s`; (6) at execution all guards of the underlying action are re-evaluated, and if one fails nothing changes, the request becomes `rejected` with actor `system` and reason `precondition_failed`. At most one `pending` request exists per `(action_code, subject_id)`; a second returns `409 ALREADY_EXISTS`. Execution, the `AdminAction` rows and the domain events commit in one transaction (S0.9.1). Counting: `required_approvals` is the number of distinct admins including the initiator, so a value of 2 means the initiator plus one other [D].
+Guards on approve [D]: (1) request is `pending` and not expired; (2) approver is a different `AdminUser` from the initiator and from every earlier approver; (3) approver holds the permission and, if the catalog says so, the `operator` role; (4) the approver's dialog shows the identical `payload_hash`; the approval body is `{step_up}` only, the step-up is bound to the hash of the stored payload, and a step-up bound to another payload is `401 AUTH_INVALID` (a changed payload is a new request, never an edit); (5) step-up passkey assertion fresher than `session.admin_stepup_s`; (6) at execution all guards of the underlying action are re-evaluated, and if one fails nothing changes, the request becomes `rejected` with actor `system` and reason `precondition_failed`. At most one `pending` request exists per `(action_code, subject_id)`; a second returns `409 ALREADY_EXISTS`. Execution, the `AdminAction` rows and the domain events commit in one transaction (S0.9.1). Counting: `required_approvals` is the number of distinct admins including the initiator, so a value of 2 means the initiator plus one other [D].
 
 ### 11.54.2 `AdminAction` log [D]
 
@@ -186,13 +186,14 @@ No field holds an IP address, a user agent, a device fingerprint or a passkey cr
 | `parameter.tighten`, `parameter.neutral`, `parameter.withdraw_pending` | `perm.parameter.edit` (area owner) | `CT2` | T, N, N | 1 | `parameter.changed`, `changelog.entry_published` |
 | `parameter.loosen` | `perm.parameter.edit` (area owner) | `CT3` | L | 2 (second `operator` approver) | `parameter.changed`, `changelog.entry_published` |
 | `launch.attach_evidence` | `perm.launch.evidence` | `CT1` | N | 1 | `gate.evidence_attached` |
-| `launch.signoff` | `perm.launch.signoff` (`operator`) | `CT3` | L | `launch.min_signoffs` | `gate.signed_off`, `launch.members_may_join_changed`, `parameter.changed` |
+| `launch.signoff` | `perm.launch.signoff` (`operator`) | `CT3` | L | `launch.min_signoffs` (distinct signers of one item) | `gate.signed_off` |
+| `launch.switch_on` | `perm.launch.switch` (`operator`) | `CT3` | L | 2 | `launch.members_may_join_changed`, `launch.member_jobs_enabled_changed`, `launch.minting_enabled_changed` |
 | `launch.reopen`, `launch.switch_off` | `perm.launch.signoff` | `CT2` | T | 1 | `gate.reopened`; `launch.members_may_join_changed`, `parameter.changed` |
 | `killswitch.engage` | `perm.killswitch.engage` (scoped, 11.64) | `CT2` | T | 1 | `killswitch.engaged` and the pause events of 11.64.2 |
 | `killswitch.release` | `perm.killswitch.release` | `CT3` | L | 2 | `killswitch.released` and the resume events |
 | `member.lookup` | `perm.member.lookup` | `CT1` | R | 1 | none (logged read) |
 | `member.resolve_handle` | `perm.member.resolve_handle` (`operator`) | `CT3` | R | 2 | none (logged read) |
-| `approval.approve`, `approval.reject`, `approval.withdraw` | per underlying action | `CT2` | n/a | n/a | `approval.executed`, `approval.rejected`, `approval.withdrawn`; `approval.requested` and `approval.expired` (system) |
+| `approval.approve`, `approval.reject`, `approval.withdraw` | per underlying action | `CT2` | n/a | n/a | `admin.approval_granted` (the approval that reaches `required_approvals` executes the action), `admin.approval_rejected`, `admin.approval_withdrawn`; `admin.approval_requested` and `admin.approval_expired` (system) |
 
 The `CT3` codes `member.ban`, `audit.accept`, `quarantine.release`, `cell.overturn`, `member.resolve_handle` and `launch.signoff` are proposed additions to the default of `security.two_person_actions` (S0.10.6 lists four names) and are reported in `ISS-117`. [A]
 
@@ -204,8 +205,8 @@ Every confirm dialog is driven by one dry-run call, so the screen never computes
 | --- | --- | --- | --- |
 | `previewAdminAction` | `POST /v1/admin/action-previews` | the action's own | Body `{op, path_params?, body?}` where `op` is an S15 operation id (15.D.4.1); permission: the previewed op's own; no `Idempotency-Key` needed (no write) |
 | `listApprovals` / `getApproval` | `GET /v1/admin/approvals[/{apv_id}]` | `perm.approval.read` | Filter `status`, `action_name`, `awaiting_me`; entity `AdminApproval`, id `apv_` |
-| `approveApprovalRequest` | `POST /v1/admin/approvals/{apv_id}/approvals` | the action's | Body `{step_up}`; a step-up bound to another payload is `401 AUTH_INVALID` (`step_up_invalid`); `409 STATE_CONFLICT` if not `pending`; `403 FORBIDDEN` for own request |
-| `rejectApprovalRequest` / `withdrawApprovalRequest` | `POST /v1/admin/approvals/{apv_id}/rejections`, `POST /v1/admin/approvals/{apv_id}/withdrawals` (body `{reason}`) | as above | Withdraw is initiator only |
+| `approveApproval` | `POST /v1/admin/approvals/{apv_id}/approvals` | the action's | Body `{step_up}`; a step-up bound to another payload is `401 AUTH_INVALID` (`step_up_invalid`); `409 STATE_CONFLICT` if not `pending`; `403 FORBIDDEN` for own request |
+| `rejectApproval` / `withdrawApproval` | `POST /v1/admin/approvals/{apv_id}/rejections`, `POST /v1/admin/approvals/{apv_id}/withdrawals` (body `{reason}`) | as above | Withdraw is initiator only |
 | `listAdminActions` / `getAdminAction` | `GET /v1/admin/actions[/{act_id}]` | `perm.admin_action.read` | Cursor-paged; viewer scope as in `SCR-ops-03` |
 | `startAdminActionVerification` | `POST /v1/admin/admin-action-verifications` | `perm.admin_action.read` | Body `{from_date, to_date}`; one verification runs at a time (`409 STATE_CONFLICT`, `already_running`, otherwise) |
 
@@ -220,16 +221,17 @@ All admin writes need `Idempotency-Key` (S0.11.5) and carry `RateLimit-*` header
 | Service approval | `service.min_approvers` (default 1; 2 is an owner decision) | Service machine S0.9.6 |
 | Ban, and appeal outcomes on bans and template rejections | `appeal.ban_min_reviewers` | Appeal machine S0.9.7 `awaiting_second_review`; a ban itself uses `ApprovalRequest` |
 | Ledger reversal | `ledger.reversal_min_approvers` (constant 2) | `ApprovalRequest` |
-| Launch sign-off and enabling a switch | `launch.min_signoffs` (default 2) | `ApprovalRequest` |
+| Launch sign-off (one `signOffGateItem` per item) | `launch.min_signoffs` (default 2), distinct signers of the item | The gate item itself (15.27.2), not `ApprovalRequest` |
+| Enabling a launch switch (`launch.switch_on`) | constant 2 (15.22.4) | `ApprovalRequest` |
 | Parameter loosen, kill-switch release, audit accept, quarantine release, cell overturn, handle resolution | membership in `security.two_person_actions`; count 2 | `ApprovalRequest` |
 
 ### 11.54.6 Acceptance criteria
 
 | AC | Given | When | Then |
 | --- | --- | --- | --- |
-| `AC-appr-01` | Admin A created a `ledger.reversal` request | A calls `approveApprovalRequest` on it | `403 FORBIDDEN`; no `AdminAction` row and no event (a refused `AdminAction` is written only for authorization failures, 15.34.1); the request stays `pending` |
-| `AC-appr-02` | A pending request with `payload_hash` H | B approves with a hash other than H | `409 STATE_CONFLICT`; nothing executes; B's dialog must reload the payload |
-| `AC-appr-03` | A pending request older than `security.admin_two_person_pending_ttl_s` | The timer runs | `approval.expired` is emitted by actor `system`; a later approval returns `409 STATE_CONFLICT` |
+| `AC-appr-01` | Admin A created a `ledger.reversal` request | A calls `approveApproval` on it | `403 FORBIDDEN`; no `AdminAction` row and no event (a refused `AdminAction` is written only for authorization failures, 15.34.1); the request stays `pending` |
+| `AC-appr-02` | A pending request whose stored payload is P | B calls `approveApproval` with `{step_up}` whose step-up is bound to a payload other than P | `401 AUTH_INVALID` (`step_up_invalid`); nothing executes; the request stays `pending`; B's dialog must reload the payload |
+| `AC-appr-03` | A pending request older than `security.two_person_ttl_s` | The timer runs | `admin.approval_expired` is emitted by actor `system`; a later approval returns `409 STATE_CONFLICT` |
 | `AC-appr-04` | Only one active `AdminUser` holds `operator` | They open a `killswitch.release` dialog | `previewAdminAction` returns `fail_closed` true; the confirm button stays disabled and shows `copy.admin.fail_closed_one_admin` |
 | `AC-appr-05` | Between request and second approval the target entry was already reversed | B approves | Execution fails its guard, the request becomes `rejected` by `system` with `precondition_failed`, no ledger entry is written |
 | `AC-trail-01` | An action whose state change succeeds but whose `AdminAction` insert fails | The transaction commits | It does not: both roll back and the client gets `503 UNAVAILABLE` |
@@ -465,7 +467,7 @@ When reports on a template reach `template.autopause_report_count` inside `templ
 | AC | Given | When | Then |
 | --- | --- | --- | --- |
 | `AC-abuse-01` | `template.autopause_report_count` = 3 (fixture) and three reports on one template inside the window | The third arrives | The queue shows one row with count 3 and a `killswitch.engaged` for `kill.template.<id>` with principal `system` exists |
-| `AC-abuse-02` | A `suspendMember` call with no `context` | Sent | `422 UNPROCESSABLE`; no `AdminAction` row and no event (a refused `AdminAction` is written only for authorization failures, 15.34.1) |
+| `AC-abuse-02` | A `suspendMember` call whose body has no `reason_code` | Sent | `400 VALIDATION_FAILED` with `details.fields` naming `reason_code`; no `AdminAction` row and no event (a refused `AdminAction` is written only for authorization failures, 15.34.1) |
 | `AC-abuse-03` | A ban initiated by reviewer A | A confirms | `202`, member status unchanged; the ban executes only after distinct admin B approves |
 | `AC-abuse-04` | Any response of the abuse and appeal APIs | Checked against the schema | No field contains a reporter's `mem_` or `vol_` id |
 | `AC-abuse-05` | A `createCellOverturn` for accepted cells | Approved by a second admin | For each cell `cell.overturned`, a ledger `reversal` and a `rework` cell (S0 `ISS-05`) exist, or the whole request is rejected by the guard of 11.60.3 |
@@ -497,7 +499,7 @@ When reports on a template reach `template.autopause_report_count` inside `templ
 
 The original entry is never edited (S0.7 forbids it); both stay visible and linked.
 
-**Audit events.** Codes `ledger.reversal`, `alarm.acknowledge`, `ledger.verify_chain`, and logged reads of member-linked views (`member.lookup`); domain events `ledger.entry_committed`, `ledger.invariants_passed`, `ledger.invariant_violated`, `approval.*`.
+**Audit events.** Codes `ledger.reversal`, `alarm.acknowledge`, `ledger.verify_chain`, and logged reads of member-linked views (`member.lookup`); domain events `ledger.entry_committed`, `ledger.invariants_passed`, `ledger.invariant_violated`, `admin.approval_*`.
 
 | `op` | Method and path | Notes |
 | --- | --- | --- |
@@ -639,27 +641,27 @@ show: name, blocked count, age, link to its screen
 | --- | --- |
 | A Switches | `launch.members_may_join`, `launch.member_jobs_enabled`, `launch.minting_enabled`: stored value and effective state. Effective = stored value AND no engaged kill switch of the matching scope (`kill.all_new_jobs` for jobs, `kill.all_minting` for minting; there is none for joining) |
 | B Rule | One row per requirement, each pass or fail with its source: every gate in `launch.required_gate_ids` signed off with at least `launch.min_signoffs` distinct admins; at least `launch.min_approved_services` approved services or a signed-off fallback; G0 and G1 always required (validation of the parameter); for minting, no open `ledger.invariant_violated` [A]. Any further clause S14.* adds appears as another row |
-| C Request | Choose gate items to sign off and, optionally, switches to enable, plus reason; `CT3` |
+| C Request | One of: sign off one gate item (`signOffGateItem`, `CT3`; one call per item); turn a switch on (`changeLaunchSwitch` with `value: true`, `CT3`); turn a switch off (`changeLaunchSwitch` with `value: false`, `CT2`); a reason for each |
 
-A `launch.signoff` request is the only way to turn a switch on: the initiator's request is sign-off 1, further distinct admins approve until `launch.min_signoffs` is reached, then, in one transaction, the items become `signed_off` (`gate.signed_off`), the rule is re-evaluated, and if it passes the chosen switches are set (`launch.members_may_join_changed` for joining, `parameter.changed` for the other two). If the rule fails at that moment nothing changes and the request is rejected by `system` (`precondition_failed`). Turning a switch off is `launch.switch_off`: one admin, `CT2`, immediate. Reopening a gate (`launch.reopen`, `CT2`, one admin, reason required) makes the rule fail; switches already on stay on until an admin switches them off, the header shows a red banner and an `Alarm` of kind `launch.rule_failing` is raised; an automatic switch-off is for S14.* to decide (`ISS-118`). With fewer eligible `operator` admins than `launch.min_signoffs` the request is unavailable (`AD9`).
+A sign-off is one `signOffGateItem` call per item (`launch.signoff`, `CT3`): the pending object is the item itself, every signer is a distinct admin, and the item becomes `signed_off` (`gate.signed_off`, emitted once) when `launch.min_signoffs` distinct admins have signed it. A sign-off never sets a switch. A switch is changed only by `changeLaunchSwitch` (15.27.3). Turning a switch on (`value: true`, action `launch.switch_on`) is a two-person action: the initiator's call returns `202` with an `AdminApproval`, a second distinct admin approves with `approveApproval`, and the blockers of 15.27.3 are checked again at execution; if none remain the switch is set (`launch.<switch>_changed`), otherwise nothing changes and the call returns `409 STATE_CONFLICT` with `details.blockers`. Turning a switch off (`value: false`) is `launch.switch_off`: one admin, `CT2`, immediate. Reopening a gate (`launch.reopen`, `CT2`, one admin, reason required) makes the rule fail; switches already on stay on until an admin switches them off, the header shows a red banner and an `Alarm` of kind `launch.rule_failing` is raised; an automatic switch-off is for S14.* to decide (`ISS-118`). With fewer eligible `operator` admins than `launch.min_signoffs` the request is unavailable (`AD9`).
 
-**Audit events.** Codes `launch.*`; domain events `gate.evidence_attached`, `gate.signed_off`, `gate.reopened`, `launch.members_may_join_changed`, `parameter.changed`, `approval.*`.
+**Audit events.** Codes `launch.*`; domain events `gate.evidence_attached`, `gate.signed_off`, `gate.reopened`, `launch.members_may_join_changed`, `launch.member_jobs_enabled_changed`, `launch.minting_enabled_changed`, `admin.approval_*`.
 
 | `op` | Method and path | Notes |
 | --- | --- | --- |
 | `listLaunchGates`, `getLaunchGateItem` | `GET /v1/admin/launch/gates[/{gate_id}]`, `GET /v1/admin/launch/gate-items/{lgi_id}` | Gates with items and evidence |
-| `createLaunchGateEvidence` | `POST /v1/admin/launch/gate-items/{lgi_id}/evidence` | `CT1`; no `If-Match`; `Idempotency-Key` required |
-| `createLaunchGateReopening` | `POST /v1/admin/launch/gate-items/{lgi_id}/reopenings` | `CT2` |
-| `signOffGateItem` | `POST /v1/admin/launch/gate-items/{lgi_id}/signoffs` | Body `{comment}`; `201`; one call per item; a switch is turned on by `changeLaunchSwitch` |
-| `changeLaunchSwitch` | `POST /v1/admin/launch/switch-changes` with `{switch, value: false, reason}` | `CT2` |
+| `attachGateEvidence` | `POST /v1/admin/launch/gate-items/{lgi_id}/evidence` | `CT1`; no `If-Match`; `Idempotency-Key` required |
+| `reopenGateItem` | `POST /v1/admin/launch/gate-items/{lgi_id}/reopenings` | `CT2` |
+| `signOffGateItem` | `POST /v1/admin/launch/gate-items/{lgi_id}/signoffs` | Body `{comment}`; `201`; one call per item; sets no switch (a switch is changed only by `changeLaunchSwitch`) |
+| `changeLaunchSwitch` | `POST /v1/admin/launch/switch-changes` with `{switch, value, reason}` | Step-up, `perm.launch.switch`. `value: false`: `CT2`, one admin, `200` at once. `value: true`: `CT3`, two-person action `launch.switch_on`, `202` with an `AdminApproval`; the blockers are recomputed at approval and the switch is set only if none remain. Errors `409 STATE_CONFLICT` (`details.blockers`), `422 UNPROCESSABLE` (`no_change`) |
 | `getLaunchStatus` | `GET /v1/admin/launch/status` | Rule rows and effective states; feeds `BLK-header` |
 
 | AC | Given | When | Then |
 | --- | --- | --- | --- |
 | `AC-gate-01` | A fresh install | `getLaunchStatus` is called | All three switches are false and every rule row that depends on a gate fails |
-| `AC-gate-02` | G1 is `open` | A sign-off request enables `launch.members_may_join` and is approved | Execution is rejected (`precondition_failed`); the switch stays false |
-| `AC-gate-03` | `launch.min_signoffs` = 2 (fixture), all required gates have evidence | Admin A requests, A tries to approve, B approves | A's approval is refused; B's executes: items `signed_off`, the chosen switch true, `launch.members_may_join_changed` emitted |
-| `AC-gate-04` | A pending request, then the only approved service is revoked | B approves | The rule fails at execution, the request is `rejected` by `system`, switches unchanged |
+| `AC-gate-02` | G1 is `open`, so `gate_not_signed_off:G1` is a blocker | An operator calls `changeLaunchSwitch` with `{switch: launch.members_may_join, value: true}` | `409 STATE_CONFLICT` with `details.blockers` including `gate_not_signed_off:G1`; no approval is created and the switch stays false |
+| `AC-gate-03` | `launch.min_signoffs` = 2 (fixture) and a required gate item in `evidence_attached` | Admin A calls `signOffGateItem` on it twice, then B calls it once; later, with all required gates `signed_off`, A calls `changeLaunchSwitch` with `value: true` for `launch.members_may_join`, A tries to approve, and B approves | A's second sign-off is `403 FORBIDDEN`; B's sign-off makes the item `signed_off`, `gate.signed_off` is emitted once and no switch changes; the switch call returns `202`, A's approval is refused, B's approval sets the switch true and `launch.members_may_join_changed` is emitted |
+| `AC-gate-04` | A pending `changeLaunchSwitch` approval with `value: true`, then the only approved service is revoked | B approves | The blockers are recomputed at execution and are not empty: `409 STATE_CONFLICT` with `details.blockers`, the request is `rejected` by `system`, the switch is unchanged |
 | `AC-gate-05` | `launch.members_may_join` is on and G1 is reopened | The reopening executes | An `Alarm` `launch.rule_failing` exists and the header banner is red; the switch stays on until `launch.switch_off` by one admin takes effect at once |
 | `AC-gate-06` | G0 has zero approved services and a signed-off fallback evidence | The rule is evaluated | The service clause passes through the fallback |
 | `AC-gate-07` | One active `operator` | The sign-off dialog opens | `fail_closed` is true and the button is disabled |
@@ -700,8 +702,8 @@ The system may also engage a switch (for example S6.* or S14.* automation on `le
 | `op` | Method and path | Notes |
 | --- | --- | --- |
 | `listKillSwitches`, `getKillSwitch` | `GET /v1/admin/kill-switches[/{key}]` | `key` is the dotted switch name |
-| `createKillSwitchEngagement` | `POST /v1/admin/kill-switches/{switch_key}/engagements` | Body `{reason_code, reason, public_text?, linked_report_id?, linked_alarm_id?}`; `CT2` |
-| `createKillSwitchRelease` | `POST /v1/admin/kill-switches/{switch_key}/releases` | Body `{reason, verification, public_text?}`; `202` with an `ApprovalRequest` |
+| `engageKillSwitch` | `POST /v1/admin/kill-switches/{switch_key}/engagements` | Body `{reason_code, reason, public_text?, linked_report_id?, linked_alarm_id?}`; `CT2` |
+| `releaseKillSwitch` | `POST /v1/admin/kill-switches/{switch_key}/releases` | Body `{reason, verification, public_text?}`; `202` with an `ApprovalRequest` |
 | `listKillSwitchHistory` | `GET /v1/admin/kill-switches/{key}/history` | |
 
 | AC | Given | When | Then |
@@ -745,7 +747,7 @@ The system may also engage a switch (for example S6.* or S14.* automation on `le
 
 The screen states "only minimal data is shown and every view is logged" (`copy.admin.member_minimal_view`).
 
-### 11.65.3 Handle resolution [D][A]
+### 11.65.3 Member view operation and acceptance criteria [D][A]
 
 | `op` | Method and path | Notes |
 | --- | --- | --- |
@@ -754,13 +756,11 @@ The screen states "only minimal data is shown and every view is logged" (`copy.a
 | AC | Given | When | Then |
 | --- | --- | --- | --- |
 | `AC-lookup-01` | The admin route table | A request searches members by name, e-mail, handle or free text | `404 NOT_FOUND`; `GET /v1/admin/members` filters by `status`, `trust_tier`, `has_open_report` only |
-| `AC-lookup-02` | A context object that does not link to the member | `createMemberView` is called | `422 UNPROCESSABLE`; no row and no event for a guard refusal (a refused `AdminAction` is written only for authorization failures, 15.34.1) |
+| `AC-lookup-02` | A `mem_` id that no member has | `getMemberAdmin` is called (no context object is sent) | `404 NOT_FOUND`; no member data is returned and no event is emitted (a refused `AdminAction` is written only for authorization failures, 15.34.1) |
 | `AC-lookup-03` | A valid lookup | The response is checked against an allow-list schema | It contains none of the denied fields of 11.65.2 |
 | `AC-lookup-04` | `ratelimit.admin_member_lookups_per_day` = 3 (fixture) | An admin makes a fourth lookup in one UTC day | `429 RATE_LIMITED` and an `Alarm` for operators |
 | `AC-lookup-05` | Any successful lookup | The audit trail is read | One `member.lookup` row names the admin, the `mem_` id and the context ids |
 | `AC-lookup-06` | A farming context | The view loads | Tree size, depth and device-sharing count appear; no device identifier appears |
-| `AC-lookup-07` | A handle resolution requested by operator A | A approves their own request | `403 FORBIDDEN`; with operator B's approval the `mem_` id is shown once and one `AdminAction` exists |
-| `AC-lookup-08` | The key version of the handle has been destroyed | Resolution executes | `422 UNPROCESSABLE` with `handle_unresolvable` |
 
 ## 11.66 Tool 12: Release / Hand over
 
@@ -805,11 +805,9 @@ Entity `WorkClaim`, table `work_claims`, prefix `clm_`, retention `moderation`. 
 | `AC-claim-01` | Two reviewers claim one item at the same instant | Both calls run | Exactly one returns `201`; the other `409 STATE_CONFLICT` |
 | `AC-claim-02` | A claim with no write for `ui.admin_claim_ttl_s` | The timer runs | `workclaim.expired` is emitted and the item sorts first in its queue |
 | `AC-claim-03` | An item claimed by A | Reviewer B writes to it | `409 STATE_CONFLICT`, `details.reason` `claim_held` |
-| `AC-claim-04` | A hand over to an admin without the permission | Sent | `403 FORBIDDEN` |
 | `AC-claim-05` | The holder has a pending approval on the item | An operator takes over | `409 STATE_CONFLICT`, `approval_pending`; after the request is rejected the takeover succeeds and the former holder sees `copy.admin.claim_taken_over` |
 | `AC-claim-06` | An `active` lease | An operator releases it | `lease.revoked`, cell `queued`, reliability of the member unchanged, event actor `admin` |
 | `AC-claim-07` | A lease in `submitted` | An operator releases it | `409 STATE_CONFLICT` |
-| `AC-claim-08` | A release with `requeue_at_front` | The next lease in that template queue is issued | It is that cell |
 | `AC-claim-09` | `listLeases` | The response is checked against its schema | It contains no `mem_` or `vol_` id |
 
 ## 11.67 Admin copy keys (Persian and English)
@@ -843,7 +841,7 @@ S0.10.6 says names are stable and S16.* completes the table. This part needs the
 | Name | Type | Initial configurable default | Validation | Owner | Replaced by |
 | --- | --- | --- | --- | --- | --- |
 | `session.admin_stepup_s` | duration_s | 300 | 30..3600; at most `session.admin_idle_ttl_s` | `operator` | `SEC` |
-| `security.admin_two_person_pending_ttl_s` | duration_s | 86,400 | 600..604800 | `operator` | `SEC` |
+| `security.two_person_ttl_s` | duration_s | 86,400 | 600..604800 | `operator` | `SEC` |
 | `security.admin_reason_min_chars` | int | 20 | 1..500 | `operator` | `SEC` |
 | `ratelimit.admin_member_lookups_per_day` | int | 30 | 1..1000 | `operator` | `SEC`, `OPS` |
 | `ui.admin_claim_ttl_s` | duration_s | 1800, the initial value of `session.admin_idle_ttl_s`, so a claim does not outlive an idle session | 60..86400 | `operator` | `OPS` |
@@ -871,6 +869,6 @@ This file is the third file of part 11, so it uses the issue sub-block `ISS-117`
 
 | id | severity | fd_ref | issue | resolution | status |
 | --- | --- | --- | --- | --- | --- |
-| `ISS-117` | minor | prompt | Convention gaps used by the admin tools: (a) entities `ApprovalRequest` (`apr_`) and `WorkClaim` (`clm_`); (b) `TermsCopy.document_kind` (`terms`, `usage_policy`, `written_permission`), needed to store the usage policy and written permission of FD§8.3 G0(i) and (k); (c) no retirement marker or event for a `GoldCell`; (d) events `approval.*` and `workclaim.*`; (e) the seven parameters of 11.68; (f) `security.two_person_actions` default lacks `member.ban`, `audit.accept`, `quarantine.release`, `cell.overturn`, `member.resolve_handle`; (g) the action codes of 11.54.3 and the reason-code lists; (h) sub-headings `11.51` upward (renumbered by FIX-21 from `11.41`) to avoid collisions with other S11 files; (i) the terms-copy upload body (derived from `service.terms_copy_max_bytes`) exceeds `api.max_body_bytes`, so it gets its own limit; (j) `Alarm` kinds `abuse.*`, `launch.rule_failing`, `ops.changelog_overdue`; (k) a transient `requeue_at_front` flag on a released `Cell` | Used as proposed in this file; C-001 and C-022 fold them into S0 and S16 | proposed |
+| `ISS-117` | minor | prompt | Convention gaps used by the admin tools: (a) entities `ApprovalRequest` (`apr_`) and `WorkClaim` (`clm_`); (b) `TermsCopy.document_kind` (`terms`, `usage_policy`, `written_permission`), needed to store the usage policy and written permission of FD§8.3 G0(i) and (k); (c) no retirement marker or event for a `GoldCell`; (d) events `admin.approval_*` and `workclaim.*`; (e) the seven parameters of 11.68; (f) `security.two_person_actions` default lacks `member.ban`, `audit.accept`, `quarantine.release`, `cell.overturn`, `member.resolve_handle`; (g) the action codes of 11.54.3 and the reason-code lists; (h) sub-headings `11.51` upward (renumbered by FIX-21 from `11.41`) to avoid collisions with other S11 files; (i) the terms-copy upload body (derived from `service.terms_copy_max_bytes`) exceeds `api.max_body_bytes`, so it gets its own limit; (j) `Alarm` kinds `abuse.*`, `launch.rule_failing`, `ops.changelog_overdue` | Used as proposed in this file; C-001 and C-022 fold them into S0 and S16 | proposed |
 | `ISS-118` | major | FD§5.3, FD§3.4, FD§8.3 | State machines of S0.9 lack transitions the tools need: (a) a `banned` member has no exit, so an overturned ban appeal cannot be applied; (b) nothing moves a rejected cell to accepted after an overturned `cell_rejection` appeal; (c) `awaiting_second_review` has no rule for split votes; (d) an approved service cannot be re-reviewed early (`review_started` only leaves `unreviewed`, `rejected`, `review_due`, `revoked`); (e) an operator lease release has no event; (f) the launch rule can fail after a gate is reopened while the switches stay on | (a) add `banned --member.reinstated--> active` on an overturned appeal only; (b) add `rejected --cell.reinstated--> accepted` when no other attempt was accepted, otherwise correct the reliability record and create no second credit (11.58.3); (c) a further distinct reviewer breaks a tie, else the original decision stands (11.58); (d) add `approved|suspended --service.review_started--> in_review`; (e) reuse `cell.declined` with actor `admin` and reason `operator_release` (11.66.3); (f) raise `launch.rule_failing` and require an explicit `launch.switch_off`, automatic switch-off left to S14.* (11.63) | proposed |
 | `ISS-119` | major | FD§5.7, FD§4.2, prompt | Decisions only the owner can make: (a) with fewer than two admins every two-person action is unavailable (`AD9`), and `ledger.reversal_min_approvers` is a constant 2; (b) `service.min_approvers` 1 or 2; (c) credit already spent cannot be reversed under `ledger.allow_negative_balance` = false, and a wrongly rejected cell whose work was paid to another attempt has no compensation rule; (d) whether a service approval needs a notice period like a loosening (applied: a public entry at approval time, no notice); (e) who counts as "founders" for parameters owned by `founders` (applied: two distinct `operator` approvers) | Applied as stated in each section; listed for S3.* | needs_owner |
