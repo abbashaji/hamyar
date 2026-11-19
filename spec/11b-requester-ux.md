@@ -118,7 +118,7 @@ Operation ids (lowerCamelCase, S0.5) are the contract between the screens and S1
 | `listTemplates` | `GET /v1/templates?job_type=` (approved versions only) | 02 |
 | `getTemplate` | `GET /v1/templates/{template_id}` | 02, 03 |
 | `getPublicPolicy` | `GET /v1/public/policy` (`active.allowlist`; a phase lock is an allowlist row with `status` `locked`; `license_options` is derived from the allowed `license` values) | 05 |
-| `listServices` | `GET /v1/services` (approved entries only, no query) (`id`, `display_name`) | 05 |
+| `listServices` | `GET /v1/services` (approved entries only, no query) (`ServiceView` of S15a 15.6.1: `id`, `display_name`, `supports_prefill`, `copy_only`, `max_url_chars`, `clean_chat_hint_key`, `advice_copy_keys`) | 05 |
 | `createJob` | `POST /v1/jobs` body `{template_id, copy_from_job_id?}` -> `Job` in `draft` | 02, 06, 18 |
 | `getJob` | `GET /v1/jobs/{job_id}` | all |
 | `updateJob` | `PATCH /v1/jobs/{job_id}` (JSON Merge Patch, `If-Match` = `row_version`) | 05 |
@@ -135,7 +135,7 @@ Operation ids (lowerCamelCase, S0.5) are the contract between the screens and S1
 | `listReservations` / `getReservation` | `GET /v1/reservations`, `GET /v1/reservations/{reservation_id}` | 01, 11 |
 | `cancelReservation` | `POST /v1/reservations/{reservation_id}/cancellation` | 11 |
 | `getJobProgress`+ | `GET /v1/jobs/{job_id}/progress` (ETag, conditional `If-None-Match`) | 12 |
-| `listJobCells` | `GET /v1/jobs/{job_id}/cells` (primary cells only; outputs by `ordinal` from `listJobResults`) | 13 |
+| `listJobCells` | `GET /v1/jobs/{job_id}/cells` (primary cells only; `ordinal`, status and attempts, no output) | 13 |
 | `getCancellationPreview`+ | `GET /v1/jobs/{job_id}/cancellation-preview` | 14 |
 | `cancelJob` | `POST /v1/jobs/{job_id}/cancellation` | 09, 14 |
 | `getSettlementReceipt`+ | `GET /v1/jobs/{job_id}/receipt` | 15 |
@@ -338,7 +338,6 @@ Finding kinds the screen can display (detection is owned by S9.*; the set is a d
 - **AC-req-11** Given `screen.pii_action` = `reject` and an upload with a `pii_pattern` finding at row 12, When the result displays, Then Continue is disabled, the finding shows "row 12" and a character range, and no snippet of the detected text appears anywhere in the page or its accessible tree.
 - **AC-req-12** Given `screen_status` = `flagged_for_review` because of `url_present`, When Continue is pressed, Then the wizard proceeds to declarations and the page states that a reviewer will look before acceptance.
 - **AC-req-13** Given `screen_status` = `pending`, When the tab is hidden, Then polling stops, and it refreshes once when the tab becomes visible again.
-- **AC-req-14** Given `requestUploadReview` was already used `screen.requester_review_requests_per_day` times today, When the person presses Ask a reviewer, Then the action is disabled with the reset time in local time.
 
 ### SCR-req-05 Declarations (wizard step 4)
 
@@ -388,7 +387,7 @@ Finding kinds the screen can display (detection is owned by S9.*; the set is a d
 
 - **AC-req-23** Given the FD§3.3 inputs (`v_ppm` 100000, `lambda_ppm` 50000, N = 240, balance 300 credits), When the quote renders, Then it shows p = 1.15, total 276, volunteer pay 240, verification pool 24 buying 24 verification cells, levy 12, balance after 24, `eta` 0.870 and a 2-day window as returned by the server (these are the FD's illustrative inputs, not measurements).
 - **AC-req-24** Given `v_source` is `prior`, When the quote renders, Then the `v` line is labelled "estimated, not yet measured" and shows `price.v_prior` as its value.
-- **AC-req-25** Given `window.status` is `unavailable`, When the quote renders, Then Continue to confirm is absent and Join waitlist and Book a reservation are offered; with `ff.job.reservations` off only the waitlist is offered.
+- **AC-req-25** Given `window.status` is `unavailable`, When the quote renders, Then Continue to confirm is absent, no join button is offered (the job is already `waitlisted`), the screen shows `waitlist.position` and `waitlist.expires_at` from `getJob`, and Book a reservation is offered; with `ff.job.reservations` off no booking is offered and the person may wait or cancel with `cancelJob`.
 - **AC-req-26** Given balance 100 credits and `p_ucr` 1,150,000, When `escrow.total_ucr` exceeds the balance, Then the screen shows the shortfall and the affordable cell count 86 (`floor(100,000,000 / 1,150,000)`), and Continue is disabled.
 
 ### SCR-req-08 Escrow confirmation (wizard step 7)
@@ -470,7 +469,6 @@ Labels (copy keys; every row carries `needs_human_and_legal_review`):
 
 - **AC-req-31** Given a `waitlisted` job, When the page loads, Then it shows the position, the lapse date in local time, and the statement that no credit is held.
 - **AC-req-32** Given `job.waitlist_released` occurs, When the person opens the app, Then the home screen lists the job under Needs attention with the remaining claim time, and `SCR-req-07` shows the new quote with `quote_expires_at` set by `admission.waitlist_claim_ttl_s`.
-- **AC-req-33** Given `admission.waitlist_max_per_member` is 1 and an entry exists, When the person joins a second waitlist, Then `422 CAP_EXCEEDED` with `details.cap` `waitlist_entries` is answered and `copy.req.err_cap_waitlist` is shown.
 
 ### SCR-req-10 Reservation booking
 
@@ -501,7 +499,7 @@ Labels (copy keys; every row carries `needs_human_and_legal_review`):
 | Accessibility | Terms in a definition list; the cancel confirmation names the exact amount returned |
 
 - **AC-req-37** Given a `held` reservation cancelled before `free_until`, When the person confirms, Then the receipt shows the returned amount equal to the held amount, and the restored credit lots show their original expiry (`ISS-07`).
-- **AC-req-38** Given a `held` reservation whose job has more cells than were booked, When `activateReservation` is sent, Then `422 CAP_EXCEEDED` with `details.cap` `reservation_cells` is shown and the reservation stays `held`.
+- **AC-req-38** Given a `held` reservation whose job has more cells than were booked, When `confirmJob` is sent with its `reservation_id`, Then `422 CAP_EXCEEDED` with `details.cap` `reservation_cells` is shown and the reservation stays `held`.
 - **AC-req-39** Given the reservation reached `expired`, When the page loads, Then the state, the date and the refund shown are those returned by the server, with no client-side computation.
 
 ## 11.39 Job progress screens
@@ -562,7 +560,7 @@ Which switch produces which pause or refusal (11c 11.64.1 and 11.64.2 own the ef
 | Switch | What happens to the requester's work | `pause_reason` shown | Copy |
 | --- | --- | --- | --- |
 | `kill.template.<tpl_id>` | Jobs on the template get `job.paused`; new jobs on it are refused | `template_paused` | `copy.req.pause_template`; a refused new job shows `copy.req.err_kill_switch` |
-| `kill.service.<svc_id>` | Jobs pinned to the service get `job.paused` (S7.* 7.10.5 pauses a job when its eligible set empties; the server reports the pause either way) | `service_paused` | `copy.req.pause_service` |
+| `kill.service.<svc_id>` | A job gets `job.paused` only when removing the service empties its eligible service set; a job that still has another eligible service continues on it (S7.* 7.10.5) | `service_paused` | `copy.req.pause_service` |
 | `kill.all_new_jobs` | Running jobs continue; only creating or admitting a job is refused | none | `copy.req.err_kill_switch` on the refused action |
 | `kill.member.<mem_id>` | Nothing pauses; the account `status` stays `active`; balance and ledger are untouched; new leases, submissions and escrow holds are refused | none | `copy.req.err_kill_switch` on the refused confirmation, the same text as the global switch; a member switch is never named or hinted at (11c 11.64.1) |
 | `kill.all_minting` | No requester effect: transfers of member jobs are unaffected | none | none |
@@ -612,7 +610,7 @@ The linear baseline is crude because volunteer supply arrives in daily batches; 
 - **AC-req-42** Given `on_track` = `behind` and the largest group is `awaiting_volunteer` with 150 cells, When the page renders, Then the banner says most remaining cells are waiting for volunteers and shows `at_risk_cells` when above zero.
 - **AC-req-43** Given `pause_reason` = `kill_switch`, When the page renders, Then the paused banner shows `copy.req.pause_kill`, Cancel stays available and the credit is stated as still held.
 - **AC-req-43a** Given a job paused by `kill.template.<tpl_id>` (11c `AC-kill-01`), When the page renders, Then `pause_reason` is `template_paused`, the banner shows `copy.req.pause_template`, Cancel stays available and the credit is stated as still held.
-- **AC-req-43b** Given a job paused by `kill.service.<svc_id>`, When the page renders, Then `pause_reason` is `service_paused` and the banner shows `copy.req.pause_service`.
+- **AC-req-43b** Given a job paused because `kill.service.<svc_id>` emptied its eligible service set (S7.* 7.10.5), When the page renders, Then `pause_reason` is `service_paused` and the banner shows `copy.req.pause_service`; given a job that still has another eligible service, Then it is not paused and shows no pause banner.
 - **AC-req-43c** Given `kill.all_new_jobs` or `kill.member.<mem_id>` is engaged, When a running job's progress is read, Then no pause banner appears and the job's state is unchanged; When Confirm is pressed on a quote, Then the answer is `503 KILL_SWITCH_ENGAGED`, `copy.req.err_kill_switch` is shown, no credit moves and nothing on the page names a member switch.
 - **AC-req-44** Given the page direction is RTL, When the map renders, Then index 1 is at the right edge, arrow-key navigation moves visually, and the legend uses shapes, not colour alone.
 
@@ -710,7 +708,7 @@ Outcome and tag copy (rows carry `needs_human_and_legal_review`):
 | `other` | Something else | موارد دیگر |
 
 - **AC-req-57** Given a `completed` job inside the rating window, When the person submits Good with tag `accuracy`, Then one `rateJob` creates a `JobRating`, the screen becomes read-only and no cell state or ledger entry changes.
-- **AC-req-58** Given a rating already exists, When a second submission is sent, Then `409 ALREADY_EXISTS` is answered and the stored rating is shown.
+- **AC-req-58** Given a rating already exists, When a second submission is sent with `rateJob`, Then the earlier rating is replaced (`200`, no `409`) and the screen shows the stored rating.
 - **AC-req-59** Given `ui.requester.rating_flag_cells_max` cells are already picked, When another index is added, Then the picker refuses it and states the limit by its configured value.
 - **AC-req-60** Given the rating window has passed, When the page loads, Then the form is absent and the page states that the window ended.
 

@@ -1081,7 +1081,7 @@ Enums: `policy_version_status`, `change_class` (`tighten`, `loosen`, `neutral`),
 | --- | --- | --- | --- |
 | `checkJobPolicy` | `POST /v1/jobs/{job_id}/policy-checks` | member | dry run on a `draft` job, no state change; returns every failing rule |
 | `getPublicPolicy` | `GET /v1/public/policy` | none | current version summary, allowlist, change-log pointer; no private data |
-| `listServices` | `GET /v1/services` | member | approved services only: `name`, `service_kind`, adapter capabilities, notices |
+| `listServices` | `GET /v1/services` | member | approved services only: `ServiceView` of S15a 15.6.1 (`id`, `display_name`, `supports_prefill`, `copy_only`, `max_url_chars`, `clean_chat_hint_key`, `advice_copy_keys`) |
 | `getOptIns`, `replaceOptIns` | `GET`, `PUT /v1/members/me/opt-ins` | member | grants need the acknowledgement; ETag / `row_version` |
 | `listTopicCategories` | `GET /v1/topic-categories` | member | active only |
 | `createPolicyVersionDraft`, `proposePolicyVersion`, `approvePolicyVersion`, `withdrawPolicyVersion` | `POST /v1/admin/policy-versions`, `.../{id}/proposal`, `.../{id}/approval`, `.../{id}/withdrawal` | admin (reviewer / operator) | 7.8 |
