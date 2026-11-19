@@ -47,7 +47,7 @@ Result for the 38 cited paths: 24 ALIAS, 12 NEW, 1 REMOVE, and 1 split (`audit-q
 | 31 | `/v1/admin/ledger-transactions` | 11c:504 | ALIAS (list removed) | `getLedgerTransaction`; list is `listLedgerEntries?txn_kind=` |
 | 32 | `/v1/admin/ledger-verifications` | 11c:507 | ALIAS | `startHashChainVerification`, `runInvariant` |
 | 33 | `/v1/admin/member-views` | 11c:751 | ALIAS | `getMemberAdmin` |
-| 34 | `/v1/admin/metric-snapshots` | 11c:615, 13:51, 13:921 | ALIAS | `listMetricSnapshots` (defined in 15.E.10 of `spec/15f-api-reconcile-measurement.md`) |
+| 34 | /v1/admin/metric-snapshots | 11c:615, 13:51, 13:921 | ALIAS | `listMetricSnapshots` (defined in 15.E.10 of `spec/15f-api-reconcile-measurement.md`) |
 | 35 | `/v1/admin/parameter-change-sets` | 11c:555 | NEW | `createParameterChangeSet` |
 | 36 | `/v1/admin/template-versions/{}/check-runs` | 11c:266 | NEW | `runTemplateChecks` |
 | 37 | `/v1/admin/work-claims` | 11c:797, 11c:798, 11c:799 | NEW | `listWorkClaims`, `createWorkClaim` |
