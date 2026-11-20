@@ -188,7 +188,7 @@ Field rules the schema cannot express (enforced by the template linter, which ru
 | `code` | Source code text | As `text` but tabs kept; no normalization of whitespace; NFC not applied to identifiers [A] |
 | `system` | Value computed by the platform (language names, label list rendering, id lists) | Taken from a template `values` table or the job metadata, never from free text |
 
-`visibility` = `server_only` means the value is stored with the cell and used by checks (for example hold-out tests) but is never placed in any rendered prompt [D].
+`visibility` = `server_only` means the value is stored with the cell and used by checks (for example the expected answer of a gold cell) but is never placed in any rendered prompt [D].
 
 ### 8.4.2 Annotated skeleton (authoring form)
 
@@ -1131,8 +1131,6 @@ Every item is a convention gap reported for folding into `S0.*` (rule 0.1). Valu
 | `template.delimiter_token_chars` | int | 12 (base32, so 60 bits of token) | 8..32 | `SEC` |
 | `template.max_skeleton_share` | ratio | 0.50 | 0 < x < 1 | `CAL` |
 | `template.min_reviewers_loosen` | int | 2 | 1..5 | `FND` |
-
-No parameter of this file belongs to a runner: the platform executes nothing (8.13.3), so no `template.exec.*` parameter is listed here [default-pending D-25].
 
 **Other additions**
 
