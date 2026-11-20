@@ -350,7 +350,7 @@ Reason for no automatic ban cascade: an attacker could join through a victim's i
 | --- | --- |
 | Invite link posted publicly | Single use, `invite.ttl_days`, per-member and per-tree quotas, `ratelimit.invite_tree_new_members_per_day` |
 | Mass identities from one tree | `invite.tree_max_members`, depth cap, freeze rule; starter grant only after a verified cell and capped by `grant.max_per_invite_tree_per_day` and `grant.max_per_day` |
-| Self-invite with a second identity | Same device token as the inviter, or same IP hash on the same day, does not block (families share devices) but holds the invitee's starter grant and any referral bonus for review (`growth.referral.hold_s` for bonuses) |
+| Self-invite with a second identity | Same device token as the inviter does not block (families share devices) but holds the invitee's starter grant and any referral bonus for review (`growth.referral.hold_s` for bonuses). No hold rests on a shared IP hash: no IP hash is persisted, so such a rule cannot be evaluated; the per-device (`grant.max_per_device`), per-invite-tree (`grant.max_per_invite_tree_per_day`) and per-day (`grant.max_per_day`) limits remain, and no persisted IP flag is introduced [default-pending D-23] |
 | Invite rings and cycles | Impossible: a member has exactly one inviter and invites only create new members |
 | Hidden privilege | No per-member quota overrides exist; changes are global parameters with a change log |
 
@@ -562,7 +562,7 @@ Retention values are parameters of `S0.10.6` (`retention.*`); `member_bound`, `j
 | Recovery requests | Yes | `RecoveryRequest`, no IP | 90 days | Recovery cap |
 | Invite edges | Yes | `Invite`, `Member.invite_id` | Edge cleared `invite.accountability_days` after joining; kept `retention.moderation_days` after resolution if a party is banned | Accountability (10.10) |
 | Reports and appeals | Yes | `Report`, `Appeal` | `moderation`: `retention.moderation_days` (180), then counts | Safety process |
-| Admin actions | Yes | `AdminAction` with `adm_` ids only | `permanent` | Accountability of operators |
+| Admin actions | Yes | `AdminAction` with `adm_` ids for the actor; `reason` is free text up to 1000 characters and may contain personal data, so it is access-controlled (`perm.adminaction.view`) and held under the retention rule of its table (`permanent`) [default-pending D-32] | `permanent` | Accountability of operators |
 | Admin credentials | Yes | Public key, sign count, label | `permanent` while the admin exists | WebAuthn |
 | Legal requests received | Yes | Count, date, outcome, no content | `permanent` | Transparency report, if lawful [V] |
 | Backups | Yes | Encrypted snapshots of the above | Set in `S4.*` as a published number; restores re-apply deletion tombstones | Recovery of service [V] |
@@ -582,7 +582,7 @@ IpHasher.hash(ip):                       # runs once, in edge middleware, before
 
 1. **The same address hashes differently each UTC day**, so counters cannot be joined across days even by someone holding the hash store; per-minute, per-hour and per-day limits only need equality within a day. [D]
 2. **Counters live in a volatile store** behind the `CounterStore` interface; not in the relational database, not in backups, never written with a TTL longer than the window; if the chosen engine snapshots to disk, the snapshot must expire with the same bound [V: engine behavior]. [A]
-3. **`retention.ip_hash_ttl_days`** is the ceiling on any IP-hash-bearing record. Setting it to 0 turns off the daily IP limits (only per-minute limits remain) and leaves registration limited by device token and tree; this is the lever for emergency minimization (10.15.4).
+3. **`retention.ip_hash_ttl_days`** (range 1..30; 0 is not allowed) is the ceiling on any IP-hash-bearing record; it does not switch any limit off. The lever for the daily IP limits (emergency minimization, 10.15.4) is lowering the `ratelimit.*` caps of 10.9.2 that key on the IP hash and a UTC day: `ratelimit.ip_hash_new_members_per_day` and, for its IP-hash side, `ratelimit.recovery_attempts_per_day`. The per-minute and per-hour IP-hash limits are the separate parameters `ratelimit.public_rpm` and `ratelimit.auth_failures_per_hour`; registration stays limited by device token and tree (`ratelimit.device_new_members_per_day`, `ratelimit.invite_tree_new_members_per_day`) [default-pending D-33].
 4. **Residual risk, stated plainly:** the IPv4 space has only 2^32 addresses, so anyone who holds both the hashes and `secret.ip_hash_key` can recover the addresses by enumeration. The key therefore lives in the secrets store, separate from the counter store, and each day's key is destroyed `retention.ip_hash_ttl_days` x 86,400 s after its day ends (10b S10.14.2), so even with the secrets store only the hashes of the last day or so can be reversed.
 5. **Deployment requirement** [V]: the reverse proxy, CDN or platform MUST NOT write client IPs to access logs, and the trusted header that carries the client address must be one only the platform can set. Where the host cannot disable its own logging, that fact MUST be recorded in the G1 threat model and in the member notice (the host then sees what 10.15.1 says).
 6. A test sends a sentinel address and asserts it appears in no database dump, log line, metric, trace or backup fixture (AC-privacy-01).
@@ -632,7 +632,7 @@ No location is collected, inferred or displayed by default (`public.location_dis
 | --- | --- |
 | Panic wipe | One tap on any screen deletes the device key, device token, session, caches and local settings, then tries to revoke the device key on the server (local deletion happens first and does not wait for the network) |
 | Quick exit | A button on every screen that navigates to a neutral page and replaces the history entry where the browser permits [V] |
-| `kill.optional_pii` [A] | Operator action (`perm.identity.purge_optional_pii`): one admin engages, two-person releases (`killswitch.release`). Immediately: refuse new e-mail addresses, delete every e-mail ciphertext and index, set the effective `retention.ip_hash_ttl_days` to 0, set the effective `retention.request_log_days` to 0 and delete existing request logs, stop recording `actor_day_hash` |
+| `kill.optional_pii` [A] | Operator action (`perm.identity.purge_optional_pii`): one admin engages, two-person releases (`killswitch.release`). Immediately: refuse new e-mail addresses, delete every e-mail ciphertext and index, lower the effective `ratelimit.ip_hash_new_members_per_day` and `ratelimit.recovery_attempts_per_day` (the lever of 10.14.2 item 3; `retention.ip_hash_ttl_days` is not changed and stays within 1..30) [default-pending D-33], set the effective `retention.request_log_days` to 0 and delete existing request logs, stop recording `actor_day_hash` |
 | Notices | The six `copy.*` keys below, all marked `needs_human_and_legal_review` |
 
 | Copy key | en | fa |
@@ -698,7 +698,7 @@ Given / When / Then; each criterion becomes a test in the layer shown (S0.5; `S1
 | AC-session-04 | An active session of a key | The client signs in again with that key | The previous session of that key is revoked | fsm |
 | AC-privacy-01 | A request from a sentinel IP address | Dumps, logs, metrics, traces and backup fixtures are searched | The sentinel appears nowhere (`retention.raw_ip_stored` = false) | inj |
 | AC-privacy-02 | The same IP on two UTC days | `IpHasher.hash` runs | The two hashes differ | unit |
-| AC-privacy-03 | `kill.optional_pii` is engaged | The action completes | E-mail ciphertexts and request logs are deleted, new addresses are refused, IP-hash TTL is 0 | e2e |
+| AC-privacy-03 | `kill.optional_pii` is engaged | The action completes | E-mail ciphertexts and request logs are deleted, new addresses are refused, the IP-hash day caps of 10.15.4 are lowered | e2e |
 | AC-privacy-04 | Any request with a body and an `Authorization` header | The request log line is read | It holds none of the body, header, IP or token | inj |
 
 ## 10.18 Events, interfaces, parameters, hooks
