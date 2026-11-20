@@ -800,7 +800,7 @@ Existing parameters used by this part: `i18n.default_locale`, `i18n.supported_lo
 | --- | --- | --- |
 | Persian wording, orthography and terminology of every notice, and the Persian names of months and weekdays | native-speaking reviewers | `reviewed` fields and review status of each copy key |
 | Wording of the account-risk, credit, license, waiver and no-circumvention notices; declared-claim register; which language prevails | counsel in the operator's jurisdiction | counsel memo, referenced in `reviewed.legal_ref` |
-| Safety and privacy-limit statements and the join-page order | a person qualified to advise on safety (FD§8.3 G1) | G1 `LaunchGateItem` evidence |
+| Safety and privacy-limit statements and the order of the first-use consent screen | a person qualified to advise on safety (FD§8.3 G1) | G1 `LaunchGateItem` evidence |
 | Golden table of Jalali boundary dates and its source | a native-speaking reviewer | a CI fixture with its source reference |
 | Platform support for `Intl` calendar and number formatting, data-saver signals, font metric overrides | an engineer on the target phones | G2 `LaunchGateItem` evidence |
 | Font license, glyph coverage, redistribution and subsetting rights | a reviewer | license file and check date beside the font files |
