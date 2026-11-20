@@ -66,8 +66,12 @@ Values S0.8 does not list but the model needs. They are stored exactly as writte
 | --- | --- |
 | `invite_status` | `issued`, `redeemed`, `expired`, `revoked` |
 | `key_purpose` / `key_status` | `auth`, `recovery` / `active`, `rotated`, `revoked` |
-| `admin_status` / `credential_status` | `invited`, `active`, `disabled` / `active`, `revoked` |
+| `admin_status` / `credential_status` | `invited`, `active`, `disabled` / `pending`, `active`, `locked`, `revoked` |
 | `device_status` | `active`, `blocked` |
+| `platform_class` | `ios`, `android`, `desktop`, `other` |
+| `invite_kind` | `seed`, `member` |
+| `key_storage` | `hardware_backed`, `software`, `unknown` (self-reported) |
+| `admin_action_outcome` | `proposed`, `approved`, `executed`, `expired` |
 | `topic_status` / `badge_status` / `team_status` | `active`, `retired` / `active`, `retired` / `active`, `archived` |
 | `upload_status` | `received`, `screening`, `accepted`, `rejected`, `split`, `purged` |
 | `upload_media_type` | `text/plain`, `text/csv`, `application/json` |
@@ -132,7 +136,7 @@ Provenance (FD§5.6) records "a salted-hash volunteer ID that requesters never s
 
 | Column | Computed as | Key (secret, S10.* owns the list) [A] | Kept for |
 | --- | --- | --- | --- |
-| `devices.device_token_hash` | HMAC-SHA-256 of a random 256-bit token the client keeps in its own storage | `secret.device_hash_key[v]` | `retention.session_days` after last use |
+| `devices.device_token_hash` | HMAC-SHA-256 of a random 256-bit token the client keeps in its own storage | `secret.device_hash_key[v]` | as the `Device` row: member-bound plus the grant-memory residue for `retention.member_inactive_days` (S5.6.3) |
 | `members.email_lookup_hash` | HMAC-SHA-256 of the lower-cased address | `secret.email_lookup_key[v]` | while the member is not `closed` |
 | `members.email_ciphertext` | AES-256-GCM field encryption of the address | `secret.email_encryption_key[v]` | as above |
 | `sessions.token_hash`, `leases.nonce_hash`, `invites.code_hash` | SHA-256 of a 128- or 256-bit CSPRNG value (no key needed, S0.6.4) | none | their TTLs |
@@ -152,7 +156,7 @@ One row per entity of S0.7 (57 rows), plus the two additions of S5.4.1 (`StateTr
 | --- | --- | --- | --- | --- |
 | `Member` | S5.6.1 | `MUT` | `member_bound` | status and tier changes (events); closure reduces the row to a tombstone |
 | `MemberKey` | S5.6.2 | `MUT` | `member_bound` | rotation: new key row, old row `rotated` |
-| `Device` | S5.6.3 | `MUT` | `short` | `blocked` status; purge nulls hashes |
+| `Device` | S5.6.3 | `MUT` | `member_bound` | `blocked` status; closure deletes the row except the grant-memory residue |
 | `Session` | S5.6.4 | `MUT` | `short` | `revoked_at`; expiry |
 | `Invite` | S5.6.5 | `MUT` | `member_bound` | `revoked` status |
 | `OptIn` | S5.6.6 | `MUT` | `member_bound` | new version of the row; change event carries before and after hashes |
@@ -356,15 +360,17 @@ A pseudonymous identity. Holds the `donor` and `requester` capabilities (S0.8.2)
 | `locale`, `digits`, `calendar` | enum | NN while `status <> 'closed'`; NULL on a closed tombstone (DDL `CHECK`) | defaults from `i18n.*`; member can change |
 | `time_zone` | text | null | IANA name chosen by the member; never inferred from an IP |
 | `creating_device_id` | id `dev_` | null, FK | the device that created the identity; used for `ratelimit.device_new_members_per_day` |
-| `invite_id` | id `inv_` | null, FK (deferred) | the invite redeemed, if any; with `Invite.issuer_member_id` it is the edge that 10a calls `Member.invited_by_member_id` (alias, 10a names canonical); set to NULL by the edge-clearing sweep of S5.6.5 [A] |
+| `invite_id` | id `inv_` | null, FK (deferred) | the invite redeemed, if any; with `Invite.issuer_member_id` it is the invite edge; set to NULL by the edge-clearing sweep of S5.6.5 [A] |
 | `invite_root_member_id`, `invite_depth` | id `mem_`, int | root null for a founder; depth >= 0 | denormalized tree position for `invite.tree_*` limits |
 | `team_id`, `team_joined_at` | id `tem_`, ts | null | a member is in at most one team [A] |
 | `email_ciphertext`, `email_key_version`, `email_lookup_hash`, `email_verified_at` | bytes, int, bytes32, ts | all null or `ciphertext` and `lookup_hash` both set | optional e-mail (FD§3.2); S5.3.3 |
+| `email_purposes` | arr | NN, default empty; subset of the notice purposes of 10a 10.5 | one opt-in per notice purpose |
 | `accepted_cells_count` | int | NN, default 0 | `DER`; counts accepted cells of every kind |
 | `first_accepted_at` | ts | null | set once; the starter-grant and referral condition |
 | `reliability_ppm`, `reliability_obs` | ppm, int | `0..1000000`; obs >= 0 | `DER` cache of the Beta estimate over the last `verify.reliability_window_obs` gold and audit observations |
 | `starter_granted_at` | ts | null | set once with the `grant` entry |
 | `recovery_cooldown_until` | ts | null | `identity.recovery_cooldown_s` after a recovery |
+| `recovery_confirmed_at` | ts | null | set when the member proves the recovery key (10a 10.4.2 step 5); NULL after a recovery until it is confirmed again |
 | `last_active_day` | day | null | day granularity only |
 | `closed_at` | ts | null; NN when `status = 'closed'` | |
 
@@ -386,22 +392,27 @@ Public keys of a member (S0.6.4). Supports rotation, device linking and the reco
 | `device_id` | id `dev_` | null, FK | the device this auth key belongs to (device linking adds a key per device) |
 | `rotated_at`, `not_after` | ts | null | `not_after` = rotation time + `identity.key_rotation_grace_s` for the old key |
 | `replaced_by_key_id` | id `mky_` | null, FK | |
+| `authorized_by_key_id` | id `mky_` | NN, FK (deferred); the key itself for the first two keys of a member | the key that authorized this one (key chain, 10a 10.7) |
+| `authorization_signature` | bytes | NN, 64 bytes | that key's signature over the addition |
+| `key_storage` | enum(`key_storage`) | NN, default `unknown` | self-reported, informational, never used in a decision (10a 10.3.1) |
+| `revoked_reason` | text | null | a code, never free text; set with `status = 'revoked'` |
 
 **Unique** `public_key`; one active `recovery` key per member (`(member_id) WHERE purpose='recovery' AND status='active'`). **Indexes** `(member_id, status)`; `(device_id)`. **Stored** public keys only. **Not stored** private keys, the recovery key itself, any seed or passphrase.
 
-### 5.6.3 `Device` · `devices` · `dev_` · `MUT` · `short`
+### 5.6.3 `Device` · `devices` · `dev_` · `MUT` · `member_bound`
 
 A keyed-hash record of a client installation for rate limits, anti-farming and linking. It is a random token the client generated, not a fingerprint. [D]
 
 | Field | Type | Null / constraint | Note |
 | --- | --- | --- | --- |
-| `device_token_hash` | bytes32 | NN until purge, then NULL (the DDL column is nullable) | S5.3.3; set to NULL by purge |
+| `device_token_hash` | bytes32 | NN | S5.3.3; kept in the grant-memory residue (Retention below) |
 | `hash_key_version` | int | NN | |
+| `platform_class` | enum(`platform_class`) | NN | set at registration (10a 10.3.3); four values, about 2 bits |
 | `status` | enum(`device_status`) | NN, default `active` | `blocked` after a farming finding (S10.*) |
 | `first_seen_day`, `last_seen_day` | day | NN | |
 | `grants_claimed` | int | NN, default 0 | counts toward `grant.max_per_device` (lifetime) |
 
-**Unique** `device_token_hash`. **Indexes** `(last_seen_day)`. **Retention.** After `retention.session_days` without use the row is purged: hashes are set to NULL; a row with `grants_claimed > 0` is kept as a tombstone `(id, grants_claimed)` while any non-closed member has it as `creating_device_id` so the lifetime grant limit cannot be reset by waiting [A].
+**Unique** `device_token_hash`. **Indexes** `(last_seen_day)`. **Retention.** `member_bound` plus a grant-memory residue (10a 10.9.1 and 10.14.1): a `Device` row is deleted once no non-closed member has it as `creating_device_id`, unless `grants_claimed > 0`; then only `(id, device_token_hash, grants_claimed)` remains for `retention.member_inactive_days` after that closure and is then deleted, so the lifetime limit `grant.max_per_device` is remembered for that long and no longer [A]. `retention.session_days` does not apply to `Device` rows.
 **Stored** keyed hashes, day-granular first and last use, a grant counter. **Not stored** raw IP, any IP hash (the creation-time hash lives only in the volatile counter, S5.3.3), user-agent, screen size, fonts, canvas or audio fingerprints, hardware ids, anything beyond the list the threat model (S10.*) admits.
 
 ### 5.6.4 `Session` · `sessions` · `ses_` · `MUT` · `short`
@@ -413,6 +424,7 @@ A keyed-hash record of a client installation for rate limits, anti-farming and l
 | `key_id` / `credential_id` | id `mky_` / `acr_` | the key or passkey that authenticated | |
 | `token_hash` | bytes32 | NN | SHA-256 of a 256-bit token; the token is shown once |
 | `last_used_at`, `idle_expires_at`, `abs_expires_at` | ts | NN | `session.member_*` / `session.admin_*` TTLs |
+| `step_up_at` | ts | null | set by a fresh step-up signature or assertion; valid for `session.step_up_max_age_s` after it (10a 10.13, condition X5) |
 | `revoked_at`, `revoked_reason` | ts, text | null | reason is a code, never free text |
 
 **Unique** `token_hash`. **Indexes** `(member_id)`, `(admin_user_id)`, `(abs_expires_at)`. **Retention** `retention.session_days` after expiry or revocation. **Not stored** the token, IP, user-agent, location.
@@ -421,12 +433,14 @@ A keyed-hash record of a client installation for rate limits, anti-farming and l
 
 | Field | Type | Null / constraint | Note |
 | --- | --- | --- | --- |
-| `issuer_member_id` | id `mem_` | NN, FK; NULL once the edge is cleared (S5.6.5 edge clearing) | issuing needs `invite.min_accepted_cells_to_issue` accepted cells; alias of 10a `inviter_member_id` (10a name canonical) |
+| `issuer_member_id` | id `mem_` | FK; NN for a `member` invite while the edge exists; NULL once the edge is cleared (S5.6.5 edge clearing) and for a `seed` invite | issuing needs `invite.min_accepted_cells_to_issue` accepted cells |
+| `kind` | enum(`invite_kind`) | NN, default `member` | `seed` invites are issued by operators under two-person approval and have no issuer (10a 10.10) |
+| `strike_recorded_at` | ts | null | set when the issuer receives a strike because the invitee was banned (10a 10.10) |
 | `code_hash` | bytes32 | NN | SHA-256 of a 128-bit code; the code is shown once to the issuer |
 | `status` | enum(`invite_status`) | NN, default `issued` | |
 | `expires_at` | ts | NN | `created_at + invite.ttl_days` |
-| `redeemed_by_member_id`, `redeemed_at` | id, ts | null, both set or both null; after edge clearing `redeemed_by_member_id` is NULL and `redeemed_at` holds its UTC date | `redeemed_by_member_id` is the alias of 10a `invitee_member_id` (10a name canonical) |
-| `tree_root_member_id`, `tree_depth` | id, int | NN | the new member's position; depth <= `invite.tree_max_depth` |
+| `redeemed_by_member_id`, `redeemed_at` | id `mem_`, ts | null; both set or both null while the edge exists; after edge clearing `redeemed_by_member_id` is NULL and `redeemed_at` changes from a timestamp to its UTC date (the column keeps type `ts`; the value is that date at 00:00:00 UTC) | `redeemed_by_member_id` is the invitee of the edge |
+| `tree_root_member_id`, `tree_depth` | id `mem_`, int | NN; for a `seed` invite `tree_root_member_id` is NULL until the invite is redeemed, then it is the redeeming member | the one tree id type: the `mem_` id of the tree's root member; with the depth it is the new member's position; depth <= `invite.tree_max_depth` |
 
 **Edge clearing** [A] (default-pending D-12; 10a 10.10, `invite.accountability_days`). That many days after the invitee's `Member.created_at`, the retention sweep sets `Member.invite_id`, `Invite.issuer_member_id` and `Invite.redeemed_by_member_id` of the redeemed invite to NULL and reduces `Invite.redeemed_at` to its UTC date; unredeemed invites keep their issuer. `tree_root_member_id`, `tree_depth`, `Member.invite_root_member_id` and `Member.invite_depth` stay, so after the window accountability is at tree level only and creation order inside a tree still permits partial inference (10a 10.15.2). If either side of the edge is banned inside the window, the edge is kept until `retention.moderation_days` after the resolution. Operators alone see edges while they exist (`perm.invite.view_tree_edges`, 10a 10.10).
 
@@ -485,7 +499,7 @@ Operator or Reviewer principal, separate from `Member` (S0.8.2). [D]
 | `sign_count` | int64 | NN, default 0 | monotonic check (clone detection) |
 | `transports` | arr | null | |
 | `label` | text | null, <= 40 chars | |
-| `status` | enum(`credential_status`) | NN | |
+| `status` | enum(`credential_status`) | NN | `pending` until the second approval of the credential (10a 10.12); `locked` after a sign-count clone finding or an emergency lock; `active`; `revoked` |
 | `last_used_at`, `revoked_at` | ts | null | |
 
 **Not stored** private keys, biometrics, attestation blobs beyond what S10.* decides to keep.
@@ -504,6 +518,8 @@ The log of every operator and reviewer action. Named so it does not collide with
 | `subject_hash` | hash | null | content hash that was reviewed or approved (binds an approval to exact content) |
 | `reason` | text | NN for sensitive actions (`security.two_person_actions`), <= 1000 chars | |
 | `approves_action_id` | id `act_` | null, FK | the first action of a two-person pair |
+| `outcome` | enum(`admin_action_outcome`) | NN | `proposed` (a two-person action waiting for its approver), `approved`, `executed` or `expired`; a single-admin action is one row with `executed`; the table is append-only, so a later outcome is a new row that references the proposal (10a 10.12) |
+| `expires_at` | ts | NN iff `outcome = 'proposed'` | proposal time + `security.two_person_ttl_s` |
 | `payload` | json | NN, <= 16 KiB | non-personal; schema per `action` |
 | `request_id` | text | NN | `req_` id |
 | `prev_hash`, `entry_hash` | hash | NN | chain over the table, S5.15 |
@@ -860,7 +876,7 @@ The ledger is one double-entry book, `ledger_id = 'main'` [A]. Amounts are integ
 | `balance_ucr` | ucr | NN, default 0 | cache, updated only by `ledger_post()`; sign rule below |
 | `last_entry_seq` | int64 | NN, default 0 | the highest `seq` that touched this account |
 
-**Sign rule (CHECK)** `member`, `escrow`, `reserve`, `retired`: `balance_ucr >= 0`; `issuance`: `balance_ucr <= 0`. This is `ledger.allow_negative_balance` = false enforced by the database. **Singletons** a unique index allows exactly one `reserve`, one `issuance` and one `retired` account. **Indexes** `(account_type)`. **Public view.** The public ledger (S12.*) shows `vol_` handles computed on read from `member_id`; no `mem_` id and no handle is stored here. The public view MUST NOT show `job_id`, `cell_id` or a `natural_key` that embeds them beside a handle, because the provenance handle of S5.3.2 is the same value: a requester who knows the `job_id` could otherwise read the handles of that job's donors from the public ledger. Either those columns are withheld from the public view, or S10.* gives the public ledger a domain-separated handle (`data = 'pub' || member_id`) that differs from the provenance handle (audit A05, finding 4). **Not stored** any personal datum; the table is the same shape for a member and for a Reserve.
+**Sign rule (CHECK)** `member`, `escrow`, `reserve`, `retired`: `balance_ucr >= 0`; `issuance`: `balance_ucr <= 0`. This is `ledger.allow_negative_balance` = false enforced by the database. **Singletons** a unique index allows exactly one `reserve`, one `issuance` and one `retired` account. **Indexes** `(account_type)`. **Not stored** any personal datum; the table is the same shape for a member and for a Reserve.
 
 ### 5.9.2 `LedgerEntry` · `ledger_entries` · `lge_` · `CHN` · `permanent`
 
@@ -1409,8 +1425,9 @@ CREATE TABLE devices (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   row_version int NOT NULL DEFAULT 1,
-  device_token_hash bytea UNIQUE CHECK (octet_length(device_token_hash) = 32),  -- NULL after purge
+  device_token_hash bytea NOT NULL UNIQUE CHECK (octet_length(device_token_hash) = 32),  -- kept in the grant-memory residue (5.6.3)
   hash_key_version int NOT NULL,
+  platform_class text NOT NULL CHECK (platform_class IN ('ios','android','desktop','other')),
   status text NOT NULL DEFAULT 'active' CHECK (status IN ('active','blocked')),
   first_seen_day date NOT NULL,
   last_seen_day date NOT NULL,
@@ -1445,12 +1462,14 @@ CREATE TABLE members (
   email_ciphertext bytea, email_key_version int,
   email_lookup_hash bytea UNIQUE CHECK (octet_length(email_lookup_hash) = 32),
   email_verified_at timestamptz,
+  email_purposes text[] NOT NULL DEFAULT '{}',
   accepted_cells_count int NOT NULL DEFAULT 0,
   first_accepted_at timestamptz,
   reliability_ppm bigint CHECK (reliability_ppm BETWEEN 0 AND 1000000),
   reliability_obs int NOT NULL DEFAULT 0,
   starter_granted_at timestamptz,
   recovery_cooldown_until timestamptz,
+  recovery_confirmed_at timestamptz,
   last_active_day date,
   closed_at timestamptz,
   CHECK ((trust_tier = 'restricted') = (tier_before_restriction IS NOT NULL)),
@@ -1979,9 +1998,9 @@ All jobs run as `retention_svc`, are idempotent, log one `Event` per run with co
 | Class | What the job does | Parameter |
 | --- | --- | --- |
 | `job_bound` | `retention.job_payload_days` after the job is terminal: set to NULL `cells.input_payload`, `cells.rendered_prompt`, `submissions.output_text`, `uploads.storage_key` (and delete the object), `glossaries.terms`, `deliverables.storage_key` (and delete the object), `verification_records.details`; set the matching `payload_purged_at`. Hashes, states, manifests and ledger rows stay | `retention.job_payload_days` |
-| `member_bound` | On `closed` (member-initiated, or inactive for `retention.member_inactive_days`): tombstone the member, delete its keys, sessions, opt-ins, badge awards, referrals and teams-owned data (S5.6.1) | `retention.member_inactive_days` |
+| `member_bound` | On `closed` (member-initiated, or inactive for `retention.member_inactive_days`): tombstone the member, delete its keys, sessions, opt-ins, badge awards, referrals and teams-owned data (S5.6.1); delete devices as in S5.6.3, leaving only the grant-memory residue, which is deleted `retention.member_inactive_days` later | `retention.member_inactive_days` |
 | `moderation` | `retention.moderation_days` after resolution: add counts to a `MetricSnapshot`, then null the personal columns and delete the `Report` or `Appeal` row | `retention.moderation_days` |
-| `short` | Delete `sessions` past `retention.session_days`; null `devices.creation_ip_hash` after `retention.ip_hash_ttl_days`; purge devices as in S5.6.3 | `retention.session_days`, `retention.ip_hash_ttl_days` |
+| `short` | Delete `sessions` past `retention.session_days`; null `devices.creation_ip_hash` after `retention.ip_hash_ttl_days` | `retention.session_days`, `retention.ip_hash_ttl_days` |
 | `ops` | Delete `events` after `retention.event_raw_days`; `invariant_checks` and `alarms` after `retention.ops_log_days` except `violated` and `checkpoint` rows | `retention.event_raw_days`, `retention.ops_log_days` |
 | `permanent` | Never touched | |
 
