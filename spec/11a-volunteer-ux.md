@@ -159,7 +159,7 @@ Every API failure maps to a screen state and a `details.copy_key`-style copy key
 | Session token | Device storage | `session.member_idle_ttl_s` idle, `session.member_abs_ttl_s` absolute | No cookies (S0.11.4) |
 | Display options | Device storage | Until changed | locale, digits, calendar |
 | Active lease data (prompt, nonce, `expires_at`) | Memory, with a best-effort copy in session storage | Until submit, decline or expiry | Session storage access is always wrapped in try and catch |
-| Paste-back draft | Device storage keyed by lease id (memory only if storage is unavailable), as specified in S11.49 | Until acknowledged, until the lease end plus `ui.draft.ttl_s`, or until the member clears local data | Never uploaded before Submit; survives a tab close so a queued Submit can be retried |
+| Paste-back draft | Device storage keyed by lease id (memory only if storage is unavailable), as specified in S11.79 | Until acknowledged, until the lease end plus `ui.draft.ttl_s`, or until the member clears local data | Never uploaded before Submit; survives a tab close so a queued Submit can be retried |
 | Never held | Provider credentials, chat links, clipboard history, the provider's page content | n/a | X1..X7 |
 
 ## 11.5 API operation names and parameters this part uses
@@ -197,13 +197,13 @@ Convention additions requested by this part (C-022 completes the table; names ar
 
 | Name | Type | Initial configurable default | Validation | Replaced by |
 | --- | --- | --- | --- | --- |
-| `ui.first_load_budget_bytes` | int | 204,096 (the same budget as `ui.budget.first_load_bytes` of S11.55: 100,000 + 20,000 + 80,000 + 4,096; C-022 keeps one name) | 20,000..5,000,000 | `TEC` measurement on real phones and links |
+| `ui.first_load_budget_bytes` | int | 204,096 (the same budget as `ui.budget.first_load_bytes` of S11.85: 100,000 + 20,000 + 80,000 + 4,096; C-022 keeps one name) | 20,000..5,000,000 | `TEC` measurement on real phones and links |
 | `ui.offer_list_size` | int | 3 (equals the default of `lease.max_active_per_member`) | 1..`api.page_size_max` | `P1M` |
 | `ui.recovery_confirm_groups` | int | 2 | 1..8 | `SEC` |
 | `ui.status_poll_max_s` | duration_s | 60 (upper bound of the polling backoff) | 5..600 | `OPS` |
 | `appeal.reason_max_chars` | int | 1000 | 100..10000 | `OPS` |
 | `invite.required_to_join` | bool | true (closed Phase 1 pilot, FD§9) | | `FND` |
-| `ui.lease_warning_ratio` | ratio | 0.25 (warn when this share of `lease.timeout_s` remains; with the defaults it equals `ui.lease.warn_remaining_s` of S11.55, 300 s = 0.25 x 1,200 s; C-022 keeps one name) | 0..1 | `CAL` |
+| `ui.lease_warning_ratio` | ratio | 0.25 (warn when this share of `lease.timeout_s` remains; with the defaults it equals `ui.lease.warn_remaining_s` of S11.85, 300 s = 0.25 x 1,200 s; C-022 keeps one name) | 0..1 | `CAL` |
 
 ## 11.6 SCR-vol-01 Landing
 
@@ -635,7 +635,7 @@ Return the provider's answer to Hamyar by a human paste, bound to the lease and 
 
 ```
 function submit(lease, answer, service_id, model_name):
-    key = draft.idempotency_key                      # new key per Submit press, reused only by retries of the same body (S0.11.5, S11.49)
+    key = draft.idempotency_key                      # new key per Submit press, reused only by retries of the same body (S0.11.5, S11.79)
     body = { nonce: lease.nonce, text: answer, service_id, model_name }
     loop with backoff up to ui.status_poll_max_s:
         r = submitResult(lease_id, body, Idempotency-Key: key)
@@ -1324,7 +1324,7 @@ The volunteer also has "flagged" in the sense of their own report on a card (`SC
 
 ## 11.22 Policy, privacy and risk notices (both languages)
 
-All text below is draft copy, marked `needs_human_and_legal_review`; none is a legal conclusion and each depends on facts that are [V]. Any sentence that promises something says "declared" (FD Principle 11). Notices are bundled with the app (V-14), version-stamped, and shown where named in the screens above. [D] Precedence: S11.51 (`spec/11d-i18n-copy.md`) owns the notice texts; where a key below also exists there (`copy.privacy.pseudonymity_notice`, `copy.credit.not_money`, `copy.risk.injection`, `copy.risk.clean_chat`, `copy.recovery.warning`, `copy.recovery.cooldown`) the S11.51 text prevails and the row here is a placeholder to be removed at assembly. Promise-like sentences in this file follow the declared rule of S11.50. [D]
+All text below is draft copy, marked `needs_human_and_legal_review`; none is a legal conclusion and each depends on facts that are [V]. Any sentence that promises something says "declared" (FD Principle 11). Notices are bundled with the app (V-14), version-stamped, and shown where named in the screens above. [D] Precedence: S11.81 (`spec/11d-i18n-copy.md`) owns the notice texts; where a key below also exists there (`copy.privacy.pseudonymity_notice`, `copy.credit.not_money`, `copy.risk.injection`, `copy.risk.clean_chat`, `copy.recovery.warning`, `copy.recovery.cooldown`) the S11.81 text prevails and the row here is a placeholder to be removed at assembly. Promise-like sentences in this file follow the declared rule of S11.80. [D]
 
 | Copy key | Shown at | `fa` (draft) | `en` |
 | --- | --- | --- | --- |

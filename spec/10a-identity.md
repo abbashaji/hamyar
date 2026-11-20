@@ -399,7 +399,7 @@ Legend: `Y` allowed when the conditions hold; `2P` allowed only with two-person 
 | `perm.policy.edit` | - | - | - | Y | - | - | X8; loosening is `parameter.loosen` |
 | `perm.appeal.decide` | - | - | - | Y | - | - | X8, X11; bans need `appeal.ban_min_reviewers` |
 | `perm.report.triage` | - | - | - | Y | - | - | X8 |
-| `perm.report.decide` | - | - | - | Y | - | - | X8, X11 [A]; the actions of 10b S10.16.4 except `ban` (`perm.member.ban`) |
+| `perm.report.decide` | - | - | - | Y | - | - | X8, X11 [A]; the actions of 10b S10.26.4 except `ban` (`perm.member.ban`) |
 | `perm.gold.manage` | - | - | - | Y | - | - | X8; gold answers are visible to reviewers only |
 | `perm.audit.view_queue` | - | - | - | Y | - | - | X8 |
 | `perm.member.view_basic` | - | - | - | Y | Y | - | X8; id, tier, status, counts; never keys or e-mail |
@@ -575,7 +575,7 @@ IpHasher.hash(ip):                       # runs once, in edge middleware, before
   addr = parse(ip)
   if addr is IPv6: addr = addr masked to its /64 prefix       # one household can hold a /64; IPv4 stays /32
   day   = utc_date(now)                                       # epoch label
-  k_day = secret.ip_hash_key[day]   # a separate random 256-bit key per UTC day (10b S10.14.2), NOT derived from a longer-lived key, so destroying it makes that day's hashes untestable
+  k_day = secret.ip_hash_key[day]   # a separate random 256-bit key per UTC day (10b S10.24.2), NOT derived from a longer-lived key, so destroying it makes that day's hashes untestable
   return base64url( HMAC-SHA-256(k_day, addr_bytes)[0:16] )   # 128-bit truncated hash
   # the variable 'ip' is discarded; k_day lives only in SecretsPort and the hasher's memory; the logger has no access to the raw value
 ```
@@ -583,7 +583,7 @@ IpHasher.hash(ip):                       # runs once, in edge middleware, before
 1. **The same address hashes differently each UTC day**, so counters cannot be joined across days even by someone holding the hash store; per-minute, per-hour and per-day limits only need equality within a day. [D]
 2. **Counters live in a volatile store** behind the `CounterStore` interface; not in the relational database, not in backups, never written with a TTL longer than the window; if the chosen engine snapshots to disk, the snapshot must expire with the same bound [V: engine behavior]. [A]
 3. **`retention.ip_hash_ttl_days`** (range 1..30; 0 is not allowed) is the ceiling on any IP-hash-bearing record; it does not switch any limit off. The lever for the daily IP limits (emergency minimization, 10.15.4) is lowering the `ratelimit.*` caps of 10.9.2 that key on the IP hash and a UTC day: `ratelimit.ip_hash_new_members_per_day` and, for its IP-hash side, `ratelimit.recovery_attempts_per_day`. The per-minute and per-hour IP-hash limits are the separate parameters `ratelimit.public_rpm` and `ratelimit.auth_failures_per_hour`; registration stays limited by device token and tree (`ratelimit.device_new_members_per_day`, `ratelimit.invite_tree_new_members_per_day`) [default-pending D-33].
-4. **Residual risk, stated plainly:** the IPv4 space has only 2^32 addresses, so anyone who holds both the hashes and `secret.ip_hash_key` can recover the addresses by enumeration. The key therefore lives in the secrets store, separate from the counter store, and each day's key is destroyed `retention.ip_hash_ttl_days` x 86,400 s after its day ends (10b S10.14.2), so even with the secrets store only the hashes of the last day or so can be reversed.
+4. **Residual risk, stated plainly:** the IPv4 space has only 2^32 addresses, so anyone who holds both the hashes and `secret.ip_hash_key` can recover the addresses by enumeration. The key therefore lives in the secrets store, separate from the counter store, and each day's key is destroyed `retention.ip_hash_ttl_days` x 86,400 s after its day ends (10b S10.24.2), so even with the secrets store only the hashes of the last day or so can be reversed.
 5. **Deployment requirement** [V]: the reverse proxy, CDN or platform MUST NOT write client IPs to access logs, and the trusted header that carries the client address must be one only the platform can set. Where the host cannot disable its own logging, that fact MUST be recorded in the G1 threat model and in the member notice (the host then sees what 10.15.1 says).
 6. A test sends a sentinel address and asserts it appears in no database dump, log line, metric, trace or backup fixture (AC-privacy-01).
 
