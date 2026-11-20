@@ -572,7 +572,7 @@ Invite    issued --invite.redeemed--> redeemed (T) ; issued --invite.expired--> 
 | `value`, `version` | per type, int | Current value; `version` increases by 1 per accepted change; every version is an immutable `ParameterVersion` |
 | `effective_from` | timestamptz | Changes are prospective: `effective_from >= now + notice_days` unless `change_class` = `tighten` (R10: tighten at once) |
 | `tighten_direction` | enum `up`, `down`, `toward:<value>`, `none` | Which direction of change counts as tightening (for example `verify.audit_rate_s` is `up`, `admission.phi` is `down`) |
-| `notice_days` | int | Advance notice for `loosen` and `neutral` changes; default `change.notice_days_default`, or `change.notice_days_price` for the areas `price`, `admission` and `credit` |
+| `notice_days` | int | Advance notice for `loosen` and `neutral` changes; default `change.notice_days_default`, or `change.notice_days_price` for the areas `price`, `admission`, `credit` and `reservation` |
 | `owner` | enum | `operator`, `reviewer` or `founders` (area table 0.10.5); only the owner role may edit; a `loosen` change also needs a second `operator` approval [A] |
 | `calibration_source` | enum | Measurement code from 0.10.4 plus a free-text pointer to the replacing measurement |
 | `public` | bool | Published on the parameter page and change log (default true except `security.*` and the rows listed in S16 16.17.5) |
@@ -772,7 +772,7 @@ The list below is the FULL set of parameter names; names are stable and C-022 co
 | `service.min_approvers` | int | 1 (FD§5.3: a reviewer records the answers); 2 is an owner decision [A] | 1..2; 0.9.6 | `FND` |
 | `service.terms_copy_max_bytes` | int | 5,242,880 | 1024..52428800 | `OPS` |
 | `template.min_reviewers_new` | int | 2 (FD§5.7 failure mode 10) | 1..2; 0.9.5 | `FND` |
-| `template.min_reviewers_edit` | int | 1 | 1..5 | `FND` |
+| `template.min_reviewers_edit` | int | 1 | 1..2; 0.9.5 | `FND` |
 | `template.autopause_report_count` | int | 5 reports inside `template.autopause_window_s` | 1..1000 | `OPS` |
 | `template.autopause_window_s` | duration_s | 3600 | 60..604800 | `OPS` |
 | `optin.default_purposes` | json | `["P0","P1"]` (FD§5.4 R8) | subset of P0..P3 | `FND` |
@@ -783,7 +783,7 @@ The list below is the FULL set of parameter names; names are stable and C-022 co
 | `appeal.window_days` | days | 14 | 1..90 | `FND` |
 | `appeal.max_per_decision` | int | 1 | 1..5 | `FND` |
 | `appeal.reviewer_sla_days` | days | 7 (target, published) | 1..60 | `OPS` |
-| `appeal.ban_min_reviewers` | int | 2 | 1..2; 0.9.7 | `FND` |
+| `appeal.ban_min_reviewers` | int | 2 | 2..2; 0.9.7 (floor 2: the appeal machine has one second-review step) [default-pending D-34] | `FND` |
 | `report.triage_sla_days` | days | 3 (target, published) | 1..30 | `OPS` |
 | `report.max_per_member_per_day` | int | 20 | 1..1000 | `OPS` |
 
@@ -829,7 +829,7 @@ The list below is the FULL set of parameter names; names are stable and C-022 co
 | `i18n.dual_calendar_detail` | bool | true (FD§10: Jalali and Gregorian) | | `FND` |
 | `security.secret_rotation_days` | int | 90 | 1..365 | `SEC` |
 | `security.rotate_before_public_exposure` | bool | true (FD§10) | constant | `CON` |
-| `security.two_person_actions` | json | `["ledger.reversal","launch.signoff","parameter.loosen","killswitch.release"]` [A] | subset of the action names in S10.* | `SEC` |
+| `security.two_person_actions` | json | `["ledger.reversal","launch.signoff","parameter.loosen","killswitch.release","policy.loosen","launch.switch_on","admin.enroll","admin.role_change","member.ban","preregistration.lock"]` [A] [default-pending D-34] | superset of the fixed minimum list (a constant of this row: `ledger.reversal`, `launch.signoff`, `parameter.loosen`, `killswitch.release`, `policy.loosen`, `launch.switch_on`, `admin.enroll`, `admin.role_change`, `member.ban`, `preregistration.lock`, the union of the actions that S10a, S14 and S15b mark as two-person) and subset of the action names in S10.*; an action may be added, never removed [default-pending D-34] | `SEC` |
 | `calibration.min_samples_per_service` | int | 30 cells per service before a `CAL` value may replace a default | 1..10000 | `FND` |
 | `metrics.rollup_interval_s` | duration_s | 3600 | 60..86400 | `OPS` |
 
