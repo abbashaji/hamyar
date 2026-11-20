@@ -266,16 +266,18 @@ CREATE INDEX state_transitions_retention ON state_transitions (retention_class, 
 
 | Field | Type | Null / constraint | Note |
 | --- | --- | --- | --- |
+| `bucket_key` | text | PK, generated stored: `scope || ':' || period || ':' || COALESCE(member_id, '')` | the one key of the row (`month:2026-11:` for a month, `member_day:2026-11-21:mem_...` for a member and day); the conditional update of 05b 5.29.3 names it together with `row_version` |
 | `scope` | text | NN, `month` or `member_day` | one row per UTC month, one per member and UTC day |
 | `period` | text | NN | UTC `YYYY-MM` for `month`, `YYYY-MM-DD` for `member_day` |
 | `member_id` | id `mem_` | NN iff `member_day`, FK | |
 | `cap_ucr` | ucr | NN, `>= 0` | the cap in force when the row is created, in `ucr` (a later parameter change applies to the next period) |
 | `reserved_ucr`, `minted_ucr` | ucr | NN, default 0, `>= 0` | `DER`; `minted_ucr + reserved_ucr <= cap_ucr` (CHECK) is what makes the conditional update of 05b 5.29.3 safe |
 
-**Unique** `(period) WHERE scope = 'month'`; `(member_id, period) WHERE scope = 'member_day'`. **Retention** `month` rows `permanent` (an aggregate, no member id); `member_day` rows `member_bound` (deleted with the member's data on closure, S5.6.1; S6.* may purge them earlier). **Lock order** after the `Cell` lock and before the `Escrow` lock (05b 5.29.2). **Not stored** which cell or donor a reservation belongs to (it is derived from the cells in `leased`, `submitted` and `flagged_for_audit`; CK-05 compares the two).
+**Keys** primary key `bucket_key`. **Unique** `(period) WHERE scope = 'month'`; `(member_id, period) WHERE scope = 'member_day'` (the two partial indexes state the rule per scope; `bucket_key` is unique exactly when they are, because a month row has no member and the three parts hold no `:`). **Retention** `month` rows `permanent` (an aggregate, no member id); `member_day` rows `member_bound` (deleted with the member's data on closure, S5.6.1; S6.* may purge them earlier). **Lock order** after the `Cell` lock and before the `Escrow` lock (05b 5.29.2). **Not stored** which cell or donor a reservation belongs to (it is derived from the cells in `leased`, `submitted` and `flagged_for_audit`; CK-05 compares the two).
 
 ```sql
 CREATE TABLE mint_headroom (
+  bucket_key text GENERATED ALWAYS AS (scope || ':' || period || ':' || COALESCE(member_id, '')) STORED PRIMARY KEY,   -- target of UPDATE ... WHERE bucket_key = :k AND row_version = :v
   scope text NOT NULL CHECK (scope IN ('month','member_day')),
   period text NOT NULL,                       -- UTC 'YYYY-MM' (month) or 'YYYY-MM-DD' (member_day)
   member_id text REFERENCES members(id),
@@ -607,7 +609,7 @@ A requester's request, or a Commons job. Machine S0.9.2. The declarations, the p
 | Field | Type | Null / constraint | Note |
 | --- | --- | --- | --- |
 | `state` | enum | NN, default `draft` | the 15 states of S0.9.2 |
-| `closure_reason` | enum | null; set with `job.stop_requested` | `policy_stopped`, `service_revoked`, `template_retired`, `operator_killed`, `overrun_timeout`, `cells_exhausted` (05b JT-15 and 5.22.1; not yet in S0.9.2, convention addition 4 of 05b [A]) |
+| `closure_reason` | enum | null; set with `job.stop_requested` | `policy_stopped`, `service_revoked`, `template_retired`, `operator_killed`, `overrun_timeout`, `cells_exhausted`, `verification_shortfall`, `funding_shortfall`, `expired`; the final list of S0.9.2 (D-30), which owns it; `cells_exhausted` is set by 05b JT-15 (5.22.1) |
 | `is_commons` | bool | NN | true for Commons jobs; the only jobs whose acceptance mints |
 | `requester_member_id` | id `mem_` | NN iff `is_commons` = false | |
 | `job_type` | enum | NN | |
@@ -733,7 +735,7 @@ Time-boxed hold of a cell by one member, bound to a nonce (FD§3.4, S0.9.3). Eve
 | `ended_at`, `end_reason` | ts, text | null | reason is one of `submitted`, `expired`, `declined`, `released`, `revoked_policy`, `revoked_service`, `revoked_job_cancelled`, `revoked_integrity` |
 | `release_reason` | text | null; set only when `state = 'released'` (CHECK); `declined` or `reported` | why the donor released the lease (05b CT-05, LT-04); a system revocation uses `revoked` and `end_reason`, not this column |
 
-**Unique** `(cell_id, attempt)`; **`(cell_id) WHERE state = 'active'`**, the race guard: at most one active lease per cell, enforced by the database, not only by application code. **Indexes** `(hard_expires_at) WHERE state = 'active'` (reaper, `lease.reap_interval_s`; the reaper expires a lease only when `hard_expires_at < now()`, so this is the lookup column, not `expires_at`; 05b 5.29.4); `(member_id) WHERE state = 'active'` (`lease.max_active_per_member`, checked under a row lock on the member). **Not stored** the nonce, IP, the service the volunteer opened.
+**Unique** `(cell_id, attempt) WHERE state = 'submitted'` (the partial key of 05b 5.29.5: a decline, release or revocation returns the cell to `queued` without a new attempt, so one attempt may have several leases but only one submitted lease); **`(cell_id) WHERE state = 'active'`**, the race guard: at most one active lease per cell, enforced by the database, not only by application code. **Indexes** `(hard_expires_at) WHERE state = 'active'` (reaper, `lease.reap_interval_s`; the reaper expires a lease only when `hard_expires_at < now()`, so this is the lookup column, not `expires_at`; 05b 5.29.4); `(member_id) WHERE state = 'active'` (`lease.max_active_per_member`, checked under a row lock on the member). **Not stored** the nonce, IP, the service the volunteer opened.
 
 ### 5.8.3 `Submission` · `submissions` · `sub_` · `IMS` · `job_bound`
 
@@ -1569,10 +1571,10 @@ CREATE TABLE leases (
   CHECK (expires_at > issued_at),
   CHECK (hard_expires_at >= expires_at),
   CHECK (release_reason IS NULL OR state = 'released'),
-  CHECK ((state = 'active') = (ended_at IS NULL)),
-  UNIQUE (cell_id, attempt)
+  CHECK ((state = 'active') = (ended_at IS NULL))
 );
 CREATE UNIQUE INDEX leases_one_active_per_cell ON leases (cell_id) WHERE state = 'active';   -- the race guard
+CREATE UNIQUE INDEX leases_one_submitted_per_attempt ON leases (cell_id, attempt) WHERE state = 'submitted';   -- partial key of 05b 5.29.5; a decline or release keeps the attempt (S0.9.3)
 CREATE INDEX leases_reaper ON leases (hard_expires_at) WHERE state = 'active';   -- the reaper tests hard_expires_at (05b 5.29.4)
 CREATE INDEX leases_member_active ON leases (member_id) WHERE state = 'active';
 ```
