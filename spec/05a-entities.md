@@ -266,7 +266,7 @@ CREATE INDEX state_transitions_retention ON state_transitions (retention_class, 
 
 | Field | Type | Null / constraint | Note |
 | --- | --- | --- | --- |
-| `bucket_key` | text | PK, generated stored: `scope || ':' || period || ':' || COALESCE(member_id, '')` | the one key of the row (`month:2026-11:` for a month, `member_day:2026-11-21:mem_...` for a member and day); the conditional update of 05b 5.29.3 names it together with `row_version` |
+| `bucket_key` | text | PK, generated stored from `scope`, `period` and `member_id` (empty for a month) joined by `:` | the one key of the row (`month:2026-11:` for a month, `member_day:2026-11-21:mem_...` for a member and day); a conditional update by `row_version` (05b 5.29.3) addresses the row by this key |
 | `scope` | text | NN, `month` or `member_day` | one row per UTC month, one per member and UTC day |
 | `period` | text | NN | UTC `YYYY-MM` for `month`, `YYYY-MM-DD` for `member_day` |
 | `member_id` | id `mem_` | NN iff `member_day`, FK | |
