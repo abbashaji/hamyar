@@ -88,7 +88,7 @@ Evaluated on every write against the configuration as it will be at `effective_f
 | `C12` | `admission.waitlist_quote_ttl_s >= price.quote_ttl_s` | error |
 | `S9-C1` | `cell.envelope.max_submission_bytes >= 3 * cell.envelope.max_output_chars` (a character is at most 3 bytes in the accepted UTF-8 range) | error |
 | `S9-C2` | `verify.duplicate_minhash_perms` is a multiple of 4 | error |
-| `S9-C3` | `lease.max_validations >= 0` and `lease.max_gate_failures >= 1` | error |
+| `S9-C3` | retired: `lease.max_validations` has no consumer (the validations call was removed; the row is kept and marked retired in 16.9); `lease.max_gate_failures >= 1` holds by the range of its own row | error (retired) |
 | `C13` | `mint.monthly_cap_credits * 10^6 <= floor(admission.phi_ppm * accepted_cells_in_window * 30 / (inflation.throughput_window_days * 10^6)) * 10^6` with `admission.phi_ppm` in ppm, so the divisor carries 10^6, once throughput data exists (skipped in Phase 0) | warning plus a second approver on the edit (S6.* ledger file 6.11.5; `ISS-166`) |
 | `C14` | `lease.extend_s <= lease.timeout_s`; `lease.submit_grace_s <= lease.timeout_s` | error |
 | `C15` | `session.member_idle_ttl_s <= session.member_abs_ttl_s`; `session.admin_idle_ttl_s <= session.admin_abs_ttl_s` | error |
@@ -98,7 +98,7 @@ Evaluated on every write against the configuration as it will be at `effective_f
 | `C19` | `launch.required_gate_ids` contains `G0` and `G1`; `launch.min_signoffs <= count of active AdminUser` | error on the first, warning on the second (`ISS-168`) |
 | `C20` | `policy.loosen_min_approvers >= policy.tighten_min_approvers`; `policy.loosen_min_notice_days >= change.notice_days_default` | error |
 | `S16D-C1` | `price.eta_alarm_threshold <= 1 / (1 + price.v_prior + price.levy_lambda)` and `price.eta_alarm_threshold > 1 / (1 + price.v_cap + price.levy_lambda)`; `price.eta_alarm_threshold > 0` | error (first part), warning (second) |
-| `S16D-C2` | `verify.gold_rate_floor > 0` (extends `C2`) | warning |
+| `S16D-C2` | pointer to `C2`: the relation `verify.gold_rate_floor > 0` is stated and checked once, in `C2`; this row adds no second check | error |
 | `S16D-C3` | `reservation.max_horizon_days + admission.max_window_days <= credit.lifetime_days` and `<= credit.lifetime_days_accelerated`, applied only if credit held in escrow keeps its lot expiry (S6 must confirm [V]) | warning |
 | `S16D-C4` | `reservation.min_lead_s >= reservation.free_cancel_notice_s` | error |
 | `S16D-C5` | `admission.min_window_s >= admission.window_step_s` and `admission.window_step_s >= 1` | error |
@@ -116,7 +116,7 @@ Evaluated on every write against the configuration as it will be at `effective_f
 | `S16D-C17` | `grant.max_per_invite_tree_per_day <= grant.max_per_day`; `grant.max_per_invite_tree_per_day <= ratelimit.invite_tree_new_members_per_day`; `growth.referral.min_newcomer_verified_cells >= grant.required_verified_cells` | error (first part), warning (others) |
 | `S16D-C18` | `mint.per_member_daily_cap_credits * 30 <= mint.monthly_cap_credits`; `reserve.ceiling_credits >= grant.max_per_day * grant.starter_credits` | warning |
 | `S16D-C19` | count of active AdminUser >= max(`launch.min_signoffs`, `policy.loosen_min_approvers`, `ledger.reversal_min_approvers`, `appeal.ban_min_reviewers`, `template.min_reviewers_new`) (generalises `C19`) | warning |
-| `S16D-C20` | `security.two_person_actions` always contains `parameter.loosen` | error |
+| `S16D-C20` | `security.two_person_actions` is a superset of its fixed minimum list (16.16), so it always contains `parameter.loosen` [default-pending D-34] | error |
 | `S16D-C21` | `team.min_public_members >= analytics.min_cohort_k` and `team.min_public_members <= team.max_members` | warning |
 | `S16D-C22` | `ui.requester.appeal_note_max_chars <= appeal.reason_max_chars`; `ui.requester.progress_poll_s <= ui.status_poll_max_s` | error |
 | `S16D-C23` | `ledger.invariant_check_interval_s <= ledger.full_recompute_interval_s <= ledger.checkpoint_interval_s`; `ops.job_lock_ttl_s <= ops.job_max_runtime_s`; `admission.reforecast_interval_s >= metrics.rollup_interval_s` | warning |
@@ -275,8 +275,8 @@ Owner `operator`. Binding: `timeout_s`, `extend_s` and `max_extensions` are stam
 | `lease.extend_s` | duration_s | 60..3600; `C14` | 600 | `T↓` | `CAL` | S9.4.4 |
 | `lease.submit_grace_s` | duration_s | 0..900; `C14` | 120 (a late paste-back is accepted if the cell is not yet re-leased) | `T↓` | `CAL`: copy-paste timing | S9.4.4 |
 | `lease.reap_interval_s` | duration_s | 5..300 | 30 | `N` | `OPS` | S5.23, S4.19.1 |
-| `lease.max_gate_failures` | int | 1..100; `S9-C3` | 5 | `T↓` | `OPS`: honest retry counts | S9.7 |
-| `lease.max_validations` | int | 0..100; `S9-C3` | 10 | `T↓` | `CAL`: copy-paste error rate | S9.7 |
+| `lease.max_gate_failures` | int | 1..100 | 5 | `T↓` | `OPS`: honest retry counts | S9.7 |
+| `lease.max_validations` | int | 0..100; retired (see `S9-C3`) | 10 | `T↓` | `CAL`: copy-paste error rate; retired: no consumer, because the validations call was removed; the row stays so that no citing part breaks [default-pending] | none (retired) |
 | `lease.max_nonce_rotations` | int | 0..10 | 2 | `T↓` | `OPS`: reload frequency on phones | S9.4 |
 | `lease.nonce_bytes` | int | constant | 16 | `C` | `CON` | S9.4.1 |
 | `lease.decline_cooldown_s` | duration_s | constant | 0 (a decline is never punished, FD§5.5) | `C` | `CON` | S9.* |
@@ -370,7 +370,7 @@ Owner `reviewer` for the first table, `operator` for the second (the owner colum
 | `service.min_approvers` | int | 1..5 | 1 (FD§5.3: a reviewer records the answers); 2 is an owner decision [A] | `T↑` | `FND` | S7.10 |
 | `service.terms_copy_allowed_types` | json list | MIME types | `["text/html","application/pdf","text/plain"]` | `T↓` (shorter list) | `P1M`: reviewer practice | S7.10 |
 | `template.min_reviewers_new` | int | 1..5 | 2 (FD§5.7 failure mode 10) | `T↑` | `FND` | S8.* |
-| `template.min_reviewers_edit` | int | 1..5 | 1 | `T↑` | `FND` | S8.* |
+| `template.min_reviewers_edit` | int | 1..2; 0.9.5 | 1 | `T↑` | `FND` | S8.* |
 | `optin.default_purposes` | json | subset of P0..P3 | `["P0","P1"]` (FD§5.4 R8) | `T↓` (shorter list) | `FND` | S7.*, S10.* |
 | `optin.default_sensitivities` | json | subset of S0..S1 | `["S0","S1"]` (R8) | `T↓` | `FND` | S7.* |
 | `optin.default_licenses` | json | subset of L0..L3 | `["L0","L1","L2"]` [A] | `T↓` | `FND` | S7.* |
@@ -379,7 +379,7 @@ Owner `reviewer` for the first table, `operator` for the second (the owner colum
 | `appeal.window_days` | days | 1..90 | 14 | `N` | `FND` | S7.*, S10.* |
 | `appeal.max_per_decision` | int | 1..5 | 1 | `N` | `FND` | S10.* |
 | `appeal.reviewer_sla_days` | days | 1..60 | 7 (target, published) | `T↓` | `OPS` | S10.* |
-| `appeal.ban_min_reviewers` | int | 1..5 | 2 | `T↑` | `FND` | S10.* |
+| `appeal.ban_min_reviewers` | int | 2..2; 0.9.7 (floor 2) [default-pending D-34] | 2 | `T↑` | `FND` | S10.* |
 | `report.triage_sla_days` | days | 1..30 | 3 (target, published) | `T↓` | `OPS` | S10.* |
 | `report.max_per_member_per_day` | int | 1..1000 | 20 | `T↓` | `OPS` | S10.* |
 
@@ -413,7 +413,7 @@ Owner `operator`; `launch.*` needs `launch.min_signoffs` distinct admins and the
 | `launch.min_signoffs` | int | 2..5; `C19`; fail-closed floor: one sign-off is no two-person gate (FD Principle 5/8, 16d F-14, A03 finding 27) | 2 distinct admins [A]; an owner decision if the team has one person (`ISS-168`) | `T↑` | `FND` | S14.* |
 | `launch.min_approved_services` | int | 1..20; fail-closed floor: 0 would pass the G0 count with no approved service (FD Principle 5/8, 16d 16.D.8.1, A03 finding 27) | 1 (FD§8.3 exit rule; or a documented fallback) | `T↑` | `FND` | S14.*, S7.* |
 | `change.notice_days_default` | days | 1..90; `C20`; fail-closed floor: 0 would remove the advance notice of a loosening (FD Principle 5/8, 16d F-07) | 7 (FD Principle 5) | `T↑` | `FND` | S0 R10, all parts |
-| `change.notice_days_price` | days | 1..90; fail-closed floor: 0 would remove the advance notice of a loosening (FD Principle 5/8, 16d F-07) | 14 (for `price.*`, `admission.*`, `reservation.*`, `credit.*`) | `T↑` | `FND` | S6.* |
+| `change.notice_days_price` | days | 1..90; >= `change.notice_days_default`; `S16D-C9`; fail-closed floor: 0 would remove the advance notice of a loosening (FD Principle 5/8, 16d F-07) | 14 (for `price.*`, `admission.*`, `reservation.*`, `credit.*`) | `T↑` | `FND` | S6.* |
 | `change.tighten_publish_within_s` | duration_s | 0..604800 | 86,400 (tightening is immediate, its public log entry follows within a day) | `T↓` | `FND` | S7.*, 16.17 |
 | `ledger.invariant_check_interval_s` | duration_s | 5..3600 | 60 (sampled checks; the per-commit check is a constant) | `T↓` | `OPS` | S6.*, S4.* |
 | `ledger.full_recompute_interval_s` | duration_s | 60..86400 | 3600 | `T↓` | `OPS` | S6.* |
@@ -485,7 +485,7 @@ Owner `operator` (`calibration.min_samples_per_service` is `founders`). Binding:
 | `api.request_timeout_s` | duration_s | 1..300 | 30 | `N` | `TEC` | S15.*, S4.* |
 | `security.secret_rotation_days` | int | 1..365 | 90 | `T↓` | `SEC` | S10.* |
 | `security.rotate_before_public_exposure` | bool | constant | true (FD§10) | `C` | `CON` | S10.*, S14.* |
-| `security.two_person_actions` | json | subset of the action names in S10.*; always contains `parameter.loosen` (`S16D-C20`) | `["ledger.reversal","launch.signoff","parameter.loosen","killswitch.release"]` [A] | `T↑` (more actions) | `SEC` | S10.*, 16.17 |
+| `security.two_person_actions` | json | superset of the fixed minimum list (a constant of this row: `ledger.reversal`, `launch.signoff`, `parameter.loosen`, `killswitch.release`, `policy.loosen`, `launch.switch_on`, `admin.enroll`, `admin.role_change`, `member.ban`, `preregistration.lock`, the union of the actions that S10a, S14 and S15b mark as two-person) and subset of the action names in S10.*; an action may be added, never removed (`S16D-C20`) [default-pending D-34] | `["ledger.reversal","launch.signoff","parameter.loosen","killswitch.release","policy.loosen","launch.switch_on","admin.enroll","admin.role_change","member.ban","preregistration.lock"]` [A] [default-pending D-34] | `T↑` (more actions) | `SEC` | S10.*, 16.17 |
 | `calibration.min_samples_per_service` | int · cells | 1..10000 | 30 | `T↑` | `FND` | S0 0.10.4, S9.12 |
 | `metrics.rollup_interval_s` | duration_s | 60..86400 | 3600 | `N` | `OPS` | S13.*, S4.* |
 | `ops.rpo_s` | duration_s | 0..86400 | 300 [V]: no parameter bounds the log-archive interval; the S4 owner adds one or states 300 s as a target | `T↓` | `OPS`: restore drill | S4.* |

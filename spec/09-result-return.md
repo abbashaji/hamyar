@@ -80,7 +80,7 @@ The nonce is bound **relationally**: it is a column of one lease row, and that r
 - **Expiry.** The nonce has no clock of its own. It is valid exactly while the lease is `active` and `now <= grace_until` (9.4.4). Extending the lease moves `grace_until`; so does nothing else. [D]
 - **Rotation.** `POST /v1/leases/{lease_id}/nonces` (operation `rotateLeaseNonce` [A]) issues a new nonce, invalidates the old one in the same transaction, and requires an `Idempotency-Key`. It is allowed only while the lease is `active` and the nonce is unconsumed, at most `lease.max_nonce_rotations` times. It exists because a mobile page may reload between lease and paste-back. [A]
 - **Idempotent replay of `createLease` and `rotateLeaseNonce`** returns the stored response with `lease_nonce` set to `null` and `details.nonce_redelivery` = `use_rotation`. The idempotency store never holds a plaintext nonce (`ISS-98`). [D]
-- **Failed attempts.** Each gate failure on a lease increments `leases.gate_failures`. When it exceeds `lease.max_gate_failures`, further submit and validate calls on that lease return `429 RATE_LIMITED` until the lease ends. The nonce is not revoked by failures, so a third party cannot lock a donor out (a caller must already be the lease's member, SC-09). [D]
+- **Failed attempts.** Each gate failure on a lease increments `leases.gate_failures`. When it exceeds `lease.max_gate_failures`, further submit calls on that lease return `429 RATE_LIMITED` until the lease ends. The nonce is not revoked by failures, so a third party cannot lock a donor out (a caller must already be the lease's member, SC-09). [D]
 
 ### 9.4.4 Lease deadlines used by the return path
 
@@ -100,7 +100,7 @@ These are requirements on the entities owned by S5.*; names follow S0.7.
 | --- | --- | --- | --- |
 | `Lease` | `nonce_hash` | text, unique | 9.4.1 |
 | `Lease` | `nonce_issued_at`, `nonce_consumed_at` | timestamptz, nullable second | 9.4.3 |
-| `Lease` | `nonce_rotations`, `extensions`, `gate_failures`, `validations` | int, default 0 | Counters bounded by the parameters in 9.18 |
+| `Lease` | `nonce_rotations`, `extensions`, `gate_failures` | int, default 0 | Counters bounded by the parameters in 9.18 |
 | `Lease` | `expires_at`, `grace_until` | timestamptz | 9.4.4 |
 | `Lease` | index | partial unique on `(cell_id)` where `state = 'active'` | One live lease per cell |
 | `Submission` | `lease_id` | text, unique | One submission per lease |
@@ -172,7 +172,7 @@ The form never offers a way to send a URL to be fetched, a file to be parsed, or
 
 ### 9.5.4 `validateSubmission` (dry run)
 
-No endpoint: S15 has no validation call (15.B.3.3, verdict REMOVE), so the client runs this dry run locally against the work order (`output.max_chars`, `output.max_bytes`, `output.format`), and `getLease` answers liveness (`state`, `expires_at`). The local check covers SC-01..SC-11, SC-12 (state and clock only), SC-16 and the length bounds, and nothing else: no detectors (9.9), no duplicate or timing logic, no gold or audit logic. It persists nothing, does not consume the nonce, and returns `{ "would_state": "ok" | "schema_failed", "reject_code": string|null, "chars": int, "bytes": int, "normalization": {...counts...} }`. As a local check it is not counted against `lease.max_validations` or `ratelimit.member_api_rpm`; the parameter itself is neither renamed nor removed here. Reason for the restriction: the syntactic rules are public by design, whereas running the flag detectors and signals on request would give an attacker an unlimited evasion oracle. [D]
+No endpoint: S15 has no validation call (15.B.3.3, verdict REMOVE), so the client runs this dry run locally against the work order (`output.max_chars`, `output.max_bytes`, `output.format`), and `getLease` answers liveness (`state`, `expires_at`). The local check covers SC-01..SC-11, SC-12 (state and clock only), SC-16 and the length bounds, and nothing else: no detectors (9.9), no duplicate or timing logic, no gold or audit logic. It persists nothing, does not consume the nonce, and returns `{ "would_state": "ok" | "schema_failed", "reject_code": string|null, "chars": int, "bytes": int, "normalization": {...counts...} }`. Reason for the restriction: the syntactic rules are public by design, whereas running the flag detectors and signals on request would give an attacker an unlimited evasion oracle. [D]
 
 ## 9.6 Limits and rate limits
 
@@ -185,7 +185,6 @@ No endpoint: S15 has no validation call (15.B.3.3, verdict REMOVE), so the clien
 | Model label length | `cell.envelope.max_model_label_chars` (new) | Envelope (SC-08) | `400 VALIDATION_FAILED` |
 | Run of combining marks | `screen.max_combining_run` (new) | Normalization | `schema_failed`, `reject.schema_invalid` |
 | Gate failures per lease | `lease.max_gate_failures` (new) | Per-lease counter | `429 RATE_LIMITED` |
-| Dry runs per lease | `lease.max_validations` (new) | Per-lease counter | `429 RATE_LIMITED` |
 | Nonce rotations per lease | `lease.max_nonce_rotations` (new) | Per-lease counter | `422 UNPROCESSABLE` |
 | Attempts per cell | `cell.max_attempts` | S5.* (cell machine) | `Cell.exhausted` |
 
@@ -195,11 +194,11 @@ The byte limit applies to the whole request body, so the derived bound is: `max_
 
 | Scope | Parameter | Applies to | Failure |
 | --- | --- | --- | --- |
-| Member, all member endpoints | `ratelimit.member_api_rpm` | Every call, including `validateSubmission` | `429 RATE_LIMITED` with `Retry-After` |
+| Member, all member endpoints | `ratelimit.member_api_rpm` | Every call | `429 RATE_LIMITED` with `Retry-After` |
 | Member, persisted submissions | `ratelimit.member_submissions_per_hour` | Every call that reaches SC-05 on the submit route, so failed attempts count | `429 RATE_LIMITED` |
 | Member, leases | `ratelimit.member_leases_per_hour` | `createLease` | `429 RATE_LIMITED` |
 | Member, concurrent holds | `lease.max_active_per_member` | `createLease` | `422 CAP_EXCEEDED` |
-| Lease | `lease.max_gate_failures`, `lease.max_validations` | Submit and validate | `429 RATE_LIMITED` |
+| Lease | `lease.max_gate_failures` | Submit | `429 RATE_LIMITED` |
 | Unauthenticated callers | `ratelimit.public_rpm` per IP hash | Requests to the submit route with no valid token, so token guessing is throttled | `429 RATE_LIMITED` |
 
 Rate limiting runs before the body is parsed and before any lease lookup (SC-05), so a flood costs one counter increment. Rate-limit responses are identical whether or not the nonce would have matched, so they leak nothing about it. [D]
@@ -301,7 +300,7 @@ The platform never interprets submitted text as anything but data. The following
 | Building a file path, command or regular-expression source from submitted text | Regular expressions come only from reviewed template data and run on a linear-time engine or with a time limit [V: engine choice, S4.*]; submitted text is only ever the subject string | `T-inj-919` |
 | Treating submitted text as markup for a downstream tool without its escaping layer | Each export format has its rule in 9.8.1 | `T-inj-907` |
 
-**Code submitted as a result.** For a `code_change_tests` job the submitted code is the deliverable. It is stored and shown as inert text and is never run by any component: not by the web, API, admin or worker tier, and there is no isolated runner, sandbox or `test_run` check (`ISS-12`; `OD-08` default applied). The code-change checks are static: parse, the platform-computed diff applies cleanly to the supplied snapshot, file-path allowlist, size and forbidden patterns, plus a sampled audit against a second donor's output (S8.*, 8.13.3 of S8a). The requester runs the supplied tests on their own machine after delivery and may report a result; the report is a rating input and never mints or moves credit. The volunteer is never asked to run anything, and `code_change_tests` is approved and leased like any other template. [D][A]
+**Code submitted as a result.** For a `code_change_tests` job the submitted code is the deliverable. It is stored and shown as inert text and is never run by any component: not by the web, API, admin or worker tier, and there is no isolated runner, sandbox or `test_run` check (`ISS-12`; `OD-08` default applied). The code-change checks are static screening, not verification: size, parse and forbidden patterns. The template's `quality_class` is not `objective`; its verification relies on audit against other donors' outputs, blanket where `risk_class` is `high` (S8.*, 8.13.3 of S8a) [default-pending D-25]. The requester runs the supplied tests on their own machine after delivery and may report a result; the report is a rating input and never mints or moves credit. The volunteer is never asked to run anything, and `code_change_tests` is approved and leased like any other template. [D][A]
 
 ### 9.8.3 Mixed-direction text (Persian and English together)
 
@@ -714,7 +713,7 @@ The payloads are illustrative; the suite also runs a maintained public injection
 | `AC-submit-13` | Given a lease whose nonce was rotated, When the old nonce is sent, Then `403`; the new one gives `201`; a replay of `createLease` returns `lease_nonce` = null |
 | `AC-submit-14` | Given a gold cell and a normal cell, When each is submitted, Then the two responses have the same fields and no field reveals the kind |
 | `AC-submit-15` | Given stored text `<script>alert(1)</script>`, When any screen or export shows it, Then it appears as literal text and no script runs |
-| `AC-submit-16` | Given the dry run, When `validateSubmission` is called, Then nothing is persisted, the nonce is unconsumed and `lease.validations` is incremented |
+| `AC-submit-16` | Given the local dry run of 9.5.4, When the client runs it, Then no server call is made, nothing is persisted, the nonce is unconsumed and no lease counter changes |
 | `AC-submit-17` | Given a quarantined submission unreviewed for `screen.quarantine_max_age_days`, When the age-out runs twice, Then the submission is `checks_failed` once with `reject.forbidden_content` and no reliability effect, the cell is requeued once and no credit moved |
 | `AC-submit-18` | Given a `structured` slot whose submitted text is not valid JSON, When verification runs, Then the submission becomes `schema_failed` with `reject.schema_invalid` (S5.* SBT-02) and the cell is rejected |
 
@@ -770,7 +769,6 @@ Every default is an `initial configurable default`, replaced by the measurement 
 | `cell.envelope.max_json_depth` | int | 16 | 2..64 | `TEC` parser limits on real devices |
 | `cell.envelope.max_model_label_chars` | int | 80 | 1..200 | `CAL` labels donors actually type |
 | `lease.max_gate_failures` | int | 5 | 1..100 | `OPS` observed honest retry counts |
-| `lease.max_validations` | int | 10 | 0..100 | `CAL` copy-paste error rate |
 | `lease.max_nonce_rotations` | int | 2 | 0..10 | `OPS` reload frequency on phones |
 | `screen.max_combining_run` | int | 8 | 1..64 | `P1M` reviewed Persian sample |
 | `screen.output_code_action` | enum | `quarantine` | `reject`, `flag_for_review`, `quarantine` | `P1M` incident log and release ratio |
@@ -785,7 +783,7 @@ Every default is an `initial configurable default`, replaced by the measurement 
 | `verify.timing_regular_window_obs` | int | 20 | 5..1000 | `P1M` |
 | `verify.timing_regular_cv` | ratio | 0.05 [H] | 0..1 | `P1M` |
 
-The LSH layout uses 4 rows per band, so `bands = verify.duplicate_minhash_perms / 4` (32 at the default). Named cross-parameter constraints added (to be folded into S0.10.3): `S9-C1` `cell.envelope.max_submission_bytes >= 3 x cell.envelope.max_output_chars`; `S9-C2` `verify.duplicate_minhash_perms` is a multiple of 4; `S9-C3` `lease.max_validations >= 0` and `lease.max_gate_failures >= 1`. [A]
+The LSH layout uses 4 rows per band, so `bands = verify.duplicate_minhash_perms / 4` (32 at the default). Named cross-parameter constraints added (to be folded into S0.10.3): `S9-C1` `cell.envelope.max_submission_bytes >= 3 x cell.envelope.max_output_chars`; `S9-C2` `verify.duplicate_minhash_perms` is a multiple of 4. [A]
 
 ## 9.19 What this part cannot promise
 
@@ -812,7 +810,7 @@ Problems and gaps found while specifying the return path. Each resolution is alr
 | `ISS-91` | major | FD§4.4, prompt | The FD's automatic "unit tests" check for code changes runs submitted code, which contradicts the rule that submitted content is never executed | Superseded by `ISS-12` (02e A1): submitted content is never executed anywhere and no runner exists; code-change checks are static plus a sampled audit, the requester runs the supplied tests, and `code_change_tests` can be approved like any template (9.8.2); `OD-08` default applied | proposed |
 | `ISS-92` | major | FD§5.5 | The FD says outputs with links, code to run or requests for action are "flagged instead of shown" but defines no owner, queue, decision or deadline, so a flagged cell could wait forever and its donor's credit stay blocked | A quarantine lifecycle: reviewer decision (release or reject), hidden from everyone else, no reliability effect unless marked deliberate, age-out after `screen.quarantine_max_age_days`, queue-age metric and alarm (9.9.2, 9.17) | proposed |
 | `ISS-93` | major | prompt scope E, FD§4.4 | "Detection of copy-paste of another donor's output" cannot separate collusion from honest agreement: honest runs of a deterministic task produce equal short outputs, and published Commons outputs are copyable | Similarity is a signal, with two narrow hard cases (cross-cell reuse of long text) and exclusions for short or schema-constrained outputs; no output is visible before its cells are accepted; limits stated (9.11) | proposed |
-| `ISS-94` | minor | FD§3.4, S0.9.3 | A schema failure ends the attempt and burns one of `cell.max_attempts`, so an honest paste error or a griefing donor can exhaust a cell | A dry run `validateSubmission` with the syntactic checks only, the same normalization routine in the browser, and gate failures that consume nothing; the copy-paste error rate is measured under `CAL` and `cell.max_attempts` tuned [H] (9.5.4, 9.14.2) | proposed |
+| `ISS-94` | minor | FD§3.4, S0.9.3 | A schema failure ends the attempt and burns one of `cell.max_attempts`, so an honest paste error or a griefing donor can exhaust a cell | A local dry run (no server call, nothing counted) with the syntactic checks only, the same normalization routine in the browser, and gate failures that consume nothing; the copy-paste error rate is measured under `CAL` and `cell.max_attempts` tuned [H] (9.5.4, 9.14.2) | proposed |
 | `ISS-95` | minor | FD§3.4, S0.9.3 | S0.9.3 requeues an expired lease "at once", while `lease.submit_grace_s` accepts a late paste-back | The reaper acts at `grace_until = expires_at + lease.submit_grace_s`; `expires_at` stays the donor-facing deadline; state machines unchanged (9.4.4) | applied |
 | `ISS-96` | minor | FD§5.6 | "Input and output hashes" do not say whether the hash covers what arrived or what is stored, and the two differ after normalization | `raw_hash` over the received string, `output_hash` over the canonical text; the manifest uses `output_hash` (9.7.4) | applied |
 | `ISS-97` | minor | prompt scope E | A "minimum plausible time" cannot be derived before Phase 0, so a hard timing rule risks rejecting honest practiced donors | One hard floor, `verify.timing_min_s`, kept low and replaced by `CAL`; everything else is a flag, active only after `calibration.min_samples_per_service` samples (9.12) | proposed |
@@ -823,7 +821,7 @@ Problems and gaps found while specifying the return path. Each resolution is alr
 - `reject.attestation_invalid` added to the cell rejection reason list of S0.8.4 (9.13).
 - Operations `submitResult`, `validateSubmission`, `rotateLeaseNonce` and their paths (9.3, 9.5); response fields `lease_nonce`, `details.reject_code`, `details.reason`, `details.nonce_redelivery`, `details.stored_submission_id`.
 - Entity field requirements on `Lease` and `Submission`, and the table `submission_fingerprints` (9.4.5, 9.14.3).
-- The 17 added parameters and constraints `S9-C1`..`S9-C3` (9.18).
+- The 16 added parameters and constraints `S9-C1` and `S9-C2` (9.18).
 - Signal names `signal.forgery_attempt`, `signal.conflicting_resubmit`, `signal.timing_below_floor`, `signal.timing_soft_fast`, `signal.timing_regular`; flag names in 9.9 and in SC-21 of 9.14.1; ops log event `submission.gate_rejected`; metrics of 9.17.
 - `slot_context` (`prose`, `code`, `structured`) as a required declaration of every template output slot (S8.*), and the template output exemption list for flag classes (9.7.1, 9.9.1).
 - Test ids numbered from 901 in each layer, and acceptance-criteria area `submit` (9.16).
