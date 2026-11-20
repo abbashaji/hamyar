@@ -516,7 +516,7 @@ The log of every operator and reviewer action. Named so it does not collide with
 | `action` | text | NN, dotted lowercase | for example `template.approve`, `service.record_flag`, `parameter.change`, `ledger.reversal.approve`, `launch.signoff`, `killswitch.engage` |
 | `subject_type`, `subject_id` | text, id | NN | polymorphic reference |
 | `subject_hash` | hash | null | content hash that was reviewed or approved (binds an approval to exact content) |
-| `reason` | text | NN for sensitive actions (`security.two_person_actions`), <= 1000 chars | |
+| `reason` | text | NN for sensitive actions (`security.two_person_actions`), <= 1000 chars | free text; may contain personal data, so it is access-controlled (`perm.adminaction.view`) and held under the retention rule of this table (`permanent`) [default-pending D-32] |
 | `approves_action_id` | id `act_` | null, FK | the first action of a two-person pair |
 | `outcome` | enum(`admin_action_outcome`) | NN | `proposed` (a two-person action waiting for its approver), `approved`, `executed` or `expired`; a single-admin action is one row with `executed`; the table is append-only, so a later outcome is a new row that references the proposal (10a 10.12) |
 | `expires_at` | ts | NN iff `outcome = 'proposed'` | proposal time + `security.two_person_ttl_s` |
@@ -1068,7 +1068,7 @@ One dated yes / no / unknown answer for one flag of one entry (S0.8.3). [D]
 | `region` | text | NN iff `flag_key = 'regional_availability'`; otherwise null or an ISO 3166-1 alpha-2 code | one answer per region |
 | `answer` | enum(`flag_answer`) | NN | `yes`, `no`, `unknown`; **`unknown` is evaluated as `no` everywhere** |
 | `terms_copy_id` | id `tcp_` | NN unless `answer = 'unknown'` (CHECK) | the copy the answer was read from |
-| `evidence_note` | text | null, <= 2000 chars | clause reference, for example a section number; no legal conclusion |
+| `evidence_note` | text | null, <= 2000 chars | clause reference, for example a section number; no legal conclusion; free text that may contain personal data, so it is access-controlled and held under the retention rule of this table (`permanent`) [default-pending D-32] |
 | `answered_on` | day | NN | reviewer-dated |
 | `reviewer_admin_id` | id `adm_` | NN, FK | |
 | `supersedes_id` | id `fla_` | null, FK | |
@@ -1169,7 +1169,7 @@ Referral link and its two-sided bonus state (FD§6.2 V5). The bonus is a `grant`
 | `bonus_referrer_txn_id`, `bonus_newcomer_txn_id` | id `txn_` | null, FK, unique | |
 | `void_reason` | text | null | one of `farming_flag`, `same_device`, `same_invite_tree`, `member_closed`, `reserve_paused` |
 
-**Indexes** `(referrer_member_id, created_at)` (`growth.referral.max_per_referrer_per_30d`); `(state, hold_until)`. Anti-farming checks (same device, same tree, shared IP hash within TTL) read `devices` and `invites`; their outcome is only the `void_reason` code.
+**Indexes** `(referrer_member_id, created_at)` (`growth.referral.max_per_referrer_per_30d`); `(state, hold_until)`. Anti-farming checks (same device, same tree) read `devices` and `invites`; their outcome is only the `void_reason` code. No check rests on a shared IP hash (no IP hash is persisted); the per-device, per-invite-tree and per-day limits remain [default-pending D-23].
 
 ## 5.12 Configuration, change and launch-gate entities
 
@@ -1219,7 +1219,7 @@ State history of each kill switch (S0.10.6). Each row is one change; the current
 | `switch_key` | text | NN | `kill.all_minting`, `kill.all_new_jobs`, `kill.template.<tpl_id>`, `kill.service.<svc_id>`, `kill.member.<mem_id>` |
 | `state` | enum | NN | `engaged`, `released` |
 | `seq` | int64 | NN, unique | |
-| `reason` | text | NN, <= 1000 chars | |
+| `reason` | text | NN, <= 1000 chars | free text; may contain personal data, so it is access-controlled and held under the retention rule of this table (`permanent`) [default-pending D-32] |
 | `admin_action_id` | id `act_` | NN, FK | releasing needs two admins (`security.two_person_actions`) |
 
 **Indexes** `(switch_key, seq DESC)`. The view `kill_switch_current` returns the latest row per key; every guard reads it. Engaging is a tightening and takes effect at once.
@@ -1377,7 +1377,7 @@ Phase 0 calibration observation (FD§8.3 G3, S0.10.4 `CAL`). [D]
 | `copy_paste_errors` | int | NN | |
 | `auto_check_passes`, `auto_check_fails` | int | NN | |
 | `max_input_chars_completed` | int | null | feeds `cell.envelope.max_input_chars` |
-| `note` | text | null, <= 1000 chars | the reviewer is told not to enter credentials or account identifiers |
+| `note` | text | null, <= 1000 chars | the reviewer is told not to enter credentials or account identifiers; free text that may contain personal data, so it is access-controlled and held under the retention rule of this table (`permanent`) [default-pending D-32] |
 | `supersedes_id` | id `cal_` | null, FK | |
 
 `calibration.min_samples_per_service` decides when these rows may replace a default; that decision is a `ParameterVersion` with `calibration_source` pointing at the records. **Not stored** the provider account name or any identifier of the tester's account.

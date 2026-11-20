@@ -164,7 +164,7 @@ Numbered for reference as "S10.23.1 item n".
 | Hashes and manifests (with `vol_` handle) | `manifests`, `submissions` | Provenance (FD§5.6) | `job_bound`, hashes stay | No; handle maps to a member only with its key version | Requester sees the manifest without handle; admins see the handle |
 | Ledger entries and lots | `ledger_entries`, `credit_lots` | Credit | `permanent` | A pseudonymous activity trace per `mem_` account | Admins; public page shows aggregates only (S10.23.6) |
 | Reports and appeals | `reports`, `appeals` | Moderation | `retention.moderation_days` after resolution, then counts | Pseudonymous ids only | Reviewers |
-| Admin action log | `admin_actions` | Accountability | `permanent` | Contains `mem_` and `adm_` ids, no free personal text (reason codes only) | Operators (`perm.adminaction.view`, 10a 10.11) |
+| Admin action log | `admin_actions` | Accountability | `permanent` | Contains `mem_` and `adm_` ids and a `reason` in free text up to 1000 characters that may contain personal data, so it is access-controlled and held under the `permanent` retention of its table (default-pending D-32) | Operators (`perm.adminaction.view`, 10a 10.11) |
 | Request and ops logs | Log sink | Debugging | `retention.request_log_days`, `retention.ops_log_days` | No (fields in item 9) | Operators |
 | Analytics events | `events` | FD§9 measures | `retention.event_raw_days` | Member reference is `HMAC-SHA-256(secret.analytics_key[version], member_id)` [A] | Operators; aggregates only for publication |
 | Backups | Blob store | Recovery | `retention.backup_days` | Contains all of the above | Key custodians (S10.24.3) |
