@@ -548,9 +548,9 @@ Retention values are parameters of `S0.10.6` (`retention.*`); `member_bound`, `j
 | Session | Yes | SHA-256 of the token, state, expiry (10.13) | `short`, at most `retention.session_days` (90) | Authentication |
 | Public keys, key chain | Yes | `MemberKey` | `member_bound` | Authentication, tamper evidence |
 | Private keys, recovery key | Never reach the server | Device only | n/a | IC2 |
-| Device token | Yes, hashed | `Device.token_hash` | `member_bound`, then grant-memory residue for `retention.member_inactive_days` (10.9.1) | Lifetime grant limit |
-| E-mail | Optional | Ciphertext plus keyed index (10.5) | `member_bound`; deleted on removal, closure or `kill.optional_pii` | Notices only |
-| Activity time | Date only | `Member.last_active_on` | `member_bound`; inactivity of `retention.member_inactive_days` (365) closes the member | Inactivity closure |
+| Device token | Yes, hashed | `Device.device_token_hash` | `member_bound`, then grant-memory residue for `retention.member_inactive_days` (10.9.1) | Lifetime grant limit |
+| E-mail | Optional | Ciphertext plus keyed lookup hash (`email_lookup_hash`, 10.5) | `member_bound`; deleted on removal, closure or `kill.optional_pii` | Notices only |
+| Activity time | Day only | `Member.last_active_day` | `member_bound`; inactivity of `retention.member_inactive_days` (365) closes the member | Inactivity closure |
 | Precise timestamps | Yes | Leases and submissions; `Session` (`created_at`, `last_used_at` at `session.touch_min_interval_s` granularity, up to `retention.session_days`); member legs of ledger entries are day-granular (`ledger.member_timestamp_granularity_s`, 10b `ISS-104`) | Their own class (`job_bound`, `permanent`) | Required for leases and the ledger; public and member-facing surfaces coarsen them (`S12.*`) because time of day can reveal a time zone |
 | Cell and job content | Yes | `job_bound` | Payload fields purged `retention.job_payload_days` (30) after a terminal state; hashes stay | Delivery, audit, provenance |
 | Volunteer's provider account, credentials, session, chat page | Never | n/a | n/a | Ground rule 3; IC3 |
@@ -560,7 +560,7 @@ Retention values are parameters of `S0.10.6` (`retention.*`); `member_bound`, `j
 | Failed-authentication and denial counters | Counts only | Volatile counters by IP hash; metric by scope | Window; metrics `ops` | Abuse limits |
 | Security notices | Yes | `SecurityNotice` | `retention.session_days` | Member awareness (10.6 to 10.8) |
 | Recovery requests | Yes | `RecoveryRequest`, no IP | 90 days | Recovery cap |
-| Invite edges | Yes | `Invite`, `Member.invited_by_member_id` | Edge cleared `invite.accountability_days` after joining; kept `retention.moderation_days` after resolution if a party is banned | Accountability (10.10) |
+| Invite edges | Yes | `Invite`, `Member.invite_id` | Edge cleared `invite.accountability_days` after joining; kept `retention.moderation_days` after resolution if a party is banned | Accountability (10.10) |
 | Reports and appeals | Yes | `Report`, `Appeal` | `moderation`: `retention.moderation_days` (180), then counts | Safety process |
 | Admin actions | Yes | `AdminAction` with `adm_` ids only | `permanent` | Accountability of operators |
 | Admin credentials | Yes | Public key, sign count, label | `permanent` while the admin exists | WebAuthn |
