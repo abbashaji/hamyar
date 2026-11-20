@@ -283,7 +283,7 @@ A `Device` is one browser profile that holds a random 128-bit device token (10.3
 
 **Tradeoff, stated plainly:** weak device identity means an adversary evades device and IP limits at near-zero cost. What bounds farming is economics (a verified cell before any grant, caps, expiry) and vouching (10.10). A stronger device identifier would protect the platform slightly more and every honest member much less, so it is not used (IC7). The server can link two identities created from the same browser profile through the device token; members who want separate pseudonyms use separate browser profiles, and the settings screen offers 'forget this device', which replaces the token. [D]
 
-**Grant memory** [D]: when a member closes, the `Device` row is deleted unless `grants_issued` is above zero; then only `{token_hash, grants_issued}` remains for `retention.member_inactive_days`, then it is deleted. Reason: `grant.max_per_device` is a lifetime limit, so it needs memory, and a hash of a random token tied to nothing else costs little privacy (`ISS-103`).
+**Grant memory** [D]: when a member closes, the `Device` row is deleted unless `grants_claimed` is above zero; then only `{id, device_token_hash, grants_claimed}` remains for `retention.member_inactive_days`, then it is deleted. Reason: `grant.max_per_device` is a lifetime limit, so it needs memory, and a hash of a random token tied to nothing else costs little privacy (`ISS-103`).
 
 ### 10.9.2 Limits [D]
 
