@@ -319,9 +319,9 @@ The sums are plain arithmetic of the columns (3 + 2 + 10 + 5 + 20 + 3 + 60 + 10 
 +--------------------------------------------------+
 ```
 
-Five visible steps: Notice, Card, Hand-off, Paste-back, Done. Identity creation is not a visible step.
+Five visible steps: Notice, Card, Hand-off, Paste-back, Done. Identity creation is not a visible step. On a member's first cell the first-use consent screen of S11.82 (`spec/11d-i18n-copy.md`) appears once between the card (F5) and the hand-off (F6), because F6 is the last step Hamyar controls before the provider's Send (X2); it is not a step of this strip, its time is not in the budgets above [H], and nothing is sent, copied or opened before the member agrees (D-18a, default-pending).
 
-**One-time notice (F3), copy intent.** Exactly three facts and one button: (1) you use your own account and press Send yourself; (2) the text you copy comes from a stranger, was reviewed, can be read in full, and any task may be declined; (3) your provider's terms and your country's rules may limit this, which is your decision [V]. No checkbox wall. The notice version is stored with the member; a changed version is shown again once.
+**One-time notice (F3), copy intent.** Exactly three facts and one button: (1) you use your own account and press Send yourself; (2) the text you copy comes from a stranger, was reviewed, can be read in full, and any task may be declined; (3) your provider's terms and your country's rules may limit this, which is your decision [V]. No checkbox wall. The notice version is stored with the member; a changed version is shown again once. The full notices and the consent boxes of `spec/11d-i18n-copy.md` (S11.81, `copy.consent.join.*`) are not part of F2 or F3: they are shown once, on the first-use consent screen of S11.82, before the member's first Send, and nothing is sent before it is acknowledged (D-18a, default-pending).
 
 | Copy key | `fa` (draft) | `en` |
 | --- | --- | --- |

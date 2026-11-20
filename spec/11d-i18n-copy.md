@@ -27,7 +27,7 @@ This part completes the last bullet of prompt scope F: Persian first (full RTL, 
 - MUST, MUST NOT, SHOULD and MAY carry their RFC 2119 meaning (S0.2). Evidence tags are those of S0.2; `[A]` assumptions are collected in S11.86.
 - Persian text uses the zero-width non-joiner (ZWNJ, U+200C) where Persian orthography needs it, for example after the verb prefix and before the plural suffix. It is invisible; a file where it is missing is wrong, not different.
 - Every number is derived by a formula shown next to it or labeled `initial configurable default` and listed in S11.85. Copy contains no hard-coded number that comes from a parameter (S11.80).
-- Heading numbers of this file start at 11.70 so that they cannot collide with the other files of S11 [A]; see `ISS-117`.
+- Heading numbers of this file start at 11.70 so that they cannot collide with the other files of S11 [A]; see `ISS-17001`.
 
 **The decisions of this part in one table** [D]
 
@@ -426,7 +426,7 @@ copy_entry:
   hash:           sha256:<hex> over RFC 8785 canonical JSON of {key, fa, en, version}   # S0.6
 ```
 
-**Review status** `copy_review_status` [D][A] (the value `needs_human_and_legal_review` is the marker of S0.5; the others are added here, `ISS-118`):
+**Review status** `copy_review_status` [D][A] (the value `needs_human_and_legal_review` is the marker of S0.5; the others are added here, `ISS-17002`):
 
 | Value | Meaning | Allowed next values |
 | --- | --- | --- |
@@ -528,7 +528,7 @@ The notice is shown to every new member and does not depend on any guess about l
 | `copy.identity.recovery_key_warning.title` | همین حالا کلید بازیابی خود را ذخیره کنید | Save your recovery key now | needs human and legal review |
 | `copy.identity.recovery_key_warning.body` | این کلید تنها راه بازگرداندن هویت شما در همیار است، اگر این دستگاه یا اطلاعات آن را از دست بدهید. ¶ • این کلید فقط یک‌بار و همین‌جا نشان داده می‌شود. اعلام‌شده: همیار نسخه‌ای از آن نگه نمی‌دارد که بتواند دوباره به شما نشان دهد. • هرکس این کلید را داشته باشد می‌تواند هویت شما را تصاحب کند و اعتبار شما را خرج کند. آن را به کسی ندهید و برای کسی نفرستید. اعلام‌شده: تیم همیار هرگز آن را نمی‌خواهد. • آن را در جای امنی نگه دارید که با شرایط خودتان سازگار باشد. هر کسی که به محل نگهداری دسترسی داشته باشد می‌تواند نسخهٔ ذخیره‌شده را پیدا کند. • اگر آن را گم کنید، همیار نمی‌تواند هویت شما را برایتان بازگرداند. • اعلام‌شده: پس از بازیابی، هویتِ بازیابی‌شده به‌مدت {recovery_cooldown} نمی‌تواند کار شروع کند یا اعتبار خرج کند. این یک محدودیت برای جلوگیری از سوءاستفاده است. | This key is the only way to get your Hamyar identity back if you lose this device or its data. ¶ • It is shown once, here. Declared: Hamyar does not keep a copy that it can show you again. • Anyone who has this key can take over your identity and spend your credit. Do not share it, and do not send it to anyone. Declared: the Hamyar team never asks for it. • Keep it somewhere safe that fits your own situation. A saved copy can be found by anyone who can reach the place where you saved it. • If you lose it, Hamyar cannot restore your identity for you. • Declared: after a recovery, the recovered identity cannot start jobs or spend credit for {recovery_cooldown}. This is an abuse limit. | needs human and legal review |
 | `copy.identity.recovery_key_warning.confirm` | کلید بازیابی‌ام را ذخیره کرده‌ام و می‌دانم همیار نمی‌تواند آن را برایم بازگرداند. | I have saved my recovery key. I understand that Hamyar cannot restore it for me. | needs human and legal review |
-| `copy.consent.join.title` | پیش از عضویت | Before you join | needs human and legal review |
+| `copy.consent.join.title` | پیش از نخستین ارسال | Before your first Send | needs human and legal review |
 | `copy.consent.join.intro` | لطفاً یادداشت‌های بالا را بخوانید. هر کادر را فقط اگر برای شما درست است علامت بزنید. برای ادامه، همهٔ کادرها لازم است. | Please read the notes above. Tick each box only if it is true for you. You need all of them to continue. | needs human and legal review |
 | `copy.consent.join.risk_ack` | یادداشت دربارهٔ خطر برای حساب‌های خودم را خوانده‌ام. می‌دانم ممکن است سرویسی حساب من را محدود یا مسدود کند و خودم تصمیم می‌گیرم که مشارکت کنم یا نه. | I have read the note on risks to my own accounts. I understand that a service may limit or suspend my account, and I decide for myself whether to take part. | needs human and legal review |
 | `copy.consent.join.privacy_ack` | آنچه همیار جمع‌آوری می‌کند و آنچه نمی‌تواند وعده دهد را خوانده‌ام. می‌دانم همیار «با نام مستعار» است، نه «ناشناس». | I have read what Hamyar collects and what it cannot promise. I understand that Hamyar is pseudonymous, not anonymous. | needs human and legal review |
@@ -557,8 +557,8 @@ The notice is shown to every new member and does not depend on any guess about l
 
 | Notice group (keys) | Where it appears | Rule |
 | --- | --- | --- |
-| `copy.safety.iran_notice.*`, `copy.risk.account_notice.*`, `copy.privacy.pseudonymity_notice.*`, `copy.credit.not_money.*`, `copy.declared.not_guaranteed.*`, `copy.license.downstream_uncontrolled.body`, `copy.policy.no_circumvention.*` | The join page, in this order (safety first), displayed in full, not collapsed; then the consent keys | Static, readable without JavaScript and before an identity exists (S11.79) |
-| `copy.consent.join.*` | Below the notices on the join page | Every box starts unticked; all are required; no box is hidden or collapsed; the continue button stays focusable and explains what is missing (S11.78) |
+| `copy.safety.iran_notice.*`, `copy.risk.account_notice.*`, `copy.privacy.pseudonymity_notice.*`, `copy.credit.not_money.*`, `copy.declared.not_guaranteed.*`, `copy.license.downstream_uncontrolled.body`, `copy.policy.no_circumvention.*` | The first-use consent screen, shown once before the member's first Send (D-18a), in this order (safety first), displayed in full, not collapsed; then the consent keys. The join page shows only the three-fact notice of `spec/11a-volunteer-ux.md` F3 | Static text, also on the public notices page, readable without JavaScript and before an identity exists (S11.79); nothing is sent before the screen is acknowledged |
+| `copy.consent.join.*` | Below the notices on the first-use consent screen, not on the join page (the key names keep `join` because no id is renamed) | Every box starts unticked; all are required; no box is hidden or collapsed; the continue button stays focusable and explains what is missing (S11.78) |
 | `copy.identity.recovery_key_warning.*` | Once, after the member's first accepted cell, as decided in `ISS-113` of S11 (`spec/11a-volunteer-ux.md`, 11.18; an owner decision); after a key rotation from settings a new key is shown once in the same way; a key is never shown a second time | The confirm step gates leaving the key screen, not the app; the unsaved-key marker stays until confirmed |
 | `copy.injection.advice.*` | The cell card, one tap away, and mandatory expansion on first use (FD§5.5); the help page | `copy.injection.clean_chat_hint.default` is the target of `adapter.clean_chat_hint_key` (S0.8.3) when an entry sets no hint of its own |
 | `copy.moderation.decline_explainer`, `copy.moderation.report_explainer` | Next to the decline and report buttons of the cell card; the help page | |
@@ -588,7 +588,7 @@ The keys above are not API error texts. API errors use their own `copy.*` keys t
 | `{draft_ttl}` | duration | `ui.draft.ttl_s` |
 | `{window}` | duration | the quoted completion window of the job (S6.*) |
 | `{topic}` | topic | display name of a `TopicCategory` (stored as a `{fa, en}` pair) |
-| `{min_age_years}` | number | `identity.min_age_years` (requested of S10.*, `ISS-119`); the age line is rendered only when the value is greater than 0 |
+| `{min_age_years}` | number | `identity.min_age_years` (requested of S10.*, `ISS-17003`); the age line is rendered only when the value is greater than 0 |
 
 **Declared-claim register** [D]. A notice may say only what the system does. Each promise-like claim below names what makes it true; a row marked [V] is a dependency on another part that must be confirmed there before the notice is approved.
 
@@ -732,13 +732,13 @@ Test cases are named here by acceptance id; S18.* assigns `T-*` ids and layers (
 | `AC-i18n-32` | every key with `promise: true` | the declared check runs | `اعلام‌شده` is present in `fa` and `declared` in `en`; guarantee words occur only in allowlisted negated sentences |
 | `AC-i18n-33` | an approved key | its Persian or English text is edited | its version increases, both languages return to `needs_human_and_legal_review`, and the hash in the manifest changes |
 | `AC-i18n-34` | a request to set `launch.members_may_join` to true | any required key of S11.81 is not `approved` | the request is refused with `LAUNCH_GATE_CLOSED` |
-| `AC-i18n-35` | a member accepts the consent boxes | the consent is recorded | the stored record holds `copy_key`, `copy_hash` and `accepted_at` for each box and no text; a hash that is in neither the current nor the previous manifest is refused |
-| `AC-i18n-36` | the join page | it loads | all notices are shown in full in the order of S11.82, every box is unticked, and the continue button stays focusable and says what is missing |
-| `AC-i18n-37` | a new member from any network | the join page is shown | the safety note appears for everyone, and no code path reads or derives a location |
+| `AC-i18n-35` | a member accepts the consent boxes of the first-use consent screen | the consent is recorded | the stored record holds `copy_key`, `copy_hash` and `accepted_at` for each box and no text; a hash that is in neither the current nor the previous manifest is refused |
+| `AC-i18n-36` | a member who has joined and has not yet acknowledged the first-use consent | the member reaches the hand-off of their first cell, before any Send | the first-use consent screen shows all notices in full in the order of S11.82, every box is unticked, and the continue button stays focusable and says what is missing; nothing is sent, copied or opened until the member agrees; the join page itself shows only the three-fact notice and no consent box |
+| `AC-i18n-37` | a new member from any network | the first-use consent screen is shown | the safety note appears for everyone, and no code path reads or derives a location |
 
 ## 11.85 Parameters introduced by this part
 
-Names follow S0.10.1 (areas `i18n`, `ui`, `screen`, `identity`). Every default is an `initial configurable default` or a formula shown in the row; S16.* completes the rows without renaming (convention gap, `ISS-119` and the note after the issues table). Owner is `operator` except `screen.*`, which is `reviewer`. `Replaced by` uses the codes of S0.10.4. [D]
+Names follow S0.10.1 (areas `i18n`, `ui`, `screen`, `identity`). Every default is an `initial configurable default` or a formula shown in the row; S16.* completes the rows without renaming (convention gap, `ISS-17003` and the note after the issues table). Owner is `operator` except `screen.*`, which is `reviewer`. `Replaced by` uses the codes of S0.10.4. [D]
 
 | Name | Type | Initial configurable default | Validation | Replaced by |
 | --- | --- | --- | --- | --- |
@@ -768,7 +768,7 @@ Names follow S0.10.1 (areas `i18n`, `ui`, `screen`, `identity`). Every default i
 | `ui.retry.base_delay_s` | duration_s | 2 | 1..30 | `OPS` |
 | `ui.retry.max_delay_s` | duration_s | 60 | at least `ui.retry.base_delay_s`; at most 600 | `OPS` |
 | `screen.bidi_control_action` | enum | `flag_for_review` | `reject`, `flag_for_review`, `ignore_display_only` | `P1M` incident log |
-| `identity.min_age_years` | int | 0 (zero means the age line is not shown; a legal decision, `ISS-119`) | 0..99 | `CNS` |
+| `identity.min_age_years` | int | 0 (zero means the age line is not shown; a legal decision, `ISS-17003`) | 0..99 | `CNS` |
 
 Existing parameters used by this part: `i18n.default_locale`, `i18n.supported_locales`, `i18n.digits_default_fa`, `i18n.dual_calendar_detail`, `public.counter_refresh_s`, `lease.timeout_s`, `lease.max_extensions`, `lease.extend_s`, `lease.submit_grace_s`, `cell.envelope.*`, `retention.*`, `identity.recovery_cooldown_s`, `report.triage_sla_days`, `appeal.window_days`, `analytics.third_party_trackers`, `analytics.cookies_enabled`, `launch.min_signoffs`.
 
@@ -778,14 +778,14 @@ Existing parameters used by this part: `i18n.default_locale`, `i18n.supported_lo
 
 | Assumption | Could be overturned by |
 | --- | --- |
-| Heading numbers of this file start at 11.70; issue ids `ISS-117` to `ISS-119` are used (S11.70) | the plan, at assembly |
+| Heading numbers of this file start at 11.70; issue ids `ISS-17001` to `ISS-17003` are used (S11.70) | the plan, at assembly |
 | WCAG 2.2 level AA is the target, with the lease-timing deviation (S11.78) | the owner choosing another level, or a lower one for operator tools |
 | `fa` defaults to Persian digits (S11.73) | the Phase 1 interview result |
 | The clock is 24-hour in both locales (S11.74) | the owner or interview feedback |
 | Public pages carry a `/fa/` or `/en/` path prefix (S11.71) | the stack decision in S4.* |
 | Locale, digits, calendar and time zone live on the device, not on the server (S11.71) | a decision to sync preferences |
 | The calendar range to validate is 2026-01-01 to 2040-12-31 (S11.74) | the longest horizon that S6.* decides |
-| The copy review statuses and the manifest (S11.80) | `ISS-118` resolution |
+| The copy review statuses and the manifest (S11.80) | `ISS-17002` resolution |
 | `appeal` is rendered `درخواست بازبینی` (S11.83) | the native-speaking reviewer |
 | English is written first for counsel, no precedence clause is written (S11.77) | counsel |
 | Hashed font files are cached as immutable; a service worker may cache the shell (S11.76, S11.79) | S10.* policy on service workers |
@@ -819,7 +819,7 @@ Each row is a requirement that this part places on another part. If the owner of
 | S5.*, S7.*, S8.* | Member-visible human-authored strings are `{fa, en}` pairs or copy keys (S11.71); templates declare `lang` on slots and output fields (S11.75); comparators declare their `fold_fa` options; declines are never counted in reliability or trust (declared-claim register) |
 | S9.* | Screen bidi controls per `screen.bidi_control_action` and quarantine flagged submissions; judge size and schema on the raw text, with no trimming (S11.75); lease responses carry `expires_at` and `server_time` (S11.79) |
 | S10.* | Content security policy limited to the page and API origins; recovery key alphabet without ambiguous characters; *clear local data* versus key deletion (S11.79); e-mail storage form; validate consent hashes against the current and previous `copy_manifest`; no code path that derives location; add `identity.min_age_years` |
-| S12.* | A public notices page (S11.82); weekly aggregates labeled as UTC weeks; share-card text follows S11.72 to S11.75; a change-log kind for notice text that changes a promise (`ISS-118`) |
+| S12.* | A public notices page (S11.82); weekly aggregates labeled as UTC weeks; share-card text follows S11.72 to S11.75; a change-log kind for notice text that changes a promise (`ISS-17002`) |
 | S13.* | Add to the Phase 1 interview guide: digits preference, time-axis read test, the terms `انصراف` and `درخواست بازبینی`, comprehension of the consent boxes |
 | S14.* | Launch gate items: all required copy keys `approved` before `launch.members_may_join` can be true (`AC-i18n-34`); the G1 safety-note item; the G2 items for RTL rendering, accessibility pass and low-bandwidth budgets on real devices; the recovery-key procedure of the team |
 | S15.* | Error bodies keep `details.copy_key` and carry no prose; no locale parameter; the consent write accepts `copy_key` and `copy_hash`; lease responses carry `server_time` |
@@ -833,8 +833,8 @@ Problems and gaps found while writing this part. Each resolution is already appl
 
 | id | severity | fd_ref | issue | resolution | status |
 | --- | --- | --- | --- | --- | --- |
-| `ISS-117` | minor | prompt | S0.4 gives a split part three issue sub-blocks and S0.13 gives no heading-number plan, but part 11 has at least four files, so a fourth file has no sub-block and its `S11.<m>` headings could collide with the other three | This file uses `ISS-117` to `ISS-119` and headings from `11.70`; the plan or C-001 assigns final blocks and numbers at assembly and updates references | proposed |
-| `ISS-118` | major | FD§5.5, FD§9, prompt F | The FD requires explicit, informed opt-in (FD§9) and notices that change only in public, but S0 has no place to record which notice text a member accepted, no review state for legal text, and no change-log kind for notices | (a) `OptIn` rows of a new kind `consent` carry `copy_key`, `copy_hash`, `accepted_at` and no text; (b) a new enum `copy_review_status` (S11.80); (c) a `copy_manifest` shipped with each build; (d) a change-log entry kind `notice` for any approved text change that alters a promise | proposed |
-| `ISS-119` | major | FD§5.3 (S3 includes minors' data), FD§8.3 | The FD keeps minors' data out of jobs but says nothing about a minimum age for members, and consent text normally needs one; setting it is a legal decision this spec cannot make | A parameter `identity.min_age_years`, default 0 (the age line `copy.consent.join.age_confirmation` is not rendered); counsel sets it [V]; also listed as an owner decision in S3.* | needs_owner |
+| `ISS-17001` | minor | prompt | S0.4 gives a split part three issue sub-blocks and S0.13 gives no heading-number plan, but part 11 has at least four files, so a fourth file has no sub-block and its `S11.<m>` headings could collide with the other three | This file uses `ISS-17001` to `ISS-17003` and headings from `11.70`; the plan or C-001 assigns final blocks and numbers at assembly and updates references | proposed |
+| `ISS-17002` | major | FD§5.5, FD§9, prompt F | The FD requires explicit, informed opt-in (FD§9) and notices that change only in public, but S0 has no place to record which notice text a member accepted, no review state for legal text, and no change-log kind for notices | (a) `OptIn` rows of a new kind `consent` carry `copy_key`, `copy_hash`, `accepted_at` and no text; (b) a new enum `copy_review_status` (S11.80); (c) a `copy_manifest` shipped with each build; (d) a change-log entry kind `notice` for any approved text change that alters a promise | proposed |
+| `ISS-17003` | major | FD§5.3 (S3 includes minors' data), FD§8.3 | The FD keeps minors' data out of jobs but says nothing about a minimum age for members, and consent text normally needs one; setting it is a legal decision this spec cannot make | A parameter `identity.min_age_years`, default 0 (the age line `copy.consent.join.age_confirmation` is not rendered); counsel sets it [V]; also listed as an owner decision in S3.* | needs_owner |
 
-Convention additions made by this part (not issues, listed so C-001 can fold them back): the parameters of S11.85 (names are new, no existing name is changed); the enum `copy_review_status` and the copy record of S11.80; the copy key groups of S11.81 beyond the example key of S0.5; the client-local draft states of S11.79 (explicitly not domain states); the `OptIn` kind `consent` and the change-log kind `notice` (`ISS-118`); the use of `fa` and `en` pairs for stored human-authored strings (S11.71).
+Convention additions made by this part (not issues, listed so C-001 can fold them back): the parameters of S11.85 (names are new, no existing name is changed); the enum `copy_review_status` and the copy record of S11.80; the copy key groups of S11.81 beyond the example key of S0.5; the client-local draft states of S11.79 (explicitly not domain states); the `OptIn` kind `consent` and the change-log kind `notice` (`ISS-17002`); the use of `fa` and `en` pairs for stored human-authored strings (S11.71).
