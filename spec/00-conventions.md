@@ -244,9 +244,9 @@ If the verification pool is not a whole number of cells, `floor` applies and the
 | `InvariantCheck` | `invariant_checks` | `ivc_` | `ops` | Result of one run of a ledger invariant |
 | `Alarm` | `alarms` | `alm_` | `ops` | A raised alarm and its acknowledgement |
 | `StateTransition` | `state_transitions` | `stt_` | the class of the parent entity (`job_bound`, `member_bound`, `moderation` or `permanent`), kept in the column `retention_class` | Append-only, gapless history of every state change of every machine in 0.9, so an appeal or a provenance question can outlive the raw event log (S5b 5.21.3) |
-| `MintHeadroom` | `mint_headroom` | none (a counter table without a primary key, S5a) | `permanent` | Counter of Commons mint capacity per UTC month and member day: minted and reserved amounts against the cap, changed only by conditional update (S5b 5.29.3, S6.*) |
+| `MintHeadroom` | `mint_headroom` | none (primary key `bucket_key`, S5a) | `permanent` for month rows, `member_bound` for `member_day` rows (S5a) | Counter of Commons mint capacity per UTC month and member day: minted and reserved amounts against the cap, changed only by conditional update (S5b 5.29.3, S6.*) |
 
-Every prefix above is unique and exactly three letters, except that `mint_headroom` has none (a counter table without a primary key, S5a) [V: S5a confirms the entity name]; the only other prefixes in use are `req_` (request ids, a ULID after the underscore) and `vol_` (provenance handles, 32 hexadecimal characters, 0.6.4); neither names an entity. [D]
+Every prefix above is unique and exactly three letters, except that `mint_headroom` has none (its primary key is `bucket_key`, S5a); the only other prefixes in use are `req_` (request ids, a ULID after the underscore) and `vol_` (provenance handles, 32 hexadecimal characters, 0.6.4); neither names an entity. [D]
 
 ## 0.8 Enumerations
 
@@ -606,7 +606,7 @@ Every accepted change writes one `ParameterVersion`, one `ChangeLogEntry` (publi
 | `policy`, `screen`, `service`, `template`, `optin`, `appeal`, `report` | `reviewer` | S7.*, S8.*, S10.* |
 | `identity`, `session`, `invite`, `ratelimit`, `retention`, `security` | `operator` | S10.* |
 | `launch`, `change` | `operator` (two approvers for `launch`) | S14.* |
-| `analytics`, `experiment`, `growth`, `team`, `public`, `metrics`, `calibration` | `founders` for thresholds, `operator` otherwise | S12.*, S13.* |
+| `analytics`, `experiment`, `growth`, `team`, `public`, `metrics`, `calibration`, `anomaly`, `commons`, `audit` | `founders` for thresholds (`anomaly.*`), `operator` otherwise (`commons.*`, `audit.*`) [A] [default-pending D-31] | S12.*, S13.*, S5.* (05b MT-06, JT-15, CT-19), S16 16.C.13 |
 | `api`, `ui`, `i18n` | `operator` | S11.*, S15.* |
 
 ### 0.10.6 Initial parameter list
@@ -673,7 +673,7 @@ The list below is the FULL set of parameter names; names are stable and C-022 co
 | `ledger.allow_negative_balance` | bool | false | constant | `CON` |
 | `job.max_overrun_ratio` | ratio | 2.0 (a job stops with partial settlement at 2 x its quoted window) | >= 1 | `P1M` |
 | `job.max_upload_bytes` | int | 4,194,304 (300 cells x 4,000 chars x up to 3 bytes of UTF-8 is about 3.6 MB) | 1..104857600 | `TEC` |
-| `change.notice_days_default` | days | 7 (FD Principle 5) | 1..90 | `FND` |
+| `change.notice_days_default` | days | 7 (FD Principle 5) | 1..90; `C20`; fail-closed floor: 0 would remove the advance notice of a loosening (FD Principle 5/8, 16d F-07) | `FND` |
 | `change.notice_days_price` | days | 14 (for `price.*`, `credit.*`, `admission.*`, `reservation.*`) | 1..90; >= `change.notice_days_default`; S16D-C9 | `FND` |
 | `change.tighten_publish_within_s` | duration_s | 86,400 (tightening is immediate, its public log entry follows within a day) | 0..604800 | `FND` |
 
@@ -832,6 +832,15 @@ The list below is the FULL set of parameter names; names are stable and C-022 co
 | `security.two_person_actions` | json | `["ledger.reversal","launch.signoff","parameter.loosen","killswitch.release","policy.loosen","launch.switch_on","member.ban","invite.seed_issue","admin.role_grant","admin.credential_add","admin.credential_unlock","disclosure.release","secret.emergency_access","preregistration.lock"]` [A] [default-pending D-34] | superset of the fixed minimum list (a constant of this row, equal to the table of S10a 10.12: `ledger.reversal`, `launch.signoff`, `parameter.loosen`, `killswitch.release`, `policy.loosen`, `launch.switch_on`, `member.ban`, `invite.seed_issue`, `admin.role_grant`, `admin.credential_add`, `admin.credential_unlock`, `disclosure.release`, `secret.emergency_access`, `preregistration.lock`, the union of the actions that S10a, S14 and S15b mark as two-person plus the two that S10b requires) and subset of the action names in S10.*; an action may be added, never removed [default-pending D-34] | `SEC` |
 | `calibration.min_samples_per_service` | int | 30 cells per service before a `CAL` value may replace a default | 1..10000 | `FND` |
 | `metrics.rollup_interval_s` | duration_s | 3600 | 60..86400 | `OPS` |
+
+**Table D: anomaly, commons, audit** (names of S16 16.C.13, owner roles of 0.10.5) [A] [default-pending D-31]
+
+| Name | Type | Initial configurable default | Validation | Replaced by |
+| --- | --- | --- | --- | --- |
+| `anomaly.restrict_count` | int | 3 (findings that restrict a member; one finding alone never does) [A] [default-pending D-31] | 2..20 | `P1M` |
+| `anomaly.restrict_window_days` | days | 14 [A] [default-pending D-31] | 1..90 | `P1M` |
+| `commons.job_overrun_days` | days | 30 (a Commons job closes `expired` after this many days) [A] [default-pending D-31] | 1..365 | `OPS` |
+| `audit.flag_age_out_days` | days | 14 (a `flagged_for_audit` cell then escalates in the audit queue) [A] [default-pending D-31] | 1..90 | `OPS` |
 
 **Kill switches** (entity `KillSwitch`, default `released`, engaged by an operator with a logged reason; S14.*): `kill.all_minting`, `kill.all_new_jobs`, `kill.template.<tpl_id>`, `kill.service.<svc_id>`, `kill.member.<mem_id>`. **Feature flags** (entity `FeatureFlag`, default off): `ff.growth.v1_fast_path`, `ff.growth.v2_live_counter`, `ff.growth.v3_share_card`, `ff.growth.v4_teams`, `ff.growth.v5_referral`, `ff.growth.v6_milestones`, `ff.channel.human_review`, `ff.job.reservations`, `ff.public.ledger_page`, `ff.experiment.expiry_arm`. Each experiment-capable flag has an `Experiment` with a logged assignment (S12.*, S13.*). [D]
 
