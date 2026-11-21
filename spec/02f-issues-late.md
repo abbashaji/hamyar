@@ -1,6 +1,6 @@
 # 2.F Late issues raised by parts
 
-*Spec part 2.F · owner cell C-060 · closes the register gap reported by `scripts/check_issues.py`: the `## Issues raised` tables of `spec/16b-parameters-a.md` (S16B), `spec/16c-parameters-b.md` (S16C) and `spec/20-glossary.md` (S20) hold 37 ids that no file `spec/02*.md` lists · each row is copied from the raising part with its id, severity, status and tags unchanged; nothing is invented · the `fd_ref` values are as the part gave them and were not re-checked against the Founding Document (FD) here · the register files `spec/02-issues.md`, `02b`, `02c` and `02d` are not edited · nothing here is legal advice, and nothing here has been verified against any provider's terms or any law.*
+*Spec part 2.F · owner cell C-060 · closes the register gap reported by `scripts/check_issues.py`: the `## Issues raised` tables of `spec/16b-parameters-a.md` (S16B), `spec/16c-parameters-b.md` (S16C) and `spec/20-glossary.md` (S20) hold 37 ids that no file `spec/02*.md` lists, and 2.F.5 adds the 3 ids `ISS-17001`..`ISS-17003` of `spec/11d-i18n-copy.md` (S11D), 40 ids in all [default-pending D-27] · each row is copied from the raising part with its id, severity, status and tags unchanged; nothing is invented · the `fd_ref` values are as the part gave them and were not re-checked against the Founding Document (FD) here · the register files `spec/02-issues.md`, `02b`, `02c` and `02d` are not edited · nothing here is legal advice, and nothing here has been verified against any provider's terms or any law.*
 
 ## 2.F.1 How to read this register
 
@@ -11,7 +11,7 @@
 - Where this register and a part resolve the same issue differently, `spec/02-issues.md` 2.9 item 3 applies: the central register wins. This file only reports the difference. [D]
 - `scripts/check_issues.py` listed exactly three parts with missing ids at the time of writing: `spec/16b-parameters-a.md` (21 ids, `ISS-16001`..`ISS-16021`), `spec/16c-parameters-b.md` (13 ids, `ISS-16101`..`ISS-16113`) and `spec/20-glossary.md` (3 ids, `ISS-201`..`ISS-203`). Every other part file was already covered. [D]
 
-Counts: 37 issues from three files: 0 `blocking`, 4 `major`, 33 `minor`. Status: 29 `proposed`, 1 `applied`, 7 `needs_owner`. S16B contributes 21 (1 major, 20 minor), S16C 13 (3 major, 10 minor), S20 3 (3 minor). [D]
+Counts: 40 issues from four files: 0 `blocking`, 6 `major`, 34 `minor`. Status: 31 `proposed`, 1 `applied`, 8 `needs_owner`. S16B contributes 21 (1 major, 20 minor), S16C 13 (3 major, 10 minor), S20 3 (3 minor), S11D 3 (2 major, 1 minor; 2.F.5). [D]
 
 ## 2.F.2 Issues raised by S16B (`ISS-16001`..`ISS-16021`)
 
