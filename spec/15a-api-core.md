@@ -350,7 +350,7 @@ The list carries card metadata only, never the prompt (limits bulk harvesting of
 createLease(member, cell_id, service_id):        req { service_id: id<svc> }
   201 { lease: Lease, cell: { id: id<cel>, card: CellCard }, work: WorkOrder, nonce: b64u<16> }   nonce appears here and in issueLeaseNonce only
   pipeline gates:   member active; launch.minting_enabled and kill.all_minting for Commons cells; launch.member_jobs_enabled for member-job cells; kill switches (template, service); the member's kill.member (403 FORBIDDEN, account_frozen); exception to step 7: the Commons, member-job, kill-switch and service-gate checks run after the cell is resolved (step 9), so a cell the caller cannot see stays 404, while the kill.member check stays at step 7
-  service gate:     service_gate(service_id, 'continue') of S14.3 (gate flags, stale copy, review_due grace) fails -> 403 FORBIDDEN (service_gate_regressed, details.service_id) [A][P: S14 owner]
+  service gate:     service_gate(service_id, 'continue') of S14.3 (gate flags, stale copy, review_due grace) fails -> 403 FORBIDDEN (service_gate_regressed, details.service_ids: all regressed services, in svc_ order) [A][P: S14 owner]
   visibility:       cell not visible under R8, own-job cell, already-executed cell            -> 404 NOT_FOUND
   service:          service_id not in optin.service_ids or not eligible for the requirement   -> 422 UNPROCESSABLE (service_not_eligible)
   quota:            active leases >= lease.max_active_per_member                              -> 422 CAP_EXCEEDED (active_lease_limit)
