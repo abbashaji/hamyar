@@ -741,7 +741,7 @@ The system may also engage a switch (for example S6.* or S14.* automation on `le
 | Account age in whole days | Exact creation time |
 | Accepted and rejected cell counts; a reliability band (low, medium, high from the `trust.*` thresholds) | Cell, prompt or output text beyond the single item of the report, appeal or alarm the view was opened from |
 | Open reports against the member (count), sanction history (type, date, reason code), appeals (kind, outcome) | The reporter's identity; the `vol_` handle; opt-in and team details; balances (use the ledger explorer with a context) |
-| Only while an open `Alarm` of kind `abuse.invite_tree`, `abuse.grant_farming` or `abuse.referral_farming` names the member (the server finds it; the caller sends nothing): invite-tree size, depth and the member's parent and children as `mem_` ids within that subtree; the number of members sharing one device record | The device record itself or any identifier that links members outside the context |
+| Only while an open `Alarm` of kind `abuse.invite_tree`, `abuse.grant_farming` or `abuse.referral_farming` names the member (the server finds it; the caller sends nothing): invite-tree size, depth and the member's parent and children as `mem_` ids within that subtree; the number of members sharing one device record | The device record itself or any identifier that links members outside that subtree |
 
 The screen states "only minimal data is shown and every view is logged" (`copy.admin.member_minimal_view`).
 
