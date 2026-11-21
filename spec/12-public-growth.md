@@ -437,8 +437,8 @@ Owned here: how growth flags are evaluated and how members are randomized. Owned
 | `flag_key` | one of `ff.growth.v1_fast_path` .. `ff.growth.v6_milestones` |
 | `status` | `draft`, `registered`, `running`, `stopped` (T), as `S13.8.2`. Events `experiment.created`, `experiment.registered`, `experiment.started`, `experiment.stopped` (reason `completed` or `killed`) (`ISS-128`) |
 | `arms` | ordered list `{arm_key, weight_ppm}`; weights sum to exactly 1,000,000; exactly one arm has `arm_key` = `control` |
-| `population` | `new_members` (created after start) or `all_members` (active at start or later) |
-| `eligibility` | `min_trust_tier`, `locales`, `status` (default `active` only), `include_existing` (bool, default false, as `S13.8.1`; true assigns members who already exist lazily, 12.11.2) |
+| `population` | `new_members` (created after start) or `all_members` (active at start or later); the field `population` of `eligibility` in `S13.8.1`, with these two values only |
+| `eligibility` | the json of `S13.8.1`: `created_at_gte`, `population`, `min_trust_tier`, `locales`, `status` (default `active` only), `include_existing` (bool, default false, as `S13.8.1`; true assigns members who already exist lazily, 12.11.2) |
 | `unit` | always the member; never a device, IP hash or invite |
 | `assignment_mode` | `hash_blocked`: the permuted blocks of `S13.8.4` (12.11.3), the only mode `S13.8` defines. `hash_bucket` stays a reserved name and is rejected with `VALIDATION_FAILED` until `S13.8` defines it |
 | `strata` | at most two of the allowed stratifiers (12.11.4) |
@@ -479,7 +479,7 @@ Assignment is a deterministic function of logged inputs, so any assignment can b
 **Mode `hash_blocked`** (the only mode; `ExperimentBlock` rows, `S13.8.1`):
 
 ```
-stratum  = 'pilot_week:<k>' with k = wk(member.created_at) (S13.5.1), optionally with 'locale:<l>' (S13.8.4 item 2; 12.11.4)
+stratum  = 'pilot_week:<k>' with k = wk(member.created_at) (S13.5.1), optionally followed by '|locale:<l>' (joiner and order as S13.8.4 item 2; 12.11.4)
 block    = the open ExperimentBlock (experiment_id, stratum), locked with SELECT ... FOR UPDATE;
            if none is open, create block_index = max + 1 with its permutation
 seed     = HMAC-SHA-256(key = salt, msg = 'v' || assignment_seed_version || 0x00 || stratum || 0x00 || block_index)
@@ -494,7 +494,7 @@ Within a stratum the count of any arm differs from `n * weight_i / 1,000,000` by
 
 ### 12.11.4 Stratification [D]
 
-The stratum rule is the one of `S13.8.4` item 2, and this part adds none: the stratum is `pilot_week:<k>` with `k = wk(member.created_at)` (`S13.5.1`), optionally with `locale:<l>` (`fa`, `en`). `pilot_week` is always part of the stratum and `locale` is the only optional stratifier, so the `strata` of an experiment is `pilot_week` alone or `pilot_week` with `locale`. Both are known at assignment time and neither is personal or location-derived. The stratum string is what `ExperimentAssignment.stratum` stores and what the permutation seed hashes (12.11.3); no other stratifier exists. **Forbidden stratifiers:** anything derived from `Device`, an IP hash, a time zone, a device language or user agent, a place, the services a member uses, or any `OptIn` field. At most two stratifiers per experiment, because small strata at pilot size would be empty. Published results merge any stratum with fewer than `analytics.min_cohort_k` members into one `other` stratum.
+The stratum rule is the one of `S13.8.4` item 2, and this part adds none: the stratum is `pilot_week:<k>` with `k = wk(member.created_at)` (`S13.5.1`), optionally followed by `locale:<l>` (`fa`, `en`), joined as `pilot_week:<k>|locale:<l>`: the joiner `|` and the order are fixed in `S13.8.4` item 2, the one definition of the string. `pilot_week` is always part of the stratum and `locale` is the only optional stratifier, so the `strata` of an experiment is `pilot_week` alone or `pilot_week` with `locale`. Both are known at assignment time and neither is personal or location-derived. The stratum string is what `ExperimentAssignment.stratum` stores and what the permutation seed hashes (12.11.3); no other stratifier exists. **Forbidden stratifiers:** anything derived from `Device`, an IP hash, a time zone, a device language or user agent, a place, the services a member uses, or any `OptIn` field. At most two stratifiers per experiment, because small strata at pilot size would be empty. Published results merge any stratum with fewer than `analytics.min_cohort_k` members into one `other` stratum.
 
 ### 12.11.5 Exposure and analysis [D]
 
