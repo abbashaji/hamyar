@@ -4,7 +4,7 @@
 
 ## 16.C.1 Scope and rules
 
-S16 says it is the single complete list of parameters (S16 16.1), yet 35 names used in S8, S6, S10, S11 and S13 are defined in neither S0 nor S16. This file gives each of them one disposition: a parameter row, an alias row, or an entry under "Not parameters" (the 16.C.8 list). Disposition count: 35 names, 30 parameter rows, 3 alias rows, 2 not-parameter entries. [D]
+S16 says it is the single complete list of parameters (S16 16.1), yet 46 names used in S5b, S6, S8, S10, S11, S13 and S14 are defined in neither S0 nor S16. This file gives each of them one disposition: a parameter row, an alias row, or an entry under "Not parameters" (the 16.C.8 list). Disposition count: 46 names, 40 parameter rows, 3 alias rows, 3 not-parameter entries. Of these, 16.C.2 to 16.C.7 hold 30 parameter rows and 3 alias rows (the first assignment of this cell, 35 names with 2 not-parameter entries), 16.C.12 and 16.C.13 add 10 parameter rows, and 16.C.8 holds 3 not-parameter entries. [D]
 
 | Rule | Decision |
 | --- | --- |
@@ -93,7 +93,7 @@ Owner `operator` (area `verify`, S0 0.10.5). The sampling rates are read when th
 
 ## 16.C.8 Not parameters
 
-Two names of the cell's list have the shape of a parameter and are not one. Neither is seeded; neither may be read or written through the parameter store (`AC-param-01` applies to any code that does). A third entry, `admission.redeemable_capacity_cells_per_day`, is added by 16d CR-25; it was found after the list of this cell was written, so it is not one of the 35 names counted in 16.C.1. [D][V]
+Two names of the cell's list have the shape of a parameter and are not one. Neither is seeded; neither may be read or written through the parameter store (`AC-param-01` applies to any code that does). A third entry, `admission.redeemable_capacity_cells_per_day`, is added by 16d CR-25; it was found after the list of this cell was written, so it is not one of the 35 names of the first assignment; it is counted in the 46 names of 16.C.1. [D][V]
 
 | name | what it is | why it is not a parameter | used in |
 | --- | --- | --- | --- |
@@ -173,7 +173,7 @@ Names used by S5b (05b MT-06, JT-15, CT-19) and defined in none of S0 0.10.6, S1
 | `commons.job_overrun_days` | days | days (86,400 s) from `admitted_at`, plus `paused_total_s` | 1..365 | 30 (initial configurable default [A], default-pending D-31). Safe because accepted cells are already minted and paid at acceptance, so the stop only ends work not yet accepted | `operator` | `T↓`: lowering ends open Commons jobs sooner = tighten-immediately, raising = loosen-with-notice (7 d) | yes: a Commons job keeps the value in force when it was confirmed (JT-09); a change applies to jobs confirmed afterwards | `OPS`: age of Commons jobs at completion, share that reach the deadline | 05b JT-15, 05b 5.22.3 |
 | `audit.flag_age_out_days` | days | days (86,400 s) from `cell.flagged_for_audit` | 1..90 | 14 (initial configurable default [A], default-pending D-31). Safe because the age-out only escalates the audit and releases a reservation; it never accepts, rejects or pays a cell | `operator` | `T↓`: lowering escalates sooner = tighten-immediately, raising = loosen-with-notice (7 d) | yes: a flag keeps the value in force when the cell was flagged (CT-07); a change applies to cells flagged afterwards | `OPS`: age of flagged cells when audited, share escalated | 05b CT-19 |
 
-Notes [D][A]: (1) No new cross-parameter constraint is added for these four rows. (2) Directions follow the rule of S16 16.2.2 (R16C-5); an owner who disagrees changes the row. (3) The count of 35 names in 16.C.1 is the count of that cell and is not changed by these rows.
+Notes [D][A]: (1) No new cross-parameter constraint is added for these four rows. (2) Directions follow the rule of S16 16.2.2 (R16C-5); an owner who disagrees changes the row. (3) The count of 16.C.1 (46 names, 40 parameter rows) includes these four rows.
 
 ## Issues raised
 

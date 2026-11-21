@@ -62,7 +62,7 @@ The directions for rows whose defining part states one (S0 for `verify.audit_rat
 | Topic | Rule |
 | --- | --- |
 | Versioning | Every accepted change creates an immutable `ParameterVersion` (`version` + 1) with `effective_from`, `change_class`, reason, approvers. The `default` column of `Parameter` is never edited. The value in force at time `t` is the version with the greatest `effective_from <= t` |
-| Owner roles | By area, S0 0.10.5: `operator` for `credit`, `price`, `grant`, `reserve`, `mint`, `inflation`, `ledger`, `job`, `admission`, `reservation`, `verify`, `lease`, `cell`, `trust`, `identity`, `session`, `invite`, `ratelimit`, `retention`, `security`, `launch`, `change`, `api`, `ui`, `i18n`, `ops`; `reviewer` for `policy`, `screen`, `service`, `template`, `optin`, `appeal`, `report` (exceptions named in 16.12); `founders` for thresholds, `operator` otherwise in `analytics`, `experiment`, `growth`, `team`, `public`, `metrics`, `calibration` |
+| Owner roles | By area, S0 0.10.5: `operator` for `credit`, `price`, `grant`, `reserve`, `mint`, `inflation`, `ledger`, `job`, `admission`, `reservation`, `verify`, `lease`, `cell`, `trust`, `identity`, `session`, `invite`, `ratelimit`, `retention`, `security`, `launch`, `change`, `api`, `ui`, `i18n`, `ops`; `reviewer` for `policy`, `screen`, `service`, `template`, `optin`, `appeal`, `report` (exceptions named in 16.12); `founders` for thresholds, `operator` otherwise in `analytics`, `experiment`, `growth`, `team`, `public`, `metrics`, `calibration`, `anomaly`, `commons`, `audit` |
 | Approvers | The owner role edits. A `loosen` or `neutral` change also needs a second distinct `operator` (`security.two_person_actions` contains `parameter.loosen`); `launch.*` needs `launch.min_signoffs` distinct admins |
 | Public exposure | `public` is true for every row except those listed in 16.17.5 |
 | Calibration gate | A `CAL` or `P1M` value may replace a default only with at least `calibration.min_samples_per_service` cells per service behind it (16.19) |
@@ -367,9 +367,9 @@ Owner `reviewer` for the first table, `operator` for the second (the owner colum
 | `screen.review_rate_established_requester` | ratio | 0..1 | 0.20 | `T↑` | `OPS` | S7.12 |
 | `service.review_max_age_days` | days | 1..365 | 90 | `T↓` | `CNS` | S7.10 |
 | `service.review_grace_days` | days | 0..90 | 14 | `T↓` | `CNS` | S7.10 |
-| `service.min_approvers` | int | 1..5 | 1 (FD§5.3: a reviewer records the answers); 2 is an owner decision [A] | `T↑` | `FND` | S7.10 |
+| `service.min_approvers` | int | 1..2; 0.9.6 | 1 (FD§5.3: a reviewer records the answers); 2 is an owner decision [A] | `T↑` | `FND` | S7.10 |
 | `service.terms_copy_allowed_types` | json list | MIME types | `["text/html","application/pdf","text/plain"]` | `T↓` (shorter list) | `P1M`: reviewer practice | S7.10 |
-| `template.min_reviewers_new` | int | 1..5 | 2 (FD§5.7 failure mode 10) | `T↑` | `FND` | S8.* |
+| `template.min_reviewers_new` | int | 1..2; 0.9.5 | 2 (FD§5.7 failure mode 10) | `T↑` | `FND` | S8.* |
 | `template.min_reviewers_edit` | int | 1..2; 0.9.5 | 1 | `T↑` | `FND` | S8.* |
 | `optin.default_purposes` | json | subset of P0..P3 | `["P0","P1"]` (FD§5.4 R8) | `T↓` (shorter list) | `FND` | S7.*, S10.* |
 | `optin.default_sensitivities` | json | subset of S0..S1 | `["S0","S1"]` (R8) | `T↓` | `FND` | S7.* |
