@@ -142,7 +142,7 @@ Provenance (FD§5.6) records "a salted-hash volunteer ID that requesters never s
 | `sessions.token_hash`, `leases.nonce_hash`, `invites.code_hash` | SHA-256 of a 128- or 256-bit CSPRNG value (no key needed, S0.6.4) | none | their TTLs |
 | `submissions.volunteer_handle` | S5.3.2 | `secret.volunteer_handle_key[v]` | with the submission row (a hash, so it stays after payload purge) |
 
-The creation-time IP hash is not a column of any table of this model (FIX-17, audit A04 finding 15). Rate-limit counters (per member, per IP hash, per invite tree) are infrastructure state keyed per UTC day or window by the daily-rolling hash (`secret.ip_hash_key`, 10a 10.14.2), with a TTL no longer than their window and never beyond `retention.ip_hash_ttl_days`; they live only in the volatile `CounterStore`, not in a relational table and not in backups, and they hold no member id and no payload (S4.*, 10a 10.14.2 item 2, 10b 10.23.2). Data-minimization consequence [A]: the per-day limits keyed by IP hash or by invite tree (the daily IP limits and `ratelimit.invite_tree_new_members_per_day`) use the volatile counter only, so they cannot be audited or replayed from the database and a counter-store restart resets them; limits that read stored columns (`grant.max_per_device` through `devices.grants_claimed`, `ratelimit.device_new_members_per_day` through `members.creating_device_id`, `invite.tree_*` through the tree columns) are unaffected. [A]
+The creation-time IP hash is not a column of any table of this model (FIX-17, audit A04 finding 15). Rate-limit counters (per member, per IP hash) are infrastructure state keyed per UTC day or window by the daily-rolling hash (`secret.ip_hash_key`, 10a 10.14.2), with a TTL no longer than their window and never beyond `retention.ip_hash_ttl_days`; they live only in the volatile `CounterStore`, not in a relational table and not in backups, and they hold no member id and no payload (S4.*, 10a 10.14.2 item 2, 10b 10.23.2). Data-minimization consequence [A]: the per-day limits keyed by IP hash (the daily IP limits) use the volatile counter only, so they cannot be audited or replayed from the database and a counter-store restart resets them; limits that read stored columns (`grant.max_per_device` through `devices.grants_claimed`, `ratelimit.device_new_members_per_day` through `members.creating_device_id`, `ratelimit.invite_tree_new_members_per_day` through `members.created_at` and the tree id `members.invite_root_member_id`, `invite.tree_*` through the tree columns) are database counts and unaffected. [A]
 
 ### 5.3.4 What a database dump reveals [D]
 
@@ -1433,13 +1433,8 @@ CREATE TABLE devices (
   status text NOT NULL DEFAULT 'active' CHECK (status IN ('active','blocked')),
   first_seen_day date NOT NULL,
   last_seen_day date NOT NULL,
-  creation_ip_hash bytea CHECK (octet_length(creation_ip_hash) = 32),
-  ip_hash_key_version int,
-  creation_ip_hash_expires_at timestamptz,
-  grants_claimed int NOT NULL DEFAULT 0 CHECK (grants_claimed >= 0),
-  CHECK ((creation_ip_hash IS NULL) = (creation_ip_hash_expires_at IS NULL))
+  grants_claimed int NOT NULL DEFAULT 0 CHECK (grants_claimed >= 0)
 );
-CREATE INDEX devices_ip ON devices (creation_ip_hash, created_at) WHERE creation_ip_hash IS NOT NULL;
 
 CREATE TABLE members (
   id text PRIMARY KEY CHECK (is_id(id,'mem')),
@@ -2002,7 +1997,7 @@ All jobs run as `retention_svc`, are idempotent, log one `Event` per run with co
 | `job_bound` | `retention.job_payload_days` after the job is terminal: set to NULL `cells.input_payload`, `cells.rendered_prompt`, `submissions.output_text`, `uploads.storage_key` (and delete the object), `glossaries.terms`, `deliverables.storage_key` (and delete the object), `verification_records.details`; set the matching `payload_purged_at`. Hashes, states, manifests and ledger rows stay | `retention.job_payload_days` |
 | `member_bound` | On `closed` (member-initiated, or inactive for `retention.member_inactive_days`): tombstone the member, delete its keys, sessions, opt-ins, badge awards, referrals and teams-owned data (S5.6.1); delete devices as in S5.6.3, leaving only the grant-memory residue, which is deleted `retention.member_inactive_days` later | `retention.member_inactive_days` |
 | `moderation` | `retention.moderation_days` after resolution: add counts to a `MetricSnapshot`, then null the personal columns and delete the `Report` or `Appeal` row | `retention.moderation_days` |
-| `short` | Delete `sessions` past `retention.session_days`; null `devices.creation_ip_hash` after `retention.ip_hash_ttl_days` | `retention.session_days`, `retention.ip_hash_ttl_days` |
+| `short` | Delete `sessions` past `retention.session_days` | `retention.session_days` |
 | `ops` | Delete `events` after `retention.event_raw_days`; `invariant_checks` and `alarms` after `retention.ops_log_days` except `violated` and `checkpoint` rows | `retention.event_raw_days`, `retention.ops_log_days` |
 | `permanent` | Never touched | |
 
