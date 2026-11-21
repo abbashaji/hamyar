@@ -26,7 +26,7 @@ This part specifies the admin side of Hamyar: twelve tools and three shared scre
 | 9 | Launch-gate checklist | 11.63 | `operator` | `SCR-ops-11`, `SCR-ops-12` |
 | 10 | Kill switches | 11.64 | `operator`; `reviewer` for template and service | `SCR-ops-13`, `SCR-ops-14` |
 | 11 | Member lookup (minimal data) | 11.65 | `reviewer`, `operator` | `SCR-rev-12` |
-| 12 | Release / Hand over (claims, lease release) | 11.66 | `reviewer`, `operator` | `SCR-ops-15`, `SCR-ops-16` |
+| 12 | Release and takeover (claims, lease release) | 11.66 | `reviewer`, `operator` | `SCR-ops-15`, `SCR-ops-16` |
 | shared | Admin home, approvals inbox, audit-trail viewer | 11.52.4, 11.53 | `reviewer`, `operator` | `SCR-ops-01`, `SCR-ops-02`, `SCR-ops-03` |
 
 ### 11.51.2 Cross-cutting decisions
@@ -443,14 +443,14 @@ The appellant receives a reason code rendered as copy, never reviewer notes.
 | Block | Content and rules |
 | --- | --- |
 | A Header | Source, category, `BLK-claim`, `BLK-trail` |
-| B Subject | Minimal summary of the subject; for a member subject the `SCR-rev-12` view opened with this item as its context (11.65) |
+| B Subject | Minimal summary of the subject; for a member subject the `SCR-rev-12` view opened from this item (11.65) |
 | C Evidence | The reported cell or submission (escaped, inert), report texts. The reporter is shown only as "member, tier" or "requester"; no admin screen or API exposes a reporter's id (`AD7`) |
 | D Related | Other open items on the same subject; for templates, the report count in the last `template.autopause_window_s` against `template.autopause_report_count` |
 | E Action ladder | Dismiss; triage; `killswitch.engage` on a template or service; `job.stop`; `cell.void`; `cell.overturn` (bundle of cells, one `ApprovalRequest`); `member.restrict`; `member.suspend`; `member.ban`. Nothing is automatic and the ladder is a menu, not a sequence. Closing the item with an action records the `AdminAction` ids in `report.action` (`actioned`); with none, `report.dismiss` |
 
 When reports on a template reach `template.autopause_report_count` inside `template.autopause_window_s` the system engages `kill.template.<tpl_id>` with actor `system`; releasing it is two-person (11.64). A member sanction is appealable (`appeal_kind` `member_suspension` or `member_ban`) and the member sees only a reason code. Takedown of an already delivered or published deliverable is outside this tool and is named as an open item for S10.* and S12.* [V].
 
-**Context rule.** Every action whose subject is a member needs a `context` `{kind, id}` naming an open report, appeal or alarm that links to that member; otherwise `422 UNPROCESSABLE`. This keeps member ids out of free browsing (`AD7`).
+**Member ids.** An action on a member takes the `mem_` id in its path and needs no other object. Member ids stay out of free browsing because no screen or API searches members (11.65.1, `AD7`), and each member read is logged (`AD6`).
 
 **Audit events.** Codes `report.*`, `member.*`, `job.stop`, `cell.*`; domain events `report.triaged`, `report.actioned`, `report.dismissed`, `member.restricted`, `member.suspended`, `member.banned`, `member.reinstated`, `member.restriction_lifted`, `cell.voided`, `cell.overturned`, `job.stop_requested`.
 
@@ -679,7 +679,7 @@ A sign-off is one `signOffGateItem` call per item (`launch.signoff`, `CT3`): the
 | `kill.all_new_jobs` | `operator` | as above | as above |
 | `kill.template.<tpl_id>` | `operator` or `reviewer`; also the system on `template.autopause_report_count` reports inside `template.autopause_window_s` | two admins holding `reviewer` or `operator` | as above |
 | `kill.service.<svc_id>` | `operator` or `reviewer` | as above | as above |
-| `kill.member.<mem_id>` | `operator`, with a `context` (11.65) | two `operator` admins | Never; counted only in the aggregate incident measure, so a member is never named or hinted at [A] |
+| `kill.member.<mem_id>` | `operator` | two `operator` admins | Never; counted only in the aggregate incident measure, so a member is never named or hinted at [A] |
 
 The system may also engage a switch (for example S6.* or S14.* automation on `ledger.invariant_violated`); the board shows actor `system` and the same release rule applies [A]. Reason codes: `ledger_integrity`, `abuse_wave`, `policy_or_legal_concern`, `provider_notice`, `safety_incident`, `operational`, `drill` [A]; only the code appears in a public entry, never the free text.
 
@@ -728,11 +728,9 @@ The system may also engage a switch (for example S6.* or S14.* automation on `le
 
 | Limit | Rule |
 | --- | --- |
-| No search | No screen or API searches or lists members. `SCR-rev-12` opens only from a "View member" button inside a report, appeal, alarm, abuse item or ledger view, which passes that object as `context` |
-| Context linkage | The server checks that the member is linked to the context object (open, or an appeal inside its window); otherwise `422 UNPROCESSABLE` |
-| Reason | `CT1`: reason code pre-filled from the context, free text of at least `security.admin_reason_min_chars` |
+| No search | No screen or API searches or lists members. `SCR-rev-12` opens only from a "View member" button inside a report, appeal, alarm, abuse item or ledger view |
 | Rate | At most `ratelimit.admin_member_lookups_per_day` views per admin per UTC day; beyond it `429 RATE_LIMITED` and an `Alarm` of kind `abuse.admin_lookup_rate` for operators |
-| Logging | Each view is an `AdminAction` `member.lookup` with the `mem_` id and the context ids (`AD6`); operators can review who looked at whom in `SCR-ops-03` |
+| Logging | Each view is an `AdminAction` `member.lookup` with the `mem_` id (`AD6`); operators can review who looked at whom in `SCR-ops-03` |
 | No persistence | `Cache-Control: no-store`; the view has no print, copy-all or export control (`AD8`) |
 
 ### 11.65.2 `SCR-rev-12` What is shown and what never is [D]
@@ -741,9 +739,9 @@ The system may also engage a switch (for example S6.* or S14.* automation on `le
 | --- | --- |
 | `mem_` id; `status`; `trust_tier` (and the tier before a restriction) | Raw IP, IP hash, e-mail or its hash, device records or hashes, public keys, recovery data, location (S0.7, S0.6.4) |
 | Account age in whole days | Exact creation time |
-| Accepted and rejected cell counts; a reliability band (low, medium, high from the `trust.*` thresholds) | Cell, prompt or output text beyond the single item in the context |
+| Accepted and rejected cell counts; a reliability band (low, medium, high from the `trust.*` thresholds) | Cell, prompt or output text beyond the single item of the report, appeal or alarm the view was opened from |
 | Open reports against the member (count), sanction history (type, date, reason code), appeals (kind, outcome) | The reporter's identity; the `vol_` handle; opt-in and team details; balances (use the ledger explorer with a context) |
-| Inside a farming context only (`abuse.invite_tree`, `abuse.grant_farming`, `abuse.referral_farming`): invite-tree size, depth and the member's parent and children as `mem_` ids within that subtree; the number of members sharing one device record | The device record itself or any identifier that links members outside the context |
+| Only while an open `Alarm` of kind `abuse.invite_tree`, `abuse.grant_farming` or `abuse.referral_farming` names the member (the server finds it; the caller sends nothing): invite-tree size, depth and the member's parent and children as `mem_` ids within that subtree; the number of members sharing one device record | The device record itself or any identifier that links members outside the context |
 
 The screen states "only minimal data is shown and every view is logged" (`copy.admin.member_minimal_view`).
 
@@ -759,12 +757,12 @@ The screen states "only minimal data is shown and every view is logged" (`copy.a
 | `AC-lookup-02` | A `mem_` id that no member has | `getMemberAdmin` is called (no context object is sent) | `404 NOT_FOUND`; no member data is returned and no event is emitted (a refused `AdminAction` is written only for authorization failures, 15.34.1) |
 | `AC-lookup-03` | A valid lookup | The response is checked against an allow-list schema | It contains none of the denied fields of 11.65.2 |
 | `AC-lookup-04` | `ratelimit.admin_member_lookups_per_day` = 3 (fixture) | An admin makes a fourth lookup in one UTC day | `429 RATE_LIMITED` and an `Alarm` for operators |
-| `AC-lookup-05` | Any successful lookup | The audit trail is read | One `member.lookup` row names the admin, the `mem_` id and the context ids |
-| `AC-lookup-06` | A farming context | The view loads | Tree size, depth and device-sharing count appear; no device identifier appears |
+| `AC-lookup-05` | Any successful lookup | The audit trail is read | One `member.lookup` row names the admin and the `mem_` id; the call carried no body |
+| `AC-lookup-06` | An open `abuse.invite_tree` alarm names the member | `getMemberAdmin` is called | Tree size, depth and device-sharing count appear; no device identifier appears |
 
-## 11.66 Tool 12: Release / Hand over
+## 11.66 Tool 12: Release and takeover
 
-**Purpose.** Carry over the Panel's Release and Hand over for stuck work: a reviewer or operator who is gone must not block a queue item, and a member's stuck lease must not block a cell. [D]
+**Purpose.** Carry over the Panel's release and takeover for stuck work: a reviewer or operator who is gone must not block a queue item, and a member's stuck lease must not block a cell. [D]
 
 ### 11.66.1 What carries over and what does not (panel-review facts, all [V]) [D]
 
@@ -772,7 +770,7 @@ The screen states "only minimal data is shown and every view is logged" (`copy.a
 | --- | --- | --- |
 | Lock by branch with the tip's commit date as heartbeat, expiry evaluated lazily when someone asks (§3.1 to 3.3) | `WorkClaim` with `expires_at`, renewed by every write; expired by a server timer every `lease.reap_interval_s` | Keep the concept, replace the mechanism: the Panel has no active enforcer |
 | Agent Release: empty commit, expired at once, served first (§3.4) | `claim.release`: the item returns to the queue and sorts first ("released first, then oldest") | Keep |
-| Owner Release / Hand over: takeover with handoff (§3.4) | `claim.hand_over` (holder to a named admin or to the pool) and `claim.take_over` (operator, forced) | Keep |
+| Owner takeover with handoff (§3.4) | `claim.take_over` (operator, forced) | Keep as takeover |
 | `CI_RUNNING` refusal while a workflow for the cell is active (§3.4) | Refusal while the holder has an unfinished two-person request on the item (`approval_pending`), or, for a cell lease, while the lease is `submitted` | Keep the idea |
 | `NEEDS_HUMAN` and `clear_feedback` (§3.4) | No equivalent; the state machines already have `changes_requested` | Not carried |
 | Fencing by `base` (branch tip) and fast-forward-only writes (§3.3) | `ETag` and `If-Match`, plus the claim-holder check (`AD12`) | Replace |
