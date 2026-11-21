@@ -65,7 +65,7 @@ Values S0.8 does not list but the model needs. They are stored exactly as writte
 | Enum | Values |
 | --- | --- |
 | `invite_status` | `issued`, `redeemed`, `expired`, `revoked` |
-| `key_purpose` / `key_status` | `auth`, `recovery` / `active`, `rotated`, `revoked` |
+| `key_purpose` / `key_status` | `auth`, `recovery` / `pending`, `active`, `retiring`, `revoked` |
 | `admin_status` / `credential_status` | `invited`, `active`, `disabled` / `pending`, `active`, `locked`, `revoked` |
 | `device_status` | `active`, `blocked` |
 | `platform_class` | `ios`, `android`, `desktop`, `other` |
@@ -155,7 +155,7 @@ One row per entity of S0.7 (57 rows), plus the two additions of S5.4.1 (`StateTr
 | Entity | Section | Class | Retention | A correction is modelled as |
 | --- | --- | --- | --- | --- |
 | `Member` | S5.6.1 | `MUT` | `member_bound` | status and tier changes (events); closure reduces the row to a tombstone |
-| `MemberKey` | S5.6.2 | `MUT` | `member_bound` | rotation: new key row, old row `rotated` |
+| `MemberKey` | S5.6.2 | `MUT` | `member_bound` | rotation: new key row, old row `retiring` |
 | `Device` | S5.6.3 | `MUT` | `member_bound` | `blocked` status; closure deletes the row except the grant-memory residue |
 | `Session` | S5.6.4 | `MUT` | `short` | `revoked_at`; expiry |
 | `Invite` | S5.6.5 | `MUT` | `member_bound` | `revoked` status |
@@ -390,7 +390,7 @@ Public keys of a member (S0.6.4). Supports rotation, device linking and the reco
 | `purpose` | enum(`key_purpose`) | NN | `auth` signs challenges; `recovery` is derived from the recovery key and used only to recover |
 | `algorithm` | text | NN, `CHECK = 'ed25519'` | scheme fixed by S0.6.4; a new scheme is a convention edit |
 | `public_key` | bytes | NN, 32 bytes | |
-| `status` | enum(`key_status`) | NN, default `active` | |
+| `status` | enum(`key_status`) | NN, default `active` | `pending`, `active`, `retiring`, `revoked` (S5.2.5) |
 | `device_id` | id `dev_` | null, FK | the device this auth key belongs to (device linking adds a key per device) |
 | `rotated_at`, `not_after` | ts | null | `not_after` = rotation time + `identity.key_rotation_grace_s` for the old key |
 | `replaced_by_key_id` | id `mky_` | null, FK | |

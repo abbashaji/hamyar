@@ -195,7 +195,7 @@ Key      { id: id<mky>, kind: "device"/"recovery", state: "pending"/"active"/"re
 Session  { id: id<ses>, created_at: ts, idle_expires_at: ts, expires_at: ts, device_id: id<dev>/null, is_current: bool }
 Device   { id: id<dev>, link_state: "pending"/"awaiting_approval"/"linked"/"denied"/"expired"/"revoked",
            created_at: ts, linked_at: ts/null, last_seen_on: date/null }
-Invite   { id: id<inv>, state: "active"/"redeemed"/"expired"/"revoked", created_at: ts, expires_at: ts, redeemed_at: ts/null }
+Invite   { id: id<inv>, state: "issued"/"redeemed"/"expired"/"revoked", created_at: ts, expires_at: ts, redeemed_at: ts/null }
 ```
 
 `trust_tier` is the 0.9.4 state set; the reliability estimate behind it is not exposed by this part [A]. `last_seen_on` is a coarse date, never a timestamp (metadata minimization, FD Principle 8). The key and invite state names are convention additions. `client_events_enabled` is an additive field that part 15f needs (client events, 15.E.11); it is read-only here (`updateMe` does not accept it) [A][V: review for high-risk members].

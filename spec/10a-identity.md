@@ -29,11 +29,11 @@ A `Member` is a pseudonym: one row plus public keys. One person may hold several
 | Entity (prefix) | Identity-relevant fields | Retention class (S0.7) | Note |
 | --- | --- | --- | --- |
 | `Member` (`mem_`) | `status`, `trust_tier`, `tier_before_restriction`, `created_at`, `last_active_day` (a day, no time), `creating_device_id`, `invite_id` (nullable), `invite_root_member_id`, `invite_depth`, `recovery_confirmed_at`, `recovery_cooldown_until`, `email_ciphertext`, `email_lookup_hash`, `email_verified_at`, `email_purposes`, `locale`, `digits`, `calendar`, `row_version` | `member_bound` | No name, phone or clear e-mail; member-level activity is a day; `Session`, lease and submission rows carry precise times (10.14.1); the full column list is S5a 5.6.1 |
-| `MemberKey` (`mky_`) | `member_id`, `device_id` (null for recovery), `purpose` (`auth`, `recovery`), `algorithm` (`ed25519`), `public_key` (32 bytes), `status` (`active`, `rotated`, `revoked`), `not_after`, `revoked_reason`, `authorized_by_key_id`, `authorization_signature`, `key_storage` (`hardware_backed`, `software`, `unknown`; self-reported), `created_at` | `member_bound` | Each key addition carries the signature that authorized it (10.7) |
-| `Device` (`dev_`) | `device_token_hash`, `platform_class` (`ios`, `android`, `desktop`, `other`), `first_seen_day`, `last_seen_day`, `registrations_count`, `grants_claimed`, `status` (`active`, `blocked`); full column list S5a 5.6.3 | `member_bound` plus grant-memory residue (10.9) | Random token, never derived from hardware |
+| `MemberKey` (`mky_`) | `member_id`, `device_id` (null for recovery), `purpose` (`auth`, `recovery`), `algorithm` (`ed25519`), `public_key` (32 bytes), `status` (`pending`, `active`, `retiring`, `revoked`), `not_after`, `revoked_reason`, `authorized_by_key_id`, `authorization_signature`, `key_storage` (`hardware_backed`, `software`, `unknown`; self-reported), `created_at` | `member_bound` | Each key addition carries the signature that authorized it (10.7) |
+| `Device` (`dev_`) | `device_token_hash`, `platform_class` (`ios`, `android`, `desktop`, `other`), `first_seen_day`, `last_seen_day`, `grants_claimed`, `status` (`active`, `blocked`); full column list S5a 5.6.3 | `member_bound` plus grant-memory residue (10.9) | Random token, never derived from hardware |
 | `Session` (`ses_`) | `principal_type`, `member_id` or `admin_user_id`, `key_id` (member) or `credential_id` (admin), `token_hash`, `created_at`, `last_used_at`, `idle_expires_at`, `abs_expires_at`, `step_up_at`, `revoked_at`, `revoked_reason` | `short` | Hash of the token only (10.13) |
 | `AuthChallenge` (`chl_`) [A] | `purpose`, `nonce`, `audience`, `expires_at`, `used_at` | `short` | Deleted on use or expiry |
-| `DeviceLinkOffer` (`dlo_`) [A] | `member_id`, `secret_hash`, `state`, `attempts`, `claimed_key_hash`, `expires_at` | `short` | 10.7 |
+| `DeviceLinkOffer` (`dlo_`) [A] | `member_id`, `secret_hash`, `state`, `expires_at` | `short` | 10.7 |
 | `RecoveryRequest` (`rcv_`) [A] | `recovery_key_id`, `outcome`, `created_at`, `completed_at` | `member_bound`, rows older than 90 days deleted (the window in `identity.recovery_max_per_90d`) | No IP, no device data |
 | `SecurityNotice` (`snt_`) [A] | `member_id`, `kind`, `created_at`, `seen_at` | `member_bound`, deleted `retention.session_days` after `created_at` | Shown on every device at next sign-in |
 | `Invite` (`inv_`) | `kind` (`seed`, `member`), `code_hash`, `issuer_member_id` (NULL once the edge is cleared), `redeemed_by_member_id` (NULL once the edge is cleared), `tree_root_member_id`, `tree_depth`, `status` (initial `issued`), `strike_recorded_at`, `expires_at`, `redeemed_at`; full column list S5a 5.6.5 | `member_bound` plus edge-clearing rule (10.10) | Code stored as SHA-256 only |
@@ -94,11 +94,11 @@ Server checks, in this order; the first failure stops the request: [D]
 | 3 | Both public keys are valid 32-byte Ed25519 points and differ from each other | `400 VALIDATION_FAILED` |
 | 4 | Challenge exists, unused, unexpired, `purpose` = `create`, audience matches | `401 AUTH_EXPIRED` or `AUTH_INVALID` |
 | 5 | Both signatures verify over the same `context_hash` (proof of possession of both private keys: a typo or bug cannot register a recovery key nobody holds) | `401 AUTH_INVALID` |
-| 6 | If `identity.registration_mode` = `invite_only`: code hash matches an `Invite` in state `active`, unexpired, its tree not frozen, tree size below `invite.tree_max_members`, depth at most `invite.tree_max_depth` | `422 UNPROCESSABLE` with one uniform `copy.invite.invalid` for unknown, expired or used codes; `422 CAP_EXCEEDED` for a full tree |
+| 6 | If `identity.registration_mode` = `invite_only`: code hash matches an `Invite` in state `issued`, unexpired, its tree not frozen, tree size below `invite.tree_max_members`, depth at most `invite.tree_max_depth` | `422 UNPROCESSABLE` with one uniform `copy.invite.invalid` for unknown, expired or used codes; `422 CAP_EXCEEDED` for a full tree |
 | 7 | One transaction: insert `Member` (`status` `active`, `trust_tier` `new`), two `MemberKey` rows (`authorized_by_key_id` = the key itself), upsert `Device`, redeem the `Invite`, mark the challenge used, emit `member.created` | `409 STATE_CONFLICT` on a lost race |
 | 8 | Issue a session (10.13) and return `{member_id, key_id, session}` | |
 
-`Idempotency-Key` is REQUIRED on registration [A]: a lost response would otherwise leave an identity whose recovery key the person never saw. In `open` mode (no invite) the new member is the root of a new tree whose `invite_tree_id` is a fresh opaque `inv_` ULID with no `Invite` row. The member's ledger account is created by `S6.*` on `member.created`. [D]
+`Idempotency-Key` is REQUIRED on registration [A]: a lost response would otherwise leave an identity whose recovery key the person never saw. In `open` mode (no invite) the new member is a founder: `invite_root_member_id` is null and the member counts as its own tree, by its own `mem_` id, for `ratelimit.invite_tree_new_members_per_day`. The member's ledger account is created by `S6.*` on `member.created`. [D]
 
 ## 10.4 Recovery key
 
@@ -136,7 +136,7 @@ The server holds `recovery_pub` only. Verification is a signature over a fresh c
 | --- | --- |
 | Recovery key never confirmed | Replaceable with a device-key step-up alone; the old key was never proven held |
 | Recovery key confirmed | Replacing it needs a device-key step-up AND a signature by the current recovery key, so a thief holding only an unlocked phone cannot lock the owner out (the `recovery_signature` of `rotateKey`, S15.B.9) |
-| Effect | New key `active` at once (both keys work meanwhile); old key `rotated` with `not_after` = rotation time + `identity.key_rotation_grace_s`, then `revoked`; a `SecurityNotice` on every device |
+| Effect | New key `active` at once (both keys work meanwhile); old key `retiring` with `not_after` = rotation time + `identity.key_rotation_grace_s`, then `revoked`; a `SecurityNotice` on every device |
 | After a recovery (10.8) | The key used is revoked at once and a new one is mandatory in the same request (it was typed on a device that may be hostile) |
 
 ## 10.5 Optional e-mail
@@ -145,9 +145,9 @@ The server holds `recovery_pub` only. Verification is a signature over a fresh c
 
 | Aspect | Decision |
 | --- | --- |
-| Storage | Never clear text (S0.7). `email_ciphertext` = AES-256-GCM with a per-row random nonce under `secret.email_encryption_key[version]`; `email_index` = HMAC-SHA-256 of the normalized address under `secret.email_lookup_key[version]` (one address maps to one member; no address can be looked up without the key) [A] |
+| Storage | Never clear text (S0.7). `email_ciphertext` = AES-256-GCM with a per-row random nonce under `secret.email_encryption_key[version]`; `email_lookup_hash` = HMAC-SHA-256 of the normalized address under `secret.email_lookup_key[version]` (one address maps to one member; no address can be looked up without the key) [A] |
 | Verification | A one-time code of 8 Crockford base32 characters, stored as SHA-256, valid `identity.email_code_ttl_s`, burned after `identity.code_max_attempts` wrong tries; proves the member controls the address |
-| Change and removal | Setting or changing needs a device step-up and is blocked during the recovery cooldown (10.8); removal deletes ciphertext and index at once; the sender integration receives the plain address only at send time |
+| Change and removal | Setting or changing needs a device step-up and is blocked during the recovery cooldown (10.8); removal deletes ciphertext and `email_lookup_hash` at once; the sender integration receives the plain address only at send time |
 | Content of mail | Neutral subject, no member id, no handle, no job details, no links carrying tokens; the mail says only that something happened and to open the app |
 | Notices default | Off. Each purpose is a separate opt-in in `email_purposes` |
 | Decryption access | Only the notification worker holds the decryption key at runtime; no admin screen shows an address (there is no `perm.member.view_email`) |
@@ -178,7 +178,7 @@ Why a grace period: a lost response or a crash between the two sides must not lo
 
 | Case | Rule |
 | --- | --- |
-| Compromise of a device key (lost or stolen phone) | `revoke_key` from another device or by recovery: immediate `revoked`, no grace, sessions bound to it die at once |
+| Compromise of a device key (lost or stolen phone) | `revokeMemberKey` from another device or by recovery: immediate `revoked`, no grace, sessions bound to it die at once |
 | Limits | At most `identity.max_devices_per_member` active or retiring device keys; at most one pending rotation per key |
 | Recovery key | Rules in 10.4.4 |
 | Server-side secrets | Rotation of `secret.*` is in the secrets part of `S10.*`; nothing in this part needs a member to act when a server secret rotates |
@@ -194,16 +194,16 @@ Offer states: pending --claim--> awaiting_approval --approval--> linked (T)
 A (signed in, step-up):  POST /v1/device-links
     -> {device_id, code (128 random bits, QR and 26-character Crockford text),
         expires_at = now + identity.device_link_code_ttl_s}
-    server stores SHA-256(link_secret) only
+    server stores SHA-256(code) only
 B (new device, no session): generate device key and device token;
     POST /v1/device-links/redemptions {code, new_public_key, proof, device_token,
         platform_class, key_storage}  signed by B's key (purpose device_link)
     server: constant-time compare of the secret hash; state awaiting_approval;
-            claimed_key_hash = SHA-256(device_pub); only the first valid claim wins
-    B and A both display  sas = (first 4 bytes of SHA-256(offer_id || device_pub) as uint32) mod 1,000,000, 6 digits
+            only the first valid claim wins
+    B and A both display  sas = (first 4 bytes of SHA-256(device_id || new_public_key) as uint32) mod 1,000,000, 6 digits
 A: shows platform_class and the 6 digits; the person confirms they match B's screen;
     POST /v1/device-links/{device_id}/approval {sas}, with the Step-Up header of A's key
-        (purpose step_up, context_hash covers offer_id and claimed_key_hash)
+        (purpose step_up; the request hash of the Step-Up header covers the path, which names the device_id, and the body, which holds the sas: S15.B.3.1, S15.B.4)
 server: txn { MemberKey(auth, active, authorized_by_key_id = A.key, authorization_signature);
               upsert Device; SecurityNotice to all devices; emit member.device_linked }
 B: next step is an ordinary session by challenge (10.13); B inherits nothing
@@ -632,7 +632,7 @@ No location is collected, inferred or displayed by default (`public.location_dis
 | --- | --- |
 | Panic wipe | One tap on any screen deletes the device key, device token, session, caches and local settings, then tries to revoke the device key on the server (local deletion happens first and does not wait for the network) |
 | Quick exit | A button on every screen that navigates to a neutral page and replaces the history entry where the browser permits [V] |
-| `kill.optional_pii` [A] | Operator action (`perm.identity.purge_optional_pii`): one admin engages, two-person releases (`killswitch.release`). Immediately: refuse new e-mail addresses, delete every e-mail ciphertext and index, lower the effective `ratelimit.ip_hash_new_members_per_day` and `ratelimit.recovery_attempts_per_day` (the lever of 10.14.2 item 3; `retention.ip_hash_ttl_days` is not changed and stays within 1..30) [default-pending D-33], set the effective `retention.request_log_days` to 0 and delete existing request logs, stop recording `actor_day_hash` |
+| `kill.optional_pii` [A] | Operator action (`perm.identity.purge_optional_pii`): one admin engages, two-person releases (`killswitch.release`). Immediately: refuse new e-mail addresses, delete every e-mail ciphertext and `email_lookup_hash`, lower the effective `ratelimit.ip_hash_new_members_per_day` and `ratelimit.recovery_attempts_per_day` (the lever of 10.14.2 item 3; `retention.ip_hash_ttl_days` is not changed and stays within 1..30) [default-pending D-33], set the effective `retention.request_log_days` to 0 and delete existing request logs, stop recording `actor_day_hash` |
 | Notices | The six `copy.*` keys below, all marked `needs_human_and_legal_review` |
 
 | Copy key | en | fa |
@@ -678,7 +678,7 @@ Given / When / Then; each criterion becomes a test in the layer shown (S0.5; `S1
 | AC-identity-09 | A device key rotation whose response was lost | The client retries inside `identity.key_rotation_grace_s` | It succeeds; after `not_after` an unconfirmed old key is `revoked` | fsm |
 | AC-identity-10 | An open device-link offer | Two devices claim it, then the first is approved; later a sixth device is offered | Only the first claim wins; the key chain records `authorized_by_key_id`; the sixth is refused at `identity.max_devices_per_member` | adv |
 | AC-identity-11 | A recovery key typed with one wrong character | The client normalizes it | The checksum fails on the device, no request is sent, no recovery attempt is counted | unit |
-| AC-identity-12 | An address already held by another member | A member sets it | The response is identical to a fresh address and nothing is sent to the holder; removal deletes ciphertext and index at once | adv |
+| AC-identity-12 | An address already held by another member | A member sets it | The response is identical to a fresh address and nothing is sent to the holder; removal deletes ciphertext and `email_lookup_hash` at once | adv |
 | AC-invite-01 | One active invite | Two clients redeem it at once | One succeeds, the other gets `409 STATE_CONFLICT` | adv |
 | AC-invite-02 | A member with `invite.max_active_per_member` active invites | They issue another | `422 CAP_EXCEEDED` | policy |
 | AC-invite-03 | A direct inviter with one strike | A second member they invited is banned for `sybil` | Issuing is suspended and active invites revoked; status, tier and credit are unchanged | fsm |
