@@ -188,7 +188,7 @@ Uploads and deliverable content are not exported: they are purged under `retenti
 | Idempotency-Key | `R`; natural idempotency: an already confirmed key returns the stored `confirmed_at` and emits nothing |
 | Pagination | none |
 | Rate-limit class | `RL-WRITE` |
-| Events | `+member.recovery_confirmed` (convention gap, listed in 15.B.9) |
+| Events | `member.recovery_confirmed` (a row of 15b 15.34.6: payload `member_id`, `key_id`) |
 | Effects | Sets `Member.recovery.confirmed_at`. It proves the member holds the recovery secret without using it; the secret never leaves the device (10a 10.4.3). Confirmation never blocks anything; it changes `rotateKey` of the recovery key (15.B.9) |
 | Given/When/Then | Given an active recovery key, When the member signs a fresh `confirm_recovery` challenge with it and calls this operation, Then `200` with `confirmed_at`, one `member.recovery_confirmed` event, and a second identical call (new challenge) returns the same `confirmed_at` and no second event |
 
@@ -316,7 +316,7 @@ Each item is additive in the sense of S15.13 and is needed by an alias or a new 
 | `listSupplyGauges` | optional filter `topic_category_id` and bucket field `topic_category_id: id<top>/null` (07's optin axis) | 07 gauge |
 | S15.4 pipeline step 7 | first gate: `Step-Up` check of 15.B.4 for the operations listed there | member step-up |
 | Error reasons (append-only, `details.reason`) | `STATE_CONFLICT`: `open_work`, `balance_changed`; `AUTH_INVALID`: `step_up_required`, `step_up_invalid` on member routes | 15.B.4, `closeMember` |
-| Events | `+member.recovery_confirmed` (producer `identity_svc`, consumer `analytics`) | `confirmRecoveryKey` |
+| Events | `member.recovery_confirmed` (producer `identity_svc`, consumer `analytics`) has its row in 15b 15.34.6; this file adds nothing | `confirmRecoveryKey` |
 | Permissions (S10 owns the matrix) | `perm.screening.read`, `perm.screening.decide` | 15.B.7 |
 | Copy keys | `copy.identity.close_forfeit_notice`, `copy.job.waitlist_limit` (text owned by S11) | `closeMember`, `decideScreening` |
 | S15b 15.33.1 rule 6 | the always-on public endpoints now include policy, capacity and health | 15.B.8 |
@@ -337,6 +337,8 @@ Given / When / Then, testable against the generated contract suite (`BM0`); ids 
 For a later cell to apply. Format: part:line, old text, new text. Lines are those of the files when this cell read them; where a line was not read, the section is named. "Wherever cited" means search the part for the old text. All other lines of the citing parts stay as they are [D].
 
 **Status note (cell R3-13, FINAL-2 row 67).** Edit 25 is applied in part: `15b` 15.33.1 rule 9 names `GET /v1/public/health` and rule 6 lists policy, capacity and health as always on, but the table of 15.21.4 has no row for `perm.screening.read` and `perm.screening.decide`, so that third part is still open. Edit 27 is not applied in the parts this cell could read (15b, 15d, 15e, 15f, 11c): the approvals row of 11c 11.54.4 already carries the S15 path, no lease-path or screening-path string was found in those five files, and 11a and the other citing parts were not read, so for them the edit stays open. Both edits remain instructions for a later cell; this cell changed no citing part [D].
+
+**Status note (cell R4-12, FINAL-3 row 45).** The table of 15b 15.21.4 now has the row `perm.screening.read`, `perm.screening.decide` (default holder reviewer, used by 15.B.7), so edit 25 is applied in all three of its parts. For edit 27, no path with the verdict REMOVE was found in the places read by R4-12: 11a 11.5.1 names operations only and cites no path, 09 9.5.4 says no validation endpoint exists, and 15b 15.22.4 carries the S15 approvals path. The parts and sections not read by R4-12 are listed in `docs/fix/R4-12.md` (Noticed, not fixed) [D].
 
 1. **10a:63, 10a:67, 10a:69** (challenge shape). Old `|| challenge_id || 0x00 || nonce || 0x00 || context_hash` , new `|| challenge || 0x00 || context_hash`. Old `` `purpose` is one of `register_device`, `register_recovery`, `session`, `step_up`, `rotate_device_key`, `rotate_recovery_key`, `link_claim`, `link_approve`, `recover`, `confirm_recovery`, `revoke_key`, `set_email`, `close_account`. `` , new `` `purpose` is one of `create`, `session`, `rotate`, `recover`, `device_link`, `step_up`, `confirm_recovery` (S15.B.3.1 maps the former 13 names; sensitive actions use `step_up` with the `Step-Up` header of S15.B.4). `` Old `` `POST /v1/auth-challenges` (auth `none`, rate limited by IP hash) returns `{challenge_id, nonce, expires_at}`. The nonce is 128 random bits, `` , new `` `POST /v1/identity-challenges` (auth `none`, rate limited by IP hash) returns `{challenge, expires_at}`. The challenge is 256 random bits, ``
 2. **10a:79**. Old `ch = POST /v1/auth-challenges {purpose: 'register_device'}` , new `ch = POST /v1/identity-challenges {purpose: 'create'}`. In 10a:80 to 86 apply the field-name map of S15.B.9 (`device_pub` to `public_key`, `device_signature` to `proof`, `challenge_id` to `challenge`, and both signatures sign the `create` message).
