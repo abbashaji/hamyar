@@ -497,7 +497,26 @@ execute:  only after approval and before expiry; parameters cannot change after 
           outcome and both admin ids are written to AdminAction; emit admin_action.executed
 ```
 
-The set of two-person actions is `security.two_person_actions`. This part defines the action names and proposes the initial default below (`ISS-102`): `ledger.reversal`, `launch.signoff`, `parameter.loosen`, `killswitch.release` (from S0.10.6), plus [A] `member.ban`, `invite.seed_issue`, `admin.role_grant`, `admin.credential_add`, `admin.credential_unlock`, `disclosure.release`. Locking a credential is deliberately single-admin (an emergency brake: `perm.admin.credential_lock`); unlocking is two-person. Two accounts held by one human cannot be detected by software; distinct humans per approval is a process rule [V: operating procedure]. Every `AdminAction` records who, what, target, payload hash, outcome and `request_id`; rows are append-only and hash-chained like the ledger [A].
+The set of two-person actions is `security.two_person_actions`. This table is its one definition (`ISS-102`) [A] [default-pending D-34]: the default value and the fixed minimum of S0.10.6, the row of S16 16.16 and the catalog of S11c 11.54.3 use these names and no others. It is the union of the actions that S10a (10.11), S14 (14.1 rule 4) and S15b (15.22.4) mark as two-person, plus the two that S10b requires (10.23.5, 10.24.1 item 2). The parameter may add an action, never remove one.
+
+| Action name | Covers | Marked by |
+| --- | --- | --- |
+| `ledger.reversal` | Reversal of a ledger entry (`perm.ledger.reverse`) | S10a 10.11, S15b |
+| `launch.signoff` | Signing a launch gate item (`perm.launch.signoff`) | S10a 10.11, S14 |
+| `launch.switch_on` | Opening a launch switch | S14, S15b |
+| `killswitch.release` | Releasing a kill switch (`perm.killswitch.release`) | S10a 10.11, S14 |
+| `parameter.loosen` | Loosening a parameter (`perm.parameter.loosen`) | S10a 10.11, S0.10.6 |
+| `policy.loosen` | Loosening a policy rule | S15b |
+| `member.ban` | Banning a member (`perm.member.ban`) | S10a 10.11, S15b |
+| `invite.seed_issue` | Issuing a seed invite (`perm.invite.seed_issue`) | S10a 10.11 |
+| `admin.role_grant` | Creating an admin and changing an admin's roles; the enrollment code is handed over out of band (Enrollment above) | S10a 10.11, S15b 15.22.5 |
+| `admin.credential_add` | Adding a credential to an admin | S10a 10.11 |
+| `admin.credential_unlock` | Unlocking a locked credential | S10a 10.11 |
+| `disclosure.release` | Releasing member data in answer to an order, with counsel sign-off [V] | S10a 10.11, S10b 10.23.5 |
+| `secret.emergency_access` | Emergency access to a secret | S10b 10.24.1 item 2 |
+| `preregistration.lock` | Locking the pre-registration | S15b |
+
+Each enrollment action has one name in this table. A part that marks another action as two-person adds it here first. Locking a credential is deliberately single-admin (an emergency brake: `perm.admin.credential_lock`); unlocking is two-person. Two accounts held by one human cannot be detected by software; distinct humans per approval is a process rule [V: operating procedure]. Every `AdminAction` records who, what, target, payload hash, outcome and `request_id`; rows are append-only and hash-chained like the ledger [A].
 
 Admin surface hardening [D]: strict Content-Security-Policy with no third-party script, font or frame; the token is held in page memory only, so a reload requires a new assertion; `ratelimit.admin_api_rpm`; CORS allows only the admin origin; a member token sent to an admin route is `AUTH_INVALID` and counted (S0.11.4).
 
@@ -758,7 +777,7 @@ All are initial configurable defaults, owned by the `operator` role (S0.10.5), p
 | `security.admin_min_credentials` | int | 2 | 1..5 | `SEC` |
 | `retention.sweep_interval_s` | duration_s | 3600 | 60..86400 | `OPS` |
 
-New cross-parameter constraint `C9` [A]: `session.member_abs_ttl_s <= retention.session_days x 86,400`. Changed default (`ISS-102`): `security.two_person_actions` starts as the four of S0.10.6 plus `member.ban`, `invite.seed_issue`, `admin.role_grant`, `admin.credential_add`, `admin.credential_unlock`, `disclosure.release`. Every parameter above follows the tighten-at-once, loosen-with-notice workflow of R10 and S0.10.3.
+New cross-parameter constraint `C9` [A]: `session.member_abs_ttl_s <= retention.session_days x 86,400`. Changed default (`ISS-102`): `security.two_person_actions` starts as the table of 10.12, which is its one definition [default-pending D-34]. Every parameter above follows the tighten-at-once, loosen-with-notice workflow of R10 and S0.10.3.
 
 ### 10.18.4 Hooks this part needs from other S10 files [A]
 
