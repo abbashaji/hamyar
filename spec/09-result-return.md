@@ -819,7 +819,7 @@ Problems and gaps found while specifying the return path. Each resolution is alr
 **Convention additions made by this part** (not issues; listed so C-001 can fold them back) [A]
 
 - `reject.attestation_invalid` added to the cell rejection reason list of S0.8.4 (9.13).
-- Operations `submitResult`, `validateSubmission`, `rotateLeaseNonce` and their paths (9.3, 9.5); response fields `lease_nonce`, `details.reject_code`, `details.reason`, `details.nonce_redelivery`, `details.stored_submission_id`.
+- Operations `submitResult` and `rotateLeaseNonce` and their paths (9.3, 9.5); response fields `lease_nonce`, `details.reject_code`, `details.reason`, `details.nonce_redelivery`, `details.stored_submission_id`.
 - Entity field requirements on `Lease` and `Submission`, and the table `submission_fingerprints` (9.4.5, 9.14.3).
 - The 16 added parameters and constraints `S9-C1` and `S9-C2` (9.18).
 - Signal names `signal.forgery_attempt`, `signal.conflicting_resubmit`, `signal.timing_below_floor`, `signal.timing_soft_fast`, `signal.timing_regular`; flag names in 9.9 and in SC-21 of 9.14.1; ops log event `submission.gate_rejected`; metrics of 9.17.

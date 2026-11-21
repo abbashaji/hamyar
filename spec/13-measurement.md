@@ -725,7 +725,7 @@ Table `pre_registrations` (entity `PreRegistration`, prefix `prr_`, retention `p
 | `content_hash` | text, nullable | `sha256:<hex>` of the RFC 8785 canonical form of `content` (S0.6.4); set when the lock executes (second approval, S15.32.1), the point at which the row becomes `locked`; before that the hash of the draft's current content is computed when the lock is requested and named in the request, and is not stored in this column |
 | `chain_hash` | text, nullable | `sha256(prev_chain_hash ":" content_hash ":" locked_at_rfc3339)`; `prev_chain_hash` is that of the previously locked pre-registration of any phase, or the SHA-256 of the ASCII string `hamyar-prereg-genesis` for the first |
 | `locked_at` | timestamptz, nullable | Server time of the second approval |
-| `lock_approvals` | jsonb | Array of `{ admin_action_id, approved_hash }`, at most one per admin |
+| `lock_approvals` | jsonb | Written once, at execution of the lock (`prereg.locked`, 13.7.2): the two `{ admin_action_id, approved_hash }` entries, one per approving admin, both with the approved `content_hash`; not written before that, because the open approval lives in the `AdminApproval` (S15.32.1) and not in this column |
 | `gate_item_id` | text, nullable | `lgi_` of the launch-gate item that carries this as evidence (13.7.6) |
 | `annotations` | jsonb | Append-only array of `{ at, admin_action_id, kind, text }` where `kind` is `deviation`, `clarification`, `evidence`, `external_anchor`; never hashed, never changes meaning of `content` |
 

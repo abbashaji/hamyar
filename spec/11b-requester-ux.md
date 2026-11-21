@@ -687,10 +687,10 @@ The linear baseline is crude because volunteer supply arrives in daily batches; 
 | Row | Content |
 | --- | --- |
 | Purpose | Collect the requester's judgement of the outcome as a quality signal, without turning it into a verification method or a penalty |
-| Entry conditions | Job `completed`, or `failed` or `cancelled` with accepted cells; within `ui.requester.rating_window_days` of the terminal state; no rating exists yet (one rating per job) |
+| Entry conditions | Job `completed`, or `failed` or `cancelled` with accepted cells; within `ui.requester.rating_window_days` of the terminal state; one rating per job: a stored rating is shown and can be replaced until the window ends |
 | Blocks | Outcome: Good / Mixed / Poor (`outcome_rating`: `good`, `mixed`, `poor`). Optional tags: `accuracy`, `format`, `completeness`, `speed_vs_quote`, `other`. Optional comment up to `ui.requester.rating_comment_max_chars`. Optional "these cells look wrong": pick up to `ui.requester.rating_flag_cells_max` cell indices. A statement of use: the rating changes nobody's credit, is never shown to volunteers with the requester's name, and may lead to closer checks of the cells flagged; in aggregate it helps judge templates. The objective figure "finished {x} before or after the quoted deadline" is shown but is recorded by the system, not by the rating |
-| States | `open`, `submitted` (read-only), `window_closed`, `not_eligible` |
-| Actions | `rateJob` (a later submission replaces the earlier rating; no read exists yet) |
+| States | `open`, `submitted` (shows the stored rating; editable until the window ends), `window_closed` (read-only), `not_eligible` |
+| Actions | `rateJob` (a later submission replaces the earlier rating; the stored rating is the `rating` object of `Job`, S15a 15.7.2) |
 | Copy intent | Short and optional; makes clear that a low rating is allowed and safe; never asks for personal details |
 | Accessibility | Three outcomes are radio buttons with text labels and icons; the cell picker accepts typed indices and shows the chosen list as text |
 
@@ -707,7 +707,7 @@ Outcome and tag copy (rows carry `needs_human_and_legal_review`):
 | `speed_vs_quote` | Time compared with the quote | زمان نسبت به بازهٔ اعلام‌شده |
 | `other` | Something else | موارد دیگر |
 
-- **AC-req-57** Given a `completed` job inside the rating window, When the person submits Good with tag `accuracy`, Then one `rateJob` creates a `JobRating`, the screen becomes read-only and no cell state or ledger entry changes.
+- **AC-req-57** Given a `completed` job inside the rating window, When the person submits Good with tag `accuracy`, Then one `rateJob` creates a `JobRating`, the screen shows the stored rating and stays editable until the window ends (as `AC-req-58`), and no cell state or ledger entry changes.
 - **AC-req-58** Given a rating already exists, When a second submission is sent with `rateJob`, Then the earlier rating is replaced (`200`, no `409`) and the screen shows the stored rating.
 - **AC-req-59** Given `ui.requester.rating_flag_cells_max` cells are already picked, When another index is added, Then the picker refuses it and states the limit by its configured value.
 - **AC-req-60** Given the rating window has passed, When the page loads, Then the form is absent and the page states that the window ended.

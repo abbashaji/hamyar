@@ -124,7 +124,7 @@ These are not assumptions of this spec. They are listed so a reader sees what th
 
 ## 3.6 Cross-reference to S19.9
 
-The series `OD-01`..`OD-12` of S19.9 and `OD-01`..`OD-14` of this part are numbered separately, and most equal numbers mean different decisions (`docs/audit/A13.md` findings 2 and 22; `ISS-195`). Neither series is renumbered. Prose that cites an id writes `S19 OD-nn` or `S3 OD-nn`. The last column is the spec's reading of which decisions are the same [A]; where this part holds the decision, this part is authoritative (`ISS-38`). The same table is in S19.9. [D]
+The series `OD-01`..`OD-12` of S19.9 and `OD-01`..`OD-31` of this part (of which only `OD-01`..`OD-14` have a row in this table) are numbered separately, and most equal numbers mean different decisions (`docs/audit/A13.md` findings 2 and 22; `ISS-195`). Neither series is renumbered. Prose that cites an id writes `S19 OD-nn` or `S3 OD-nn`. The last column is the spec's reading of which decisions are the same [A]; where this part holds the decision, this part is authoritative (`ISS-38`). The same table is in S19.9. [D]
 
 | nn | `S3 OD-nn` means (3.2) | `S19 OD-nn` means (19.9) | Same decision? Counterpart |
 | --- | --- | --- | --- |

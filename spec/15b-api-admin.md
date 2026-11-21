@@ -71,6 +71,7 @@ Permission names follow `perm.<area>.<action>` (S0 0.8.2). The permission matrix
 | `perm.killswitch.read`, `perm.killswitch.engage.global`, `perm.killswitch.engage.template`, `perm.killswitch.engage.service`, `perm.killswitch.engage.member`, `perm.killswitch.release` | operator (template, service and member engage also reviewer) | 15.28 |
 | `perm.audit.read`, `perm.audit.resolve`, `perm.appeal.read`, `perm.appeal.decide`, `perm.report.read`, `perm.report.triage` | reviewer | 15.29 |
 | `perm.alarm.read`, `perm.alarm.ack` | operator, reviewer | 15.29 |
+| `perm.screening.read`, `perm.screening.decide` | reviewer | S15c 15.B.7 (`listScreeningQueue`, `getScreeningItem`, `getScreeningContent`, `decideScreening`) |
 | `perm.member.read_admin`, `perm.member.restrict`, `perm.member.suspend`, `perm.member.ban` | operator, reviewer | 15.29 |
 | `perm.ledger.read`, `perm.ledger.read_member`, `perm.ledger.verify`, `perm.ledger.reverse` | operator | 15.30 |
 | `perm.capacity.read` | operator | 15.31 |
@@ -962,7 +963,7 @@ Every event has this envelope; the catalog below lists only the payload.
 | `report.triaged`, `report.actioned`, `report.dismissed` | `report_id`, `action_ids?` | `admin_svc` | `inbox_proj` |
 | `team.locked`, `team.unlocked` | `team_id`, `action_id`, `report_id?` | `admin_svc` | `identity_svc`, `public_proj` |
 
-### 15.34.4 Catalog: ledger, configuration, launch, kill switches
+### 15.34.4 Catalog: ledger, configuration, launch, kill switches, experiments, calibration, decision reports, incidents and interviews
 
 | Event | Payload (besides envelope) | Producer | Consumers |
 | --- | --- | --- | --- |

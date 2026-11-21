@@ -288,7 +288,7 @@ Given / When / Then
 ## 15.C.6 Convention additions made by this file [A]
 
 - **Operations (11):** `createAppeal`, `listAppeals`, `getAppeal`, `withdrawAppeal`, `recordExperimentExposure`, `getCancellationPreview`, `previewCells`, `getSettlementReceipt`, `getReservationAvailability`, `listPublicExperiments`, `listPublicTeams`. They are S15 operations and belong in the generated OpenAPI document and the contract tests (`BM0`).
-- **Event:** `+experiment.exposed` (also `experiment.assigned`, named by part 12 and absent from the S15b catalogue).
+- **Event:** `+experiment.exposed` (also `experiment.assigned`, named by part 12; S15b 15.34.4 has a row for each).
 - **`details.reason` values:** `appeal_exists` (`ALREADY_EXISTS`), `appeal_window_closed`, `not_appealable`, `appeal_decided` (`STATE_CONFLICT`), `job_incomplete` (`UNPROCESSABLE`).
 - **Enum values:** `appeal_kind` as accepted by members: `submission_rejection`, `job_rejection`, `member_ban`. The enum name and the full value set must be checked against S0, which this cell did not read [V].
 - **Copy keys:** `copy.api_error.<code>[.<reason>]` for the new reasons; one fixed text each for the cancellation estimate basis and the availability estimate (areas `job` and `reservation`, `S11.*`).
@@ -321,7 +321,7 @@ These are contradictions or gaps that this reconciliation exposed and that it ca
 - **S2** S15a 15.7.2 `confirmJob` guards: with `reservation_id`, the reservation must be `held`, the caller's, not past `target_date`, and match template and cell count, else `409 STATE_CONFLICT` reason `reservation_state_invalid`.
 - **S3** S15a 15.13 and 15.1: the S15 operation tables include this file.
 - **S4** S15a 15.9: append the five new `details.reason` values of 15.C.6 to their code rows.
-- **S5** S15b 15.34: add `experiment.assigned` and `experiment.exposed`; add `job_svc` as consumer of `appeal.overturned`.
+- **S5** S15b 15.34: done; 15.34.4 has rows for `experiment.assigned` and `experiment.exposed`, and `job_svc` is a consumer of `appeal.overturned` (15.34.3).
 - **S6** S15a 15.7.3 and `Job`: refund text (O6) and rating read-back (O7).
 
 ## Edits required in citing parts

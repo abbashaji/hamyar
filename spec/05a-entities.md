@@ -634,6 +634,7 @@ A requester's request, or a Commons job. Machine S0.9.2. The declarations, the p
 | `reservation_id` | id `rsn_` | null | set when activated from a reservation |
 | `submitted_at`, `admitted_at`, `started_at`, `assembled_at`, `settled_at` | ts | null | |
 | `requester_rating` | int | null, 1..5 | rating of the outcome (prompt F); no free text, because free text can hold personal data |
+| `requester_rated_at` | ts | null until rated | time of the latest `rateJob` that stored `requester_rating`; the source of `Job.rating.updated_at` in S15a 15.7.2 [default-pending D-24] |
 | `pause_causes` | arr of enum(`job_pause_cause`) | NN, default empty; non-empty iff `state = 'suspended'` (CHECK) | set of `kill_template`, `kill_service`, `kill_member`, `policy_tightened`, `template_paused`, `service_suspended`; JT-11 adds a member, JT-12 fires when the last member clears (05b 5.22, 5.22.2) |
 | `state_before_pause` | enum | set iff `state = 'suspended'`; `admitted` or `running` | the state JT-12 returns to |
 | `pause_started_at` | ts | set iff `state = 'suspended'` | start of the current pause; cleared by JT-12 |
