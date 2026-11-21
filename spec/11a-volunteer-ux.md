@@ -173,7 +173,7 @@ Names only. Paths, bodies and final ids are owned by S15.*; where S15.* renames 
 | `getPublicStatus` | 01 | Launch state, public counter (when `ff.growth.v2_live_counter` is on), approved-service count |
 | `createMember` | 02 | Create the identity; carries the public key and, if present, an invite token |
 | `createSession` | all | Sign a challenge with the device key |
-| `getMember` | all | Status, `trust_tier`, restriction end, key-saved flag |
+| `getMe` | all | Status, `trust_tier`, restriction end, key-saved flag |
 | `listOffers` | 03 | Card summaries the member may lease, already filtered by `R8` opt-ins |
 | `createLease`, `getLease`, `extendLease`, `releaseLease` | 03, 04, 05 | Lease, read, extend once, decline or release |
 | `acknowledgePrompt` | 03 | Record that the full prompt was expanded (11.8.4) |
@@ -186,8 +186,8 @@ Names only. Paths, bodies and final ids are owned by S15.*; where S15.* renames 
 | `createInvite`, `listInvites`, `revokeInvite`, `getReferralStatus` | 12 | Invites and referral state |
 | `createTeam`, `getTeam`, `joinTeam`, `leaveTeam` | 10 | Teams |
 | `getShareCard` | 11 | Aggregate data for the card |
-| `startRecovery`, `completeRecovery`, `rotateRecoveryKey`, `confirmRecoveryKey` | 13 | Recovery |
-| `createDeviceLinkCode`, `redeemDeviceLinkCode`, `rotateMemberKey`, `closeMember` | 17 | Device linking, rotation, closure |
+| `recoverMember`, `rotateKey` (`kind` `recovery`), `confirmRecoveryKey` | 13 | Recovery |
+| `createDeviceLink`, `redeemDeviceLink`, `rotateKey` (`kind` `device`), `closeMember` | 17 | Device linking, rotation, closure |
 
 ### 11.5.2 Parameters this part reads, and additions [A]
 

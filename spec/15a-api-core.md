@@ -95,12 +95,13 @@ Schema blocks list `field: type`. A response object named in the text (for examp
 **Challenge and signature (API view)** [D][A]
 
 ```
-challenge = POST /v1/identity-challenges { purpose }      purpose in create, session, rotate, recover, device_link
-message   = "hamyar:v1:" + purpose + ":" + challenge + ":" + subject      subject: key id or public key
-signature = Ed25519(private_key, message)
+challenge = POST /v1/identity-challenges { purpose }      purpose in create, session, rotate, recover, device_link, step_up, confirm_recovery
+sig_input = utf8("hamyar:v1:") || purpose || 0x00 || audience || 0x00 || challenge || 0x00 || context_hash
+context_hash = SHA-256( RFC 8785 canonical JSON of the request body )      audience: the member origin string
+signature = Ed25519(private_key, sig_input)
 ```
 
-A challenge is 256 random bits, stored only as SHA-256, bound to its purpose, single-use, and valid for `identity.challenge_ttl_s`. Verification is constant-time and an unknown key, a revoked key and a wrong signature all return the same `401 AUTH_INVALID`, reason `credentials_invalid` (no key enumeration). The purposes `create` and `device_link` are reserved: `createMember` and `redeemDeviceLink` carry no server challenge, their proofs sign a domain-separated message over the submitted public keys, and replay is blocked by the unique `public_key` and by the single-use device-link code respectively [A][V: `S10.*` may add a challenge field]. The exact byte layout, the recovery-key derivation and every cryptographic parameter are owned by `S10.*`; where `S10.*` differs in detail it wins and the field names here stay [A][V: crypto review before launch, `SEC`].
+A challenge is 256 random bits, stored only as SHA-256, bound to its purpose, single-use, and valid for `identity.challenge_ttl_s`. Verification is constant-time and an unknown key, a revoked key and a wrong signature all return the same `401 AUTH_INVALID`, reason `credentials_invalid` (no key enumeration). There are seven purposes: `create`, `session`, `rotate`, `recover`, `device_link`, `step_up` and `confirm_recovery` (the last two are the additive purposes of S15.B.4 and S15.B.9). Every purpose has a server challenge, `create` (`createMember`) and `device_link` (`redeemDeviceLink`) included; a challenge is issued to anyone for any purpose and never reveals whether a key or a member exists. One signature therefore covers one purpose, one `audience` and one request body (`context_hash`), so it cannot be replayed on another site, for another action or with another body [A][V: `S10.*` 10.3.2 owns the layout]. The exact byte layout, the recovery-key derivation and every cryptographic parameter are owned by `S10.*`; where `S10.*` differs in detail it wins and the field names here stay [A][V: crypto review before launch, `SEC`].
 
 **Session lifecycle** [D]
 
@@ -178,6 +179,12 @@ Decisions behind the shapes [D]: the member keypair and the recovery secret are 
 | `createInvite` | `POST /v1/invites` | member | R | `RL-WRITE` | 201 | `+invite.created` |
 | `listInvites` | `GET /v1/invites` | member | - | `RL-READ` | 200 | - |
 | `revokeInvite` | `DELETE /v1/invites/{invite_id}` | member | R | `RL-WRITE` | 204 | `+invite.revoked` |
+| `revokeAllSessions` | `POST /v1/members/me/session-revocations` | member | R | `RL-WRITE` | 200 | - (defined in 15c 15.B.5.3) |
+| `getMemberExport` | `GET /v1/members/me/export` | member | - | `RL-WRITE` | 200 | - (defined in 15c 15.B.5.2) |
+| `confirmRecoveryKey` | `POST /v1/members/me/recovery-confirmations` | member | R | `RL-WRITE` | 200 | `+member.recovery_confirmed` (defined in 15c 15.B.5.4) |
+| `closeMember` | `POST /v1/members/me/closure` | member | R | `RL-WRITE` | 200 | `member.closed` (defined in 15c 15.B.5.1) |
+
+The last four rows are defined in `15c` (S15.B.5.1 to S15.B.5.4) under the ids shown; their request, response, errors and `Step-Up` rule are in `15c`, and this table lists them so that the identity operations are in one place [D].
 
 **Objects**
 
@@ -203,10 +210,10 @@ Invite   { id: id<inv>, state: "issued"/"redeemed"/"expired"/"revoked", created_
 **Schemas** (errors beyond the common set of `S15.9` are listed per operation)
 
 ```
-createIdentityChallenge  req { purpose: "create"/"session"/"rotate"/"recover"/"device_link", key_id?: id<mky> }
+createIdentityChallenge  req { purpose: "create"/"session"/"rotate"/"recover"/"device_link"/"step_up"/"confirm_recovery", key_id?: id<mky> }
                          201 { challenge: b64u<32>, expires_at: ts }      always returned, even for an unknown key_id
 createMember             req { public_key: b64u<32>, recovery_public_key: b64u<32>,
-                               proof: b64u<64>, recovery_proof: b64u<64>,   both sign the "create" message over both public keys
+                               challenge: b64u<32>, proof: b64u<64>, recovery_proof: b64u<64>,   challenge of purpose "create"; both proofs sign the "create" sig_input
                                device_token: b64u<16>, invite_code: text<32>?, locale: enum<locale>? }
                          201 { member: Member, key: Key, recovery_key: Key,
                                session_challenge: { challenge: b64u<32>, expires_at: ts } }
@@ -230,7 +237,7 @@ recoverMember            req { recovery_public_key: b64u<32>, challenge: b64u<32
                          201 { member: Member, key: Key, revoked_key_ids: [id<mky>], session_challenge: { challenge, expires_at } }
                          err 401 AUTH_INVALID (credentials_invalid); 403 FORBIDDEN (recovery_quota); 429 RATE_LIMITED
 createDeviceLink         201 { device_id: id<dev>, code: text<32>, expires_at: ts }     the code appears once
-redeemDeviceLink         req { code: text<32>, new_public_key: b64u<32>, proof: b64u<64>, device_token: b64u<16> }
+redeemDeviceLink         req { code: text<32>, challenge: b64u<32>, new_public_key: b64u<32>, proof: b64u<64>, device_token: b64u<16> }
                          202 { device_id: id<dev>, link_state: "awaiting_approval", sas: text<8> }
 approveDeviceLink        req { sas: text<8> }   200 { device: Device, key: Key }     the member compares sas on both screens
 createInvite             201 { invite: Invite, code: text<32> }                          the code appears once
@@ -241,7 +248,7 @@ createInvite             201 { invite: Invite, code: text<32> }                 
 
 **Behavior and guards**
 
-- **Create (no signup).** `createMember` needs no prior challenge: both proofs are signatures over the domain-separated creation message, which proves possession of both private keys (a mistyped recovery key cannot lock the member out). It returns no token; it returns a ready `session_challenge` so the client signs it and calls `createSession` at once (two round trips after creation, low bandwidth; time to first verified cell is measured, `V1`). A retry with the same `Idempotency-Key` replays the stored body; a new key with a known `public_key` is `409 ALREADY_EXISTS`. [D]
+- **Create (no signup).** `createMember` carries a challenge of purpose `create` (from `createIdentityChallenge`): both proofs are signatures over the `create` `sig_input` of 10a 10.3.2, which proves possession of both private keys (a mistyped recovery key cannot lock the member out). It returns no token; it returns a ready `session_challenge` so the client signs it and calls `createSession` at once (two round trips after creation, low bandwidth; time to first verified cell is measured, `V1`). A retry with the same `Idempotency-Key` replays the stored body; a new key with a known `public_key` is `409 ALREADY_EXISTS`. [D]
 - **Open or invite-only.** `invite.required_to_join` (convention gap, initial configurable default `true` for the closed Phase 1 pilot) decides whether `invite_code` is required. `launch.members_may_join` = `false` refuses every `createMember` with `LAUNCH_GATE_CLOSED`, regardless of invites. Redemption is atomic with creation: the invite, the member, the tree edge and the tree limits (`invite.tree_max_members`, `invite.tree_max_depth`) are checked and written in one transaction, so no unredeemed member row exists when invites are required. `invite_unusable` covers unknown, expired, redeemed and revoked codes alike (no enumeration); `checkInvite` is the only place the four states are distinguished, and only to a holder of the code. [D]
 - **Invite issuing.** Allowed when the member is `active`, has at least `invite.min_accepted_cells_to_issue` accepted cells, and has fewer than `invite.max_active_per_member` active invites; `expires_at = created_at + invite.ttl_days x 86,400 s`. A revoked or expired invite can never be redeemed. [D]
 - **Sessions.** `createSession` is single-use per challenge; a lost response means a new challenge. The key must be `active` or `retiring`; a `pending` device key (not yet approved) returns `key_pending` only after its signature verified, so the reason cannot be probed. [D]
