@@ -198,7 +198,7 @@ job_type: translation_glossary
 title: { en: "Translation with a shared glossary", fa: "ترجمه با واژه‌نامهٔ مشترک" }
 profiles: [ { purposes: [P0, P1], sensitivities: [S0, S1], service_requirements: [M0, M1] } ]
 risk_class: standard          # high => blanket redundancy per verify.blanket_redundancy_n
-quality_class: mixed          # subjective or mixed => verify.human_review_rate applies
+quality_class: mixed          # human review (verify.human_review_rate) applies where verification.subjective is true (08b 8.27), not for mixed alone
 volunteer_steps: [copy_prompt, press_send, copy_answer, paste_back]
 envelope: { input_ref: cell.envelope.max_input_chars, output_ref: cell.envelope.max_output_chars, expected_time_ref: cell.envelope.expected_time_s }
 slots:    [ ... ]             # 8.4.1
@@ -841,11 +841,11 @@ The tests are never run by or for the volunteer, and never by the platform. They
 | `code_change_tests` | `requester_side` | The requester, on their own machine, after delivery | `high` | Screening checks (8.13.3), gold, blanket audit (`verify.blanket_redundancy_n`, 8.13.3) against independent donors' outputs with comparator `patch_normalized_equal`; the deliverable is labeled "tests not run by the platform" |
 | `code_change_tests_rs` | `requester_side` | The requester, on their own machine, after download | `high` | The same screening checks (8.13.3); blanket redundancy (`verify.blanket_redundancy_n`) with comparator `patch_normalized_equal`; the deliverable is labeled "tests not run by the platform" |
 
-Both slugs are kept because this fix renames and deletes no id (FIX-27); with the runner removed they have the same `execution`, `risk_class`, `checks`, `comparator` and audit rule (blanket where `risk_class` is `high`, 8.13.3), and merging them is an owner matter (`OD-08`). In `requester_side` mode a requester's later test report is stored as an outcome rating only; it never creates or reverses a ledger entry (credit was paid at acceptance, `ISS-09` of `S0`) and never counts as a reliability observation by itself [D][A].
+Both slugs are kept because this fix renames and deletes no id (FIX-27); with the runner removed they have the same `execution`, `risk_class`, `checks`, `comparator` and audit rule (blanket where `risk_class` is `high`, 8.13.3), and merging them is an owner matter that is not decided here (FIX-27). In `requester_side` mode a requester's later test report is stored as an outcome rating only; it never creates or reverses a ledger entry (credit was paid at acceptance, `ISS-09` of `S0`) and never counts as a reliability observation by itself [D][A].
 
 ### 8.13.3 Static screening and audit contract; no runner [D]
 
-No runner exists. The platform never executes submitted content, so no `TestRunner` interface, `runner_profile` or isolated process is part of any template or of the platform (`ISS-12`; `OD-08` default applied). The table states what a template may rely on instead.
+No runner exists. The platform never executes submitted content, so no `TestRunner` interface, `runner_profile` or isolated process is part of any template or of the platform (`ISS-12`; `OD-08` default applied). The table states what a template may rely on instead. `verify.human_review_rate` does not apply to the two code-change slugs: human review is keyed on `verification.subjective` (08b 8.27), both slugs declare a comparator (`patch_normalized_equal`), which excludes `subjective`, so their audits are blanket comparator audits and `quality_class` = `mixed` does not select human review [default-pending D-25].
 
 | Requirement | Statement |
 | --- | --- |
