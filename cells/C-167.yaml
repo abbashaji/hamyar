@@ -1,0 +1,51 @@
+id: C-167
+title: 'R4-07: payout guard and overrun'
+type: normal
+priority: 4
+lease_minutes: 90
+goal: 'You apply a fixed list of audit findings to spec parts and write docs/fix/R4-07.md. SOURCES: docs/audit/FINAL-3.md (the ''Findings'' table; rows 1-51: each row you are assigned states file:line, defect and the proposed fix; READ each of your rows first), docs/owner-decisions.md (the owner''s accepted decisions D-01..D-38: they are binding, apply them, never invent another choice), and the parts named below. AUTHORITY WHEN SOURCES CONFLICT: docs/owner-decisions.md, then the Founding Document, then S0 (spec/00-conventions.md), then the part that owns the concept per D-30 (entities and columns: S5a; enums and states: S0; operations and paths: S15a/S15b; copy keys for requester rejections: S7), then all other parts. METHOD: for each assigned row, locate the cited text by reading about 30 lines around the cited line (lines drift; search nearby, never guess); make the MINIMAL edit in place (apply_changes with small old/new strings; never rewrite sections, never delete content that is not part of the fix); after an edit, check that every other place in YOUR files that states the same fact now agrees (search by reading the neighbouring sections and any table that repeats it); do not touch anything not named by your rows; if you notice another defect list it under ''## Noticed, not fixed'' with file:line and do not fix it. Names: edits may change only the identifiers your row says to change; never rename any other id, parameter, endpoint, state or enum; never mention retired names in the new text. If an edit would contradict the Founding Document, a ground rule of docs/decisions.md or a decision of docs/owner-decisions.md, do not make it: record skipped-needs-owner with the reason. STATUS WORDS: applied / already-applied / skipped-needs-owner / skipped-not-found (with what you searched). LOG docs/fix/R4-07.md: a table with columns exactly: edit | file:line | before | after | status (one row per edit, row numbers of FINAL-3 in the first column), then ''## Read-back'' (after ALL edits re-open every edited place and state in a phrase what you now read; also state, for each row, which other places you checked for the same fact), then ''## Noticed, not fixed'', then a last line ''Result: DONE'' or ''Result: DONE WITH SKIPS''. Mark every edit that follows a decision as default-pending in the ''after'' column. Do not run anything; CI runs the acceptance commands.
+
+
+  TASK R4-07: Rows 14, 34 (D-26, D-31). Read 5.29.6 and 5.29.8 of 05b first and state in your Read-back what 5.29.8 says. Row 14: in JT-15 say that when both guards are true the reason is `funding_shortfall`; add to the `overrun_timeout` row of 5.22.1 that a cell blocked by the payout guard is voided as in the `funding_shortfall` row; define `acceptance_deferred_until` as recomputed from the current overrun deadline including `paused_total_s` (a deadline extension by JT-12 moves it), not stored once: make :187 (G-accept) and :675 and the entity text in 05a say the same. Your Read-back must show that a deferred blocked cell reaches a terminal state so that settlement can run. Row 34: add the `commons` area to `Job.parameter_versions` in 05a:632 and a column for the audit flag-age value, or (choose the smaller edit and state which) change JT-15 and CT-19 and 16c to use the value in force when evaluated; JT-15 and 16c must say the same.
+
+  '
+after:
+- C-166
+- C-003
+- C-004
+- C-046
+- C-047
+- C-077
+- C-087
+- C-088
+- C-089
+- C-139
+- C-140
+- C-144
+- C-145
+- C-146
+- C-155
+read:
+- docs/decisions.md
+- docs/owner-decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- docs/audit/FINAL-3.md
+- spec/05b-state-machines.md
+- spec/05a-entities.md
+allowed_paths:
+- docs/fix/R4-07.md
+- spec/05b-state-machines.md
+- spec/05a-entities.md
+outputs:
+- docs/fix/R4-07.md
+acceptance:
+- cmd: python scripts/check_fixlog.py docs/fix/R4-07.md
+- cmd: python scripts/check_spec.py spec/05b-state-machines.md --min-lines 701 --min-tags 1
+- cmd: python scripts/check_spec.py spec/05a-entities.md --min-lines 1732 --min-tags 1
+- cmd: python scripts/check_text.py spec/05b-state-machines.md --present 'funding_shortfall'
+- cmd: python scripts/check_params.py
+- cmd: python scripts/check_issues.py
+- cmd: python scripts/check_stale.py
+- cmd: python scripts/check_refs.py api
+notes: 'Round-4 fix cell. Edits only inside allowed_paths. Large files: read in chunks of at most 600 lines with read_files; commit (apply_changes) after every ~10 edits and keep the log table current. Evidence tags and heading format as in docs/decisions.md. Acceptance is partly structural: completeness is what the goal says.'

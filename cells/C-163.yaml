@@ -1,0 +1,62 @@
+id: C-163
+title: 'R4-03: registration, recovery key and challenge model'
+type: normal
+priority: 4
+lease_minutes: 90
+goal: 'You apply a fixed list of audit findings to spec parts and write docs/fix/R4-03.md. SOURCES: docs/audit/FINAL-3.md (the ''Findings'' table; rows 1-51: each row you are assigned states file:line, defect and the proposed fix; READ each of your rows first), docs/owner-decisions.md (the owner''s accepted decisions D-01..D-38: they are binding, apply them, never invent another choice), and the parts named below. AUTHORITY WHEN SOURCES CONFLICT: docs/owner-decisions.md, then the Founding Document, then S0 (spec/00-conventions.md), then the part that owns the concept per D-30 (entities and columns: S5a; enums and states: S0; operations and paths: S15a/S15b; copy keys for requester rejections: S7), then all other parts. METHOD: for each assigned row, locate the cited text by reading about 30 lines around the cited line (lines drift; search nearby, never guess); make the MINIMAL edit in place (apply_changes with small old/new strings; never rewrite sections, never delete content that is not part of the fix); after an edit, check that every other place in YOUR files that states the same fact now agrees (search by reading the neighbouring sections and any table that repeats it); do not touch anything not named by your rows; if you notice another defect list it under ''## Noticed, not fixed'' with file:line and do not fix it. Names: edits may change only the identifiers your row says to change; never rename any other id, parameter, endpoint, state or enum; never mention retired names in the new text. If an edit would contradict the Founding Document, a ground rule of docs/decisions.md or a decision of docs/owner-decisions.md, do not make it: record skipped-needs-owner with the reason. STATUS WORDS: applied / already-applied / skipped-needs-owner / skipped-not-found (with what you searched). LOG docs/fix/R4-03.md: a table with columns exactly: edit | file:line | before | after | status (one row per edit, row numbers of FINAL-3 in the first column), then ''## Read-back'' (after ALL edits re-open every edited place and state in a phrase what you now read; also state, for each row, which other places you checked for the same fact), then ''## Noticed, not fixed'', then a last line ''Result: DONE'' or ''Result: DONE WITH SKIPS''. Mark every edit that follows a decision as default-pending in the ''after'' column. Do not run anything; CI runs the acceptance commands.
+
+
+  TASK R4-03: Rows 8, 11, 13, 19. Read 15b..15f for the four operations of row 13 first. Row 8 (D-18, D-18a, D-38): in 10a the recovery key is shown after the member''s first accepted cell, not at the end of registration: change the registration pseudocode, the text at 10.3.1, item 5 of 10.4.2 and AC-identity-04; the client holds the recovery secret in device storage from registration until the member confirms the key and wipes it then; it is never sent to the server; update the statement that it is never stored to say exactly that. Row 11: rewrite 15a 15.3 (challenge paragraph) to the seven purposes of 10a (create, session, rotate, recover, device_link, step_up, confirm_recovery) and the signed `sig_input` of 10a (audience and context_hash); delete the sentence that `create` and `device_link` carry no server challenge; keep the pointer to S10 for crypto detail. Row 13: confirm each of createSessionRevocation, exportMe, confirmRecoveryKey, closeMember exists as an operation in 15a to 15f (15c lists confirmRecoveryKey and closeMember as NEW rows; revokeSession and exportMe are in 15c 15.B.5); if one exists only in 15c, state in the 15a identity table that it is defined in 15c with the 15c id; rename the 10a and 11a ids to the 15a ids (10a says S15 is authoritative): deleteSession/revokeSession, createRecovery/recoverMember, putMemberEmail/setEmail, deleteMemberEmail/removeEmail, deleteInvite/revokeInvite, and the 11a 11.5.1 ids (getMember, createDeviceLinkCode, redeemDeviceLinkCode, rotateMemberKey, rotateRecoveryKey, startRecovery, completeRecovery) to the ids 15a/15c define for the same paths; add `checkInvite` to 10a 10.6. Row 19: add `rejectApproval`, `withdrawApproval` to 10a 10.18.1 and the events `admin.approval_rejected`, `admin.approval_withdrawn` to 10.18.2 (ids and events as S15b 15.21-15.22 and 15.34).
+
+  '
+after:
+- C-162
+- C-011
+- C-013
+- C-020
+- C-045
+- C-050
+- C-053
+- C-076
+- C-083
+- C-089
+- C-138
+- C-139
+- C-140
+- C-145
+- C-152
+- C-155
+read:
+- docs/decisions.md
+- docs/owner-decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- docs/audit/FINAL-3.md
+- spec/15b-api-admin.md
+- spec/15c-api-reconcile-core.md
+- spec/15d-api-reconcile-requester-growth.md
+- spec/15e-api-reconcile-admin.md
+- spec/15f-api-reconcile-measurement.md
+- spec/11d-i18n-copy.md
+- spec/10a-identity.md
+- spec/15a-api-core.md
+- spec/11a-volunteer-ux.md
+allowed_paths:
+- docs/fix/R4-03.md
+- spec/10a-identity.md
+- spec/15a-api-core.md
+- spec/11a-volunteer-ux.md
+outputs:
+- docs/fix/R4-03.md
+acceptance:
+- cmd: python scripts/check_fixlog.py docs/fix/R4-03.md
+- cmd: python scripts/check_spec.py spec/10a-identity.md --min-lines 659 --min-tags 1
+- cmd: python scripts/check_spec.py spec/15a-api-core.md --min-lines 756 --min-tags 1
+- cmd: python scripts/check_spec.py spec/11a-volunteer-ux.md --min-lines 1179 --min-tags 1
+- cmd: python scripts/check_text.py spec/10a-identity.md --absent 'before leaving onboarding'
+- cmd: python scripts/check_text.py spec/15a-api-core.md --absent 'carry no server challenge' --present 'confirm_recovery'
+- cmd: python scripts/check_params.py
+- cmd: python scripts/check_issues.py
+- cmd: python scripts/check_stale.py
+- cmd: python scripts/check_refs.py api
+notes: 'Round-4 fix cell. Edits only inside allowed_paths. Large files: read in chunks of at most 600 lines with read_files; commit (apply_changes) after every ~10 edits and keep the log table current. Evidence tags and heading format as in docs/decisions.md. Acceptance is partly structural: completeness is what the goal says.'

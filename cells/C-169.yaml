@@ -1,0 +1,61 @@
+id: C-169
+title: 'R4-09: verification shortfall and risk class'
+type: normal
+priority: 4
+lease_minutes: 90
+goal: 'You apply a fixed list of audit findings to spec parts and write docs/fix/R4-09.md. SOURCES: docs/audit/FINAL-3.md (the ''Findings'' table; rows 1-51: each row you are assigned states file:line, defect and the proposed fix; READ each of your rows first), docs/owner-decisions.md (the owner''s accepted decisions D-01..D-38: they are binding, apply them, never invent another choice), and the parts named below. AUTHORITY WHEN SOURCES CONFLICT: docs/owner-decisions.md, then the Founding Document, then S0 (spec/00-conventions.md), then the part that owns the concept per D-30 (entities and columns: S5a; enums and states: S0; operations and paths: S15a/S15b; copy keys for requester rejections: S7), then all other parts. METHOD: for each assigned row, locate the cited text by reading about 30 lines around the cited line (lines drift; search nearby, never guess); make the MINIMAL edit in place (apply_changes with small old/new strings; never rewrite sections, never delete content that is not part of the fix); after an edit, check that every other place in YOUR files that states the same fact now agrees (search by reading the neighbouring sections and any table that repeats it); do not touch anything not named by your rows; if you notice another defect list it under ''## Noticed, not fixed'' with file:line and do not fix it. Names: edits may change only the identifiers your row says to change; never rename any other id, parameter, endpoint, state or enum; never mention retired names in the new text. If an edit would contradict the Founding Document, a ground rule of docs/decisions.md or a decision of docs/owner-decisions.md, do not make it: record skipped-needs-owner with the reason. STATUS WORDS: applied / already-applied / skipped-needs-owner / skipped-not-found (with what you searched). LOG docs/fix/R4-09.md: a table with columns exactly: edit | file:line | before | after | status (one row per edit, row numbers of FINAL-3 in the first column), then ''## Read-back'' (after ALL edits re-open every edited place and state in a phrase what you now read; also state, for each row, which other places you checked for the same fact), then ''## Noticed, not fixed'', then a last line ''Result: DONE'' or ''Result: DONE WITH SKIPS''. Mark every edit that follows a decision as default-pending in the ''after'' column. Do not run anything; CI runs the acceptance commands.
+
+
+  TASK R4-09: Rows 16, 36, 38, 39, 50 (D-25). Read 08b 8.32 and 04 :264 first. Row 16: 08b (the `verification.risk_class` row and the ISS-85 resolution) say none is `high` by default in Phase 1 EXCEPT `code_change_tests` and `code_change_tests_rs`, which 08a 8.13.2 declares `high`; 08a, 08b and spec/04-architecture.md:264 agree for the two slugs (04 is not yours: log a difference under Noticed). Row 36: in 5.22.1 (05b) say that on `verification_shortfall` a flagged cell without a payable audit is accepted or voided by one stated rule consistent with CT-07, CT-19 and 08b 8.32 (choose: voided, no credit minted; and state it), so settlement never waits on it. Row 38: add one sentence to 8.13.3 saying whether `verify.human_review_rate` applies to the two slugs (08b keys human review on `verification.subjective`); correct the skeleton comment at 08a:201 to match. Row 39: point the reason for keeping two slugs to the right place (not OD-08, which is about a sandbox). Row 50: 06a (the free-budget test): the stop applies to mandatory events only; a sampled draw the pool cannot pay is skipped and counted as `hamyar_ledger_verification_unfunded_total`; add the floor-band case to 08b (the budget_remaining condition).
+
+  '
+after:
+- C-167
+- C-168
+- C-004
+- C-005
+- C-008
+- C-009
+- C-042
+- C-047
+- C-049
+- C-070
+- C-077
+- C-096
+- C-097
+- C-098
+- C-144
+- C-146
+- C-151
+read:
+- docs/decisions.md
+- docs/owner-decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- docs/audit/FINAL-3.md
+- spec/04-architecture.md
+- spec/09-result-return.md
+- spec/08a-templates.md
+- spec/08b-verification.md
+- spec/05b-state-machines.md
+- spec/06a-ledger.md
+allowed_paths:
+- docs/fix/R4-09.md
+- spec/08a-templates.md
+- spec/08b-verification.md
+- spec/05b-state-machines.md
+- spec/06a-ledger.md
+outputs:
+- docs/fix/R4-09.md
+acceptance:
+- cmd: python scripts/check_fixlog.py docs/fix/R4-09.md
+- cmd: python scripts/check_spec.py spec/08a-templates.md --min-lines 988 --min-tags 1
+- cmd: python scripts/check_spec.py spec/08b-verification.md --min-lines 583 --min-tags 1
+- cmd: python scripts/check_spec.py spec/05b-state-machines.md --min-lines 701 --min-tags 1
+- cmd: python scripts/check_spec.py spec/06a-ledger.md --min-lines 753 --min-tags 1
+- cmd: python scripts/check_text.py spec/08b-verification.md --present 'code_change_tests_rs'
+- cmd: python scripts/check_params.py
+- cmd: python scripts/check_issues.py
+- cmd: python scripts/check_stale.py
+- cmd: python scripts/check_refs.py api
+notes: 'Round-4 fix cell. Edits only inside allowed_paths. Large files: read in chunks of at most 600 lines with read_files; commit (apply_changes) after every ~10 edits and keep the log table current. Evidence tags and heading format as in docs/decisions.md. Acceptance is partly structural: completeness is what the goal says.'

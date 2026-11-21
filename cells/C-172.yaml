@@ -1,0 +1,129 @@
+id: C-172
+title: 'R4-12: small residues and log hygiene'
+type: normal
+priority: 4
+lease_minutes: 90
+goal: 'You apply a fixed list of audit findings to spec parts and write docs/fix/R4-12.md. SOURCES: docs/audit/FINAL-3.md (the ''Findings'' table; rows 1-51: each row you are assigned states file:line, defect and the proposed fix; READ each of your rows first), docs/owner-decisions.md (the owner''s accepted decisions D-01..D-38: they are binding, apply them, never invent another choice), and the parts named below. AUTHORITY WHEN SOURCES CONFLICT: docs/owner-decisions.md, then the Founding Document, then S0 (spec/00-conventions.md), then the part that owns the concept per D-30 (entities and columns: S5a; enums and states: S0; operations and paths: S15a/S15b; copy keys for requester rejections: S7), then all other parts. METHOD: for each assigned row, locate the cited text by reading about 30 lines around the cited line (lines drift; search nearby, never guess); make the MINIMAL edit in place (apply_changes with small old/new strings; never rewrite sections, never delete content that is not part of the fix); after an edit, check that every other place in YOUR files that states the same fact now agrees (search by reading the neighbouring sections and any table that repeats it); do not touch anything not named by your rows; if you notice another defect list it under ''## Noticed, not fixed'' with file:line and do not fix it. Names: edits may change only the identifiers your row says to change; never rename any other id, parameter, endpoint, state or enum; never mention retired names in the new text. If an edit would contradict the Founding Document, a ground rule of docs/decisions.md or a decision of docs/owner-decisions.md, do not make it: record skipped-needs-owner with the reason. STATUS WORDS: applied / already-applied / skipped-needs-owner / skipped-not-found (with what you searched). LOG docs/fix/R4-12.md: a table with columns exactly: edit | file:line | before | after | status (one row per edit, row numbers of FINAL-3 in the first column), then ''## Read-back'' (after ALL edits re-open every edited place and state in a phrase what you now read; also state, for each row, which other places you checked for the same fact), then ''## Noticed, not fixed'', then a last line ''Result: DONE'' or ''Result: DONE WITH SKIPS''. Mark every edit that follows a decision as default-pending in the ''after'' column. Do not run anything; CI runs the acceptance commands.
+
+
+  TASK R4-12: Rows 20, 30, 32, 33, 43, 44, 45, 46, 47, 48, 51. Row 20: 11b AC-req-57 shows the stored rating and stays editable until the window ends (as AC-req-58); align SCR-req-17 entry conditions. Row 30: add `requester_rated_at` to 05a Job (timestamp, null until rated) so that `Job.rating` `{score, updated_at}` of 15a has a stored source; 15a unchanged unless it disagrees. Row 32: 09 convention additions list only `submitResult` and `rotateLeaseNonce` (no validation endpoint exists, 9.5.4). Row 33: 13 `lock_approvals`: state it is written once at execution with the two approver action ids and the approved hash (the open approval lives in AdminApproval). Row 43: 02f header and counts line include 2.F.5; counts equal the ids of the file. Row 44: locate the two stale sentences in 15d (15.C.6 event bullet saying `experiment.assigned` is absent) and 15c (15.B.9 Events row calling `member.recovery_confirmed` a convention gap) and align them with 15b 15.34.4 and 15.34.6. Row 45: apply the R3-13 edits 25 and 27 intent in 15c: the `perm.screening.read` and `perm.screening.decide` rows in 15b 15.21.4 and the 15c lines they require; read 11a and the other citing parts to check that no part cites a path with verdict REMOVE. Row 46: rename the heading of 15b 15.34.4 to cover calibration, decision-report, incident, interview and experiment events too. Row 47: in 19 prefix bare `OD-nn` ids with `S19` in the paragraph near 19.1 and search 19.2..19.8 for bare ids (prose never writes a bare id). Row 48: 03 3.6 says `OD-01` to `OD-31` of this part, of which only `OD-01` to `OD-14` have a row in this table. Row 51: in docs/fix/R3-02.md, R3-07.md, R3-14.md, R3-15.md add under the table a line ''Offset note (round 4): line citations in this log drift by up to 30 lines against the final files'' and correct the two false read-back sentences (R3-14: 08b has 687 lines and its range was 1-583; R3-15: ISS-17003 is not read in 11.87 row S10, which has no issue id). Do not edit anything else in those logs.
+
+  '
+after:
+- C-170
+- C-171
+- C-167
+- C-166
+- C-001
+- C-003
+- C-010
+- C-014
+- C-018
+- C-020
+- C-021
+- C-025
+- C-028
+- C-037
+- C-038
+- C-046
+- C-047
+- C-051
+- C-052
+- C-053
+- C-054
+- C-060
+- C-077
+- C-078
+- C-082
+- C-083
+- C-084
+- C-085
+- C-087
+- C-088
+- C-089
+- C-092
+- C-093
+- C-094
+- C-095
+- C-098
+- C-130
+- C-139
+- C-140
+- C-142
+- C-144
+- C-145
+- C-147
+- C-148
+- C-150
+- C-151
+- C-152
+- C-154
+- C-155
+read:
+- docs/decisions.md
+- docs/owner-decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- docs/audit/FINAL-3.md
+- spec/11a-volunteer-ux.md
+- spec/11c-admin-tools.md
+- spec/15e-api-reconcile-admin.md
+- spec/15f-api-reconcile-measurement.md
+- spec/08b-verification.md
+- spec/11b-requester-ux.md
+- spec/15a-api-core.md
+- spec/05a-entities.md
+- spec/09-result-return.md
+- spec/13-measurement.md
+- spec/02f-issues-late.md
+- spec/15b-api-admin.md
+- spec/15c-api-reconcile-core.md
+- spec/15d-api-reconcile-requester-growth.md
+- spec/19-risks.md
+- spec/03-assumptions.md
+- docs/fix/R3-02.md
+- docs/fix/R3-07.md
+- docs/fix/R3-14.md
+- docs/fix/R3-15.md
+allowed_paths:
+- docs/fix/R4-12.md
+- spec/11b-requester-ux.md
+- spec/15a-api-core.md
+- spec/05a-entities.md
+- spec/09-result-return.md
+- spec/13-measurement.md
+- spec/02f-issues-late.md
+- spec/15b-api-admin.md
+- spec/15c-api-reconcile-core.md
+- spec/15d-api-reconcile-requester-growth.md
+- spec/19-risks.md
+- spec/03-assumptions.md
+- docs/fix/R3-02.md
+- docs/fix/R3-07.md
+- docs/fix/R3-14.md
+- docs/fix/R3-15.md
+outputs:
+- docs/fix/R4-12.md
+acceptance:
+- cmd: python scripts/check_fixlog.py docs/fix/R4-12.md
+- cmd: python scripts/check_spec.py spec/11b-requester-ux.md --min-lines 922 --min-tags 1
+- cmd: python scripts/check_spec.py spec/15a-api-core.md --min-lines 756 --min-tags 1
+- cmd: python scripts/check_spec.py spec/05a-entities.md --min-lines 1732 --min-tags 1
+- cmd: python scripts/check_spec.py spec/09-result-return.md --min-lines 703 --min-tags 1
+- cmd: python scripts/check_spec.py spec/13-measurement.md --min-lines 982 --min-tags 1
+- cmd: python scripts/check_spec.py spec/02f-issues-late.md --min-lines 64 --min-tags 1
+- cmd: python scripts/check_spec.py spec/15b-api-admin.md --min-lines 1020 --min-tags 1
+- cmd: python scripts/check_spec.py spec/15c-api-reconcile-core.md --min-lines 321 --min-tags 1
+- cmd: python scripts/check_spec.py spec/15d-api-reconcile-requester-growth.md --min-lines 392 --min-tags 1
+- cmd: python scripts/check_spec.py spec/19-risks.md --min-lines 299 --min-tags 1
+- cmd: python scripts/check_spec.py spec/03-assumptions.md --min-lines 136 --min-tags 1
+- cmd: python scripts/check_spec.py docs/fix/R3-02.md --min-lines 35 --min-tags 1
+- cmd: python scripts/check_spec.py docs/fix/R3-07.md --min-lines 59 --min-tags 1
+- cmd: python scripts/check_spec.py docs/fix/R3-14.md --min-lines 39 --min-tags 1
+- cmd: python scripts/check_spec.py docs/fix/R3-15.md --min-lines 34 --min-tags 1
+- cmd: python scripts/check_text.py spec/09-result-return.md --absent 'validation operation and its path'
+- cmd: python scripts/check_params.py
+- cmd: python scripts/check_issues.py
+- cmd: python scripts/check_stale.py
+- cmd: python scripts/check_refs.py api
+notes: 'Round-4 fix cell. Edits only inside allowed_paths. Large files: read in chunks of at most 600 lines with read_files; commit (apply_changes) after every ~10 edits and keep the log table current. Evidence tags and heading format as in docs/decisions.md. Acceptance is partly structural: completeness is what the goal says.'

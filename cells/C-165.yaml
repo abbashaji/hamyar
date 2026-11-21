@@ -1,0 +1,42 @@
+id: C-165
+title: 'R4-05: admin acceptance rows'
+type: normal
+priority: 4
+lease_minutes: 90
+goal: 'You apply a fixed list of audit findings to spec parts and write docs/fix/R4-05.md. SOURCES: docs/audit/FINAL-3.md (the ''Findings'' table; rows 1-51: each row you are assigned states file:line, defect and the proposed fix; READ each of your rows first), docs/owner-decisions.md (the owner''s accepted decisions D-01..D-38: they are binding, apply them, never invent another choice), and the parts named below. AUTHORITY WHEN SOURCES CONFLICT: docs/owner-decisions.md, then the Founding Document, then S0 (spec/00-conventions.md), then the part that owns the concept per D-30 (entities and columns: S5a; enums and states: S0; operations and paths: S15a/S15b; copy keys for requester rejections: S7), then all other parts. METHOD: for each assigned row, locate the cited text by reading about 30 lines around the cited line (lines drift; search nearby, never guess); make the MINIMAL edit in place (apply_changes with small old/new strings; never rewrite sections, never delete content that is not part of the fix); after an edit, check that every other place in YOUR files that states the same fact now agrees (search by reading the neighbouring sections and any table that repeats it); do not touch anything not named by your rows; if you notice another defect list it under ''## Noticed, not fixed'' with file:line and do not fix it. Names: edits may change only the identifiers your row says to change; never rename any other id, parameter, endpoint, state or enum; never mention retired names in the new text. If an edit would contradict the Founding Document, a ground rule of docs/decisions.md or a decision of docs/owner-decisions.md, do not make it: record skipped-needs-owner with the reason. STATUS WORDS: applied / already-applied / skipped-needs-owner / skipped-not-found (with what you searched). LOG docs/fix/R4-05.md: a table with columns exactly: edit | file:line | before | after | status (one row per edit, row numbers of FINAL-3 in the first column), then ''## Read-back'' (after ALL edits re-open every edited place and state in a phrase what you now read; also state, for each row, which other places you checked for the same fact), then ''## Noticed, not fixed'', then a last line ''Result: DONE'' or ''Result: DONE WITH SKIPS''. Mark every edit that follows a decision as default-pending in the ''after'' column. Do not run anything; CI runs the acceptance commands.
+
+
+  TASK R4-05: Rows 6, 21. Row 6: `AC-lookup-05` and `AC-lookup-06` are rewritten without a context (`getMemberAdmin` has no body; D-20: the read is logged, not justified); remove the other context requirements: the Context rule of 11.59, 11.65.1, 11.64.1 (whatever still demands a context object for a member lookup). Row 21: rename heading 11.66 and reword its Purpose and 11.66.1 to release and takeover (hand over was removed); the sentence at the end that says no handover stays true.
+
+  '
+after:
+- C-164
+- C-015
+- C-051
+- C-080
+- C-081
+- C-092
+- C-141
+- C-142
+- C-152
+read:
+- docs/decisions.md
+- docs/owner-decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- docs/audit/FINAL-3.md
+- spec/11c-admin-tools.md
+allowed_paths:
+- docs/fix/R4-05.md
+- spec/11c-admin-tools.md
+outputs:
+- docs/fix/R4-05.md
+acceptance:
+- cmd: python scripts/check_fixlog.py docs/fix/R4-05.md
+- cmd: python scripts/check_spec.py spec/11c-admin-tools.md --min-lines 742 --min-tags 1
+- cmd: python scripts/check_text.py spec/11c-admin-tools.md --absent 'Release and [Hh]and over'
+- cmd: python scripts/check_params.py
+- cmd: python scripts/check_issues.py
+- cmd: python scripts/check_stale.py
+- cmd: python scripts/check_refs.py api
+notes: 'Round-4 fix cell. Edits only inside allowed_paths. Large files: read in chunks of at most 600 lines with read_files; commit (apply_changes) after every ~10 edits and keep the log table current. Evidence tags and heading format as in docs/decisions.md. Acceptance is partly structural: completeness is what the goal says.'

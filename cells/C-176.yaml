@@ -1,0 +1,32 @@
+id: C-176
+title: 'Re-audit round 4, slice C: ledger, machines, verification'
+type: normal
+priority: 3
+lease_minutes: 90
+goal: 'INDEPENDENT re-audit slice (you did not write the parts or the fixes). Method: read in chunks of at most 600 lines; do not paste file contents into chat; every claim names file:line you saw. Write docs/audit/FINAL-4c.md with: ''## Checked'' (what you opened and found correct), a findings table with columns exactly ''# | severity | file:line | defect | action'' (severity blocking/major/minor; action: the exact proposed fix), ''## Not verified'', and a last line ''Verdict: READY'' or ''Verdict: READY WITH LOGGED ITEMS'' or ''Verdict: NOT READY''. Be critical; a log that says DONE is a claim, not evidence. Owner decisions are in docs/owner-decisions.md (D-01..D-38, accepted; do not report them as open). The 51 rows of docs/audit/FINAL-3.md are what round 4 fixed: confirm each row of your slice is closed by reading the part file, and look for NEW contradictions created by the edits. SLICE: Open docs/fix/R4-07.md, R4-08.md, R4-09.md, R4-11.md. Cross-check: JT-15, G-accept, 5.22.1, 5.29.8 together: does every blocked or flagged cell reach a terminal state so that settlement runs; restitution in 05b and 06a; risk_class of the two code-change slugs in 04, 08a, 08b, 09; mint_headroom naming in 05a, 05b, 06a, S0; parameter ranges in S0 and S16.'
+after:
+- C-167
+- C-168
+- C-169
+- C-171
+read:
+- docs/decisions.md
+- docs/owner-decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- docs/audit/FINAL-3.md
+- docs/fix/R4-07.md
+- docs/fix/R4-08.md
+- docs/fix/R4-09.md
+- docs/fix/R4-11.md
+allowed_paths:
+- docs/audit/FINAL-4c.md
+outputs:
+- docs/audit/FINAL-4c.md
+acceptance:
+- cmd: python scripts/check_audit.py docs/audit/FINAL-4c.md
+- cmd: python scripts/check_params.py
+- cmd: python scripts/check_issues.py
+- cmd: python scripts/check_stale.py
+- cmd: python scripts/check_refs.py api
+notes: Audit cell. Independent and critical. Nothing is executed by you; CI runs acceptance.

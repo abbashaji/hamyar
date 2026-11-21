@@ -45,3 +45,6 @@ The owner accepted the defaults of docs/audit/FINAL.md section 4 (D-01..D-22). T
 
 ## Round 3 (owner note)
 Cells C-138..C-160 apply the findings of docs/audit/FINAL-2.md (one cell per file group, every finding assigned to exactly one cell, files sequenced with `after` edges) and end with an independent re-audit in four slices plus a merge (docs/audit/FINAL-3.md). Fix logs: docs/fix/R3-*.md. Decisions: docs/owner-decisions.md.
+
+## Round 4
+Cells C-161..C-178 apply the open findings of docs/audit/FINAL-3.md (rows 1-51, each in exactly one cell R4-01..R4-13), then four independent re-audit slices (docs/audit/FINAL-4a..d.md) and a merge (docs/audit/FINAL-4.md). Fix logs: docs/fix/R4-*.md. Decisions: docs/owner-decisions.md (D-01..D-38; D-35..D-38 answer the four open questions of FINAL-3).

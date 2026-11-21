@@ -1,0 +1,82 @@
+id: C-164
+title: 'R4-04: two-person actions'
+type: normal
+priority: 4
+lease_minutes: 90
+goal: 'You apply a fixed list of audit findings to spec parts and write docs/fix/R4-04.md. SOURCES: docs/audit/FINAL-3.md (the ''Findings'' table; rows 1-51: each row you are assigned states file:line, defect and the proposed fix; READ each of your rows first), docs/owner-decisions.md (the owner''s accepted decisions D-01..D-38: they are binding, apply them, never invent another choice), and the parts named below. AUTHORITY WHEN SOURCES CONFLICT: docs/owner-decisions.md, then the Founding Document, then S0 (spec/00-conventions.md), then the part that owns the concept per D-30 (entities and columns: S5a; enums and states: S0; operations and paths: S15a/S15b; copy keys for requester rejections: S7), then all other parts. METHOD: for each assigned row, locate the cited text by reading about 30 lines around the cited line (lines drift; search nearby, never guess); make the MINIMAL edit in place (apply_changes with small old/new strings; never rewrite sections, never delete content that is not part of the fix); after an edit, check that every other place in YOUR files that states the same fact now agrees (search by reading the neighbouring sections and any table that repeats it); do not touch anything not named by your rows; if you notice another defect list it under ''## Noticed, not fixed'' with file:line and do not fix it. Names: edits may change only the identifiers your row says to change; never rename any other id, parameter, endpoint, state or enum; never mention retired names in the new text. If an edit would contradict the Founding Document, a ground rule of docs/decisions.md or a decision of docs/owner-decisions.md, do not make it: record skipped-needs-owner with the reason. STATUS WORDS: applied / already-applied / skipped-needs-owner / skipped-not-found (with what you searched). LOG docs/fix/R4-04.md: a table with columns exactly: edit | file:line | before | after | status (one row per edit, row numbers of FINAL-3 in the first column), then ''## Read-back'' (after ALL edits re-open every edited place and state in a phrase what you now read; also state, for each row, which other places you checked for the same fact), then ''## Noticed, not fixed'', then a last line ''Result: DONE'' or ''Result: DONE WITH SKIPS''. Mark every edit that follows a decision as default-pending in the ''after'' column. Do not run anything; CI runs the acceptance commands.
+
+
+  TASK R4-04: Rows 7, 18 (D-34, D-35). Row 7: ONE table of two-person action names, owned by 10a 10.12 (D-30: S10a); the S0 default and fixed minimum (S0 `security.two_person_actions` row), S16 16.16 and 11c all conform to it: it is the union of what S10a, S14 and S15b mark as two-person (read 14 and 15b for their lists; 10b requires `disclosure.release` 10.23.5 and `secret.emergency_access` 10.24.1 item 2: include both); delete `member.resolve_handle` everywhere in your files (11c catalog row, the sentence that counts it among the additions, 11c 11.x :226 and ISS-117 (f) item); 10a 10.12 line that gives a second default list becomes a pointer to the table; settle `admin.enroll` and `admin.role_change` against `admin.role_grant` and `admin.credential_add` by D-35: the enrollment actions have one name each in the table, `createAdminUser` of S15b keeps `admin.enroll` only if 10a lists it, otherwise S15b is not in your files: log it under Noticed. Row 18: split the 11c row `launch.reopen`, `launch.switch_off`: reopen keeps `perm.launch.signoff` and `gate.reopened`; switch_off takes `perm.launch.switch` and the three `launch.<switch>_changed` events (11c lines 190 and 656 state them).
+
+  '
+after:
+- C-163
+- C-000
+- C-011
+- C-015
+- C-022
+- C-027
+- C-045
+- C-051
+- C-054
+- C-056
+- C-059
+- C-062
+- C-064
+- C-065
+- C-066
+- C-072
+- C-073
+- C-074
+- C-076
+- C-080
+- C-081
+- C-089
+- C-090
+- C-091
+- C-092
+- C-138
+- C-139
+- C-140
+- C-141
+- C-142
+- C-144
+- C-147
+- C-152
+- C-155
+read:
+- docs/decisions.md
+- docs/owner-decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- docs/audit/FINAL-3.md
+- spec/14-launch-gates.md
+- spec/15b-api-admin.md
+- spec/10b-safety.md
+- spec/00-conventions.md
+- spec/10a-identity.md
+- spec/11c-admin-tools.md
+- spec/16-parameters.md
+allowed_paths:
+- docs/fix/R4-04.md
+- spec/00-conventions.md
+- spec/10a-identity.md
+- spec/11c-admin-tools.md
+- spec/16-parameters.md
+outputs:
+- docs/fix/R4-04.md
+acceptance:
+- cmd: python scripts/check_fixlog.py docs/fix/R4-04.md
+- cmd: python scripts/check_spec.py spec/00-conventions.md --min-lines 843 --min-tags 1
+- cmd: python scripts/check_spec.py spec/10a-identity.md --min-lines 659 --min-tags 1
+- cmd: python scripts/check_spec.py spec/11c-admin-tools.md --min-lines 742 --min-tags 1
+- cmd: python scripts/check_spec.py spec/16-parameters.md --min-lines 552 --min-tags 1
+- cmd: python scripts/check_text.py spec/11c-admin-tools.md --absent 'member\.resolve_handle'
+- cmd: python scripts/check_text.py spec/10a-identity.md --absent 'member\.resolve_handle'
+- cmd: python scripts/check_text.py spec/00-conventions.md --absent 'member\.resolve_handle'
+- cmd: python scripts/check_text.py spec/16-parameters.md --absent 'member\.resolve_handle'
+- cmd: python scripts/check_params.py
+- cmd: python scripts/check_issues.py
+- cmd: python scripts/check_stale.py
+- cmd: python scripts/check_refs.py api
+notes: 'Round-4 fix cell. Edits only inside allowed_paths. Large files: read in chunks of at most 600 lines with read_files; commit (apply_changes) after every ~10 edits and keep the log table current. Evidence tags and heading format as in docs/decisions.md. Acceptance is partly structural: completeness is what the goal says.'

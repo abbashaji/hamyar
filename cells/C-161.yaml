@@ -1,0 +1,57 @@
+id: C-161
+title: 'R4-01: identity states and fields'
+type: normal
+priority: 4
+lease_minutes: 90
+goal: 'You apply a fixed list of audit findings to spec parts and write docs/fix/R4-01.md. SOURCES: docs/audit/FINAL-3.md (the ''Findings'' table; rows 1-51: each row you are assigned states file:line, defect and the proposed fix; READ each of your rows first), docs/owner-decisions.md (the owner''s accepted decisions D-01..D-38: they are binding, apply them, never invent another choice), and the parts named below. AUTHORITY WHEN SOURCES CONFLICT: docs/owner-decisions.md, then the Founding Document, then S0 (spec/00-conventions.md), then the part that owns the concept per D-30 (entities and columns: S5a; enums and states: S0; operations and paths: S15a/S15b; copy keys for requester rejections: S7), then all other parts. METHOD: for each assigned row, locate the cited text by reading about 30 lines around the cited line (lines drift; search nearby, never guess); make the MINIMAL edit in place (apply_changes with small old/new strings; never rewrite sections, never delete content that is not part of the fix); after an edit, check that every other place in YOUR files that states the same fact now agrees (search by reading the neighbouring sections and any table that repeats it); do not touch anything not named by your rows; if you notice another defect list it under ''## Noticed, not fixed'' with file:line and do not fix it. Names: edits may change only the identifiers your row says to change; never rename any other id, parameter, endpoint, state or enum; never mention retired names in the new text. If an edit would contradict the Founding Document, a ground rule of docs/decisions.md or a decision of docs/owner-decisions.md, do not make it: record skipped-needs-owner with the reason. STATUS WORDS: applied / already-applied / skipped-needs-owner / skipped-not-found (with what you searched). LOG docs/fix/R4-01.md: a table with columns exactly: edit | file:line | before | after | status (one row per edit, row numbers of FINAL-3 in the first column), then ''## Read-back'' (after ALL edits re-open every edited place and state in a phrase what you now read; also state, for each row, which other places you checked for the same fact), then ''## Noticed, not fixed'', then a last line ''Result: DONE'' or ''Result: DONE WITH SKIPS''. Mark every edit that follows a decision as default-pending in the ''after'' column. Do not run anything; CI runs the acceptance commands.
+
+
+  TASK R4-01: Rows 1, 2, 3, 12, 22, 23, 24, 25. Read first: S0 0.8/0.9 (spec/00-conventions.md) and spec/15c-api-reconcile-core.md 15.B.3.1; if S0 has no MemberKey state list, add exactly one (active, retiring, revoked; `pending` is client-side only) in S0 0.8/0.9 is NOT allowed here (S0 is not in your files): then use the list that S0 or 15c already states and log skipped-needs-owner for any value that no source states. Row 1: the Invite state is `issued` at 10a check 6 and 15a (search 10a and 15a for any other Invite state called `active`). Row 2: ONE MemberKey state list in every place of the row (10a, 05a, 15a) and correct the false R3-01 log claim by recording the truth in your own log. Row 3: remove `attempts` (and `claimed_key_hash` only if 15c 15.B.3.1 does not use it) from the DeviceLinkOffer row. Row 12: delete the `invite_tree_id` sentence; a founder has `invite_root_member_id` null and counts as its own tree by its own `mem_` id (D-30). Row 22: in the `invites` DDL of 05a drop NOT NULL on `issuer_member_id`, keep a CHECK that a `member` invite has an issuer while the edge exists. Row 23: rename `email_index` to `email_lookup_hash` in 10.5, 10.15.4, kill.optional_pii and AC-identity-12; drop `registrations_count` from 10a (05a has no such column). Row 24: write `revokeMemberKey` where `revoke_key` stands. Row 25: rewrite 10a lines about the device link (`link_secret`, `offer_id`, `device_pub`, step-up `context_hash`) to the names and the hash rule of 15c 15.B.3.1.
+
+  '
+after:
+- C-003
+- C-011
+- C-020
+- C-045
+- C-046
+- C-053
+- C-076
+- C-083
+- C-087
+- C-088
+- C-089
+- C-138
+- C-139
+- C-140
+- C-145
+- C-155
+read:
+- docs/decisions.md
+- docs/owner-decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- docs/audit/FINAL-3.md
+- spec/00-conventions.md
+- spec/15c-api-reconcile-core.md
+- spec/10a-identity.md
+- spec/05a-entities.md
+- spec/15a-api-core.md
+allowed_paths:
+- docs/fix/R4-01.md
+- spec/10a-identity.md
+- spec/05a-entities.md
+- spec/15a-api-core.md
+outputs:
+- docs/fix/R4-01.md
+acceptance:
+- cmd: python scripts/check_fixlog.py docs/fix/R4-01.md
+- cmd: python scripts/check_spec.py spec/10a-identity.md --min-lines 659 --min-tags 1
+- cmd: python scripts/check_spec.py spec/05a-entities.md --min-lines 1732 --min-tags 1
+- cmd: python scripts/check_spec.py spec/15a-api-core.md --min-lines 756 --min-tags 1
+- cmd: python scripts/check_text.py spec/10a-identity.md --absent 'email_index' 'registrations_count' 'revoke_key' --present 'retiring'
+- cmd: python scripts/check_params.py
+- cmd: python scripts/check_issues.py
+- cmd: python scripts/check_stale.py
+- cmd: python scripts/check_refs.py api
+notes: 'Round-4 fix cell. Edits only inside allowed_paths. Large files: read in chunks of at most 600 lines with read_files; commit (apply_changes) after every ~10 edits and keep the log table current. Evidence tags and heading format as in docs/decisions.md. Acceptance is partly structural: completeness is what the goal says.'

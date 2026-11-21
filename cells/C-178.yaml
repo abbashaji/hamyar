@@ -1,0 +1,32 @@
+id: C-178
+title: 'Re-audit round 4: final readiness report'
+type: normal
+priority: 3
+lease_minutes: 90
+goal: 'INDEPENDENT re-audit slice (you did not write the parts or the fixes). Method: read in chunks of at most 600 lines; do not paste file contents into chat; every claim names file:line you saw. Write docs/audit/FINAL-4.md with: ''## Checked'' (what you opened and found correct), a findings table with columns exactly ''# | severity | file:line | defect | action'' (severity blocking/major/minor; action: the exact proposed fix), ''## Not verified'', and a last line ''Verdict: READY'' or ''Verdict: READY WITH LOGGED ITEMS'' or ''Verdict: NOT READY''. Be critical; a log that says DONE is a claim, not evidence. Owner decisions are in docs/owner-decisions.md (D-01..D-38, accepted; do not report them as open). The 51 rows of docs/audit/FINAL-3.md are what round 4 fixed: confirm each row of your slice is closed by reading the part file, and look for NEW contradictions created by the edits. SLICE: MERGE of docs/audit/FINAL-4a.md, FINAL-4b.md, FINAL-4c.md and FINAL-4d.md (read all four completely) into this file: totals; every open finding deduplicated with the slice that logged it; spot-check 10 findings from different slices by opening the cited file:line; owner questions still open (not covered by docs/owner-decisions.md); next fix tasks if not ready (one per cell: files, edit, acceptance); and the overall verdict. Do not soften the slices.'
+after:
+- C-174
+- C-175
+- C-176
+- C-177
+read:
+- docs/decisions.md
+- docs/owner-decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- docs/audit/FINAL-3.md
+- docs/audit/FINAL-4a.md
+- docs/audit/FINAL-4b.md
+- docs/audit/FINAL-4c.md
+- docs/audit/FINAL-4d.md
+allowed_paths:
+- docs/audit/FINAL-4.md
+outputs:
+- docs/audit/FINAL-4.md
+acceptance:
+- cmd: python scripts/check_audit.py docs/audit/FINAL-4.md
+- cmd: python scripts/check_params.py
+- cmd: python scripts/check_issues.py
+- cmd: python scripts/check_stale.py
+- cmd: python scripts/check_refs.py api
+notes: Audit cell. Independent and critical. Nothing is executed by you; CI runs acceptance.

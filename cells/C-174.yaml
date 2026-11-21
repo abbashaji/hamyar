@@ -1,0 +1,32 @@
+id: C-174
+title: 'Re-audit round 4, slice A: identity and data model'
+type: normal
+priority: 3
+lease_minutes: 90
+goal: 'INDEPENDENT re-audit slice (you did not write the parts or the fixes). Method: read in chunks of at most 600 lines; do not paste file contents into chat; every claim names file:line you saw. Write docs/audit/FINAL-4a.md with: ''## Checked'' (what you opened and found correct), a findings table with columns exactly ''# | severity | file:line | defect | action'' (severity blocking/major/minor; action: the exact proposed fix), ''## Not verified'', and a last line ''Verdict: READY'' or ''Verdict: READY WITH LOGGED ITEMS'' or ''Verdict: NOT READY''. Be critical; a log that says DONE is a claim, not evidence. Owner decisions are in docs/owner-decisions.md (D-01..D-38, accepted; do not report them as open). The 51 rows of docs/audit/FINAL-3.md are what round 4 fixed: confirm each row of your slice is closed by reading the part file, and look for NEW contradictions created by the edits. SLICE: Open docs/fix/R4-01.md, R4-02.md, R4-03.md, R4-06.md; confirm at least 30 applied edits in spec/10a-identity.md, 05a-entities.md, 10b-safety.md, 15a-api-core.md, 11a-volunteer-ux.md. Cross-check: MemberKey and Invite state lists in S0, 05a, 10a, 15a, 15c; the device hash form; no IP hash column or claim; challenge purposes in 10a and 15a; recovery key timing in 10a, 11a, 11d; operation ids of 10a and 11a against 15a to 15f.'
+after:
+- C-161
+- C-162
+- C-163
+- C-166
+read:
+- docs/decisions.md
+- docs/owner-decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- docs/audit/FINAL-3.md
+- docs/fix/R4-01.md
+- docs/fix/R4-02.md
+- docs/fix/R4-03.md
+- docs/fix/R4-06.md
+allowed_paths:
+- docs/audit/FINAL-4a.md
+outputs:
+- docs/audit/FINAL-4a.md
+acceptance:
+- cmd: python scripts/check_audit.py docs/audit/FINAL-4a.md
+- cmd: python scripts/check_params.py
+- cmd: python scripts/check_issues.py
+- cmd: python scripts/check_stale.py
+- cmd: python scripts/check_refs.py api
+notes: Audit cell. Independent and critical. Nothing is executed by you; CI runs acceptance.
