@@ -146,7 +146,7 @@ The creation-time IP hash is not a column of any table of this model (FIX-17, au
 
 ### 5.3.4 What a database dump reveals [D]
 
-A full dump reveals pseudonymous `mem_` ids; public keys; day-granular activity; the submitted text of cells still inside the payload retention window; ciphertext of optional e-mails (not readable without the secrets); keyed hashes (not reversible without the keys); the ledger; and the registry. It reveals no IP address and no provider credential, because none is stored. Whether a seizure of the host, the secrets or both defeats pseudonymity, and what the platform can NOT promise, is stated in S10.*; this part states only that the data model never contains more than the list above. Legal questions about compelled disclosure and about keyed IP hashes with a one-day TTL are [V] for counsel (`CNS`).
+A full dump reveals pseudonymous `mem_` ids; public keys; day-granular activity; the submitted text of cells still inside the payload retention window; ciphertext of optional e-mails (not readable without the secrets); keyed hashes (not reversible without the keys); the ledger; the registry; and the free-text fields, which may contain personal data (including `Report.reporter_text`, `Appeal.statement`, `AdminAction.reason`, `ParameterVersion.reason`, `KillSwitch.reason`, `FlagAnswer.evidence_note`, `LaunchGateItem.reopen_reason` and `CalibrationRecord.note`, each with its limit in its own table) [default-pending D-32]. It reveals no IP address and no provider credential, because none is stored. Whether a seizure of the host, the secrets or both defeats pseudonymity, and what the platform can NOT promise, is stated in S10.*; this part states only that the data model never contains more than the list above. Legal questions about compelled disclosure and about keyed IP hashes with a one-day TTL are [V] for counsel (`CNS`).
 
 ## 5.4 Entity catalogue, mutability and retention
 
@@ -1089,7 +1089,7 @@ Abuse or content report from a volunteer or requester. Machine S0.9.8 (`open`, `
 | `subject_type`, `subject_id` | enum(`report_subject_type`), id | NN | |
 | `report_kind` | enum(`report_kind`) | NN | |
 | `evidence_cell_id` | id `cel_` | null, FK | |
-| `reporter_text` | text | null, <= 1000 chars; null after retention | escaped on display; may hold personal data, hence the short life |
+| `reporter_text` | text | null, <= 1000 chars; null after retention | escaped on display; free text that may contain personal data, hence the short life, so it is access-controlled and held under the retention rule of this table (`moderation`, S5.15.4) [default-pending D-32] |
 | `state` | enum | NN, default `open` | |
 | `triaged_by_admin_id` | id `adm_` | null, FK | |
 | `outcome` | enum(`report_outcome`) | null; NN when `actioned` or `dismissed` | |
@@ -1111,7 +1111,7 @@ Challenge to a rejection, ban or report outcome. Machine S0.9.7. [D]
 | `decision_event_ref` | text | null | an opaque event id for automatic decisions (for example a `reject.*` outcome) |
 | `decision_at` | ts | NN | `filed` is allowed only within `appeal.window_days` of it (API error otherwise) |
 | `state` | enum | NN | `filed`, `assigned`, `in_review`, `awaiting_second_review`, `upheld`, `overturned`, `withdrawn` |
-| `statement` | text | null after retention, <= 2000 chars | |
+| `statement` | text | null after retention, <= 2000 chars | free text; may contain personal data, so it is access-controlled and held under the retention rule of this table (`moderation`, S5.15.4) [default-pending D-32] |
 | `original_decider_admin_id` | id `adm_` | null | the assigned reviewer must differ (S0.9.7) |
 | `assigned_admin_id`, `second_reviewer_admin_id` | id `adm_` | null, FK | bans and template rejections need `appeal.ban_min_reviewers` |
 | `resulting_action_id` | id `act_` | null, FK | the reversing action, for example `cell.overturned` or `member.reinstated` |
@@ -1205,7 +1205,7 @@ Definition of a configuration parameter (S0.10.3). The value itself is in the cu
 | `value_hash` | hash | NN | |
 | `effective_from` | ts | NN | `>= created_at + notice_days` unless `change_class = 'tighten'` (trigger) |
 | `change_class` | enum | NN | |
-| `reason` | text | NN, <= 1000 chars | published when the parameter is public |
+| `reason` | text | NN, <= 1000 chars | free text; may contain personal data; held under the retention rule of this table (`permanent`); published as written when the parameter is public, otherwise access-controlled [default-pending D-32] |
 | `changelog_entry_id`, `admin_action_id` | id | NN for public parameters, FK | |
 | `approval_action_ids` | arr | NN | a `loosen` change needs a second `operator` approval (S0.10.3) |
 | `supersedes_id` | id `pmv_` | null, FK | |
@@ -1270,7 +1270,7 @@ One checklist line of `G0`..`G5` with its evidence and sign-offs (FD§8.3). A li
 | `evidence` | json | NN | array of `{kind, ref_id, hash, note}`; `kind` is `service_entry`, `terms_copy`, `calibration_record`, `document` (hash and title only) or `counsel_memo` (hash and date only; the memo text is not stored) |
 | `evidence_hash` | hash | NN | |
 | `signoffs` | json | NN | array of `{admin_user_id, signed_at, admin_action_id, evidence_hash}` |
-| `reopen_reason` | text | NN when `reopened`, <= 1000 chars | |
+| `reopen_reason` | text | NN when `reopened`, <= 1000 chars | free text; may contain personal data, so it is access-controlled and held under the retention rule of this table (`permanent`) [default-pending D-32] |
 | `supersedes_id` | id `lgi_` | null, FK | previous revision |
 | `created_by_admin_id` | id `adm_` | NN, FK | |
 
