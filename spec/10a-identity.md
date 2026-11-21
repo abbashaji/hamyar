@@ -51,7 +51,7 @@ A `Member` is a pseudonym: one row plus public keys. One person may hold several
 | --- | --- | --- | --- | --- |
 | Device key | Ed25519 (S0.6.4) | In the browser at first use | WebCrypto `CryptoKey` with `extractable = false` in IndexedDB where the browser supports Ed25519 [V: support on the target phones]; otherwise a bundled audited Ed25519 implementation with the seed in IndexedDB and `key_storage` = `software` [V] | `MemberKey.public_key` |
 | Recovery key | Ed25519 keypair derived from the recovery secret (10.4) | Same moment | Never stored; shown once | `MemberKey.public_key`, `purpose` = `recovery` |
-| Device token | 128-bit CSPRNG value | First visit | IndexedDB; random, not derived from hardware | `Device.device_token_hash` = SHA-256 of the token |
+| Device token | 256-bit CSPRNG value | First visit | IndexedDB; random, not derived from hardware | `Device.device_token_hash` = HMAC-SHA-256 of the token under `secret.device_hash_key[v]`, with `Device.hash_key_version` (S5a 5.3.3) |
 | Session token | 256-bit CSPRNG value | Server | IndexedDB, never a cookie (S0.11.4) | SHA-256 only |
 
 Browser storage can be evicted (storage pressure, per-site caps) [V]. The client asks for persistent storage where available. Losing the device key loses that device's identity; the member recovers with the recovery key (10.8). WebCrypto keys are not generally hardware-backed [V], so `key_storage` is informational and never trusted for a decision.
@@ -72,7 +72,7 @@ context_hash = SHA-256( RFC8785_canonical_json(request_body) )     # S0.6.4
 
 ```
 client:
-  token = loadOrCreate(device_token)                 # 128-bit CSPRNG, IndexedDB
+  token = loadOrCreate(device_token)                 # 256-bit CSPRNG, IndexedDB
   dk    = generateKey(Ed25519, extractable=false if supported)
   rs    = csprng(identity.recovery_key_bits / 8)     # recovery secret, never sent
   rk    = Ed25519_from_seed( HKDF-SHA-256(rs, 'hamyar:v1:recovery', 'ed25519-seed', 32) )
@@ -266,7 +266,7 @@ A device whose key was revoked by recovery gets `401 AUTH_INVALID` with `details
 
 ### 10.9.1 What a 'device' is, and the privacy tradeoff [D]
 
-A `Device` is one browser profile that holds a random 128-bit device token (10.3.1). It is identified by `SHA-256(token)` and nothing else. No fingerprint is computed. Candidate signals:
+A `Device` is one browser profile that holds a random 256-bit device token (10.3.1). It is identified by `HMAC-SHA-256(secret.device_hash_key[v], token)` and nothing else. No fingerprint is computed. Candidate signals:
 
 | Signal | Used? | Privacy cost | Cost to evade | Decision |
 | --- | --- | --- | --- | --- |
@@ -291,9 +291,9 @@ A `Device` is one browser profile that holds a random 128-bit device token (10.3
 | --- | --- | --- | --- | --- | --- |
 | Public reads, challenge creation | IP hash | `ratelimit.public_rpm` | minute | volatile counters | 429 |
 | Failed authentications | IP hash | `ratelimit.auth_failures_per_hour` [A] | hour | volatile | 429 |
-| New members | device token | `ratelimit.device_new_members_per_day` | UTC day | volatile | 429 |
+| New members | device token | `ratelimit.device_new_members_per_day` | UTC day | counted from `members.creating_device_id` | 429 |
 | New members | IP hash | `ratelimit.ip_hash_new_members_per_day` | UTC day | volatile | 429 |
-| New members | invite tree | `ratelimit.invite_tree_new_members_per_day` | UTC day | counted from `Member.created_at` | 429 |
+| New members | invite tree | `ratelimit.invite_tree_new_members_per_day` | UTC day | counted from `members.created_at` through the tree id (`members.invite_root_member_id`) | 429 |
 | Recovery attempts | IP hash and device token, separately | `ratelimit.recovery_attempts_per_day` | UTC day | volatile | 429 |
 | Device-link offers | member | `ratelimit.device_link_offers_per_day` [A] | UTC day | volatile | 429 |
 | Leases, submissions, API | member | `ratelimit.member_leases_per_hour`, `ratelimit.member_submissions_per_hour`, `ratelimit.member_api_rpm` | hour, hour, minute | volatile | 429 |
@@ -771,6 +771,6 @@ New cross-parameter constraint `C9` [A]: `session.member_abs_ttl_s <= retention.
 | --- | --- | --- | --- | --- | --- |
 | `ISS-101` | minor | prompt | `S10` is split over several files, so `S10.<m>` numbers can collide, and this file lists identity-relevant columns while `S5.*` owns full schemas | This file owns `S10.1`..`S10.19`, other S10 files start at `S10.20`; `S5.*` wins on column names, this file on meaning; any mismatch is reported at assembly | proposed |
 | `ISS-102` | major | FD§3.2, FD§8.3 | The FD makes e-mail optional without saying what it is for, names no account recovery besides the key, and names no admin approval mechanism; a one-person Phase 1 team cannot meet two-person approval | E-mail is for opt-in notices only and never a recovery or login factor; recovery is by key only and no operator can restore access; `security.two_person_actions` is extended (10.12); at least two distinct admins are required before any two-person action, including launch sign-off, can run | needs_owner |
-| `ISS-103` | minor | FD§4.6 | `S0.7` gives `Device` the retention class `short` and calls it a keyed-hash record, but `grant.max_per_device` is a lifetime limit and the token is a 128-bit random value that needs only SHA-256 | `Device` is `member_bound` with a residue of `{id, device_token_hash, grants_claimed}` kept `retention.member_inactive_days` after closure (10.9.1); the hash is plain SHA-256 | proposed |
+| `ISS-103` | minor | FD§4.6 | `S0.7` gives `Device` the retention class `short` and calls it a keyed-hash record, but `grant.max_per_device` is a lifetime limit and the token is a 256-bit random value hashed with a keyed HMAC-SHA-256 under `secret.device_hash_key[v]` (S5a 5.3.3) | `Device` is `member_bound` with a residue of `{id, device_token_hash, grants_claimed}` kept `retention.member_inactive_days` after closure (10.9.1); the hash is the keyed HMAC-SHA-256 with column `hash_key_version`, and the key `secret.device_hash_key` exists (10b S10.24.2) | proposed |
 
 Convention additions made by this part (not issues, listed so `S0.*` can fold them back): entities `AuthChallenge` (`chl_`), `DeviceLinkOffer` (`dlo_`), `RecoveryRequest` (`rcv_`), `SecurityNotice` (`snt_`); `Invite` states and the events in 10.18.2; `MemberKey` `status` and `purpose` values (named as in `S5.2.5`); the kill switch `kill.optional_pii`; secrets `secret.email_encryption_key` and `secret.email_lookup_key`; the parameters of 10.18.3 and constraint `C9`; the permission names of 10.11 and the conditions `X1`..`X11`; the copy keys of 10.15.4 and `copy.invite.invalid`, `copy.ratelimit.try_later`, `copy.identity.recovery_limit`, `copy.identity.recovery_typo`, `copy.identity.recovered_elsewhere`.
