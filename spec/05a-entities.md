@@ -629,7 +629,7 @@ A requester's request, or a Commons job. Machine S0.9.2. The declarations, the p
 | `verification_pool_cells` | int | `floor(primary_cell_count * v_ppm / 1000000)` | S0.6.1; remainder refunded at settlement (`ISS-04`) |
 | `quoted_window_s` | int | NN at quote | |
 | `quote_expires_at` | ts | NN at quote | `price.quote_ttl_s` |
-| `parameter_versions` | json | NN at quote | map of parameter name to version in force (`admission.*`, `price.*`, `credit.*`, `verify.*`) |
+| `parameter_versions` | json | NN at quote | map of parameter name to version in force (`admission.*`, `price.*`, `credit.*`, `verify.*`, `commons.*`); JT-15 (05b) reads `commons.job_overrun_days` from it [default-pending D-31] |
 | `escrow_id` | id `esc_` | null until `escrow_confirmed` | |
 | `reservation_id` | id `rsn_` | null | set when activated from a reservation |
 | `submitted_at`, `admitted_at`, `started_at`, `assembled_at`, `settled_at` | ts | null | |
@@ -708,7 +708,7 @@ One prompt-and-response unit inside the envelope; the unit of credit. The row pe
 | `accepted_submission_id`, `accepted_at` | id, ts | NN iff `accepted` or `overturned` | |
 | `accept_policy_version_id` | id `plv_` | null until acceptance | R9 re-check result (policy in force at acceptance) |
 | `last_reject_code` | text | null | a `reject.*` code of S0.8.4 |
-| `acceptance_deferred_until` | ts | null; non-null only in `submitted` or `flagged_for_audit` (CHECK) | set by `G-accept` when it returns DEFER (05b 5.23.2); cleared when the sweep re-enqueues the acceptance (`job.resumed`, `template.resumed`, `member.reinstated`, `killswitch.released`); a deferred cell keeps its headroom reservation |
+| `acceptance_deferred_until` | ts | null; non-null only in `submitted` or `flagged_for_audit` (CHECK) | set by `G-accept` when it returns DEFER (05b 5.23.2); for a payout-guard deferral it is not stored once but recomputed from the job's current overrun deadline (`jobs.admitted_at` + `job.max_overrun_ratio` x `quoted_window_s` + `paused_total_s`), so a deadline extension by JT-12 moves it, and the column holds the last computed value [default-pending D-26]; cleared when the sweep re-enqueues the acceptance (`job.resumed`, `template.resumed`, `member.reinstated`, `killswitch.released`); a deferred cell keeps its headroom reservation |
 | `credit_txn_id` | id `txn_` | null, unique | the `payout` (member job) or `mint` (Commons) transaction; set once, which makes double payment structurally impossible |
 | `payload_purged_at` | ts | null | |
 
@@ -811,6 +811,7 @@ Sampled re-execution of a cell, comparator result, third execution. Machine S0.9
 | `primary_cell_id`, `primary_submission_id` | id | NN, FK | |
 | `trigger` | enum(`audit_trigger`) | NN | |
 | `sampling_rate_ppm_applied` | ppm | null | `s` applied when sampled; needed to estimate false accepts without bias |
+| `flag_age_out_days_applied` | int | null | `audit.flag_age_out_days` in force when the primary cell was flagged for audit; 05b CT-19 reads it, so a later change of the parameter does not move the age-out of a cell already flagged; null for an audit not caused by a flag [default-pending D-31] |
 | `state` | enum | NN | `pending`, `second_executed`, `matched`, `mismatched`, `third_pending`, `resolved`, `cancelled` |
 | `second_cell_id`, `third_cell_id` | id `cel_` | null, FK | executions by donors different from the primary donor and from each other (enforced when leasing, S9.*) |
 | `second_submission_id`, `third_submission_id` | id `sub_` | null, FK | |
@@ -1517,7 +1518,7 @@ CREATE TABLE cells (
   accept_policy_version_id text REFERENCES policy_versions(id),
   last_reject_code text CHECK (last_reject_code ~ '^reject\.[a-z_]+$'),
   credit_txn_id text UNIQUE REFERENCES ledger_transactions(id),
-  acceptance_deferred_until timestamptz,                           -- set by G-accept DEFER (05b 5.23.2)
+  acceptance_deferred_until timestamptz,                           -- set by G-accept DEFER (05b 5.23.2); payout-guard deferral: recomputed from the job's current overrun deadline (5.8.1)
   payload_purged_at timestamptz,
   CHECK ((cell_kind = 'primary') = (ordinal IS NOT NULL)),
   CHECK ((cell_kind = 'gold') = (gold_cell_id IS NOT NULL)),
