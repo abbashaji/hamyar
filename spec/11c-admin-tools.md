@@ -41,7 +41,7 @@ This part specifies the admin side of Hamyar: twelve tools and three shared scre
 | `AD6` | Reads of sensitive data are logged too: member lookup, gold answers, submission bodies, member-linked ledger views [D] | A read can leak as much as a write |
 | `AD7` | Minimal data: no admin screen shows or stores a raw IP, an e-mail address, a device record, key material, an invite-tree edge outside a farming case, or a volunteer's chat text (S0.7 retention rules; FD Principle 8) [D] | Safety of members in Iran |
 | `AD8` | No admin tool exports member-linked data in bulk. Any export (CSV, JSON) contains aggregates only and suppresses cohorts smaller than `analytics.min_cohort_k` [D] | Compelled-disclosure exposure; what is not stored cannot be handed over |
-| `AD9` | Fail closed: if fewer distinct eligible admins exist than a two-person action needs, the action is unavailable and the screen says so (`copy.admin.fail_closed_one_admin`); there is no break-glass override [D][A] | A single-person team is an owner decision (`ISS-119`, S3.*) |
+| `AD9` | Fail closed: if fewer distinct eligible admins exist than a two-person action needs, the action is unavailable and the screen says so (`copy.admin.fail_closed_one_admin`); there is no break-glass override except the enrollment fallback of S10a 10.12, which only issues an enrollment code [D][A] [default-pending D-35] | A single-person team is an owner decision (`ISS-119`, S3.*) |
 | `AD10` | No admin screen stores a provider credential or session, fetches or opens a provider URL on the server, reads a volunteer's chat page or submits anything for a volunteer. A reviewer-entered terms source is text only; the server never requests it (ground rule 3; FD Principle 3) [D] | The human presses Send, always |
 | `AD11` | Published or approved records are never edited in place; a correction is a new version or row. There is no soft-delete flag (S0.7) [D] | Public rules, no secret changes (Principle 5) |
 | `AD12` | Concurrency: mutable resources carry `ETag` (= `row_version`) and need `If-Match` on write; items that people work on also carry a claim (11.66) [D] | S0.11.7; replaces the Panel's fencing by branch tip `base` (panel-review §3.3) [V] |
@@ -56,7 +56,7 @@ This part specifies the admin side of Hamyar: twelve tools and three shared scre
 | `reviewer` | Templates, services, audit queue, appeals, abuse queue, member suspend and restrict, kill switches for one template or one service, minimal member lookup | Ledger reversal, parameter edits in `operator` areas, launch switches, global kill switches |
 | `operator` | Ledger explorer, parameters of operator-owned areas, capacity dashboard, launch gates, all kill switches, claim takeover, lease release, member kill switch | Approving their own two-person request; reviewing a template they authored |
 
-One person may hold both roles through one `AdminUser`. A second approver is always a different `AdminUser` and, where the catalog says "operator approver", holds `operator`. Two admin accounts held by one human defeat the rule; admin onboarding is itself a two-person action (S10.*) and the residual risk is stated in S10.* and S19.* [V].
+One person may hold both roles through one `AdminUser`. A second approver is always a different `AdminUser` and, where the catalog says "operator approver", holds `operator`. Two admin accounts held by one human defeat the rule; admin onboarding is itself a two-person action (S10.*), except the enrollment fallback of S10a 10.12 while fewer than two operators are active [default-pending D-35], and the residual risk is stated in S10.* and S19.* [V].
 
 ### 11.52.2 Confirmation tiers [D]
 
@@ -99,31 +99,32 @@ Blocks: `BLK-header`; **My work** (claims I hold, with time left); **Queues** (o
 
 ## 11.54 Two-person approvals, the admin action log and the action catalog
 
-### 11.54.1 `ApprovalRequest` [A]
+### 11.54.1 `AdminApproval` [A]
 
-Entity `ApprovalRequest`, table `approval_requests`, prefix `apr_` (unused in S0.7), retention `permanent`, mutable with `row_version`. A `CT3` action endpoint never executes on the initiator's call: it stores the request and returns `202 Accepted` with the `ApprovalRequest`. [D]
+Entity `AdminApproval`, table `admin_approvals`, prefix `apv_` (S15b 15.22.4), retention `permanent`, mutable with `row_version`. A `CT3` action endpoint never executes on the initiator's call: it stores the request and returns `202 Accepted` with the `AdminApproval`. [D]
 
 | Field | Type | Rule |
 | --- | --- | --- |
-| `id` | `apr_` id | S0.6.3 |
+| `id` | `apv_` id | S0.6.3 |
 | `action_code` | text | A `CT3` code from 11.54.3 |
 | `subject_type`, `subject_id` | text | The record the action targets (for example `ledger_entry`, `kill_switch`, `launch_gate_item`, `member`) |
 | `payload`, `payload_hash` | json, text | The exact parameters of the action; `payload_hash` = `sha256:` over RFC 8785 canonical JSON (S0.6.4). Frozen at creation |
 | `initiator_admin_id` | `adm_` id | The requester counts as approval number 1 |
 | `required_approvals` | int | Looked up at creation from the rule of the action (11.54.5) and frozen |
 | `reason_code`, `reason_text` | text | `AD3` |
-| `state` | enum | `pending`, `executed`, `rejected`, `expired`, `withdrawn` |
+| `state` | enum | `pending`, `approved`, `rejected`, `withdrawn`, `expired`, `failed` |
 | `expires_at` | timestamptz | `created_at + security.two_person_ttl_s` seconds (server time) |
 
 ```
 (none)  --admin.approval_requested-->  pending
-pending --admin.approval_granted-->   executed    approvals >= required_approvals and the action's own guards still pass
-pending --admin.approval_rejected-->   rejected    any eligible admin, reason required; or system when a guard fails at execution
+pending --admin.approval_granted-->   approved    approvals >= required_approvals and the action's own guards still pass
+pending --admin.approval_rejected-->   rejected    any eligible admin, reason required
+pending --admin.approval_failed-->     failed      system, when a guard fails at execution
 pending --admin.approval_expired-->    expired     timer
 pending --admin.approval_withdrawn-->  withdrawn   initiator only
 ```
 
-Guards on approve [D]: (1) request is `pending` and not expired; (2) approver is a different `AdminUser` from the initiator and from every earlier approver; (3) approver holds the permission and, if the catalog says so, the `operator` role; (4) the approver's dialog shows the identical `payload_hash`; the approval body is `{step_up}` only, the step-up is bound to the hash of the stored payload, and a step-up bound to another payload is `401 AUTH_INVALID` (a changed payload is a new request, never an edit); (5) step-up passkey assertion fresher than `session.admin_stepup_s`; (6) at execution all guards of the underlying action are re-evaluated, and if one fails nothing changes, the request becomes `rejected` with actor `system` and reason `precondition_failed`. At most one `pending` request exists per `(action_code, subject_id)`; a second returns `409 ALREADY_EXISTS`. Execution, the `AdminAction` rows and the domain events commit in one transaction (S0.9.1). Counting: `required_approvals` is the number of distinct admins including the initiator, so a value of 2 means the initiator plus one other [D].
+Guards on approve [D]: (1) request is `pending` and not expired; (2) approver is a different `AdminUser` from the initiator and from every earlier approver; (3) approver holds the permission and, if the catalog says so, the `operator` role; (4) the approver's dialog shows the identical `payload_hash`; the approval body is `{step_up}` only, the step-up is bound to the hash of the stored payload, and a step-up bound to another payload is `401 AUTH_INVALID` (a changed payload is a new request, never an edit); (5) step-up passkey assertion fresher than `session.step_up_max_age_s`; (6) at execution all guards of the underlying action are re-evaluated, and if one fails nothing changes, the request becomes `failed` and `admin.approval_failed` is emitted. At most one `pending` request exists per `(action_code, subject_id)`; a second returns `409 ALREADY_EXISTS`. Execution, the `AdminAction` rows and the domain events commit in one transaction (S0.9.1). Counting: `required_approvals` is the number of distinct admins including the initiator, so a value of 2 means the initiator plus one other [D].
 
 ### 11.54.2 `AdminAction` log [D]
 
@@ -134,8 +135,8 @@ Append-only, no `updated_at`, no delete path (S0.7). One row per write, per refu
 | `id` (`act_`), `created_at` | S0.6.3 |
 | `principal_type`, `admin_user_id` | `admin` with the `adm_` id, or `system` with null (for timers and automatic pauses) |
 | `action_code` | A code from 11.54.3 |
-| `subject_type`, `subject_id` | As in `ApprovalRequest`; a member subject is always a `mem_` id and appears only in `member`-scoped codes |
-| `approval_request_id` | `apr_` id or null |
+| `subject_type`, `subject_id` | As in `AdminApproval`; a member subject is always a `mem_` id and appears only in `member`-scoped codes |
+| `approval_request_id` | `apv_` id or null |
 | `reason_code`, `reason_text` | Required on writes; absent on plain reads |
 | `detail` | json: checklist answers, flag answers, parameter name and version, affected counts; validated per code; never member text, never a raw IP |
 | `before_hash`, `after_hash` | `sha256:` of the canonical subject before and after; null for reads |
@@ -147,7 +148,7 @@ No field holds an IP address, a user agent, a device fingerprint or a passkey cr
 
 ### 11.54.3 Action catalog [D]
 
-`Dir` is the direction of 11.51 `AD2`: `T` tighten, `L` loosen or release, `C` credit or result creation, `N` neutral, `R` read. `Appr` is the number of distinct admins (11.54.5). The tier column is the default; a `CT3` code listed in `security.two_person_actions` stays two-person, and removing a code from that list is itself a `parameter.loosen`.
+`Dir` is the direction of 11.51 `AD2`: `T` tighten, `L` loosen or release, `C` credit or result creation, `N` neutral, `R` read. `Appr` is the number of distinct admins (11.54.5). The tier column is the default; a `CT3` code listed in `security.two_person_actions` stays two-person; the parameter adds names to that list and removes none (D-34).
 
 | `action_code` | Permission | Tier | Dir | Appr | Domain events emitted |
 | --- | --- | --- | --- | --- | --- |
@@ -165,7 +166,7 @@ No field holds an IP address, a user agent, a device fingerprint or a passkey cr
 | `service.reject` | `perm.service.review` | `CT1` | T | 1 | `service.rejected` |
 | `service.revoke` | `perm.service.revoke` | `CT2` | T | 1 | `service.revoked`, `changelog.entry_published` |
 | `audit.reject` / `quarantine.reject` | `perm.audit.decide` | `CT1` | T | 1 | `audit.resolved` and `cell.audit_failed` / `submission.rejected` |
-| `audit.accept` / `quarantine.release` | `perm.audit.release` | `CT3` | C | 2 | `audit.resolved` and `cell.audit_passed` / `submission.released_from_quarantine` |
+| `audit.accept` / `quarantine.release` | `perm.audit.release` | `CT2` | C | 1 | `audit.resolved` and `cell.audit_passed` / `submission.released_from_quarantine` |
 | `gold.view_answer`, `submission.view` | `perm.audit.view_restricted` | `CT1` | R | 1 | none (logged read) |
 | `gold.retire` | `perm.audit.decide` | `CT2` | T | 1 | none (convention gap `ISS-117`) |
 | `appeal.assign`, `appeal.start_review`, `appeal.reassign`, `appeal.request_second_review` | `perm.appeal.decide` | `CT0` | N | 1 | `appeal.assigned`, `appeal.review_started`, `appeal.reassigned`, `appeal.second_review_requested` |
@@ -178,7 +179,7 @@ No field holds an IP address, a user agent, a device fingerprint or a passkey cr
 | `member.ban` | `perm.member.ban` | `CT3` | T | 2 (`appeal.ban_min_reviewers`) | `member.banned` |
 | `job.stop` | `perm.job.stop` | `CT2` | T | 1 | `job.stop_requested` (`closure_reason` `operator_killed`) |
 | `cell.void` | `perm.cell.void` | `CT2` | T | 1 | `cell.voided` |
-| `cell.overturn` | `perm.cell.overturn` | `CT3` | C | 2 | `cell.overturned`, `ledger.entry_committed` |
+| `cell.overturn` | `perm.cell.overturn` | `CT2` | C | 1 | `cell.overturned`, `ledger.entry_committed` |
 | `cell.release` | `perm.cell.release` | `CT2` | T | 1 | `lease.revoked`, `cell.declined` |
 | `ledger.reversal` | `perm.ledger.reverse` (`operator`) | `CT3` | C | `ledger.reversal_min_approvers` | `ledger.entry_committed` |
 | `alarm.acknowledge` | `perm.alarm.acknowledge` | `CT1` | N | 1 | none |
@@ -195,7 +196,7 @@ No field holds an IP address, a user agent, a device fingerprint or a passkey cr
 | `member.lookup` | `perm.member.lookup` | `CT1` | R | 1 | none (logged read) |
 | `approval.approve`, `approval.reject`, `approval.withdraw` | per underlying action | `CT2` | n/a | n/a | `admin.approval_granted` (the approval that reaches `required_approvals` executes the action), `admin.approval_rejected`, `admin.approval_withdrawn`; `admin.approval_requested` and `admin.approval_expired` (system) |
 
-The `CT3` codes `member.ban` and `launch.signoff` are in the table of two-person action names of S10a 10.12, which is the one definition of `security.two_person_actions`; `audit.accept`, `quarantine.release` and `cell.overturn` are not in it and are reported in `ISS-117`. [A]
+The `CT3` codes `member.ban` and `launch.signoff` are in the table of two-person action names of S10a 10.12, which is the one definition of `security.two_person_actions`; `audit.accept`, `quarantine.release` and `cell.overturn` are `CT2` with one admin and a step-up, not two-person actions (D-20, D-39). [A]
 
 ### 11.54.4 Preview and API [D]
 
@@ -216,14 +217,14 @@ All admin writes need `Idempotency-Key` (S0.11.5) and carry `RateLimit-*` header
 
 | Rule | Source parameter | Mechanism |
 | --- | --- | --- |
-| New template approval | `template.min_reviewers_new` (default 2), reviewers distinct and not the author | Template machine S0.9.5, not `ApprovalRequest` |
+| New template approval | `template.min_reviewers_new` (default 2), reviewers distinct and not the author | Template machine S0.9.5, not `AdminApproval` |
 | Edit of an approved template | `template.min_reviewers_edit` | Same |
 | Service approval | `service.min_approvers` (default 1; 2 is an owner decision) | Service machine S0.9.6 |
-| Ban, and appeal outcomes on bans and template rejections | `appeal.ban_min_reviewers` | Appeal machine S0.9.7 `awaiting_second_review`; a ban itself uses `ApprovalRequest` |
-| Ledger reversal | `ledger.reversal_min_approvers` (constant 2) | `ApprovalRequest` |
-| Launch sign-off (one `signOffGateItem` per item) | `launch.min_signoffs` (default 2), distinct signers of the item | The gate item itself (15.27.2), not `ApprovalRequest` |
-| Enabling a launch switch (`launch.switch_on`) | constant 2 (15.22.4) | `ApprovalRequest` |
-| Parameter loosen, kill-switch release, audit accept, quarantine release, cell overturn | membership in `security.two_person_actions`; count 2 | `ApprovalRequest` |
+| Ban, and appeal outcomes on bans and template rejections | `appeal.ban_min_reviewers` | Appeal machine S0.9.7 `awaiting_second_review`; a ban itself uses `AdminApproval` |
+| Ledger reversal | `ledger.reversal_min_approvers` (constant 2) | `AdminApproval` |
+| Launch sign-off (one `signOffGateItem` per item) | `launch.min_signoffs` (default 2), distinct signers of the item | The gate item itself (15.27.2), not `AdminApproval` |
+| Enabling a launch switch (`launch.switch_on`) | constant 2 (15.22.4) | `AdminApproval` |
+| Parameter loosen, kill-switch release | membership in `security.two_person_actions`; count 2 | `AdminApproval` |
 
 ### 11.54.6 Acceptance criteria
 
@@ -545,9 +546,9 @@ No `PUT`, `PATCH` or `DELETE` route exists on any ledger resource.
 | E Constraints | Named constraints `C1`..`C8` that include this parameter with the current values of their other members. Evaluation is over the timeline: at every effective instant among all pending versions the full set must satisfy `C1`..`C7`; `C8` is a warning that needs a ticked acknowledgement |
 | F Scope notice | "Jobs, lots and leases keep the version they were created under where the spec says so" (S0.10.3), listing the stamped objects the parameter affects |
 
-**Change sets.** Parameters that constraints couple (for example `credit.lifetime_days` and `credit.lifetime_days_accelerated`, constraint `C4`) are edited together: one request lists several `{name, value}` items, is validated as a whole on the timeline, needs one `ApprovalRequest` if any item needs two approvers, and writes one public change-log group. Items keep their own `effective_from`; a tighten item is not delayed by a loosen item. The item count is bounded only by `api.max_body_bytes`. [D]
+**Change sets.** Parameters that constraints couple (for example `credit.lifetime_days` and `credit.lifetime_days_accelerated`, constraint `C4`) are edited together: one request lists several `{name, value}` items, is validated as a whole on the timeline, needs one `AdminApproval` if any item needs two approvers, and writes one public change-log group. Items keep their own `effective_from`; a tighten item is not delayed by a loosen item. The item count is bounded only by `api.max_body_bytes`. [D]
 
-**Special cases** [D]: the three `launch` switches are read-only here and link to `SCR-ops-12`; `security.*` parameters are not public, so no public entry is written and the screen says so; `security.two_person_actions` accepts only action names of the table of S10a 10.12, adding a name is a tighten and removing one is a loosen; `parameter.changed` is emitted when a version is accepted and carries `effective_from`, consumers apply it at that instant, and no second event is emitted [A].
+**Special cases** [D]: the three `launch` switches are read-only here and link to `SCR-ops-12`; `security.*` parameters are not public, so no public entry is written and the screen says so; `security.two_person_actions` accepts only action names of the table of S10a 10.12, adding a name is a tighten and the parameter removes no name (D-34); `parameter.changed` is emitted when a version is accepted and carries `effective_from`, consumers apply it at that instant, and no second event is emitted [A].
 
 **`SCR-ops-09` Pending and change log.** Pending versions with a countdown and `Withdraw` (`parameter.withdraw_pending`, `CT2`: a withdrawal is a retraction, so a new `ChangeLogEntry` references the original, which stays); published entries; a tracker of tighten entries due within `change.tighten_publish_within_s` that raises an `Alarm` of kind `ops.changelog_overdue` when late.
 
@@ -838,7 +839,7 @@ S0.10.6 says names are stable and S16.* completes the table. This part needs the
 
 | Name | Type | Initial configurable default | Validation | Owner | Replaced by |
 | --- | --- | --- | --- | --- | --- |
-| `session.admin_stepup_s` | duration_s | 300 | 30..3600; at most `session.admin_idle_ttl_s` | `operator` | `SEC` |
+| `session.step_up_max_age_s` | duration_s | 300 | 30..3600; at most `session.admin_idle_ttl_s` | `operator` | `SEC` |
 | `security.two_person_ttl_s` | duration_s | 86,400 | 600..604800 | `operator` | `SEC` |
 | `security.admin_reason_min_chars` | int | 20 | 1..500 | `operator` | `SEC` |
 | `ratelimit.admin_member_lookups_per_day` | int | 30 | 1..1000 | `operator` | `SEC`, `OPS` |
@@ -867,6 +868,6 @@ This file is the third file of part 11, so it uses the issue sub-block `ISS-117`
 
 | id | severity | fd_ref | issue | resolution | status |
 | --- | --- | --- | --- | --- | --- |
-| `ISS-117` | minor | prompt | Convention gaps used by the admin tools: (a) entities `ApprovalRequest` (`apr_`) and `WorkClaim` (`clm_`); (b) `TermsCopy.document_kind` (`terms`, `usage_policy`, `written_permission`), needed to store the usage policy and written permission of FD§8.3 G0(i) and (k); (c) no retirement marker or event for a `GoldCell`; (d) events `admin.approval_*` and `workclaim.*`; (e) the seven parameters of 11.68; (f) `security.two_person_actions` default lacks `member.ban`, `audit.accept`, `quarantine.release` and `cell.overturn`; (g) the action codes of 11.54.3 and the reason-code lists; (h) sub-headings `11.51` upward (renumbered by FIX-21 from `11.41`) to avoid collisions with other S11 files; (i) the terms-copy upload body (derived from `service.terms_copy_max_bytes`) exceeds `api.max_body_bytes`, so it gets its own limit; (j) `Alarm` kinds `abuse.*`, `launch.rule_failing`, `ops.changelog_overdue` | Used as proposed in this file; C-001 and C-022 fold them into S0 and S16 | proposed |
+| `ISS-117` | minor | prompt | Convention gaps used by the admin tools: (a) entities `AdminApproval` (`apv_`) and `WorkClaim` (`clm_`); (b) `TermsCopy.document_kind` (`terms`, `usage_policy`, `written_permission`), needed to store the usage policy and written permission of FD§8.3 G0(i) and (k); (c) no retirement marker or event for a `GoldCell`; (d) events `admin.approval_*` and `workclaim.*`; (e) the seven parameters of 11.68; (f) the default of `security.two_person_actions` is the table of S10a 10.12 (14 names, `member.ban` among them); `audit.accept`, `quarantine.release` and `cell.overturn` are single-admin with step-up [default-pending D-34, D-39]; (g) the action codes of 11.54.3 and the reason-code lists; (h) sub-headings `11.51` upward (renumbered by FIX-21 from `11.41`) to avoid collisions with other S11 files; (i) the terms-copy upload body (derived from `service.terms_copy_max_bytes`) exceeds `api.max_body_bytes`, so it gets its own limit; (j) `Alarm` kinds `abuse.*`, `launch.rule_failing`, `ops.changelog_overdue` | Used as proposed in this file; C-001 and C-022 fold them into S0 and S16 | proposed |
 | `ISS-118` | major | FD§5.3, FD§3.4, FD§8.3 | State machines of S0.9 lack transitions the tools need: (a) a `banned` member has no exit, so an overturned ban appeal cannot be applied; (b) nothing moves a rejected cell to accepted after an overturned `cell_rejection` appeal; (c) `awaiting_second_review` has no rule for split votes; (d) an approved service cannot be re-reviewed early (`review_started` only leaves `unreviewed`, `rejected`, `review_due`, `revoked`); (e) an operator lease release has no event; (f) the launch rule can fail after a gate is reopened while the switches stay on | (a) add `banned --member.reinstated--> active` on an overturned appeal only; (b) add `rejected --cell.reinstated--> accepted` when no other attempt was accepted, otherwise correct the reliability record and create no second credit (11.58.3); (c) a further distinct reviewer breaks a tie, else the original decision stands (11.58); (d) add `approved|suspended --service.review_started--> in_review`; (e) reuse `cell.declined` with actor `admin` and reason `operator_release` (11.66.3); (f) raise `launch.rule_failing` and require an explicit `launch.switch_off`, automatic switch-off left to S14.* (11.63) | proposed |
-| `ISS-119` | major | FD§5.7, FD§4.2, prompt | Decisions only the owner can make: (a) with fewer than two admins every two-person action is unavailable (`AD9`), and `ledger.reversal_min_approvers` is a constant 2; (b) `service.min_approvers` 1 or 2; (c) credit already spent cannot be reversed under `ledger.allow_negative_balance` = false, and a wrongly rejected cell whose work was paid to another attempt has no compensation rule; (d) whether a service approval needs a notice period like a loosening (applied: a public entry at approval time, no notice); (e) who counts as "founders" for parameters owned by `founders` (applied: two distinct `operator` approvers) | Applied as stated in each section; listed for S3.* | needs_owner |
+| `ISS-119` | major | FD§5.7, FD§4.2, prompt | Decisions only the owner can make: (a) with fewer than two admins every two-person action is unavailable (`AD9`), and `ledger.reversal_min_approvers` is a constant 2; (b) `service.min_approvers` 1 or 2; (c) credit already spent cannot be reversed under `ledger.allow_negative_balance` = false, and a wrongly rejected cell whose work was paid to another attempt has no compensation rule; (d) whether a service approval needs a notice period like a loosening (applied: a public entry at approval time, no notice); (e) who counts as "founders" for parameters owned by `founders` (applied: loosening is `parameter.loosen` with two distinct `operator` approvers, tightening is one admin with step-up [default-pending D-39]) | Applied as stated in each section; listed for S3.* | needs_owner |
