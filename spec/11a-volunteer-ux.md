@@ -762,7 +762,7 @@ The volunteer also has "flagged" in the sense of their own report on a card (`SC
 | Blocked: suspended | Member suspended after submit | Outcome still readable; new tasks blocked; Appeal offered |
 | Blocked: paused | Job or template paused or voided (`cell.voided`) | `copy.feedback.voided`: the task was withdrawn; no fault of yours; credit rules shown (S6.*) |
 
-**API calls.** `getSubmission`, `getBalance`, `getMember`.
+**API calls.** `getSubmission`, `getBalance`, `getMe`.
 
 **Copy intent.** Say what is known, say what is not yet known, never congratulate beyond the fact. Never promise credit before acceptance. Never describe verification internals. Use "declared" for any statement about rules or expiry: "credit expires on the declared date".
 
@@ -811,7 +811,7 @@ The volunteer also has "flagged" in the sense of their own report on a card (`SC
 
 **Content rules [D]**
 
-- Balance is the sum of unexpired `CreditLot` amounts of the member's `member` ledger account, from `getBalance`; lots from `listCreditLots`; entries from `listMemberLedgerEntries`. Display rounds balances down (S0.6.1) and shows whole credits plus a fraction only when non-zero. The client never sums, rounds, or computes expiry itself.
+- Balance is the sum of unexpired `CreditLot` amounts of the member's `member` ledger account, from `getBalance`; lots from `listLots`; entries from `listLedgerEntries`. Display rounds balances down (S0.6.1) and shows whole credits plus a fraction only when non-zero. The client never sums, rounds, or computes expiry itself.
 - Each lot row shows credits, earned date, expiry date (`expires_at = earned_at + credit.lifetime_days x 86,400 s` with the parameter version in force at `earned_at`, S0.6.2), source (`mint`, `transfer`, `grant` starter, `grant` referral, `refund` restored), and an expiry warning when within `credit.expiry_notice_days`. Both calendars appear in the detail tooltip.
 - The starter-grant lot shows its own shorter expiry (`grant.starter_lifetime_days`) and is labeled non-transferable (`grant.non_transferable`).
 - When a member is in the accelerated-expiry arm (`ff.experiment.expiry_arm` on and an `ExperimentAssignment` exists), the screen shows only the member's own declared lifetime in days and never the word "experiment" or the other arm's value; the assignment itself is logged server-side (S12.*, S13.*) and its disclosure is part of the pilot opt-in notice (FD§9 Phase 1 setup, participants informed). [D][A]
@@ -832,7 +832,7 @@ The volunteer also has "flagged" in the sense of their own report on a card (`SC
 
 **Actions.** Take a task, View ledger entries (list only, own entries), Read more (expiry explainer), Back.
 
-**API calls.** `getBalance`, `listCreditLots`, `listMemberLedgerEntries`, `getMember`.
+**API calls.** `getBalance`, `listLots`, `listLedgerEntries`, `getMe`.
 
 **Copy intent.** Dates before percentages; no loss framing ("you will lose") beyond the plain expiry date; no countdown animation; the expiry notice is shown on this screen and as a header dot, never as a push message (V-11, V-12).
 
@@ -884,7 +884,7 @@ The volunteer also has "flagged" in the sense of their own report on a card (`SC
 
 **Actions.** Filter, Load more, Open detail, Appeal, Report, Export.
 
-**API calls.** `listCellHistory`, `getSubmission`, `listAppeals`.
+**API calls.** `listSubmissions`, `listLeases`, `getSubmission`, `listAppeals` (11.5.1 says which list feeds which filter).
 
 **Copy intent.** Neutral list language; outcome words match 11.11.2; no ranking against others.
 
@@ -939,7 +939,7 @@ The volunteer also has "flagged" in the sense of their own report on a card (`SC
 
 **Actions.** Toggle, Save, Reset to defaults, Back (asks before discarding unsaved changes).
 
-**API calls.** `getOptIns`, `updateOptIns`, `listTopicCategories`, `listApprovedServices`.
+**API calls.** `getOptIns`, `replaceOptIns`, `listTopicCategories`, `listServices`.
 
 **Copy intent.** Respectful and neutral; each item says what the volunteer will see, not what they should choose.
 
@@ -948,7 +948,7 @@ The volunteer also has "flagged" in the sense of their own report on a card (`SC
 **Acceptance criteria**
 
 - `AC-vol-43` Given a new member, When the screen opens, Then exactly the values in `optin.default_*` are selected, `P2` and `P3` are disabled, `S2` and `S3` are not selectable, and no topic category is selected.
-- `AC-vol-44` Given the volunteer enables a sensitive topic category, When they tap Save, Then a confirmation listing what such tasks can contain is shown first, `updateOptIns` is called only after confirmation, and `member.optin_changed` is emitted.
+- `AC-vol-44` Given the volunteer enables a sensitive topic category, When they tap Save, Then a confirmation listing what such tasks can contain is shown first, `replaceOptIns` is called only after confirmation, and `member.optin_changed` is emitted.
 - `AC-vol-45` Given the volunteer disables `P1`, When they next open the offer list, Then no `P1` cell is offered and their trust tier and credit are unchanged.
 - `AC-vol-46` Given a request that enables a locked axis is forced, When the server evaluates it, Then it returns `UNPROCESSABLE` and the stored `OptIn` is unchanged.
 
@@ -1091,7 +1091,7 @@ The volunteer also has "flagged" in the sense of their own report on a card (`SC
 
 **Actions.** Create, Copy link, Copy code, Revoke, toggle "add to share card" (11.16).
 
-**API calls.** `createInvite`, `listInvites`, `revokeInvite`, `getReferralStatus`.
+**API calls.** `createInvite`, `listInvites`, `revokeInvite`, `listReferrals`.
 
 **Copy intent.** Quiet, safety-first; a trust relationship, not a promotion.
 
@@ -1146,15 +1146,15 @@ The volunteer also has "flagged" in the sense of their own report on a card (`SC
 
 **Rules [D]**
 
-- The key is shown only after `getMember` reports the first accepted cell, only on the device, with Copy and Download as plain text. It is never sent to the server in clear; the server stores only a verifier (S10.*). Display is not logged. The screen is excluded from screenshots where the platform lets a page ask for that [V].
-- Confirmation asks the member to re-enter `ui.recovery_confirm_groups` groups chosen at random from the key (default 2), proving the member saved it; success calls `confirmRecoveryKey` and removes the header marker. The member may choose Later; the marker stays, and the key can be shown again only by `rotateRecoveryKey`, which creates a new key and invalidates the old one after a confirmation that states the consequence. [D]
+- The key is shown only after `getMe` reports the first accepted cell, only on the device, with Copy and Download as plain text. It is never sent to the server in clear; the server stores only a verifier (S10.*). Display is not logged. The screen is excluded from screenshots where the platform lets a page ask for that [V].
+- Confirmation asks the member to re-enter `ui.recovery_confirm_groups` groups chosen at random from the key (default 2), proving the member saved it; success calls `confirmRecoveryKey` and removes the header marker. The member may choose Later; the marker stays, and the key can be shown again only by `rotateKey` (`kind` `recovery`), which creates a new key and invalidates the old one after a confirmation that states the consequence. [D]
 - The key is excluded from digit conversion (11.4.2) and rendered `dir="ltr"`; alternate "words" display is an option only if S10.* defines a word list for it [A].
 - Restore: signed with a new device key; success emits `member.recovered`; the member then faces `identity.recovery_cooldown_s` (default 86,400 s) during which they cannot start jobs or spend (S10.*), shown as a declared safety rule with the end time. Attempts are limited by `ratelimit.recovery_attempts_per_day` and `identity.recovery_max_per_90d`; the screen never says which limit triggered or whether the key was close. A wrong key and an unknown key give the same answer (no account enumeration). [D]
 - Honest limit statement (FD Principle 11): the screen says plainly that a recovery key is the only way back, that anyone who has it can restore the identity, and that Hamyar cannot protect a key the member shares. [D]
 
 **States.** Empty: no key yet generated (not reachable after F2). Loading: restore in progress. Error: `RATE_LIMITED`; wrong key (`copy.recovery.not_recognized`); `copy.error.try_again`. Offline: save and confirm work offline except `confirmRecoveryKey`, which is queued; restore requires network. Blocked: member `closed` (`copy.recovery.closed`); too many attempts (`RATE_LIMITED` with time).
 
-**API calls.** `confirmRecoveryKey`, `rotateRecoveryKey`, `startRecovery`, `completeRecovery`, `createSession`.
+**API calls.** `confirmRecoveryKey`, `rotateKey` (`kind` `recovery`), `createIdentityChallenge` (purpose `recover`), `recoverMember`, `createSession`.
 
 | Copy key | `fa` (draft) | `en` |
 | --- | --- | --- |
@@ -1314,8 +1314,8 @@ The volunteer also has "flagged" in the sense of their own report on a card (`SC
 ```
 
 - Display options are device-local (11.4.2); time zone is the device zone by default and an IANA zone if chosen, never inferred from an IP address (S0.6.2).
-- **Link another device:** `createDeviceLinkCode` shows a one-time code valid `identity.device_link_code_ttl_s` (default 300 s); the new device enters it with `redeemDeviceLinkCode`; success emits `member.device_linked`; the old device is told. The screen explains that a linked device holds full access to the identity. [D]
-- **Rotate key:** `rotateMemberKey` replaces the device key with a grace period `identity.key_rotation_grace_s`; emits `member.key_rotated`; a confirmation states the consequence.
+- **Link another device:** `createDeviceLink` shows a one-time code valid `identity.device_link_code_ttl_s` (default 300 s); the new device enters it with `redeemDeviceLink` and shows a short check string; the old device compares the two strings and confirms with `approveDeviceLink`; the approval emits `member.device_linked`. The screen explains that a linked device holds full access to the identity. [D]
+- **Rotate key:** `rotateKey` (`kind` `device`) replaces the device key with a grace period `identity.key_rotation_grace_s`; emits `member.key_rotated`; a confirmation states the consequence.
 - **E-mail:** optional (`identity.email_optional`); if S10.* allows it, the screen says in plain words what the address is used for and that adding it can link the identity to a person; it is never requested elsewhere. [A]
 - **Close account:** `closeMember` after a confirmation that states what is deleted or reduced to an opaque id (`member_bound` retention, S0.7) and that ledger records without personal data remain (`permanent` retention); irreversible; shows the credit that will be forfeited. Emits `member.closed`.
 - States: Loading; Error with retry; Offline: display options still change (device-local), server actions disabled; Blocked: suspended or banned members can change display options and close the account, nothing else.
