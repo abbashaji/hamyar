@@ -469,7 +469,7 @@ function effective_variant(flag_key, member):
 | --- | --- | --- |
 | Disable any growth flag | `tighten` | Immediate, one operator; change-log entry within `change.tighten_publish_within_s` |
 | Enable `V1`, `V2`, `V3`, `V4`, `V6`, `ff.public.ledger_page` | `neutral` | Entry with notice `change.notice_days_default` |
-| Enable `ff.growth.v5_referral` (moves credit from the Reserve) | `loosen` | Entry with `reason`, notice `change.notice_days_default`, two operators; `S10.*` appends `flag.enable_credit_moving` to `security.two_person_actions` (`ISS-128`) |
+| Enable `ff.growth.v5_referral` (moves credit from the Reserve) | `loosen` | Entry with `reason`, notice `change.notice_days_default`, one operator with step-up, not a two-person action (D-39; `ISS-128`) |
 | Start an experiment | `neutral` | Entry of `subject_kind` `pre_registration` with the locked hash |
 
 ### 12.11.3 Assignment mechanism [D]
