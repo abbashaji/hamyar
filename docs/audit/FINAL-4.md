@@ -1,6 +1,6 @@
 # FINAL-4: readiness report round 4, merging docs/audit/FINAL-4a.md, docs/audit/FINAL-4b.md, docs/audit/FINAL-4c.md and docs/audit/FINAL-4d.md
 
-*Cell C-178. Written by a reviewer who wrote none of the four slice files, the fix logs R4-01 to R4-13, FINAL-3 or the audited parts. Nothing was executed here; CI runs the acceptance commands. I read FINAL-4a, FINAL-4b, FINAL-4c and FINAL-4d completely, `docs/owner-decisions.md` completely (D-01 to D-38) and `docs/audit/FINAL-3.md` lines 1-12 and 118-157 (totals header, owner questions, next fix tasks). I then opened the cited places listed under Spot checks in the part files, in ranges of at most 12 lines each. No file content is pasted. K4 is the one four-value `MemberKey` state list of 05a 5.2.5; this file writes K4 and the first K4 value because the log checker rejects one spelling (as FINAL-4a does). Line numbers are those of the slices; where I counted a different number the row says so. D-01 to D-38 are accepted and are not reported as open.*
+*Cell C-178. Written by a reviewer who wrote none of the four slice files, the fix logs R4-01 to R4-13, FINAL-3 or the audited parts. Nothing was executed here; CI runs the acceptance commands. I read FINAL-4a, FINAL-4b, FINAL-4c and FINAL-4d completely, `docs/owner-decisions.md` completely (D-01 to D-38) and `docs/audit/FINAL-3.md` lines 1-12 and 118-157 (totals header, owner questions, next fix tasks). I then opened the cited places listed under Spot checks in the part files, in 20 ranges of at most 30 lines in 8 part files. No file content is pasted. K4 is the one four-value `MemberKey` state list of 05a 5.2.5; this file writes K4 and the first K4 value because the log checker rejects one spelling (as FINAL-4a does). Line numbers are those of the slices; where I counted a different number the row says so. D-01 to D-38 are accepted and are not reported as open.*
 
 ## Totals
 
@@ -28,14 +28,14 @@
 **FINAL-3 rows 1 to 51.** The row lists of the four slices are 17, 8, 14 and 12 rows; together they are rows 1 to 51 with no row counted twice. As the slices read the part files:
 
 - 33 rows are closed (1, 4, 5, 10, 12, 19, 23, 24, 49; 6, 17, 18, 21, 40, 41, 42; 14, 15, 16, 26, 27, 28, 29, 31, 34, 37, 38, 39, 50; 30, 35, 43, 45). Rows 6, 14, 15, 16, 18, 21, 26, 27, 34 and 37 leave residue that is a row below.
-- 3 rows are closed in part only: 7 (S0, S10a and S16 agree, S15b, S12, S13 and two rows of S11c do not: rows 1, 10, 12, 13, 42), 9 (closed in 10a, 10b and 05a, not in 15a: row 3) and 36 (closed for `verification_shortfall` only: row 17).
-- 5 rows are closed with a new conflict: 3 (rows 5, 6), 8 (rows 28, 29, 30), 11 (row 7), 13 (rows 22, 33) and 25 (rows 31, 32).
+- 3 rows are closed in part only: 7 (S0, S10a and S16 agree, S15b, S12, S13 and two rows of S11c do not: rows 1, 12, 13), 9 (closed in 10a, 10b and 05a, not in 15a: row 3) and 36 (closed for `verification_shortfall` only: row 17).
+- 5 rows are closed with a new conflict: 3 (row 5), 8 (rows 28, 29, 30), 11 (row 7), 13 (row 33) and 25 (rows 31, 32).
 - 2 rows are not closed: 2 (rows 4, 37) and 22 (row 36).
 - 8 rows were not confirmed by any slice (20, 32, 33, 44, 46, 47, 48, 51); slice D has only the R4-12 read-back for them, which is a claim. They count as not verified (see Not verified).
 
 **Round 4 edits that created or exposed a contradiction** (the slices mark these rows as new or as exposed by an R4 edit): rows 1, 3, 7, 11, 13, 14, 15, 16, 19, 25, 39, 40, 41, 44, 46, 47 and 48. The pattern is the one of FINAL-3: an edit conforms one part to a decision and leaves its sibling on the old text (15a moved to the 10a signature layout and 15c did not; the device token grew to 256 bits in three parts and not in 15a; the context object left 11.65 and stayed in the ledger explorer). A fix cell below ends with a read-back of every sibling file named in its row, not only the file it edits.
 
-**What the spot checks showed.** I opened 15 cited places (list under Spot checks). All 15 hold as the slices say; the only differences are line numbers (S15b, rows 1, 10, 16 and 23, one line later than cited) and one coverage gap in the reach of row 2.
+**What the spot checks showed.** I opened 20 ranges (list under Spot checks) to test 19 merged rows. All 19 hold as the slices say; the differences are line numbers (S15b, rows 1, 10, 16 and 23, one line later than cited), a narrower reach for row 2, and row 61, which D-08 covers.
 
 ## Findings
 
@@ -112,7 +112,7 @@ Each row begins with the slice row it comes from (4a-n, 4b-n, 4c-n, 4d-n). Rows 
 
 ## Spot checks
 
-I opened 20 ranges in 8 part files (15a, 15b, 05b, 15c, 11c, 16c, 11a, 11b) to test 20 merged rows from all four slices (rows 1, 2, 3, 7, 10, 16, 17, 18, 19, 22, 23, 25, 31, 39, 50, 57, 59, 60, 61 and the second formula of 50). Every row I tested holds as the slice says. The differences are: S15b line numbers stand one line later than the slice cites (rows 1, 10, 16, 23); the reach of row 2 is narrower than the slice lists (stated in the row); and row 61 conflicts with D-08 (reclassified in the row).
+I opened 20 ranges in 8 part files (15a, 15b, 05b, 15c, 11c, 16c, 11a, 11b) to test 19 merged rows from all four slices (rows 1, 2, 3, 7, 10, 16, 17, 18, 19, 22, 23, 25, 31, 39, 50, 57, 59, 60 and 61). Every row I tested holds as the slice says. The differences are: S15b line numbers stand one line later than the slice cites (rows 1, 10, 16, 23); the reach of row 2 is narrower than the slice lists (stated in the row); and row 61 conflicts with D-08 (reclassified in the row).
 
 - Row 3 (slice A): `spec/15a-api-core.md:214-242`. `device_token` is `b64u<16>` in `createMember` (:217), `createSession` (:224), `recoverMember` (:236) and `redeemDeviceLink` (:240); `challenge` appears in the redemption body at :240 (row 31). Confirmed, line numbers exact.
 - Row 7 (slice A): `spec/15c-api-reconcile-core.md:94-101` and `:183-186`. The step-up message is `hamyar:v1:step_up:` plus challenge plus request hash and the recovery confirmation signs `hamyar:v1:confirm_recovery:` plus challenge plus key id; neither names an audience. Confirmed on the 15c side; 10a 10.3.2 was not opened by me.
@@ -168,7 +168,7 @@ Order: R5-01 and R5-10 are the two blocking cells and touch different files, so 
 
 - `docs/decisions.md`, `docs/source/Hamyar - Founding Document.md` and `docs/source/prompt.md` (named in the read list): not opened; the merge needed none of them beyond what `docs/owner-decisions.md` states.
 - `docs/audit/FINAL-3.md` lines 13-117 (the 51 rows) were not reopened. The status of each row in Checked is what the slices report; I did not read the row texts.
-- I opened 20 ranges in 8 part files (Spot checks). Every other file:line in the findings rests on a slice. In S15b the lines I counted stand one line later than the slice cites; the other S15b cites (rows 11, 12, 13, 14, 15, 45, 47 and 48 touch S15b) are not re-anchored, and a fix cell must find each by its text.
+- I opened 20 ranges in 8 part files (Spot checks). Every other file:line in the findings rests on a slice. In S15b the lines I counted stand one line later than the slice cites; the other S15b cites (rows 11 to 15, 41 and 45) are not re-anchored, and a fix cell must find each by its text.
 - Slice A left open: the 11d recovery-key timing (its file name was not given and a guess returned NOT_FOUND); 11a outside lines 170-194 and 288-312; 05a outside the ranges it names; 10b outside 138-172 and 300-318; 15a lines 1-83 and 271-897; 15c lines 331-378; S0 lines 1-269, 421-479 and 571-992; 15b (the approval ids rest on the R4-03 log) and 15d to 15g; 10a:759 and 10.12 as FINAL-3 row 7.
 - Slice B left open: the text of S0 0.10.5 and 0.10.6 on `founders` areas and launch approvers; S16 `S16D-C20`; 15c to 15g (rows 12 and 45 may find an owner there); 14.5 to 14.8.5 and 14.10 to 14.14; 11c 11.55 to 11.59, 11.62.1, AC-appr-* and AC-claim-*; 10a 10.4, 10.9, 10.10; 10b 10.23.5; 12 and 13 outside the ranges it names; 15b 15.21 and the events of 15.34; `spec/18-testing.md`.
 - Slice C left open: 06a LD-12 and 6.11.2 (row 21); 08b 8.34, 8.27 and 8.24.2; 08a 8.13.1 and LR-08; 05b outside the ranges it names, including table 5.29.2 (lock order, row 55); 00-conventions.md:162 and :583; S16 16.3 (C19, C20) and the range of `job.max_overrun_ratio`; S0 0.9.2 (closure reasons); 15a; `spec/18-testing.md` (`AC-ledger-03`).
