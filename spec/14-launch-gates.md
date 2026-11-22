@@ -55,7 +55,7 @@ Permissions [A] (names follow 0.8.2; the full matrix is S10.*):
 | `perm.launch.attach_evidence` | Attach evidence to an item | `reviewer` for items of scope `service`; `operator` for all items |
 | `perm.launch.signoff` | Sign off an item | same split as attach |
 | `perm.launch.reopen` | Reopen an item | `reviewer`, `operator` |
-| `perm.launch.switch_propose`, `perm.launch.switch_approve`, `perm.launch.switch_close` | Open a launch switch (two admins), close one (one admin) | `operator` |
+| `perm.launch.switch` | Open a launch switch (two admins, `launch.switch_on`), close one (one admin) | `operator` |
 | `perm.killswitch.engage` | Engage a kill switch | `operator` for every key; `reviewer` for `kill.template.*` and `kill.service.*` only |
 | `perm.killswitch.release_propose`, `perm.killswitch.release_approve` | Release a kill switch (two admins) | `operator` |
 
@@ -505,13 +505,13 @@ FD section 8.3 lists the fallbacks as what happens if no service clears G0; this
 
 ### 14.8.1 Opening a launch switch (two admins, R10)
 
-1. `launch.switch_propose` (holder of `perm.launch.switch_propose`): calls `evaluate_switch` fresh; if `Fail`, the proposal is refused with the reasons (`FORBIDDEN`), so a doomed proposal never reaches a second admin. If `Pass`, writes an `AdminAction` of type `proposal` holding the evaluation result and a snapshot of `relied_on` (the exact items and generations the `Pass` used).
-2. `launch.switch_approve` (holder of `perm.launch.switch_approve`, distinct `adm_` id from the proposer): within `param('launch.approval_window_s')` (default 86400) of the proposal, re-runs `evaluate_switch`. If anything has changed (a different reason set, a different `relied_on`), the approval is refused and the proposer must propose again against the new state, with no silent reuse of a stale evaluation. If unchanged, writes the `LaunchAuthorization` row (S14.4.4), sets the parameter to `true` via the ordinary parameter-write path (0.10.3), and both writes happen in one transaction so a switch is never `true` without an active authorization or vice versa.
+1. `launch.switch_propose` (holder of `perm.launch.switch`): calls `evaluate_switch` fresh; if `Fail`, the proposal is refused with the reasons (`FORBIDDEN`), so a doomed proposal never reaches a second admin. If `Pass`, writes an `AdminAction` of type `proposal` holding the evaluation result and a snapshot of `relied_on` (the exact items and generations the `Pass` used).
+2. `launch.switch_approve` (holder of `perm.launch.switch`, distinct `adm_` id from the proposer): within `param('launch.approval_window_s')` (default 86400) of the proposal, re-runs `evaluate_switch`. If anything has changed (a different reason set, a different `relied_on`), the approval is refused and the proposer must propose again against the new state, with no silent reuse of a stale evaluation. If unchanged, writes the `LaunchAuthorization` row (S14.4.4), sets the parameter to `true` via the ordinary parameter-write path (0.10.3), and both writes happen in one transaction so a switch is never `true` without an active authorization or vice versa.
 3. The authorization's `authorized_until` is the minimum `valid_until` across `relied_on` items (null `valid_until` entries do not constrain it); when that instant arrives the switch is no longer open even though the parameter row still reads `true` (S14.4.4's active-authorization definition is what enforcement actually reads, per `GI-01`).
 
 ### 14.8.2 Closing a launch switch (one admin)
 
-`launch.switch_close` (holder of `perm.launch.switch_close`): sets the parameter to `false` and sets `revoked_at`, `revoked_by`, `revoked_reason = closed_by_admin` on the active authorization, in one transaction. No second admin and no evaluation are required, consistent with rule 4 (tighten at once). Closing `launch.member_jobs_enabled` also sets `launch.minting_enabled` to `false` and revokes its authorization in the same transaction (`revoked_reason = gate_regressed`), because minting without member jobs is refused at opening (`GI-03`) and must not outlive that condition. [D]
+`launch.switch_close` (holder of `perm.launch.switch`): sets the parameter to `false` and sets `revoked_at`, `revoked_by`, `revoked_reason = closed_by_admin` on the active authorization, in one transaction. No second admin and no evaluation are required, consistent with rule 4 (tighten at once). Closing `launch.member_jobs_enabled` also sets `launch.minting_enabled` to `false` and revokes its authorization in the same transaction (`revoked_reason = gate_regressed`), because minting without member jobs is refused at opening (`GI-03`) and must not outlive that condition. [D]
 
 ### 14.8.3 Automatic revocation
 

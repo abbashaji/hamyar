@@ -360,7 +360,7 @@ Exposure bound from grants, derived from defaults: per tree per day `grant.max_p
 
 Roles are the `role` enum of S0.8.2. A `member` principal holds the `donor` and `requester` capabilities together; an `AdminUser` holds `reviewer`, `operator` or both and gets the union. The matrix shows what each role alone grants. Human review cells (FD§6.4 channel 2) are member work, not the `reviewer` role. [D]
 
-Legend: `Y` allowed when the conditions hold; `2P` allowed only with two-person approval (X9); `-` denied. Permission names follow `perm.<area>.<action>`; `S15.*` maps every API operation to exactly one permission here. [D]
+Legend: `Y` allowed when the conditions hold; `2P` allowed only with two-person approval (X9); `-` denied; a cell with two entries (`2P on, Y off`) gives the value for each direction of one switch. Permission names follow `perm.<area>.<action>`; `S15.*` maps every API operation to exactly one permission here. [D]
 
 | Permission | anon | donor | requester | reviewer | operator | system | Conditions |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -396,7 +396,9 @@ Legend: `Y` allowed when the conditions hold; `2P` allowed only with two-person 
 | `perm.template.review` | - | - | - | Y | - | - | X8, X11 |
 | `perm.template.pause` | - | - | - | Y | Y | - | X8 |
 | `perm.service.review` | - | - | - | Y | - | - | X8 |
-| `perm.policy.edit` | - | - | - | Y | - | - | X8; loosening is `parameter.loosen` |
+| `perm.policy.edit` | - | - | - | Y | - | - | X8; loosening is `perm.policy.loosen` |
+| `perm.policy.loosen` | - | - | - | 2P | - | - | X8, X9; action `policy.loosen` (S15b 15.25) |
+| `perm.policy.approve_loosen` | - | - | - | 2P | - | - | X8, X9; the second approver of `policy.loosen`, a different `AdminUser` (S15b 15.25) |
 | `perm.appeal.decide` | - | - | - | Y | - | - | X8, X11; bans need `appeal.ban_min_reviewers` |
 | `perm.report.triage` | - | - | - | Y | - | - | X8 |
 | `perm.report.decide` | - | - | - | Y | - | - | X8, X11 [A]; the actions of 10b S10.26.4 except `ban` (`perm.member.ban`) |
@@ -412,19 +414,23 @@ Legend: `Y` allowed when the conditions hold; `2P` allowed only with two-person 
 | `perm.invite.unfreeze_tree` | - | - | - | - | Y | - | X8 |
 | `perm.invite.seed_issue` | - | - | - | - | 2P | - | X8, X9 |
 | `perm.parameter.edit` | - | - | - | Y | Y | - | X8; only the owner role of the area (S0.10.5) |
-| `perm.parameter.loosen` | - | - | - | 2P | 2P | - | X8, X9; covers policy-rule loosening (R10) |
+| `perm.parameter.loosen` | - | - | - | 2P | 2P | - | X8, X9; parameters only, policy-rule loosening is `perm.policy.loosen` (R10) |
 | `perm.killswitch.engage` | - | - | - | Y | Y | - | X8; reviewers only for template and service scopes |
 | `perm.killswitch.release` | - | - | - | 2P | 2P | - | X8, X9 |
 | `perm.launch.signoff` | - | - | - | - | 2P | - | X8, X9; `S14.*` may extend |
+| `perm.launch.switch` | - | - | - | - | 2P on, Y off | - | X8; X9 when opening: opening a switch (`value` true, action `launch.switch_on`) is two-person, closing one is a single admin (S14.8, S15b 15.27.3) |
+| `perm.launch.reopen` | - | - | - | Y | Y | - | X8; one admin, because reopening a gate item tightens (S14.4.6, S15b 15.27.2) |
 | `perm.ledger.explore` | - | - | - | Y | Y | - | X8; read-only |
 | `perm.ledger.reverse` | - | - | - | - | 2P | - | X8, X9 |
 | `perm.capacity.view` | - | - | - | Y | Y | - | X8 |
+| `perm.prereg.lock` | - | - | - | - | 2P | - | X8, X9; action `preregistration.lock`; S15b 15.21.4 names the founders as holders |
 | `perm.adminaction.view` | - | - | - | - | Y | - | X8 |
 | `perm.admin.role_grant` | - | - | - | - | 2P | - | X8, X9 |
 | `perm.admin.credential_add` | - | - | - | - | 2P | - | X8, X9 |
 | `perm.admin.credential_lock` | - | - | - | Y | Y | - | X8; emergency lock of another admin, one admin suffices |
 | `perm.admin.credential_unlock` | - | - | - | - | 2P | - | X8, X9 |
 | `perm.disclosure.release` | - | - | - | - | 2P | - | X8, X9, counsel sign-off [V] |
+| `perm.secret.emergency_access` | - | - | - | - | 2P | - | X8, X9; S10b 10.24.1 item 2; reserved: no operation in Phase 1 [default-pending D-39] |
 | `perm.identity.purge_optional_pii` | - | - | - | - | Y | - | X8; engages `kill.optional_pii` (10.15) |
 | `perm.system.run_background_jobs` | - | - | - | - | - | Y | sweeps, retention purge, key-chain check, invite expiry |
 
@@ -510,13 +516,13 @@ The set of two-person actions is `security.two_person_actions`. This table is it
 | `member.ban` | Banning a member (`perm.member.ban`) | S10a 10.11, S15b |
 | `invite.seed_issue` | Issuing a seed invite (`perm.invite.seed_issue`); reserved: no operation in Phase 1 [default-pending D-39] | S10a 10.11 |
 | `admin.role_grant` | Creating an admin and changing an admin's roles; the enrollment code is handed over out of band (Enrollment above) | S10a 10.11, S15b 15.22.5 |
-| `admin.credential_add` | Adding a credential to an admin; reserved: no operation in Phase 1 [default-pending D-39] | S10a 10.11 |
-| `admin.credential_unlock` | Unlocking a locked credential; reserved: no operation in Phase 1 [default-pending D-39] | S10a 10.11 |
+| `admin.credential_add` | Adding a credential to an existing admin (`createCredentialEnrollment`, then the enrollment code); the first credential of a new admin belongs to `admin.role_grant` [default-pending D-39] | S10a 10.11, S15b 15.22.5 |
+| `admin.credential_unlock` | Unlocking a locked credential (`unlockAdminCredential`) [default-pending D-39] | S10a 10.11, S15b 15.22.5 |
 | `disclosure.release` | Releasing member data in answer to an order, with counsel sign-off [V]; reserved: no operation in Phase 1 [default-pending D-39] | S10a 10.11, S10b 10.23.5 |
 | `secret.emergency_access` | Emergency access to a secret; reserved: no operation in Phase 1 [default-pending D-39] | S10b 10.24.1 item 2 |
 | `preregistration.lock` | Locking the pre-registration | S15b |
 
-Each enrollment action has one name in this table. A part that marks another action as two-person adds it here first. Locking a credential is deliberately single-admin (an emergency brake: `perm.admin.credential_lock`); unlocking is two-person. Two accounts held by one human cannot be detected by software; distinct humans per approval is a process rule [V: operating procedure]. Every `AdminAction` records who, what, target, payload hash, outcome and `request_id`; rows are append-only and hash-chained like the ledger [A].
+Each enrollment action has one name in this table. A part that marks another action as two-person adds it here first. Locking a credential is deliberately single-admin (`lockAdminCredential`, an emergency brake: `perm.admin.credential_lock`); unlocking is two-person (`unlockAdminCredential`). Two accounts held by one human cannot be detected by software; distinct humans per approval is a process rule [V: operating procedure]. Every `AdminAction` records who, what, target, payload hash, outcome and `request_id`; rows are append-only and hash-chained like the ledger [A].
 
 Admin surface hardening [D]: strict Content-Security-Policy with no third-party script, font or frame; the token is held in page memory only, so a reload requires a new assertion; `ratelimit.admin_api_rpm`; CORS allows only the admin origin; a member token sent to an admin route is `AUTH_INVALID` and counted (S0.11.4).
 
@@ -745,13 +751,15 @@ Names and paths are proposals for `S15.*`, which is authoritative; methods and p
 | `closeMember` | `POST /v1/members/me/closure` | member (X5) | `perm.identity.close_account` | yes |
 | `createInvite`, `revokeInvite` | `POST /v1/invites`, `DELETE /v1/invites/{inv_id}` | member | `perm.invite.issue`, `perm.invite.revoke_own` | yes |
 | `startAdminLogin`, `createAdminSession` | `POST /v1/admin/auth/challenges`, `POST /v1/admin/sessions` | none | none (WebAuthn) | no |
+| `createCredentialEnrollment`, `unlockAdminCredential` | `POST /v1/admin/users/{adm_id}/credential-enrollments`, `POST /v1/admin/users/{adm_id}/credentials/{acr_id}/unlocks` | admin (X8) | `perm.admin.credential_add`, `perm.admin.credential_unlock`; two-person: each answers `202` with an `AdminApproval` | yes |
+| `lockAdminCredential` | `POST /v1/admin/users/{adm_id}/credentials/{acr_id}/locks` | admin (X8) | `perm.admin.credential_lock` | yes |
 | `approveApproval` | `POST /v1/admin/approvals/{apv_id}/approvals` | admin | by action (10.11); a two-person action is started by the concrete operation, which answers `202` with an `AdminApproval` | yes |
 | `rejectApproval` | `POST /v1/admin/approvals/{apv_id}/rejections` | admin | by action (10.11); as `approveApproval` | yes |
 | `withdrawApproval` | `POST /v1/admin/approvals/{apv_id}/withdrawals` | admin | by action (10.11); the initiator only | yes |
 
 ### 10.18.2 Events and metrics [A]
 
-Events (S0.5 format, stored in the outbox): `member.created`, `member.key_rotated`, `member.key_revoked`, `member.device_linked`, `member.recovered`, `member.recovery_confirmed`, `member.email_set`, `member.email_removed`, `member.closed`, `invite.issued`, `invite.redeemed`, `invite.expired`, `invite.revoked`, `invite.strike_recorded`, `invite.tree_frozen`, `invite.tree_unfrozen`, `session.issued`, `session.revoked`, `device_link.offered`, `device_link.claimed`, `device_link.approved`, `device_link.cancelled`, `device_link.expired`, `admin.signed_in`, `admin.credential_added`, `admin.credential_locked`, `admin.approval_requested`, `admin.approval_granted`, `admin.approval_rejected`, `admin.approval_withdrawn`, `admin_action.executed` (the original operation's own event, S15.B.3.1), `admin.approval_expired`, `admin.approval_failed`. Events carry `actor` as principal type plus opaque id and never an IP, key or token.
+Events (S0.5 format, stored in the outbox): `member.created`, `member.key_rotated`, `member.key_revoked`, `member.device_linked`, `member.recovered`, `member.recovery_confirmed`, `member.email_set`, `member.email_removed`, `member.closed`, `invite.issued`, `invite.redeemed`, `invite.expired`, `invite.revoked`, `invite.strike_recorded`, `invite.tree_frozen`, `invite.tree_unfrozen`, `session.issued`, `session.revoked`, `device_link.offered`, `device_link.claimed`, `device_link.approved`, `device_link.cancelled`, `device_link.expired`, `admin.signed_in`, `admin.credential_added`, `admin.credential_locked`, `admin.credential_unlocked`, `admin.approval_requested`, `admin.approval_granted`, `admin.approval_rejected`, `admin.approval_withdrawn`, `admin_action.executed` (the original operation's own event, S15.B.3.1), `admin.approval_expired`, `admin.approval_failed`. Events carry `actor` as principal type plus opaque id and never an IP, key or token.
 
 Metrics (no id or IP in any label): `hamyar_identity_registrations_total`, `hamyar_identity_recoveries_total`, `hamyar_identity_recovery_failures_total`, `hamyar_identity_key_chain_invalid_total`, `hamyar_ratelimit_denied_total` (label: scope), `hamyar_session_revocations_total`, `hamyar_admin_pending_approvals_total`. Alarms (`Alarm`): `identity.key_chain_invalid`, `admin.credential_cloned`, `admin.bootstrap_enrollment` (category `security`), a spike in `hamyar_identity_recovery_failures_total`.
 

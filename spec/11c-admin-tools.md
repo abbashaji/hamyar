@@ -189,7 +189,7 @@ No field holds an IP address, a user agent, a device fingerprint or a passkey cr
 | `launch.attach_evidence` | `perm.launch.evidence` | `CT1` | N | 1 | `gate.evidence_attached` |
 | `launch.signoff` | `perm.launch.signoff` (`operator`) | `CT3` | L | `launch.min_signoffs` (distinct signers of one item) | `gate.signed_off` |
 | `launch.switch_on` | `perm.launch.switch` (`operator`) | `CT3` | L | 2 | `launch.members_may_join_changed`, `launch.member_jobs_enabled_changed`, `launch.minting_enabled_changed` |
-| `launch.reopen` | `perm.launch.signoff` | `CT2` | T | 1 | `gate.reopened` |
+| `launch.reopen` | `perm.launch.reopen` (`reviewer`, `operator`) | `CT2` | T | 1 | `gate.reopened` |
 | `launch.switch_off` | `perm.launch.switch` (`operator`) | `CT2` | T | 1 | `launch.members_may_join_changed`, `launch.member_jobs_enabled_changed`, `launch.minting_enabled_changed` |
 | `killswitch.engage` | `perm.killswitch.engage` (scoped, 11.64) | `CT2` | T | 1 | `killswitch.engaged` and the pause events of 11.64.2 |
 | `killswitch.release` | `perm.killswitch.release` | `CT3` | L | 2 | `killswitch.released` and the resume events |
@@ -632,7 +632,7 @@ show: name, blocked count, age, link to its screen
 ## 11.63 Tool 9: Launch-gate checklist
 
 **Purpose.** Make BUILDING separate from LAUNCHING: the three `launch.*` switches stay off until the gates G0..G5 that `launch.required_gate_ids` names are signed off by distinct admins with evidence (prompt; FD§8.3). Gate content, the exit rule and the switch rule are owned by S14.*; this part specifies the screens and actions. [D]
-**Roles and permissions.** `operator`: `perm.launch.evidence`, `perm.launch.signoff`. Reads for `reviewer`.
+**Roles and permissions.** `operator`: `perm.launch.evidence`, `perm.launch.signoff`, `perm.launch.switch`. `reopenGateItem`: `perm.launch.reopen` (`reviewer`, `operator`). Reads for `reviewer`.
 
 **`SCR-ops-11` Checklist.** One card per gate G0..G5 listing its `LaunchGateItem` lines (data owned by S14.*, for example the G0 questions (a)..(k) of FD§8.3). Each line shows state (`open`, `evidence_attached`, `signed_off`, `reopened`), evidence list, sign-offs `n / launch.min_signoffs` and a "required" badge when the gate is in `launch.required_gate_ids` (default G0 and G1). Evidence kinds: a text note; a saved file (bytes with `sha256:` hash, bounded by `api.max_body_bytes` after base64 [A]); a reference to an existing record (`svc_`, `tcp_`, `cal_`, `prr_`). Counsel's answers and the G1 threat-model decision are attached as evidence and are [V]; the tool records them and draws no legal conclusion. The G0 card also shows the number of `approved` services against `launch.min_approved_services` and a link to `SCR-rev-03`; a documented fallback (FD§8.3 fallbacks i to iv) is an evidence kind `fallback_decision` on G0 [A].
 
@@ -652,7 +652,7 @@ A sign-off is one `signOffGateItem` call per item (`launch.signoff`, `CT3`): the
 | --- | --- | --- |
 | `listLaunchGates`, `getLaunchGateItem` | `GET /v1/admin/launch/gates[/{gate_id}]`, `GET /v1/admin/launch/gate-items/{lgi_id}` | Gates with items and evidence |
 | `attachGateEvidence` | `POST /v1/admin/launch/gate-items/{lgi_id}/evidence` | `CT1`; no `If-Match`; `Idempotency-Key` required |
-| `reopenGateItem` | `POST /v1/admin/launch/gate-items/{lgi_id}/reopenings` | `CT2` |
+| `reopenGateItem` | `POST /v1/admin/launch/gate-items/{lgi_id}/reopenings` | `CT2`; `perm.launch.reopen` |
 | `signOffGateItem` | `POST /v1/admin/launch/gate-items/{lgi_id}/signoffs` | Body `{comment}`; `201`; one call per item; sets no switch (a switch is changed only by `changeLaunchSwitch`) |
 | `changeLaunchSwitch` | `POST /v1/admin/launch/switch-changes` with `{switch, value, reason}` | Step-up, `perm.launch.switch`. `value: false`: `CT2`, one admin, `200` at once. `value: true`: `CT3`, two-person action `launch.switch_on`, `202` with an `AdminApproval`; the blockers are recomputed at approval and the switch is set only if none remain. Errors `409 STATE_CONFLICT` (`details.blockers`), `422 UNPROCESSABLE` (`no_change`) |
 | `getLaunchStatus` | `GET /v1/admin/launch/status` | Rule rows and effective states; feeds `BLK-header` |
