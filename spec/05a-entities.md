@@ -696,7 +696,7 @@ A requester's request, or a Commons job. Machine S0.9.2. The declarations, the p
 | `verification_pool_cells` | int | `floor(primary_cell_count * v_ppm / 1000000)` | S0.6.1; remainder refunded at settlement (`ISS-04`) |
 | `quoted_window_s` | int | NN at quote | |
 | `quote_expires_at` | ts | NN at quote | `price.quote_ttl_s` |
-| `parameter_versions` | json | NN at quote | map of parameter name to version in force (`admission.*`, `price.*`, `credit.*`, `verify.*`, `commons.*`); JT-15 (05b) reads `commons.job_overrun_days` from it [default-pending D-31] |
+| `parameter_versions` | json | NN at quote | map of parameter name to version in force (`admission.*`, `price.*`, `credit.*`, `verify.*`, `commons.*`); JT-15 (05b) reads `commons.job_overrun_days` from it, so a Commons job's overrun deadline uses the value stamped at quote (JT-04), not the value at confirmation [default-pending D-31] |
 | `escrow_id` | id `esc_` | null until `escrow_confirmed` | |
 | `reservation_id` | id `rsn_` | null | set when activated from a reservation |
 | `submitted_at`, `admitted_at`, `started_at`, `assembled_at`, `settled_at` | ts | null | |
@@ -705,7 +705,7 @@ A requester's request, or a Commons job. Machine S0.9.2. The declarations, the p
 | `pause_causes` | arr of enum(`job_pause_cause`) | NN, default empty; non-empty iff `state = 'suspended'` (CHECK) | set of `kill_template`, `kill_service`, `kill_member`, `policy_tightened`, `template_paused`, `service_suspended`; JT-11 adds a member, JT-12 fires when the last member clears (05b 5.22, 5.22.2) |
 | `state_before_pause` | enum | set iff `state = 'suspended'`; `admitted` or `running` | the state JT-12 returns to |
 | `pause_started_at` | ts | set iff `state = 'suspended'` | start of the current pause; cleared by JT-12 |
-| `paused_total_s` | int | NN, default 0, `>= 0` | sum of closed pauses; extends the overrun deadline of JT-15 (a pause never causes `overrun_timeout`) |
+| `paused_total_s` | int | NN, default 0, `>= 0` | sum of closed pauses; extends the overrun deadline of JT-15, as does a pause still in progress (a pause never causes `overrun_timeout`) |
 | `held_ucr` | ucr | null until `escrow_confirmed`; `= escrow_ucr` for a member job (CHECK); NULL for a Commons job | amount held at JT-09; the settlement identity of 05b 5.29.8 compares it with payouts + levy + refund |
 | `levy_reserved_ucr` | ucr | null until quote; `= primary_cell_count * lambda_ppm` (CHECK) | stamped at JT-04; `payable_ucr(job)` = escrow balance minus this (CT-01, 05b 5.29.7 E5) |
 | `quote_id` | text | null until quote; new value per quote (JT-04, JT-07) | opaque, no new id prefix; carried by `job.escrow_confirmed`; names the quote whose `parameter_versions` are honored at JT-09. Needed by 05b JT-09 and by S6.* and S15.* |
@@ -776,7 +776,7 @@ One prompt-and-response unit inside the envelope; the unit of credit. The row pe
 | `accepted_submission_id`, `accepted_at` | id, ts | NN iff `accepted` or `overturned` | |
 | `accept_policy_version_id` | id `plv_` | null until acceptance | R9 re-check result (policy in force at acceptance) |
 | `last_reject_code` | text | null | a `reject.*` code of S0.8.4 |
-| `acceptance_deferred_until` | ts | null; non-null only in `submitted` or `flagged_for_audit` (CHECK) | set by `G-accept` when it returns DEFER (05b 5.23.2); for a payout-guard deferral it is not stored once but recomputed from the job's current overrun deadline (`jobs.admitted_at` + `job.max_overrun_ratio` x `quoted_window_s` + `paused_total_s`), so a deadline extension by JT-12 moves it, and the column holds the last computed value [default-pending D-26]; cleared when the sweep re-enqueues the acceptance (`job.resumed`, `template.resumed`, `member.reinstated`, `killswitch.released`); a deferred cell keeps its headroom reservation |
+| `acceptance_deferred_until` | ts | null; non-null only in `submitted` or `flagged_for_audit` (CHECK) | set by `G-accept` when it returns DEFER (05b 5.23.2); for a payout-guard deferral it is not stored once but recomputed from the deadline of the `overrun_timeout` guard of 05b JT-15 (`jobs.admitted_at` + `job.max_overrun_ratio` x `quoted_window_s` + `paused_total_s` + the time of a pause still in progress, `now` - `pause_started_at`), so a deadline extension by JT-12 moves it, and the column holds the last computed value [default-pending D-26]; set only while the job is not `settling` or `cancelling`, because in those states no cell is deferred and a blocked cell is voided (05b `G-accept`) [default-pending D-43]; cleared when the sweep re-enqueues the acceptance (`job.resumed`, `template.resumed`, `member.reinstated`, `killswitch.released`, or the job's move to `settling` or `cancelling`, after which the cell is accepted or voided, 05b 5.22.1); a deferred cell keeps its headroom reservation |
 | `credit_txn_id` | id `txn_` | null, unique | the `payout` (member job) or `mint` (Commons) transaction; set once, which makes double payment structurally impossible |
 | `payload_purged_at` | ts | null | |
 
@@ -879,7 +879,7 @@ Sampled re-execution of a cell, comparator result, third execution. Machine S0.9
 | `primary_cell_id`, `primary_submission_id` | id | NN, FK | |
 | `trigger` | enum(`audit_trigger`) | NN | |
 | `sampling_rate_ppm_applied` | ppm | null | `s` applied when sampled; needed to estimate false accepts without bias |
-| `flag_age_out_days_applied` | int | null | `audit.flag_age_out_days` in force when the primary cell was flagged for audit; 05b CT-19 reads it, so a later change of the parameter does not move the age-out of a cell already flagged; null for an audit not caused by a flag [default-pending D-31] |
+| `flag_age_out_days_applied` | int | null | `audit.flag_age_out_days` in force when the primary cell was flagged for audit, written by 05b CT-07 in the transaction that creates the `Audit`; 05b CT-19 reads it, so a later change of the parameter does not move the age-out of a cell already flagged; null for an audit not caused by a flag [default-pending D-31] |
 | `state` | enum | NN | `pending`, `second_executed`, `matched`, `mismatched`, `third_pending`, `resolved`, `cancelled` |
 | `second_cell_id`, `third_cell_id` | id `cel_` | null, FK | executions by donors different from the primary donor and from each other (enforced when leasing, S9.*) |
 | `second_submission_id`, `third_submission_id` | id `sub_` | null, FK | |
