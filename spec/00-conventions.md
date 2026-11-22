@@ -243,6 +243,10 @@ If the verification pool is not a whole number of cells, `floor` applies and the
 | `BadgeAward` | `badge_awards` | `baw_` | `member_bound` | A badge held by a member |
 | `InvariantCheck` | `invariant_checks` | `ivc_` | `ops` | Result of one run of a ledger invariant |
 | `Alarm` | `alarms` | `alm_` | `ops` | A raised alarm and its acknowledgement |
+| `AuthChallenge` | `auth_challenges` | `chl_` | `short` | Server-issued single-use challenge that a signed identity request answers; deleted on use or expiry (S10a 10.3.2, S5a 5.6.11) [default-pending D-44] |
+| `DeviceLinkOffer` | `device_link_offers` | `dlo_` | `short` | One-time offer to add a device to a member; holds the redeemed public key and token hash until the approval creates the `Device` and the `MemberKey` (S10a 10.7, S5a 5.6.12) [default-pending D-44] |
+| `RecoveryRequest` | `recovery_requests` | `rcv_` | `member_bound` | One row per completed recovery, counted against `identity.recovery_max_per_90d`; deleted 90 days after creation (S10a 10.8, S5a 5.6.13) [default-pending D-44] |
+| `SecurityNotice` | `security_notices` | `snt_` | `member_bound` | Notice that a key or device changed, shown at the next sign-in of every device; deleted `retention.session_days` after creation (S10a 10.2, S5a 5.6.14) [default-pending D-44] |
 | `StateTransition` | `state_transitions` | `stt_` | the class of the parent entity (`job_bound`, `member_bound`, `moderation` or `permanent`), kept in the column `retention_class` | Append-only, gapless history of every state change of every machine in 0.9, so an appeal or a provenance question can outlive the raw event log (S5b 5.21.3) |
 | `MintHeadroom` | `mint_headroom` | none (primary key `bucket_key`, S5a) | `permanent` for month rows, `member_bound` for `member_day` rows (S5a) | Counter of Commons mint capacity per UTC month and member day: minted and reserved amounts against the cap, changed only by conditional update (S5b 5.29.3, S6.*) |
 
@@ -366,9 +370,19 @@ Reject reason codes shown to requesters: `policy.<policy_rule_id>.<slug>` (for e
 | `size_class` | `standard` (the only value in Phases 1-2) |
 | `deadline_class` | `standard` (multiplier fixed at 1.0 in Phase 1, FD§4.8) |
 | `member_status` | `active`, `suspended`, `banned`, `closed` (orthogonal to `trust_tier`, 0.9.4) |
+| `key_status` (`MemberKey.status`) | `pending`, `active`, `retiring`, `revoked` (T): the four-value list that S5a 5.2.5 and S10a 10.4.4 call K4; the meaning of each value is in the table below the enum table [default-pending D-44] |
 | `change_class` (R10) | `tighten`, `loosen`, `neutral` |
 | `locale` / `digits` / `calendar` | `fa`, `en` / `latin`, `persian` / `jalali`, `gregorian` |
 | `closure_reason`, `appeal_kind`, `trust_tier` | defined where used (0.9.2, 0.9.7, 0.9.4); the `CHECK` constraints of 0.7 use those lists |
+
+**`key_status`** (the status of a `MemberKey`, 0.7; stored exactly as written by S5a 5.2.5 and 5.6.2, moved by S10a 10.4.4, 10.6 and 10.7) [D][A] [default-pending D-44]. These are the values the server stores; what a client keeps locally for a key it has not sent yet is not a `key_status`. The `purpose` of the key (`auth` for a device key, `recovery` for the recovery key, S5a 5.2.5) decides which meaning of a value applies.
+
+| Value | Meaning |
+| --- | --- |
+| `pending` | A new recovery key from the moment it is added by a rotation of the recovery key until `identity.key_rotation_grace_s` ends; the old recovery key is `retiring` meanwhile, and at the end the new key becomes `active` (what each key may do meanwhile is S10a 10.4.4). A device key is never stored in this value: it is created `active`, at registration or in the transaction that approves a `DeviceLinkOffer` (S5a 5.6.12) |
+| `active` | The key in force. A device key answers session challenges; the recovery key is the one that a recovery and a confirmation of the recovery key are verified against (at most one `active` recovery key per member, S5a 5.6.2) |
+| `retiring` | A key that a successor has replaced and that still works until `not_after` (the rotation time plus `identity.key_rotation_grace_s`); it becomes `revoked` when the grace ends, and a device key earlier, on the first session of its successor (S10a 10.6) |
+| `revoked` (T) | A key that authenticates nothing: its grace ended, or it was revoked at once (a compromise, a recovery, or the member revoking it); `revoked_reason` holds a code (S5a 5.6.2); no key leaves this value |
 
 ## 0.9 State machines: state names and event names
 
@@ -607,7 +621,7 @@ Every accepted change writes one `ParameterVersion`, one `ChangeLogEntry` (publi
 | `identity`, `session`, `invite`, `ratelimit`, `retention`, `security` | `operator` | S10.* |
 | `launch`, `change` | `operator` (two approvers for `launch`) | S14.* |
 | `analytics`, `experiment`, `growth`, `team`, `public`, `metrics`, `calibration`, `anomaly`, `commons`, `audit` | `founders` for thresholds (`anomaly.*`), `operator` otherwise (`commons.*`, `audit.*`) [A] [default-pending D-31] | S12.*, S13.*, S5.* (05b MT-06, JT-15, CT-19), S16 16.C.13 |
-| `api`, `ui`, `i18n` | `operator` | S11.*, S15.* |
+| `api`, `ui`, `i18n`, `ops` | `operator` | S11.*, S15.*; S4 4.19.1 and S16 16.16 for `ops` |
 
 ### 0.10.6 Initial parameter list
 
@@ -841,6 +855,17 @@ The list below is the FULL set of parameter names; names are stable and C-022 co
 | `anomaly.restrict_window_days` | days | 14 [A] [default-pending D-31] | 1..90 | `P1M` |
 | `commons.job_overrun_days` | days | 30 (a Commons job closes `expired` after this many days) [A] [default-pending D-31] | 1..365 | `OPS` |
 | `audit.flag_age_out_days` | days | 14 (a `flagged_for_audit` cell then escalates in the audit queue) [A] [default-pending D-31] | 1..90 | `OPS` |
+
+**Table E: metrics, analytics, calibration, admission** (names of S16 16.C.12, owner roles of 0.10.5; the owner role and the change policy of each row are those stated in 16.C.12) [A]
+
+| Name | Type | Initial configurable default | Validation | Replaced by |
+| --- | --- | --- | --- | --- |
+| `metrics.concentration_top_fraction` | ratio | 0.10 (S13; FD§9 asks for the share of capacity held by the top 10 percent) | 0 < x <= 0.5 | `FND` |
+| `analytics.client_events_enabled` | bool | true (S13) | bool | `SEC` |
+| `calibration.lease_timeout_multiplier` | int | 10 (S13; 1,200 = 10 x 120 s, the derivation of `lease.timeout_s`) | 1..100 | `P1M`: abandonment and lease-expiry rates |
+| `calibration.timing_min_percentile` | int | 1 (S13) | 1..25 | `FND` |
+| `calibration.envelope_min_success` | ratio | 0.95 (S13) | 0.5..1 | `FND` |
+| `admission.allowed_job_types` | json | all `job_type` values, no restriction [A]; the fallback `g0.fb.iii` of S14.7.4 sets `["human_review"]` | a list; every value is a `job_type` value of S0 0.8 [V] | `FND`: the fallback is a gate decision (S14) |
 
 **Kill switches** (entity `KillSwitch`, default `released`, engaged by an operator with a logged reason; S14.*): `kill.all_minting`, `kill.all_new_jobs`, `kill.template.<tpl_id>`, `kill.service.<svc_id>`, `kill.member.<mem_id>`. **Feature flags** (entity `FeatureFlag`, default off): `ff.growth.v1_fast_path`, `ff.growth.v2_live_counter`, `ff.growth.v3_share_card`, `ff.growth.v4_teams`, `ff.growth.v5_referral`, `ff.growth.v6_milestones`, `ff.channel.human_review`, `ff.job.reservations`, `ff.public.ledger_page`, `ff.experiment.expiry_arm`. Each experiment-capable flag has an `Experiment` with a logged assignment (S12.*, S13.*). [D]
 

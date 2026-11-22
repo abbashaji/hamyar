@@ -4,7 +4,7 @@
 
 ## 16.C.1 Scope and rules
 
-S16 says it is the single complete list of parameters (S16 16.1), yet 46 names used in S5b, S6, S8, S10, S11, S13 and S14 are defined in neither S0 nor S16. This file gives each of them one disposition: a parameter row, an alias row, or an entry under "Not parameters" (the 16.C.8 list). Disposition count: 46 names, 40 parameter rows, 3 alias rows, 3 not-parameter entries. Of these, 16.C.2 to 16.C.7 hold 30 parameter rows and 3 alias rows (the first assignment of this cell, 35 names with 2 not-parameter entries), 16.C.12 and 16.C.13 add 10 parameter rows, and 16.C.8 holds 3 not-parameter entries. [D]
+S16 says it is the single complete list of parameters (S16 16.1), yet 46 names used in S5b, S6, S8, S10, S11, S13 and S14 were defined in neither S0 nor S16 when this file was written (the ten names of 16.C.12 and 16.C.13 are now also listed in S0 0.10.6 Tables E and D). This file gives each of them one disposition: a parameter row, an alias row, or an entry under "Not parameters" (the 16.C.8 list). Disposition count: 46 names, 40 parameter rows, 3 alias rows, 3 not-parameter entries. Of these, 16.C.2 to 16.C.7 hold 30 parameter rows and 3 alias rows (the first assignment of this cell, 35 names with 2 not-parameter entries), 16.C.12 and 16.C.13 add 10 parameter rows, and 16.C.8 holds 3 not-parameter entries. [D]
 
 | Rule | Decision |
 | --- | --- |
@@ -149,7 +149,7 @@ Worked check of the initial defaults against `S16C-C1`..`S16C-C14` [D]: `C1` 204
 
 ## 16.C.12 Rows added by FIX-04 (cell C-075)
 
-Names used in S13 (13.13) and S14 (14.13, 14.7.4) and defined in none of S0 0.10.6, S16, 16.B or 16.C. The rules of 16.C.1 apply unchanged; every default is the value the using part states, labeled `initial configurable default`; a range, a direction or a unit that the using part does not state is chosen here and marked [A]. The `calibration.*` rows only shape proposals: a proposal never writes a parameter (13.9). [D][A]
+Names used in S13 (13.13) and S14 (14.13, 14.7.4) and first defined here; S0 0.10.6 Table E lists them with the same defaults. The rules of 16.C.1 apply unchanged; every default is the value the using part states, labeled `initial configurable default`; a range, a direction or a unit that the using part does not state is chosen here and marked [A]. The `calibration.*` rows only shape proposals: a proposal never writes a parameter (13.9). [D][A]
 
 | name | type | unit | validation | initial default | owner role | change policy | prospective-only | calibration | used in |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -164,7 +164,7 @@ Notes [D][A]: (1) `calibration.lease_timeout_multiplier` = 10 reproduces the def
 
 ## 16.C.13 Rows added by R3-07 (cell C-144, decision D-31)
 
-Names used by S5b (05b MT-06, JT-15, CT-19) and defined in none of S0 0.10.6, S16, 16.B or 16.C. The four defaults are the owner's initial values of D-31, labeled `initial configurable default` [A] and marked default-pending; the owner may set other values. The areas `anomaly`, `commons` and `audit` are not listed in S0 0.10.5; the owner role is stated in each row. The rules of 16.C.1 apply unchanged. [D][A]
+Names used by S5b (05b MT-06, JT-15, CT-19) and first defined here. The four defaults are the owner's initial values of D-31, labeled `initial configurable default` [A] and marked default-pending; the owner may set other values. The areas `anomaly`, `commons` and `audit` are in S0 0.10.5, and the four names are listed with the same defaults in S0 0.10.6 Table D; the owner role is also stated in each row. The rules of 16.C.1 apply unchanged. [D][A]
 
 | name | type | unit | validation | initial default | owner role | change policy | prospective-only | calibration | used in |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
