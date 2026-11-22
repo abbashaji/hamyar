@@ -531,7 +531,7 @@ No `PUT`, `PATCH` or `DELETE` route exists on any ledger resource.
 ## 11.61 Tool 7: Parameter editor
 
 **Purpose.** Change configuration parameters with versioning, prospective effect, advance notice and a public change log, so credit and rules are never altered secretly (FD Principle 5; FD§4.9). [D]
-**Roles and permissions.** `perm.parameter.read` for any admin; `perm.parameter.edit` only for the owner role of the area (S0.10.5). in areas owned by `founders` loosening is `parameter.loosen` (two distinct `operator` approvers) and tightening is one admin with step-up [A] [default-pending D-39]; `launch.*` areas always need two approvers (S0.10.5); a parameter referenced by a locked `PreRegistration` is read-only (`STATE_CONFLICT`, lock owned by S13.*).
+**Roles and permissions.** `perm.parameter.read` for any admin; `perm.parameter.edit` only for the owner role of the area (S0.10.5). In areas owned by `founders` loosening is `parameter.loosen` (two distinct `operator` approvers) and tightening is one admin with step-up [A] [default-pending D-39]; `launch.*` areas always need two approvers (S0.10.5); a parameter referenced by a locked `PreRegistration` is read-only (`STATE_CONFLICT`, lock owned by S13.*).
 
 **`SCR-ops-07` List.** Filters: area, owner, public, has pending version, locked, constants. Columns: name, type, current value (a `ratio` shown as a decimal from ppm, `credits` as whole credits, durations with the raw `_s` value beside), version, `effective_from`, a badge for a pending future version, default and difference from default, `calibration_source`.
 
