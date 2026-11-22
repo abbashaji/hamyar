@@ -4,7 +4,7 @@
 
 ## 5.1 Scope, sources and how to read this part
 
-- **Scope.** This part fixes the stored shape of every entity named in S0.7: the 28 entities named by the prompt (scope B) and the 29 entities added by S0. That is 57 entities. For each: fields, types, constraints, keys, unique constraints, indexes, retention, what is stored and what is deliberately not stored. DDL is given for the critical entities in S5.14. [D]
+- **Scope.** This part fixes the stored shape of every entity named in S0.7: the 28 entities named by the prompt (scope B) and the 29 entities added by S0. That is 57 entities, plus the four identity entities that 10a names and S0.7 does not list yet (S5.6.11 to S5.6.14) [A] [default-pending D-44]. For each: fields, types, constraints, keys, unique constraints, indexes, retention, what is stored and what is deliberately not stored. DDL is given for the critical entities in S5.14. [D]
 - **Out of scope.** Guards, side effects and concurrency of the state machines (state-machine part of S5.*), ledger postings, price and admission algorithms (S6.*), the policy evaluator and registry workflow (S7.*), identity protocols (S10.*) and API shapes (S15.*). This part fixes only the columns they read and write, and the stored state names, which are exactly the names in S0.9. [D]
 - **File name.** S0.13 proposes `spec/05a-domain-model.md`; the owning cell's `allowed_paths` are authoritative, so this file is `spec/05a-entities.md` (`ISS-52`). [D]
 - **Field tables** have the columns `Field`, `Type`, `Null / constraint`, `Note`. Types use the aliases of S5.2.1. `NN` means NOT NULL. Common columns (S5.2.2) are not repeated unless they differ.
@@ -69,6 +69,10 @@ Values S0.8 does not list but the model needs. They are stored exactly as writte
 | `admin_status` / `credential_status` | `invited`, `active`, `disabled` / `pending`, `active`, `locked`, `revoked` |
 | `device_status` | `active`, `blocked` |
 | `platform_class` | `ios`, `android`, `desktop`, `other` |
+| `device_link_state` | `pending`, `awaiting_approval`, `linked`, `expired`, `denied` |
+| `challenge_purpose` | `create`, `session`, `rotate`, `recover`, `device_link`, `step_up`, `confirm_recovery` |
+| `recovery_outcome` | `completed` |
+| `security_notice_kind` | `key_rotated`, `device_linked`, `recovered`, `recovery_key_rotated` |
 | `invite_kind` | `seed`, `member` |
 | `key_storage` | `hardware_backed`, `software`, `unknown` (self-reported) |
 | `admin_action_outcome` | `proposed`, `approved`, `executed`, `expired` |
@@ -136,10 +140,10 @@ Provenance (FD§5.6) records "a salted-hash volunteer ID that requesters never s
 
 | Column | Computed as | Key (secret, S10.* owns the list) [A] | Kept for |
 | --- | --- | --- | --- |
-| `devices.device_token_hash` | HMAC-SHA-256 of a random 256-bit token the client keeps in its own storage | `secret.device_hash_key[v]` | as the `Device` row: member-bound plus the grant-memory residue for `retention.member_inactive_days` (S5.6.3) |
+| `devices.device_token_hash` (and `device_link_offers.device_token_hash` until the offer is deleted, S5.6.12) | HMAC-SHA-256 of a random 256-bit token the client keeps in its own storage | `secret.device_hash_key[v]` | as the `Device` row: member-bound plus the grant-memory residue for `retention.member_inactive_days` (S5.6.3) |
 | `members.email_lookup_hash` | HMAC-SHA-256 of the lower-cased address | `secret.email_lookup_key[v]` | while the member is not `closed` |
 | `members.email_ciphertext` | AES-256-GCM field encryption of the address | `secret.email_encryption_key[v]` | as above |
-| `sessions.token_hash`, `leases.nonce_hash`, `invites.code_hash` | SHA-256 of a 128- or 256-bit CSPRNG value (no key needed, S0.6.4) | none | their TTLs |
+| `sessions.token_hash`, `leases.nonce_hash`, `invites.code_hash`, `device_link_offers.secret_hash`, `auth_challenges.nonce` | SHA-256 of a 128- or 256-bit CSPRNG value (no key needed, S0.6.4) | none | their TTLs |
 | `submissions.volunteer_handle` | S5.3.2 | `secret.volunteer_handle_key[v]` | with the submission row (a hash, so it stays after payload purge) |
 
 The creation-time IP hash is not a column of any table of this model (FIX-17, audit A04 finding 15). Rate-limit counters (per member, per IP hash) are infrastructure state keyed per UTC day or window by the daily-rolling hash (`secret.ip_hash_key`, 10a 10.14.2), with a TTL no longer than their window and never beyond `retention.ip_hash_ttl_days`; they live only in the volatile `CounterStore`, not in a relational table and not in backups, and they hold no member id and no payload (S4.*, 10a 10.14.2 item 2, 10b 10.23.2). Data-minimization consequence [A]: the per-day limits keyed by IP hash (the daily IP limits) use the volatile counter only, so they cannot be audited or replayed from the database and a counter-store restart resets them; limits that read stored columns (`grant.max_per_device` through `devices.grants_claimed`, `ratelimit.device_new_members_per_day` through `members.creating_device_id`, `ratelimit.invite_tree_new_members_per_day` through `members.created_at` and the tree id `members.invite_root_member_id`, `invite.tree_*` through the tree columns) are database counts and unaffected. [A]
@@ -150,7 +154,7 @@ A full dump reveals pseudonymous `mem_` ids; public keys; day-granular activity;
 
 ## 5.4 Entity catalogue, mutability and retention
 
-One row per entity of S0.7 (57 rows), plus the two additions of S5.4.1 (`StateTransition` and the `mint_headroom` store) that S0.7 does not list yet [A] (FIX-16, audit A05 finding 18). `Class` is S5.2.3. `Retention` is the S0.7 class, with exceptions marked [A] in `ISS-51`. The last column says how a correction is modelled, because no `IMM` or `CHN` row is ever edited. [D]
+One row per entity of S0.7 (57 rows), plus the four identity entities of S5.6.11 to S5.6.14 that 10a names and S0.7 does not list yet (61 rows in all) [A] [default-pending D-44], plus the two additions of S5.4.1 (`StateTransition` and the `mint_headroom` store) that S0.7 does not list yet [A] (FIX-16, audit A05 finding 18). `Class` is S5.2.3. `Retention` is the S0.7 class, with exceptions marked [A] in `ISS-51`. The last column says how a correction is modelled, because no `IMM` or `CHN` row is ever edited. [D]
 
 | Entity | Section | Class | Retention | A correction is modelled as |
 | --- | --- | --- | --- | --- |
@@ -164,6 +168,10 @@ One row per entity of S0.7 (57 rows), plus the two additions of S5.4.1 (`StateTr
 | `AdminUser` | S5.6.8 | `MUT` | `permanent` | `disabled` status; never deleted |
 | `AdminCredential` | S5.6.9 | `MUT` | `permanent` | `revoked` status |
 | `AdminAction` | S5.6.10 | `CHN` | `permanent` | a later action that references the earlier one |
+| `AuthChallenge` | S5.6.11 | `IMS` | `short` | none; a used or expired challenge is deleted and a new one is issued |
+| `DeviceLinkOffer` | S5.6.12 | `MUT` | `short` | `expired` or `denied`; a new offer |
+| `RecoveryRequest` | S5.6.13 | `IMM` | `member_bound` | none; deleted 90 days after creation |
+| `SecurityNotice` | S5.6.14 | `IMS` | `member_bound` | none; only `seen_at` is set, once; deleted `retention.session_days` after creation |
 | `Template` | S5.7.1 | `MUT` | `permanent` | pointer to the active `TemplateVersion` |
 | `TemplateVersion` | S5.7.2 | `IMS` | `permanent` | a new version; the old one is `retired` |
 | `Glossary` | S5.7.3 | `IMS` | `job_bound` | a new glossary row for a new job |
@@ -214,7 +222,7 @@ One row per entity of S0.7 (57 rows), plus the two additions of S5.4.1 (`StateTr
 
 ### 5.4.1 Additions used by `spec/05b-state-machines.md` and `spec/09-result-return.md` [A]
 
-Two stores are written by the machines of S5.21 to S5.29 and are listed neither in S0.7 nor in the catalogue above (audit A05 finding 18). They are added here so that the model has a table for each; S0.7 must gain the `StateTransition` row at the next convention edit (S0.7 would then list 58 entities) [A]. Neither stores a personal datum.
+Two stores are written by the machines of S5.21 to S5.29 and are listed neither in S0.7 nor in the catalogue above (audit A05 finding 18). They are added here so that the model has a table for each; S0.7 must gain the `StateTransition` row and the four identity rows of S5.4 at the next convention edit (S0.7 would then list 62 entities) [A]. Neither stores a personal datum.
 
 **`StateTransition` · `state_transitions` · `stt_` · `IMM` · retention = class of the parent entity (column `retention_class`).** Durable, ordered history of every transition of every machine of S5.21 to S5.28 (05b 5.21.2 item 2 and 5.21.3). Needed by 05b (every `transition()` writes one row), by the appeal evidence snapshot (APT-01) and by the sequence check CK-07 (05b 5.29.10).
 
@@ -303,6 +311,7 @@ IDENTITY
   Device 1--* MemberKey (device_id)   Device 1--* Member (creating_device_id)
   Member 1--* Invite (issuer)      Invite 0..1--1 Member (redeemed_by)   Member *--0..1 Team
   AdminUser 1--* AdminCredential   AdminUser 1--* Session(admin)     AdminUser 1--* AdminAction
+  Member 1--* DeviceLinkOffer      Member 1--* RecoveryRequest      Member 1--* SecurityNotice      AuthChallenge (no foreign key)
 
 TEMPLATES AND JOBS
   Template 1--* TemplateVersion    Template 0..1--1 TemplateVersion (active_version_id)
@@ -378,7 +387,7 @@ A pseudonymous identity. Holds the `donor` and `requester` capabilities (S0.8.2)
 
 **Keys** PK `id`; FKs as above. **Unique** `email_lookup_hash` (where not null). **Indexes** `(status, trust_tier)`; `(team_id)`; `(invite_root_member_id)`; `(creating_device_id, created_at)`; `(last_active_day)`.
 **Stored** status, tier, display preferences, tree position, counters, optional e-mail ciphertext. **Not stored** name, nickname, IP, country, user-agent, provider identifiers, recovery key (only the public key derived from it, in `member_keys`), password.
-**Closure.** On `closed` the retention job deletes the rows of `member_keys`, `sessions`, `invites` (issued), `opt_ins`, `badge_awards`, `referrals`, and sets every nullable column above to NULL and every other column to its default (`trust_tier` = `new` with `tier_before_restriction` NULL, counters and `invite_depth` = 0, `locale`, `digits` and `calendar` NULL), keeping `id`, `created_at`, `status`, `closed_at` and `row_version`; `status_changed_at` and `updated_at` keep their closure-time values. The row is a tombstone so permanent rows that hold the opaque `mem_` id stay valid and point at nothing personal. Credit left on a closed member's lots moves to the Reserve through one `reserve_donation` transaction (`member` to `reserve`, key `closedonate:<mem_id>`, 05b MS-04); `expire` entries (S0.8.5) cover expired lots only; S6.* owns the rule [A]. [D]
+**Closure.** On `closed` the retention job deletes the rows of `member_keys`, `sessions`, `device_link_offers`, `recovery_requests`, `security_notices`, `invites` (issued), `opt_ins`, `badge_awards`, `referrals`, and sets every nullable column above to NULL and every other column to its default (`trust_tier` = `new` with `tier_before_restriction` NULL, counters and `invite_depth` = 0, `locale`, `digits` and `calendar` NULL), keeping `id`, `created_at`, `status`, `closed_at` and `row_version`; `status_changed_at` and `updated_at` keep their closure-time values. The row is a tombstone so permanent rows that hold the opaque `mem_` id stay valid and point at nothing personal. Credit left on a closed member's lots moves to the Reserve through one `reserve_donation` transaction (`member` to `reserve`, key `closedonate:<mem_id>`, 05b MS-04); `expire` entries (S0.8.5) cover expired lots only; S6.* owns the rule [A]. [D]
 
 ### 5.6.2 `MemberKey` · `member_keys` · `mky_` · `MUT` · `member_bound`
 
@@ -390,7 +399,7 @@ Public keys of a member (S0.6.4). Supports rotation, device linking and the reco
 | `purpose` | enum(`key_purpose`) | NN | `auth` signs challenges; `recovery` is derived from the recovery key and used only to recover |
 | `algorithm` | text | NN, `CHECK = 'ed25519'` | scheme fixed by S0.6.4; a new scheme is a convention edit |
 | `public_key` | bytes | NN, 32 bytes | |
-| `status` | enum(`key_status`) | NN, default `active` | `pending`, `active`, `retiring`, `revoked` (S5.2.5) |
+| `status` | enum(`key_status`) | NN, default `active` | `pending`, `active`, `retiring`, `revoked` (S5.2.5); `pending` is held only by a new recovery key during its grace (the first K4 value, 10a 10.4.4); a device key is never stored unapproved: it is created `active`, at registration or in the transaction that approves a `DeviceLinkOffer` (S5.6.12) [default-pending D-44] |
 | `device_id` | id `dev_` | null, FK | the device this auth key belongs to (device linking adds a key per device) |
 | `rotated_at`, `not_after` | ts | null | `not_after` = rotation time + `identity.key_rotation_grace_s` for the old key |
 | `replaced_by_key_id` | id `mky_` | null, FK | |
@@ -403,18 +412,18 @@ Public keys of a member (S0.6.4). Supports rotation, device linking and the reco
 
 ### 5.6.3 `Device` · `devices` · `dev_` · `MUT` · `member_bound`
 
-A keyed-hash record of a client installation for rate limits, anti-farming and linking. It is a random token the client generated, not a fingerprint. [D]
+A keyed-hash record of a client installation for rate limits, anti-farming and linking. It is a random token the client generated, not a fingerprint. A `Device` row is created at registration (10a 10.3.3) or in the transaction that approves a `DeviceLinkOffer` (S5.6.12) [default-pending D-44]. [D]
 
 | Field | Type | Null / constraint | Note |
 | --- | --- | --- | --- |
 | `device_token_hash` | bytes32 | NN | S5.3.3; kept in the grant-memory residue (Retention below) |
-| `hash_key_version` | int | NN | |
+| `hash_key_version` | int | NN | the version of `secret.device_hash_key` that made `device_token_hash`; a version stays live until no `devices` row, residue included, carries it, and a lookup tries the live versions (10b S10.24.2) [default-pending D-44] |
 | `platform_class` | enum(`platform_class`) | NN | set at registration (10a 10.3.3); four values, about 2 bits |
 | `status` | enum(`device_status`) | NN, default `active` | `blocked` after a farming finding (S10.*) |
 | `first_seen_day`, `last_seen_day` | day | NN | |
 | `grants_claimed` | int | NN, default 0 | counts toward `grant.max_per_device` (lifetime) |
 
-**Unique** `device_token_hash`. **Indexes** `(last_seen_day)`. **Retention.** `member_bound` plus a grant-memory residue (10a 10.9.1 and 10.14.1): a `Device` row is deleted once no non-closed member has it as `creating_device_id`, unless `grants_claimed > 0`; then only `(id, device_token_hash, grants_claimed)` remains for `retention.member_inactive_days` after that closure and is then deleted, so the lifetime limit `grant.max_per_device` is remembered for that long and no longer [A]. `retention.session_days` does not apply to `Device` rows.
+**Unique** `device_token_hash`. **Indexes** `(last_seen_day)`. **Retention.** `member_bound` plus a grant-memory residue (10a 10.9.1 and 10.14.1): a `Device` row is deleted once no non-closed member has it as `creating_device_id`, unless `grants_claimed > 0`; then only `(id, device_token_hash, hash_key_version, grants_claimed)` remains for `retention.member_inactive_days` after that closure and is then deleted, so the lifetime limit `grant.max_per_device` is remembered for that long and no longer [A]. `retention.session_days` does not apply to `Device` rows.
 **Stored** keyed hashes, day-granular first and last use, a grant counter. **Not stored** raw IP, any IP hash (the creation-time hash lives only in the volatile counter, S5.3.3), user-agent, screen size, fonts, canvas or audio fingerprints, hardware ids, anything beyond the list the threat model (S10.*) admits.
 
 ### 5.6.4 `Session` · `sessions` · `ses_` · `MUT` · `short`
@@ -527,6 +536,64 @@ The log of every operator and reviewer action. Named so it does not collide with
 | `prev_hash`, `entry_hash` | hash | NN | chain over the table, S5.15 |
 
 **Keys** PK `id`; unique `seq`; FKs. **Indexes** `(subject_type, subject_id, seq)`; `(admin_user_id, seq)`; `(action, seq)`. **Not stored** admin IP, session token, user-agent.
+
+### 5.6.11 `AuthChallenge` · `auth_challenges` · `chl_` · `IMS` · `short`
+
+The server-issued, single-use value that a signed request answers (10a 10.3.2, 15a 15.4). `createIdentityChallenge` issues it to anyone for any purpose, so a row says nothing about who asked. [A] [default-pending D-44]
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `purpose` | enum(`challenge_purpose`) | NN | the seven purposes of 10a 10.3.2 |
+| `nonce` | bytes32 | NN, unique | SHA-256 of the 256-bit challenge; the challenge itself is not stored (15a 15.4) |
+| `audience` | text | NN | the member origin string the signature must name |
+| `expires_at` | ts | NN | `created_at + identity.challenge_ttl_s` |
+| `used_at` | ts | null | set once, in the transaction of the action it authorizes; the only column that changes |
+
+**Keys** PK `id`. **Unique** `nonce`. **Indexes** `(expires_at)`. **Retention** `short`: deleted on use or expiry, that is by the next sweep once `used_at` is set or `expires_at` has passed (S5.15.4). **Not stored** the challenge value, a member id, a key id, an IP address, a device token, a user-agent.
+
+### 5.6.12 `DeviceLinkOffer` · `device_link_offers` · `dlo_` · `MUT` · `short`
+
+A one-time offer to add a device to a member (10a 10.7). It is the only row that exists between the offer and the approval: the redemption writes this row and nothing else, and the approval creates the `Device` row and the `MemberKey` in one transaction. [A] [default-pending D-44]
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `member_id` | id `mem_` | NN, FK | the member whose device offered the link (the approving side) |
+| `secret_hash` | bytes32 | NN, unique | SHA-256 of the 128-bit code, which is shown once to the offering device (S5.3.3) |
+| `state` | enum(`device_link_state`) | NN, default `pending` | `pending`, `awaiting_approval`, `linked` (T), `expired` (T), `denied` (T); transitions and events `device_link.*` as in 10a 10.7 and 10.18.2 |
+| `expires_at` | ts | NN | `created_at + identity.device_link_code_ttl_s` |
+| `new_public_key` | bytes | null until redemption; 32 bytes | the Ed25519 public key of the new device |
+| `device_token_hash` | bytes32 | null until redemption | the keyed hash of the new device's token (S5.3.3) |
+| `hash_key_version` | int | null until redemption | the key version of `device_token_hash`, so that the approval can write a valid `Device` row |
+| `platform_class` | enum(`platform_class`) | null until redemption | `other` when the client sent none |
+
+**Device id.** The API names the new device by `device_id` (15a 15.5): it is the id that the `Device` row takes at approval, the offer id with the prefix `dev_` in place of `dlo_` (the same ULID); no column stores it.
+**Approval.** One transaction: insert the `Device` row (that id, `device_token_hash`, `hash_key_version`, `platform_class` of the offer), insert the `MemberKey` (`purpose` `auth`, `status` `active`, `device_id` that id, `public_key` = `new_public_key`, `authorized_by_key_id` and `authorization_signature` of the approving key, `key_storage` `unknown`), set `state` to `linked`. Before it no `Device` row and no `MemberKey` exists for the new device.
+**Keys** PK `id`; FK `member_id`. **Unique** `secret_hash`; one open offer per member (`(member_id) WHERE state IN ('pending','awaiting_approval')`, 10a 10.7). **Indexes** `(expires_at)`. **Retention** `short`: deleted `retention.session_days` after `expires_at`, whatever the state, and at member closure (S5.6.1, S5.15.4). **Not stored** the code in clear, a private key, the short authentication string, an IP address, a user-agent.
+
+### 5.6.13 `RecoveryRequest` · `recovery_requests` · `rcv_` · `IMM` · `member_bound`
+
+One row per completed recovery (10a 10.8 step 4), counted against `identity.recovery_max_per_90d`. [A] [default-pending D-44]
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `member_id` | id `mem_` | NN, FK | the recovered member |
+| `recovery_key_id` | id `mky_` | NN, FK | the recovery key that was used (revoked in the same transaction) |
+| `outcome` | enum(`recovery_outcome`) | NN | `completed`, the one value written; only the recovery transaction inserts a row |
+| `completed_at` | ts | NN | transaction time |
+
+**Keys** PK `id`; FKs. **Indexes** `(member_id, completed_at)`. **Retention** `member_bound`: deleted 90 days after `created_at` (the window of `identity.recovery_max_per_90d`) and at member closure (S5.15.4). **Not stored** an IP address, a device token, a user-agent, the recovery key itself.
+
+### 5.6.14 `SecurityNotice` · `security_notices` · `snt_` · `IMS` · `member_bound`
+
+A notice that a key or device changed, shown at the next sign-in of every device (10a 10.2, 10.6 to 10.8). [A] [default-pending D-44]
+
+| Field | Type | Null / constraint | Note |
+| --- | --- | --- | --- |
+| `member_id` | id `mem_` | NN, FK | |
+| `kind` | enum(`security_notice_kind`) | NN | the notice kinds of 15a 15.5 (`Member.security_notices`); the text is copy, never stored |
+| `seen_at` | ts | null | set once, when the notice has been shown at a sign-in; the only column that changes |
+
+**Keys** PK `id`; FK `member_id`. **Indexes** `(member_id, created_at)`. **Retention** `member_bound`: deleted `retention.session_days` after `created_at` and at member closure (S5.15.4). **Not stored** free text, an IP address, a device token.
 
 ## 5.7 Templates, uploads and jobs
 
@@ -1430,7 +1497,7 @@ CREATE TABLE devices (
   updated_at timestamptz NOT NULL DEFAULT now(),
   row_version int NOT NULL DEFAULT 1,
   device_token_hash bytea NOT NULL UNIQUE CHECK (octet_length(device_token_hash) = 32),  -- kept in the grant-memory residue (5.6.3)
-  hash_key_version int NOT NULL,
+  hash_key_version int NOT NULL,                  -- a version stays live until no devices row, residue included, carries it (10b S10.24.2)
   platform_class text NOT NULL CHECK (platform_class IN ('ios','android','desktop','other')),
   status text NOT NULL DEFAULT 'active' CHECK (status IN ('active','blocked')),
   first_seen_day date NOT NULL,
@@ -1480,6 +1547,112 @@ CREATE INDEX members_status ON members (status, trust_tier);
 CREATE INDEX members_team ON members (team_id) WHERE team_id IS NOT NULL;
 CREATE INDEX members_tree ON members (invite_root_member_id);
 CREATE INDEX members_device ON members (creating_device_id, created_at);
+
+CREATE TABLE member_keys (
+  id text PRIMARY KEY CHECK (is_id(id,'mky')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  row_version int NOT NULL DEFAULT 1,
+  member_id text NOT NULL REFERENCES members(id),
+  purpose text NOT NULL CHECK (purpose IN ('auth','recovery')),
+  algorithm text NOT NULL CHECK (algorithm = 'ed25519'),
+  public_key bytea NOT NULL UNIQUE CHECK (octet_length(public_key) = 32),
+  status text NOT NULL DEFAULT 'active' CHECK (status IN ('pending','active','retiring','revoked')),   -- enum(key_status), 5.2.5
+  device_id text REFERENCES devices(id),                       -- NULL for a recovery key
+  rotated_at timestamptz,
+  not_after timestamptz,
+  replaced_by_key_id text REFERENCES member_keys(id) DEFERRABLE INITIALLY DEFERRED,
+  authorized_by_key_id text NOT NULL REFERENCES member_keys(id) DEFERRABLE INITIALLY DEFERRED,   -- the key itself for the first two keys of a member
+  authorization_signature bytea NOT NULL CHECK (octet_length(authorization_signature) = 64),
+  key_storage text NOT NULL DEFAULT 'unknown' CHECK (key_storage IN ('hardware_backed','software','unknown')),
+  revoked_reason text,                                         -- a code, never free text
+  CHECK (purpose = 'auth' OR device_id IS NULL),
+  CHECK (revoked_reason IS NULL OR status = 'revoked')
+);
+CREATE UNIQUE INDEX member_keys_one_recovery ON member_keys (member_id) WHERE purpose = 'recovery' AND status = 'active';
+CREATE INDEX member_keys_member ON member_keys (member_id, status);
+CREATE INDEX member_keys_device ON member_keys (device_id) WHERE device_id IS NOT NULL;
+
+CREATE TABLE invites (
+  id text PRIMARY KEY CHECK (is_id(id,'inv')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  row_version int NOT NULL DEFAULT 1,
+  issuer_member_id text REFERENCES members(id) DEFERRABLE INITIALLY DEFERRED,           -- D-12: NULL for a seed invite and once the edge is cleared (5.6.5)
+  kind text NOT NULL DEFAULT 'member' CHECK (kind IN ('seed','member')),
+  strike_recorded_at timestamptz,
+  code_hash bytea NOT NULL UNIQUE CHECK (octet_length(code_hash) = 32),
+  status text NOT NULL DEFAULT 'issued' CHECK (status IN ('issued','redeemed','expired','revoked')),
+  expires_at timestamptz NOT NULL,
+  redeemed_by_member_id text UNIQUE REFERENCES members(id) DEFERRABLE INITIALLY DEFERRED,   -- D-12: the invitee of the edge; NULL once the edge is cleared
+  redeemed_at timestamptz,                                      -- after edge clearing: the UTC date at 00:00:00 (5.6.5)
+  tree_root_member_id text REFERENCES members(id) DEFERRABLE INITIALLY DEFERRED,        -- seed invite: NULL until redeemed
+  tree_depth int NOT NULL CHECK (tree_depth >= 0),
+  CHECK (kind <> 'seed' OR issuer_member_id IS NULL),
+  CHECK (kind <> 'member' OR status = 'redeemed' OR issuer_member_id IS NOT NULL),      -- a member invite has an issuer while the edge exists
+  CHECK (status = 'redeemed' OR (redeemed_by_member_id IS NULL AND redeemed_at IS NULL)),
+  CHECK (status <> 'redeemed' OR redeemed_at IS NOT NULL),
+  CHECK (kind = 'seed' OR tree_root_member_id IS NOT NULL),
+  CHECK (kind <> 'seed' OR (status = 'redeemed') = (tree_root_member_id IS NOT NULL))
+);
+CREATE INDEX invites_issuer ON invites (issuer_member_id, status) WHERE issuer_member_id IS NOT NULL;
+CREATE INDEX invites_tree ON invites (tree_root_member_id);
+
+CREATE TABLE auth_challenges (
+  id text PRIMARY KEY CHECK (is_id(id,'chl')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  row_version int NOT NULL DEFAULT 1,
+  purpose text NOT NULL CHECK (purpose IN ('create','session','rotate','recover','device_link','step_up','confirm_recovery')),
+  nonce bytea NOT NULL UNIQUE CHECK (octet_length(nonce) = 32),   -- SHA-256 of the challenge
+  audience text NOT NULL,
+  expires_at timestamptz NOT NULL,
+  used_at timestamptz
+);
+CREATE INDEX auth_challenges_expiry ON auth_challenges (expires_at);
+
+CREATE TABLE device_link_offers (
+  id text PRIMARY KEY CHECK (is_id(id,'dlo')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  row_version int NOT NULL DEFAULT 1,
+  member_id text NOT NULL REFERENCES members(id),
+  secret_hash bytea NOT NULL UNIQUE CHECK (octet_length(secret_hash) = 32),                  -- SHA-256 of the 128-bit code
+  state text NOT NULL DEFAULT 'pending' CHECK (state IN ('pending','awaiting_approval','linked','expired','denied')),   -- enum(device_link_state), 5.2.5
+  expires_at timestamptz NOT NULL,                                                           -- created_at + identity.device_link_code_ttl_s
+  new_public_key bytea CHECK (octet_length(new_public_key) = 32),                            -- set at redemption, with the next three columns
+  device_token_hash bytea CHECK (octet_length(device_token_hash) = 32),
+  hash_key_version int,
+  platform_class text CHECK (platform_class IN ('ios','android','desktop','other')),
+  CHECK ((new_public_key IS NULL) = (device_token_hash IS NULL)),
+  CHECK ((new_public_key IS NULL) = (hash_key_version IS NULL)),
+  CHECK ((new_public_key IS NULL) = (platform_class IS NULL)),
+  CHECK (state NOT IN ('awaiting_approval','linked') OR new_public_key IS NOT NULL),
+  CHECK (state <> 'pending' OR new_public_key IS NULL)
+);
+CREATE UNIQUE INDEX device_link_offers_one_open ON device_link_offers (member_id) WHERE state IN ('pending','awaiting_approval');
+CREATE INDEX device_link_offers_expiry ON device_link_offers (expires_at);
+
+CREATE TABLE recovery_requests (
+  id text PRIMARY KEY CHECK (is_id(id,'rcv')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  member_id text NOT NULL REFERENCES members(id),
+  recovery_key_id text NOT NULL REFERENCES member_keys(id),
+  outcome text NOT NULL CHECK (outcome IN ('completed')),                                    -- enum(recovery_outcome), 5.2.5
+  completed_at timestamptz NOT NULL
+);
+CREATE INDEX recovery_requests_member ON recovery_requests (member_id, completed_at);
+
+CREATE TABLE security_notices (
+  id text PRIMARY KEY CHECK (is_id(id,'snt')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  row_version int NOT NULL DEFAULT 1,
+  member_id text NOT NULL REFERENCES members(id),
+  kind text NOT NULL CHECK (kind IN ('key_rotated','device_linked','recovered','recovery_key_rotated')),   -- enum(security_notice_kind), 5.2.5
+  seen_at timestamptz
+);
+CREATE INDEX security_notices_member ON security_notices (member_id, created_at);
 ```
 
 ### 5.14.2 Cell
@@ -1997,9 +2170,9 @@ All jobs run as `retention_svc`, are idempotent, log one `Event` per run with co
 | Class | What the job does | Parameter |
 | --- | --- | --- |
 | `job_bound` | `retention.job_payload_days` after the job is terminal: set to NULL `cells.input_payload`, `cells.rendered_prompt`, `submissions.output_text`, `uploads.storage_key` (and delete the object), `glossaries.terms`, `deliverables.storage_key` (and delete the object), `verification_records.details`; set the matching `payload_purged_at`. Hashes, states, manifests and ledger rows stay | `retention.job_payload_days` |
-| `member_bound` | On `closed` (member-initiated, or inactive for `retention.member_inactive_days`): tombstone the member, delete its keys, sessions, opt-ins, badge awards, referrals and teams-owned data (S5.6.1); delete devices as in S5.6.3, leaving only the grant-memory residue, which is deleted `retention.member_inactive_days` later | `retention.member_inactive_days` |
+| `member_bound` | On `closed` (member-initiated, or inactive for `retention.member_inactive_days`): tombstone the member, delete its keys, sessions, opt-ins, badge awards, referrals and teams-owned data (S5.6.1); delete devices as in S5.6.3, leaving only the grant-memory residue, which is deleted `retention.member_inactive_days` later; on `closed` also delete its device-link offers, recovery requests and security notices; at any time delete `recovery_requests` 90 days after `created_at` (the window of `identity.recovery_max_per_90d`) and `security_notices` `retention.session_days` after `created_at` | `retention.member_inactive_days`, `retention.session_days` |
 | `moderation` | `retention.moderation_days` after resolution: add counts to a `MetricSnapshot`, then null the personal columns and delete the `Report` or `Appeal` row | `retention.moderation_days` |
-| `short` | Delete `sessions` past `retention.session_days` | `retention.session_days` |
+| `short` | Delete `sessions` past `retention.session_days`; delete `device_link_offers` `retention.session_days` after their `expires_at`; delete `auth_challenges` that are used or past their `expires_at`, at the next run (every `retention.sweep_interval_s`) | `retention.session_days` |
 | `ops` | Delete `events` after `retention.event_raw_days`; `invariant_checks` and `alarms` after `retention.ops_log_days` except `violated` and `checkpoint` rows | `retention.event_raw_days`, `retention.ops_log_days` |
 | `permanent` | Never touched | |
 
@@ -2032,4 +2205,4 @@ Problems and gaps found while fixing the stored shape of the domain model. Resol
 | `ISS-52` | minor | prompt | S0.13 proposes `spec/05a-domain-model.md` for this part; the owning cell's path is `spec/05a-entities.md`. Both the entity part and the state-machine part carry a top-level `# 5.` heading, so `## 5.<m>` numbers can collide at assembly | The cell path is authoritative (S0.13). This file numbers its sections `5.1`..`5.16`; the state-machine part should continue from `5.17` or C-001 renumbers at assembly. References to this file use `S5.<m>` with the numbers above | needs_owner |
 | `ISS-53` | major | FD§5.6, FD§8.3, FD§5.7 | Four places where "permanent, never edited" and a changing state conflict: (1) `LaunchGateItem` has the states `open`, `evidence_attached`, `signed_off`, `reopened` but evidence and sign-offs must stay as history; (2) a kill switch has a state history; (3) approvals of templates, services and ledger reversals need a store but S0.7 has no approval entity; (4) FD§5.6 puts the volunteer id in the manifest but requesters must never see it | (1) revision rows with a current view; (2) `KillSwitch` rows are state changes, the latest wins; (3) approvals are `AdminAction` rows with `subject_hash`, counted by guards; (4) the manifest has an internal form with `volunteer_handle` and a redacted export; only the export reaches requesters | proposed |
 
-Convention additions made by this part (not issues, listed so C-001 can fold them back): the local enums of S5.2.5; the columns `members.team_id`, `members.team_joined_at`, `members.email_*`, `cells.credit_txn_id`, `ledger_entries.lot_effect`, `leases.optin_version`; the reference table `ledger_entry_type_rules`; the views `effective_flag_answers`, `kill_switch_current`, `launch_gate_items_current`; the infrastructure table `ledger_heads`; the abbreviations `IMM`, `CHN`, `IMS`, `MUT`, `DER` and `AO-1`..`AO-8`; and the acceptance ids `AC-data-01`..`AC-data-12`.
+Convention additions made by this part (not issues, listed so C-001 can fold them back): the local enums of S5.2.5; the four identity entities of S5.6.11 to S5.6.14 (named by 10a 10.2) and the DDL of `member_keys` and `invites` in S5.14.1; the columns `members.team_id`, `members.team_joined_at`, `members.email_*`, `cells.credit_txn_id`, `ledger_entries.lot_effect`, `leases.optin_version`; the reference table `ledger_entry_type_rules`; the views `effective_flag_answers`, `kill_switch_current`, `launch_gate_items_current`; the infrastructure table `ledger_heads`; the abbreviations `IMM`, `CHN`, `IMS`, `MUT`, `DER` and `AO-1`..`AO-8`; and the acceptance ids `AC-data-01`..`AC-data-12`.
