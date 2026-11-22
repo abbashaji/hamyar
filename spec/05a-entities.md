@@ -274,18 +274,20 @@ CREATE INDEX state_transitions_retention ON state_transitions (retention_class, 
 
 | Field | Type | Null / constraint | Note |
 | --- | --- | --- | --- |
-| `bucket_key` | text | PK, generated stored from `scope`, `period` and `member_id` (empty for a month) joined by `:` | the one key of the row (`month:2026-11:` for a month, `member_day:2026-11-21:mem_...` for a member and day); a conditional update by `row_version` (05b 5.29.3) addresses the row by this key |
+| `bucket_key` | text | PK, generated stored from `scope`, `period` and `member_id` (empty for a month) joined by `:` | the one key of the row (`month:2026-11:` for a month, `member_day:2026-11-21:mem_...` for a member and day); the conditional update of 05b 5.29.3 addresses the row by this key; its guard is the headroom predicate `minted_ucr + reserved_ucr + amount <= cap_ucr`, and every update of the row bumps `row_version` |
 | `scope` | text | NN, `month` or `member_day` | one row per UTC month, one per member and UTC day |
 | `period` | text | NN | UTC `YYYY-MM` for `month`, `YYYY-MM-DD` for `member_day` |
 | `member_id` | id `mem_` | NN iff `member_day`, FK | |
 | `cap_ucr` | ucr | NN, `>= 0` | the cap in force when the row is created, in `ucr` (a later parameter change applies to the next period) |
 | `reserved_ucr`, `minted_ucr` | ucr | NN, default 0, `>= 0` | `DER`; `minted_ucr + reserved_ucr <= cap_ucr` (CHECK) is what makes the conditional update of 05b 5.29.3 safe |
+| `row_version` | int | NN, default 1 | bumped by every update (`row_version + 1`); it is not part of the guard, which is the headroom predicate |
+| `updated_at` | timestamptz | NN, default `now()` | set to `now()` by every update |
 
 **Keys** primary key `bucket_key`. **Unique** `(period) WHERE scope = 'month'`; `(member_id, period) WHERE scope = 'member_day'` (the two partial indexes state the rule per scope; `bucket_key` is unique exactly when they are, because a month row has no member and the three parts hold no `:`). **Retention** `month` rows `permanent` (an aggregate, no member id); `member_day` rows `member_bound` (deleted with the member's data on closure, S5.6.1; S6.* may purge them earlier). **Lock order** after the `Cell` lock and before the `Escrow` lock (05b 5.29.2). **Not stored** which cell or donor a reservation belongs to (it is derived from the cells in `leased`, `submitted` and `flagged_for_audit`; CK-05 compares the two).
 
 ```sql
 CREATE TABLE mint_headroom (
-  bucket_key text GENERATED ALWAYS AS (scope || ':' || period || ':' || COALESCE(member_id, '')) STORED PRIMARY KEY,   -- target of UPDATE ... WHERE bucket_key = :k AND row_version = :v
+  bucket_key text GENERATED ALWAYS AS (scope || ':' || period || ':' || COALESCE(member_id, '')) STORED PRIMARY KEY,   -- target of UPDATE ... WHERE bucket_key = :k AND minted_ucr + reserved_ucr + :amount <= cap_ucr (row_version is bumped by every update, not compared)
   scope text NOT NULL CHECK (scope IN ('month','member_day')),
   period text NOT NULL,                       -- UTC 'YYYY-MM' (month) or 'YYYY-MM-DD' (member_day)
   member_id text REFERENCES members(id),
