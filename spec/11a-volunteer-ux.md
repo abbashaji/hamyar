@@ -170,24 +170,25 @@ Names only. Paths, bodies and final ids are owned by S15.*; where S15.* renames 
 
 | Operation | Used by | Purpose |
 | --- | --- | --- |
-| `getPublicStatus` | 01 | Launch state, public counter (when `ff.growth.v2_live_counter` is on), approved-service count |
+| `getPublicCounter` | 01 | Public counter of verified cells (only when `ff.growth.v2_live_counter` is on; with the flag off S15b answers `404 NOT_FOUND`) |
+| `createIdentityChallenge` | 02, 13, 17, every sign-in | Server challenge that the device key or the recovery key signs for `createMember`, `createSession`, `recoverMember`, `rotateKey` and `redeemDeviceLink`; the purposes are those of S15a 15.5 |
 | `createMember` | 02 | Create the identity; carries the public key and, if present, an invite token |
 | `createSession` | all | Sign a challenge with the device key |
 | `getMe` | all | Status, `trust_tier`, restriction end, key-saved flag |
-| `listOffers` | 03 | Card summaries the member may lease, already filtered by `R8` opt-ins |
+| `listOfferedCells` | 03 | Card summaries the member may lease, already filtered by `R8` opt-ins |
 | `createLease`, `getLease`, `extendLease`, `releaseLease` | 03, 04, 05 | Lease, read, extend once, decline or release |
-| `acknowledgePrompt` | 03 | Record that the full prompt was expanded (11.8.4) |
+| `expandLeasePrompt` | 03 | Record that the full prompt was expanded (11.8.4) |
 | `submitResult`, `getSubmission` | 05, 06 | Paste-back and outcome |
-| `listCellHistory` | 08 | Member's cells and outcomes |
-| `getBalance`, `listCreditLots`, `listMemberLedgerEntries` | 07 | Balance, lots with expiry, own entries |
-| `getOptIns`, `updateOptIns`, `listTopicCategories`, `listApprovedServices` | 09, 04 | Opt-in model and service list |
+| `listSubmissions`, `listLeases` | 08 | Member's outcomes (`listSubmissions`, filter `verdict`) and declined or expired leases (`listLeases`, filter `state`); S15a has no operation that lists cells as such, so History reads these two |
+| `getBalance`, `listLots`, `listLedgerEntries` | 07 | Balance, lots with expiry, own entries |
+| `getOptIns`, `replaceOptIns`, `listTopicCategories`, `listServices` | 09, 04 | Opt-in model and service list |
 | `createReport` | 16 | Report a cell |
 | `createAppeal`, `getAppeal`, `listAppeals`, `withdrawAppeal` | 14 | Appeals |
-| `createInvite`, `listInvites`, `revokeInvite`, `getReferralStatus` | 12 | Invites and referral state |
+| `createInvite`, `listInvites`, `revokeInvite`, `listReferrals` | 12 | Invites and referral state |
 | `createTeam`, `getTeam`, `joinTeam`, `leaveTeam` | 10 | Teams |
 | `getShareCard` | 11 | Aggregate data for the card |
 | `recoverMember`, `rotateKey` (`kind` `recovery`), `confirmRecoveryKey` | 13 | Recovery |
-| `createDeviceLink`, `redeemDeviceLink`, `rotateKey` (`kind` `device`), `closeMember` | 17 | Device linking, rotation, closure |
+| `createDeviceLink`, `redeemDeviceLink`, `approveDeviceLink`, `rotateKey` (`kind` `device`), `closeMember` | 17 | Device linking (the old device approves), rotation, closure |
 
 ### 11.5.2 Parameters this part reads, and additions [A]
 
@@ -246,8 +247,8 @@ Convention additions requested by this part (C-022 completes the table; names ar
 | State | Condition | Behavior |
 | --- | --- | --- |
 | Empty | Not applicable (static content) | The page never depends on data to be useful |
-| Loading | `getPublicStatus` in flight | Static content and primary action render at once; the counter area shows a placeholder, never a spinner over the whole page |
-| Error | `getPublicStatus` fails | Counter area omitted silently; the rest is unchanged |
+| Loading | `getPublicCounter` in flight | Static content and primary action render at once; the counter area shows a placeholder, never a spinner over the whole page |
+| Error | `getPublicCounter` fails | Counter area omitted silently; the rest is unchanged |
 | Offline or low bandwidth | No network | Static shell from the local copy if previously loaded; a first-ever visit shows the browser's own offline page (unavoidable); the primary action is disabled with `copy.landing.offline` |
 | Blocked: not open | `launch.members_may_join` = false (`LAUNCH_GATE_CLOSED`) | Primary action replaced by a notice `copy.landing.not_open`; no member is created; an existing member can still sign in to see balance and history [D] |
 | Blocked: join by invite only | `invite.required_to_join` = true and no invite token | Primary action opens the invite-code field (`copy.landing.invite_needed`); no identity is created without a valid token |
@@ -262,7 +263,7 @@ Convention additions requested by this part (C-022 completes the table; names ar
 | Language switch | Changes `locale` on this device only |
 | Expand risks | Shows the full risk notice (`copy.risk.provider_and_law`) |
 
-**API calls.** `getPublicStatus`.
+**API calls.** `getPublicCounter`.
 
 **Copy intent.** Plain, calm, short. State the human-presses-Send model and the "never" list before any benefit claim. No claim of anonymity (promise minimization, never anonymity, FD Principle 8), no claim about speed of completion, no political framing (FD§6.1 rank 2). The counter line says "verified cells" and nothing else.
 
