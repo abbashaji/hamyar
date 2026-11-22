@@ -32,10 +32,10 @@ A `Member` is a pseudonym: one row plus public keys. One person may hold several
 | `MemberKey` (`mky_`) | `member_id`, `device_id` (null for recovery), `purpose` (`auth`, `recovery`), `algorithm` (`ed25519`), `public_key` (32 bytes), `status` (`pending`, `active`, `retiring`, `revoked`), `not_after`, `revoked_reason`, `authorized_by_key_id`, `authorization_signature`, `key_storage` (`hardware_backed`, `software`, `unknown`; self-reported), `created_at` | `member_bound` | Each key addition carries the signature that authorized it (10.7) |
 | `Device` (`dev_`) | `device_token_hash`, `platform_class` (`ios`, `android`, `desktop`, `other`), `first_seen_day`, `last_seen_day`, `grants_claimed`, `status` (`active`, `blocked`); full column list S5a 5.6.3 | `member_bound` plus grant-memory residue (10.9) | Random token, never derived from hardware |
 | `Session` (`ses_`) | `principal_type`, `member_id` or `admin_user_id`, `key_id` (member) or `credential_id` (admin), `token_hash`, `created_at`, `last_used_at`, `idle_expires_at`, `abs_expires_at`, `step_up_at`, `revoked_at`, `revoked_reason` | `short` | Hash of the token only (10.13) |
-| `AuthChallenge` (`chl_`) [A] | `purpose`, `nonce`, `audience`, `expires_at`, `used_at` | `short` | Deleted on use or expiry |
-| `DeviceLinkOffer` (`dlo_`) [A] | `member_id`, `secret_hash`, `state`, `expires_at` | `short` | 10.7 |
-| `RecoveryRequest` (`rcv_`) [A] | `recovery_key_id`, `outcome`, `created_at`, `completed_at` | `member_bound`, rows older than 90 days deleted (the window in `identity.recovery_max_per_90d`) | No IP, no device data |
-| `SecurityNotice` (`snt_`) [A] | `member_id`, `kind`, `created_at`, `seen_at` | `member_bound`, deleted `retention.session_days` after `created_at` | Shown on every device at next sign-in |
+| `AuthChallenge` (`chl_`) [A] | `purpose`, `nonce` (SHA-256 of the challenge), `audience`, `expires_at`, `used_at`; full column list S5a 5.6.11 | `short` | Deleted on use or expiry |
+| `DeviceLinkOffer` (`dlo_`) [A] | `member_id`, `secret_hash`, `state`, `expires_at`, `new_public_key`, `device_token_hash`, `hash_key_version`, `platform_class`; full column list S5a 5.6.12 | `short` | 10.7: the redemption writes only this row; the approval creates the `Device` and the `MemberKey` [default-pending D-44] |
+| `RecoveryRequest` (`rcv_`) [A] | `member_id`, `recovery_key_id`, `outcome`, `created_at`, `completed_at`; full column list S5a 5.6.13 | `member_bound`, rows older than 90 days deleted (the window in `identity.recovery_max_per_90d`) | No IP, no device data |
+| `SecurityNotice` (`snt_`) [A] | `member_id`, `kind`, `created_at`, `seen_at`; full column list S5a 5.6.14 | `member_bound`, deleted `retention.session_days` after `created_at` | Shown on every device at next sign-in |
 | `Invite` (`inv_`) | `kind` (`seed`, `member`), `code_hash`, `issuer_member_id` (NULL once the edge is cleared), `redeemed_by_member_id` (NULL once the edge is cleared), `tree_root_member_id`, `tree_depth`, `status` (initial `issued`), `strike_recorded_at`, `expires_at`, `redeemed_at`; full column list S5a 5.6.5 | `member_bound` plus edge-clearing rule (10.10) | Code stored as SHA-256 only |
 | `AdminUser` (`adm_`) | `label` (pseudonym), `roles` (subset of `reviewer`, `operator`), `status` (`invited`, `active`, `disabled`), `declared_member_ids` (optional, 10.11) | `permanent` | No e-mail, no password |
 | `AdminCredential` (`acr_`) | `admin_user_id`, `credential_id`, `public_key`, `sign_count`, `transports`, `label`, `status` (`pending`, `active`, `locked`, `revoked`), `last_used_at` | `permanent` | WebAuthn, 10.12 |
@@ -188,25 +188,29 @@ Why a grace period: a lost response or a crash between the two sides must not lo
 Purpose: add a second device (new phone, desktop) to the same member without moving any private key. Every device holds its own keypair; no key export, no identity file and no session copying exists, because an exportable identity is a theft target. [D]
 
 ```
-Offer states: pending --claim--> awaiting_approval --approval--> linked (T)
+Offer states (`DeviceLinkOffer.state`, S5a 5.6.12): pending --claim--> awaiting_approval --approval--> linked (T)
               pending|awaiting_approval --ttl--> expired (T);  pending|awaiting_approval --cancel--> denied (T)
 
 A (signed in, step-up):  POST /v1/device-links
     -> {device_id, code (128 random bits, QR and 26-character Crockford text),
         expires_at = now + identity.device_link_code_ttl_s}
-    server stores SHA-256(code) only
+    server inserts a DeviceLinkOffer (member_id, secret_hash = SHA-256(code), state pending, expires_at); device_id is the
+    dev_ id that the Device row takes at approval (the ULID of the offer's dlo_ id, S5a 5.6.12); no Device and no MemberKey exists yet
 B (new device, no session): generate device key and device token;
     POST /v1/device-links/redemptions {code, challenge, new_public_key, proof, device_token,
-        platform_class, key_storage}  signed by B's key (purpose device_link; `challenge` from `POST /v1/identity-challenges`)
+        platform_class}  signed by B's key (purpose device_link; `challenge` from `POST /v1/identity-challenges`)
     server: constant-time compare of the secret hash; state awaiting_approval;
-            only the first valid claim wins
+            only the first valid claim wins; the call writes only the offer (new_public_key,
+            device_token_hash with hash_key_version, platform_class): no Device row and no MemberKey row
     B and A both display  sas = (first 4 bytes of SHA-256(device_id || new_public_key) as uint32) mod 1,000,000, 6 digits
 A: shows platform_class and the 6 digits; the person confirms they match B's screen;
     POST /v1/device-links/{device_id}/approval {sas}, with the Step-Up header of A's key
         (purpose step_up; the request hash of the Step-Up header covers the path, which names the device_id, and the body, which holds the sas: S15.B.3.1, S15.B.4)
-server: txn { MemberKey(auth, active, authorized_by_key_id = A.key, authorization_signature);
-              upsert Device; SecurityNotice to all devices; emit member.device_linked }
-B: next step is an ordinary session by challenge (10.13); B inherits nothing
+server: txn { Device (the id, token hash, hash_key_version and platform_class of the offer);
+              MemberKey(auth, active, device_id = that Device, new_public_key of the offer, key_storage unknown,
+              authorized_by_key_id = A.key, authorization_signature); offer state linked;
+              SecurityNotice to all devices; emit member.device_linked }
+B: next step is an ordinary session by challenge (10.13) with its now active key; until the approval B has no key row and no session; B inherits nothing
 ```
 
 | Limit | Value | Reason |
@@ -268,7 +272,7 @@ A device whose key was revoked by recovery gets `401 AUTH_INVALID` with `details
 
 ### 10.9.1 What a 'device' is, and the privacy tradeoff [D]
 
-A `Device` is one browser profile that holds a random 256-bit device token (10.3.1). It is identified by `HMAC-SHA-256(secret.device_hash_key[v], token)` and nothing else. No fingerprint is computed. Candidate signals:
+A `Device` is one browser profile that holds a random 256-bit device token (10.3.1). It is identified by `HMAC-SHA-256(secret.device_hash_key[v], token)` and nothing else (a lookup tries the live versions of the key, 10b S10.24.2). No fingerprint is computed. Candidate signals:
 
 | Signal | Used? | Privacy cost | Cost to evade | Decision |
 | --- | --- | --- | --- | --- |
@@ -285,7 +289,7 @@ A `Device` is one browser profile that holds a random 256-bit device token (10.3
 
 **Tradeoff, stated plainly:** weak device identity means an adversary evades device and IP limits at near-zero cost. What bounds farming is economics (a verified cell before any grant, caps, expiry) and vouching (10.10). A stronger device identifier would protect the platform slightly more and every honest member much less, so it is not used (IC7). The server can link two identities created from the same browser profile through the device token; members who want separate pseudonyms use separate browser profiles, and the settings screen offers 'forget this device', which replaces the token. [D]
 
-**Grant memory** [D]: when a member closes, the `Device` row is deleted unless `grants_claimed` is above zero; then only `{id, device_token_hash, grants_claimed}` remains for `retention.member_inactive_days`, then it is deleted. Reason: `grant.max_per_device` is a lifetime limit, so it needs memory, and a hash of a random token tied to nothing else costs little privacy (`ISS-103`).
+**Grant memory** [D]: when a member closes, the `Device` row is deleted unless `grants_claimed` is above zero; then only `{id, device_token_hash, hash_key_version, grants_claimed}` remains for `retention.member_inactive_days`, then it is deleted. Reason: `grant.max_per_device` is a lifetime limit, so it needs memory, and a hash of a random token tied to nothing else costs little privacy (`ISS-103`).
 
 ### 10.9.2 Limits [D]
 
@@ -576,6 +580,8 @@ Retention values are parameters of `S0.10.6` (`retention.*`); `member_bound`, `j
 | Public keys, key chain | Yes | `MemberKey` | `member_bound` | Authentication, tamper evidence |
 | Private keys, recovery key | Never reach the server | Device only | n/a | IC2 |
 | Device token | Yes, hashed | `Device.device_token_hash` | `member_bound`, then grant-memory residue for `retention.member_inactive_days` (10.9.1) | Lifetime grant limit |
+| Device-link offer | Yes | `DeviceLinkOffer`: SHA-256 of the code, the new device's public key, its keyed token hash with the key version, `platform_class` (10.7) | `short`: `retention.session_days` after `expires_at`; deleted at closure | Adding a device without a key row before the approval |
+| Challenge | Yes | `AuthChallenge`: purpose, SHA-256 of the challenge, audience, expiry (10.3.2) | `short`: deleted by the sweep once used or expired | Replay protection |
 | E-mail | Optional | Ciphertext plus keyed lookup hash (`email_lookup_hash`, 10.5) | `member_bound`; deleted on removal, closure or `kill.optional_pii` | Notices only |
 | Activity time | Day only | `Member.last_active_day` | `member_bound`; inactivity of `retention.member_inactive_days` (365) closes the member | Inactivity closure |
 | Precise timestamps | Yes | Leases and submissions; `Session` (`created_at`, `last_used_at` at `session.touch_min_interval_s` granularity, up to `retention.session_days`); member legs of ledger entries are day-granular (`ledger.member_timestamp_granularity_s`, 10b `ISS-104`) | Their own class (`job_bound`, `permanent`) | Required for leases and the ledger; public and member-facing surfaces coarsen them (`S12.*`) because time of day can reveal a time zone |
@@ -703,7 +709,7 @@ Given / When / Then; each criterion becomes a test in the layer shown (S0.5; `S1
 | AC-identity-07 | A member with `identity.recovery_max_per_90d` completed recoveries in 90 days | They recover again | `422 CAP_EXCEEDED`, nothing changes | adv |
 | AC-identity-08 | An unknown recovery key and a known key with a bad signature | Both are submitted | The two responses are identical in status and body and equal in work | adv |
 | AC-identity-09 | A device key rotation whose response was lost, and a recovery key rotation | The client retries the device rotation inside `identity.key_rotation_grace_s`; a recovery signature is made with the old or the new recovery key during the grace | The retry succeeds; after `not_after` an unconfirmed old device key is `revoked`; the new device key is `active` at once; the new recovery key holds `pending` until the grace ends, both recovery keys work meanwhile, then it is `active` and the old recovery key is `revoked` | fsm |
-| AC-identity-10 | An open device-link offer | Two devices claim it, then the first is approved; later a sixth device is offered | Only the first claim wins; the key chain records `authorized_by_key_id`; the sixth is refused at `identity.max_devices_per_member` | adv |
+| AC-identity-10 | An open device-link offer | Two devices claim it, then the first is approved; later a sixth device is offered | Only the first claim wins and writes only the offer (no `Device` and no `MemberKey` exists before the approval); the approval creates both and the key chain records `authorized_by_key_id`; the sixth is refused at `identity.max_devices_per_member` | adv |
 | AC-identity-11 | A recovery key typed with one wrong character | The client normalizes it | The checksum fails on the device, no request is sent, no recovery attempt is counted | unit |
 | AC-identity-12 | An address already held by another member | A member sets it | The response is identical to a fresh address and nothing is sent to the holder; removal deletes ciphertext and `email_lookup_hash` at once | adv |
 | AC-identity-13 | The recovery key screen is open and the member retypes the key [default-pending D-18] | The member completes the confirmation, with network activity recorded from the start of the retype step | The only requests are two `POST /v1/identity-challenges` (purposes `confirm_recovery` and `step_up`) and `POST /v1/members/me/recovery-confirmations`; none carries the recovery secret or the key; `recovery_confirmed_at` is set and the recovery secret is no longer in device storage [default-pending D-38] | e2e |
@@ -734,14 +740,14 @@ Given / When / Then; each criterion becomes a test in the layer shown (S0.5; `S1
 
 ### 10.18.1 Operations required by this part
 
-Names and paths are proposals for `S15.*`, which is authoritative; methods and prefixes follow S0.11. `Idem` marks a required `Idempotency-Key`. [A]
+Names and paths are proposals for `S15.*`, which is authoritative; methods and prefixes follow S0.11. `Idem` is `yes` for a required `Idempotency-Key` (column `R` of S15a) and `no` otherwise (`O`, `X`, `-`). [A]
 
 | `op` | Request | Auth | Permission | Idem |
 | --- | --- | --- | --- | --- |
 | `createIdentityChallenge` | `POST /v1/identity-challenges` | none | `perm.identity.create_challenge` | no |
 | `createMember` | `POST /v1/members` | none | `perm.identity.create_member` | yes |
 | `createSession` | `POST /v1/sessions` | none | `perm.identity.start_session` | no |
-| `revokeSession` | `DELETE /v1/sessions/{ses_id}` | member | `perm.session.revoke_own` | no |
+| `revokeSession` | `DELETE /v1/sessions/{session_id}` | member | `perm.session.revoke_own` | no |
 | `revokeAllSessions` | `POST /v1/members/me/session-revocations` | member (X5) | `perm.session.revoke_own` | yes |
 | `getMe`, `getMemberExport` | `GET /v1/members/me`, `GET /v1/members/me/export` | member | `perm.identity.view_own`, `perm.identity.export_own_data` | no |
 | `listMemberKeys`, `rotateKey` | `GET /v1/member-keys`, `POST /v1/member-keys/rotations` | member (X5 for POST) | `perm.identity.manage_keys` | POST yes |
@@ -749,10 +755,10 @@ Names and paths are proposals for `S15.*`, which is authoritative; methods and p
 | `rotateKey` (`kind` `recovery`), `confirmRecoveryKey` | `POST /v1/member-keys/rotations`, `POST /v1/members/me/recovery-confirmations` | member (X5) | `perm.identity.manage_keys` | yes |
 | `recoverMember` | `POST /v1/recoveries` | none | `perm.identity.start_recovery` | yes |
 | `createDeviceLink`, `approveDeviceLink` | `POST /v1/device-links`, `POST /v1/device-links/{device_id}/approval` | member (X5) | `perm.identity.link_device` | yes |
-| `redeemDeviceLink` | `POST /v1/device-links/redemptions` | none | `perm.identity.link_device` (by secret) | no |
-| `setEmail`, `removeEmail` | `PUT`, `DELETE /v1/members/me/email` | member (X5) | `perm.identity.set_email` | yes |
+| `redeemDeviceLink` | `POST /v1/device-links/redemptions` | none | `perm.identity.link_device` (by secret) | yes |
+| `setEmail`, `removeEmail` | `PUT`, `DELETE /v1/members/me/email` | member (X5) | `perm.identity.set_email` | no |
 | `closeMember` | `POST /v1/members/me/closure` | member (X5) | `perm.identity.close_account` | yes |
-| `createInvite`, `revokeInvite` | `POST /v1/invites`, `DELETE /v1/invites/{inv_id}` | member | `perm.invite.issue`, `perm.invite.revoke_own` | yes |
+| `createInvite`, `revokeInvite` | `POST /v1/invites`, `DELETE /v1/invites/{invite_id}` | member | `perm.invite.issue`, `perm.invite.revoke_own` | yes |
 | `startAdminLogin`, `createAdminSession` | `POST /v1/admin/auth/challenges`, `POST /v1/admin/sessions` | none | none (WebAuthn) | no |
 | `createCredentialEnrollment`, `unlockAdminCredential` | `POST /v1/admin/users/{adm_id}/credential-enrollments`, `POST /v1/admin/users/{adm_id}/credentials/{acr_id}/unlocks` | admin (X8) | `perm.admin.credential_add`, `perm.admin.credential_unlock`; two-person: each answers `202` with an `AdminApproval` | yes |
 | `lockAdminCredential` | `POST /v1/admin/users/{adm_id}/credentials/{acr_id}/locks` | admin (X8) | `perm.admin.credential_lock` | yes |
@@ -762,7 +768,7 @@ Names and paths are proposals for `S15.*`, which is authoritative; methods and p
 
 ### 10.18.2 Events and metrics [A]
 
-Events (S0.5 format, stored in the outbox): `member.created`, `member.key_rotated`, `member.key_revoked`, `member.device_linked`, `member.recovered`, `member.recovery_confirmed`, `member.email_set`, `member.email_removed`, `member.closed`, `invite.issued`, `invite.redeemed`, `invite.expired`, `invite.revoked`, `invite.strike_recorded`, `invite.tree_frozen`, `invite.tree_unfrozen`, `session.issued`, `session.revoked`, `device_link.offered`, `device_link.claimed`, `device_link.approved`, `device_link.cancelled`, `device_link.expired`, `admin.signed_in`, `admin.credential_added`, `admin.credential_locked`, `admin.credential_unlocked`, `admin.approval_requested`, `admin.approval_granted`, `admin.approval_rejected`, `admin.approval_withdrawn`, `admin_action.executed` (the original operation's own event, S15.B.3.1), `admin.approval_expired`, `admin.approval_failed`. Events carry `actor` as principal type plus opaque id and never an IP, key or token.
+Events (S0.5 format, stored in the outbox): `member.created`, `member.key_rotated`, `member.key_revoked`, `member.device_linked`, `member.device_revoked`, `member.recovered`, `member.recovery_confirmed`, `member.email_set`, `member.email_removed`, `member.closed`, `invite.issued`, `invite.redeemed`, `invite.expired`, `invite.revoked`, `invite.strike_recorded`, `invite.tree_frozen`, `invite.tree_unfrozen`, `session.issued`, `session.revoked`, `device_link.offered`, `device_link.claimed`, `device_link.approved`, `device_link.cancelled`, `device_link.expired`, `admin.signed_in`, `admin.credential_added`, `admin.credential_locked`, `admin.credential_unlocked`, `admin.approval_requested`, `admin.approval_granted`, `admin.approval_rejected`, `admin.approval_withdrawn`, `admin_action.executed` (the original operation's own event, S15.B.3.1), `admin.approval_expired`, `admin.approval_failed`. Events carry `actor` as principal type plus opaque id and never an IP, key or token.
 
 Metrics (no id or IP in any label): `hamyar_identity_registrations_total`, `hamyar_identity_recoveries_total`, `hamyar_identity_recovery_failures_total`, `hamyar_identity_key_chain_invalid_total`, `hamyar_ratelimit_denied_total` (label: scope), `hamyar_session_revocations_total`, `hamyar_admin_pending_approvals_total`. Alarms (`Alarm`): `identity.key_chain_invalid`, `admin.credential_cloned`, `admin.bootstrap_enrollment` (category `security`), a spike in `hamyar_identity_recovery_failures_total`.
 
@@ -804,6 +810,6 @@ New cross-parameter constraint `C9` [A]: `session.member_abs_ttl_s <= retention.
 | --- | --- | --- | --- | --- | --- |
 | `ISS-101` | minor | prompt | `S10` is split over several files, so `S10.<m>` numbers can collide, and this file lists identity-relevant columns while `S5.*` owns full schemas | This file owns `S10.1`..`S10.19`, other S10 files start at `S10.20`; `S5.*` wins on column names, this file on meaning; any mismatch is reported at assembly | proposed |
 | `ISS-102` | major | FD§3.2, FD§8.3 | The FD makes e-mail optional without saying what it is for, names no account recovery besides the key, and names no admin approval mechanism; a one-person Phase 1 team cannot meet two-person approval | E-mail is for opt-in notices only and never a recovery or login factor; recovery is by key only and no operator can restore access; `security.two_person_actions` is the table of 10.12, extended by the parameter only and never reduced (D-34); at least two distinct admins are required before any two-person action, including launch sign-off, can run, except the enrollment fallback of 10.12 that enrolls the second admin (D-35) [default-pending D-34, D-35] | applied |
-| `ISS-103` | minor | FD§4.6 | `S0.7` gives `Device` the retention class `short` and calls it a keyed-hash record, but `grant.max_per_device` is a lifetime limit and the token is a 256-bit random value hashed with a keyed HMAC-SHA-256 under `secret.device_hash_key[v]` (S5a 5.3.3) | `Device` is `member_bound` with a residue of `{id, device_token_hash, grants_claimed}` kept `retention.member_inactive_days` after closure (10.9.1); the hash is the keyed HMAC-SHA-256 with column `hash_key_version`, and the key `secret.device_hash_key` exists (10b S10.24.2) | proposed |
+| `ISS-103` | minor | FD§4.6 | `S0.7` gives `Device` the retention class `short` and calls it a keyed-hash record, but `grant.max_per_device` is a lifetime limit and the token is a 256-bit random value hashed with a keyed HMAC-SHA-256 under `secret.device_hash_key[v]` (S5a 5.3.3) | `Device` is `member_bound` with a residue of `{id, device_token_hash, hash_key_version, grants_claimed}` kept `retention.member_inactive_days` after closure (10.9.1); the hash is the keyed HMAC-SHA-256 with column `hash_key_version`, and the key `secret.device_hash_key` exists (10b S10.24.2) | proposed |
 
 Convention additions made by this part (not issues, listed so `S0.*` can fold them back): entities `AuthChallenge` (`chl_`), `DeviceLinkOffer` (`dlo_`), `RecoveryRequest` (`rcv_`), `SecurityNotice` (`snt_`); `Invite` states and the events in 10.18.2; `MemberKey` `status` and `purpose` values (named as in `S5.2.5`); the kill switch `kill.optional_pii`; secrets `secret.email_encryption_key` and `secret.email_lookup_key`; the parameters of 10.18.3 and constraint `C9`; the permission names of 10.11 and the conditions `X1`..`X11`; the copy keys of 10.15.4 and `copy.invite.invalid`, `copy.ratelimit.try_later`, `copy.identity.recovery_limit`, `copy.identity.recovery_typo`, `copy.identity.recovered_elsewhere`.
