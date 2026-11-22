@@ -78,7 +78,7 @@ One person may hold both roles through one `AdminUser`. A second approver is alw
 | `BLK-diff` | Structured before / after of the record; for parameters also the effective-from schedule |
 | `BLK-twoperson` | Initiator, approvers needed and present, payload hash (first 12 hex), expiry countdown, Approve, Reject, Withdraw; each disabled button shows its reason (own request, role missing, not enough admins, expired) |
 | `BLK-trail` | Drawer with the `AdminAction` rows for the subject, newest first |
-| `BLK-claim` | Holder, time left, Claim, Release, Hand over, Take over (permission-gated, 11.66) |
+| `BLK-claim` | Holder, time left, Claim, Release, Take over (permission-gated, 11.66) |
 | `BLK-error` | Maps `error.code` to `details.copy_key` text (S0.11.3); a `412 PRECONDITION_FAILED` offers "reload and reapply", never a silent overwrite |
 | `BLK-empty` | Empty states state what feeds the list (for example "nothing is `in_review`"), never a blank page |
 
@@ -153,7 +153,6 @@ No field holds an IP address, a user agent, a device fingerprint or a passkey cr
 | `action_code` | Permission | Tier | Dir | Appr | Domain events emitted |
 | --- | --- | --- | --- | --- | --- |
 | `claim.acquire` / `claim.release` | `perm.claim.hold` | `CT0` | N | 1 | `workclaim.acquired` / `workclaim.released` |
-| `claim.hand_over` | `perm.claim.hold` | `CT1` | N | 1 | `workclaim.handed_over` |
 | `claim.take_over` | `perm.claim.take_over` (`operator`) | `CT2` | T | 1 | `workclaim.taken_over` |
 | `template.comment` | `perm.template.review` | `CT0` | N | 1 | none |
 | `template.request_changes` | `perm.template.review` | `CT1` | N | 1 | `template.changes_requested` |
@@ -193,7 +192,7 @@ No field holds an IP address, a user agent, a device fingerprint or a passkey cr
 | `launch.switch_off` | `perm.launch.switch` (`operator`) | `CT2` | T | 1 | `launch.members_may_join_changed`, `launch.member_jobs_enabled_changed`, `launch.minting_enabled_changed` |
 | `killswitch.engage` | `perm.killswitch.engage` (scoped, 11.64) | `CT2` | T | 1 | `killswitch.engaged` and the pause events of 11.64.2 |
 | `killswitch.release` | `perm.killswitch.release` | `CT3` | L | 2 | `killswitch.released` and the resume events |
-| `member.lookup` | `perm.member.lookup` | `CT1` | R | 1 | none (logged read) |
+| `member.lookup` | `perm.member.view_basic` | `CT0` | R | 1 | none (logged read) |
 | `approval.approve`, `approval.reject`, `approval.withdraw` | per underlying action | `CT2` | n/a | n/a | `admin.approval_granted` (the approval that reaches `required_approvals` executes the action), `admin.approval_rejected`, `admin.approval_withdrawn`; `admin.approval_requested` and `admin.approval_expired` (system) |
 
 The `CT3` codes `member.ban` and `launch.signoff` are in the table of two-person action names of S10a 10.12, which is the one definition of `security.two_person_actions`; `audit.accept`, `quarantine.release` and `cell.overturn` are `CT2` with one admin and a step-up, not two-person actions (D-20, D-39). [A]
@@ -437,7 +436,7 @@ The appellant receives a reason code rendered as copy, never reviewer notes.
 **Purpose.** Triage reports from volunteers and requesters and system abuse flags, and take proportionate, logged, appealable action. [D]
 **Roles and permissions.** `reviewer`: `perm.report.triage`, `perm.member.sanction`, `perm.member.ban`, `perm.cell.void`, `perm.cell.overturn`, `perm.job.stop`; `operator` holds the same plus `perm.cell.release`.
 
-**`SCR-rev-10` Queue.** Rows come from `Report` (S0.9.8) and from `Alarm` rows whose kind starts with `abuse.` (for example `abuse.grant_farming`, `abuse.invite_tree`, `abuse.referral_farming`, `abuse.timing_anomaly`, `abuse.duplicate_output`, `abuse.injection_attempt`; the list is owned by S9.* and S10.* [A]). Reports on the same subject collapse into one row with a count. Columns: source, category (an opaque enum owned by S10.*), subject kind, count, age with a badge after `report.triage_sla_days`, severity (set at triage), "auto-paused" badge. Oldest first.
+**`SCR-rev-10` Queue.** Rows come from `Report` (S0.9.8) and from `Alarm` rows of category `abuse` (kinds `farming.device_limit`, `farming.invite_tree`, `farming.referral`, `integrity.duplicate_output`, `integrity.timing_anomaly`, `injection.output_flagged` and `template.report_burst`; the list is the one of S15b 15.29.4). Reports on the same subject collapse into one row with a count. Columns: source, category (an opaque enum owned by S10.*), subject kind, count, age with a badge after `report.triage_sla_days`, severity (set at triage), "auto-paused" badge. Oldest first.
 
 **`SCR-rev-11` Item screen.** [D]
 
@@ -477,15 +476,15 @@ When reports on a template reach `template.autopause_report_count` inside `templ
 ## 11.60 Tool 6: Ledger explorer and reversal
 
 **Purpose.** Let an operator read the ledger exactly as stored, see invariant and hash-chain status, acknowledge alarms, and request a reversal. The explorer cannot edit, insert or delete anything; the only write path to the ledger from any admin screen is the two-person reversal (S0.8.5). [D]
-**Roles and permissions.** `operator`: `perm.ledger.read`, `perm.ledger.reverse`, `perm.alarm.acknowledge`. `reviewer`: read-only views of entries and transactions reached through an open appeal, report or alarm (a `context`, 11.65).
+**Roles and permissions.** `operator`: `perm.ledger.read`, `perm.ledger.reverse`, `perm.alarm.acknowledge`. `reviewer`: read-only views of entries and transactions reached through an open appeal, report or alarm.
 
 **`SCR-ops-04` Explorer.** [D]
 
 | Block | Content and rules |
 | --- | --- |
 | A Account list | `ledger_account_type`, `lac_` id, balance as a base-10 integer string in `ucr` with the credit value rounded down beside it (S0.6.1), the constraint of the type (`member` >= 0, `escrow` >= 0 and zero when closed, `reserve` >= 0, `issuance` <= 0 and equal to minus cumulative mint, `retired` >= 0 and equal to cumulative retired). A totals row shows the sum of all balances, which must be exactly 0 |
-| B Entries | Filters: entry type, transaction kind, account type, `job_id`, `txn_id`, date range, amount range. No search by `mem_` id and no listing of one member's entries without a `context` (`AD7`); member accounts appear as `lac_` ids |
-| C Lots | Credit lots of an account (`lot_` id, amount, `earned_at`, `expires_at`), only with a `context` |
+| B Entries | Filters: entry type, transaction kind, account type, `job_id`, `txn_id`, date range, amount range. No search by `mem_` id (`AD7`); member accounts appear as `lac_` ids, and a member-linked read needs `perm.ledger.read_member` and is logged (`AD6`) |
+| C Lots | Credit lots of an account (`lot_` id, amount, `earned_at`, `expires_at`); a member-linked read needs `perm.ledger.read_member` and is logged (`AD6`) |
 
 **`SCR-ops-05` Entry and transaction detail.** Debit and credit accounts, type, amount, `seq`, `prev_hash`, `entry_hash` with a recompute button, the owning transaction and its sibling entries, lots consumed or created, the policy and parameter versions stamped, linked job and cell, whether the entry has been reversed. There is no edit control. The "Request reversal" button opens the flow below.
 
@@ -493,7 +492,7 @@ When reports on a template reach `template.autopause_report_count` inside `templ
 
 ### 11.60.3 Reversal flow [D]
 
-1. From an entry or transaction the operator opens the dialog and supplies a `context` (a cell overturn, an appeal or an alarm), a reason code (`fraud_finding`, `appeal_overturn`, `system_error`, `duplicate_posting`, `other`) [A] and text.
+1. From an entry or transaction the operator opens the dialog and supplies `linked_ids` (a cell overturn, an appeal or an alarm), a reason code (`fraud_finding`, `appeal_overturn`, `system_error`, `duplicate_posting`, `other`) [A] and text.
 2. `previewAdminAction` returns the mirror entries (`entry_type` `reversal`, same amount, accounts swapped), the lot effects, the resulting balances and these guards: (a) the target is not itself a `reversal` and not already reversed (`STATE_CONFLICT`); (b) no account would break its constraint, given `ledger.allow_negative_balance` = false; a member who already spent the credit makes the preview return `would_overdraw` and the request is refused with `422 UNPROCESSABLE` (what then happens to the loss is an owner decision, `ISS-119`; the screen offers `kill.member.<mem_id>` to stop further spending, 11.64).
 3. The operator confirms at `CT3`; an `AdminApproval` with `required_approvals` = `ledger.reversal_min_approvers` (constant 2) is created.
 4. A second `operator` repeats the preview against the current state and approves. Execution posts one `LedgerTransaction` of kind `reversal`, emits `ledger.entry_committed`, runs the per-commit invariant check and writes the `AdminAction` rows in the same transaction.
@@ -523,7 +522,7 @@ No `PUT`, `PATCH` or `DELETE` route exists on any ledger resource.
 | `AC-ledgerx-02` | A mint entry of 1,000,000 `ucr` whose credit is unspent (fixture) | Operator A requests a reversal and operator B approves | One `reversal` transaction posts the mirror entry, `ledger.entry_committed` and `ledger.invariants_passed` follow, and the original entry is unchanged |
 | `AC-ledgerx-03` | The same entry after the member spent the credit | A requests a reversal | `422 UNPROCESSABLE` with `would_overdraw`; no `AdminApproval` is created |
 | `AC-ledgerx-04` | An entry that is already a `reversal` | A requests a reversal | `409 STATE_CONFLICT` |
-| `AC-ledgerx-05` | A request for a member's account without `context` | Sent | `422 UNPROCESSABLE`; a refused `AdminAction` is written |
+| `AC-ledgerx-05` | An operator requests a member's account (`?member_id`) | Sent | `200`; one `AdminAction` of kind `read` (`member.lookup`) names the admin and the `mem_` id, and the call carried no body (a logged read, D-20) [default-pending D-40] |
 | `AC-ledgerx-06` | An open `ledger.invariant_violated` | An operator acknowledges the alarm | The alarm shows acknowledged and the invariant row stays red until a passing check runs |
 | `AC-ledgerx-07` | A seeded edit of one entry (the BM1 corruption test) | `createLedgerVerification` runs | The first broken `seq` is named and `ledger.invariant_violated` is raised |
 | `AC-ledgerx-08` | A balance of 9007199254740993 `ucr` | Displayed | Shown exactly, as a string, never through a JavaScript number |
@@ -602,7 +601,7 @@ Every tile shows its value, the time it was computed, and the parameter it is co
 | Concentration | Share of accepted cells from the top 10 percent of donors (a Phase 1 measure, FD§9) | |
 | Alarms and switches | Open `Alarm` rows, engaged kill switches, effective launch state | |
 
-A breach turns the tile red and raises an `Alarm`; each tile links to the parameter in `SCR-ops-08` and to the matching kill switch with the tile as `context`. The dashboard changes nothing itself. Worked fixture (the FD§3.3 inputs, not measurements): 40 active donors, 8 cells per donor per day, a 2-day window, `phi` 500,000 ppm and haircut 0 give capacity `floor(40 * 8 * 2 * 500,000 * (10^6 - 0) / 10^12)` = 320 cells; committed 264 cells (S0.6.1) leave a headroom of 56 cells.
+A breach turns the tile red and raises an `Alarm`; each tile links to the parameter in `SCR-ops-08` and to the matching kill switch. The dashboard changes nothing itself. Worked fixture (the FD§3.3 inputs, not measurements): 40 active donors, 8 cells per donor per day, a 2-day window, `phi` 500,000 ppm and haircut 0 give capacity `floor(40 * 8 * 2 * 500,000 * (10^6 - 0) / 10^12)` = 320 cells; committed 264 cells (S0.6.1) leave a headroom of 56 cells.
 
 ### 11.62.3 Bottleneck banner (carried over from the Panel concept) [D][A]
 
@@ -644,7 +643,7 @@ show: name, blocked count, age, link to its screen
 | B Rule | One row per requirement, each pass or fail with its source: every gate in `launch.required_gate_ids` signed off with at least `launch.min_signoffs` distinct admins; at least `launch.min_approved_services` approved services or a signed-off fallback; G0 and G1 always required (validation of the parameter); for minting, no open `ledger.invariant_violated` [A]. Any further clause S14.* adds appears as another row |
 | C Request | One of: sign off one gate item (`signOffGateItem`, `CT3`; one call per item); turn a switch on (`changeLaunchSwitch` with `value: true`, `CT3`); turn a switch off (`changeLaunchSwitch` with `value: false`, `CT2`); a reason for each |
 
-A sign-off is one `signOffGateItem` call per item (`launch.signoff`, `CT3`): the pending object is the item itself, every signer is a distinct admin, and the item becomes `signed_off` (`gate.signed_off`, emitted once) when `launch.min_signoffs` distinct admins have signed it. A sign-off never sets a switch. A switch is changed only by `changeLaunchSwitch` (15.27.3). Turning a switch on (`value: true`, action `launch.switch_on`) is a two-person action: the initiator's call returns `202` with an `AdminApproval`, a second distinct admin approves with `approveApproval`, and the blockers of 15.27.3 are checked again at execution; if none remain the switch is set (`launch.<switch>_changed`), otherwise nothing changes and the call returns `409 STATE_CONFLICT` with `details.blockers`. Turning a switch off (`value: false`) is `launch.switch_off`: one admin, `CT2`, immediate. Reopening a gate (`launch.reopen`, `CT2`, one admin, reason required) makes the rule fail; switches already on stay on until an admin switches them off, the header shows a red banner and an `Alarm` of kind `launch.rule_failing` is raised; an automatic switch-off is for S14.* to decide (`ISS-118`). With fewer eligible `operator` admins than `launch.min_signoffs` the request is unavailable (`AD9`).
+A sign-off is one `signOffGateItem` call per item (`launch.signoff`, `CT3`): the pending object is the item itself, every signer is a distinct admin, and the item becomes `signed_off` (`gate.signed_off`, emitted once) when `launch.min_signoffs` distinct admins have signed it. A sign-off never sets a switch. A switch is changed only by `changeLaunchSwitch` (15.27.3). Turning a switch on (`value: true`, action `launch.switch_on`) is a two-person action: the initiator's call returns `202` with an `AdminApproval`, a second distinct admin approves with `approveApproval`, and the blockers of 15.27.3 are checked again at execution; if none remain the switch is set (`launch.<switch>_changed`), otherwise nothing changes and the call returns `409 STATE_CONFLICT` with `details.blockers`. Turning a switch off (`value: false`) is `launch.switch_off`: one admin, `CT2`, immediate. Reopening a gate (`launch.reopen`, `CT2`, one admin, reason required) makes the rule fail; switches already on stay on until an admin switches them off, the header shows a red banner and an `Alarm` of kind `launch.rule_broken` is raised; an automatic switch-off is for S14.* to decide (`ISS-118`). With fewer eligible `operator` admins than `launch.min_signoffs` the request is unavailable (`AD9`).
 
 **Audit events.** Codes `launch.*`; domain events `gate.evidence_attached`, `gate.signed_off`, `gate.reopened`, `launch.members_may_join_changed`, `launch.member_jobs_enabled_changed`, `launch.minting_enabled_changed`, `admin.approval_*`.
 
@@ -663,7 +662,7 @@ A sign-off is one `signOffGateItem` call per item (`launch.signoff`, `CT3`): the
 | `AC-gate-02` | G1 is `open`, so `gate_not_signed_off:G1` is a blocker | An operator calls `changeLaunchSwitch` with `{switch: launch.members_may_join, value: true}` | `409 STATE_CONFLICT` with `details.blockers` including `gate_not_signed_off:G1`; no approval is created and the switch stays false |
 | `AC-gate-03` | `launch.min_signoffs` = 2 (fixture) and a required gate item in `evidence_attached` | Admin A calls `signOffGateItem` on it twice, then B calls it once; later, with all required gates `signed_off`, A calls `changeLaunchSwitch` with `value: true` for `launch.members_may_join`, A tries to approve, and B approves | A's second sign-off is `403 FORBIDDEN`; B's sign-off makes the item `signed_off`, `gate.signed_off` is emitted once and no switch changes; the switch call returns `202`, A's approval is refused, B's approval sets the switch true and `launch.members_may_join_changed` is emitted |
 | `AC-gate-04` | A pending `changeLaunchSwitch` approval with `value: true`, then the only approved service is revoked | B approves | The blockers are recomputed at execution and are not empty: `409 STATE_CONFLICT` with `details.blockers`, the request is `failed` (`admin.approval_failed`, actor `system`), the switch is unchanged |
-| `AC-gate-05` | `launch.members_may_join` is on and G1 is reopened | The reopening executes | An `Alarm` `launch.rule_failing` exists and the header banner is red; the switch stays on until `launch.switch_off` by one admin takes effect at once |
+| `AC-gate-05` | `launch.members_may_join` is on and G1 is reopened | The reopening executes | An `Alarm` `launch.rule_broken` exists and the header banner is red; the switch stays on until `launch.switch_off` by one admin takes effect at once |
 | `AC-gate-06` | G0 has zero approved services and a signed-off fallback evidence | The rule is evaluated | The service clause passes through the fallback |
 | `AC-gate-07` | One active `operator` | The sign-off dialog opens | `fail_closed` is true and the button is disabled |
 | `AC-gate-08` | `kill.all_minting` engaged and `launch.minting_enabled` true | The switches block loads | Effective minting shows off |
@@ -723,7 +722,7 @@ The system may also engage a switch (for example S6.* or S14.* automation on `le
 ## 11.65 Tool 11: Member lookup (minimal data)
 
 **Purpose.** Show a reviewer or operator the least about one member that a report, appeal or alarm needs, and make every look accountable. The design assumes an insider, a compelled-disclosure request and a seized admin laptop are all possible (prompt I; FD Principle 8). [D]
-**Roles and permissions.** `reviewer` and `operator`: `perm.member.lookup`.
+**Roles and permissions.** `reviewer` and `operator`: `perm.member.view_basic`.
 
 ### 11.65.1 Entry and limits [D]
 
@@ -741,8 +740,8 @@ The system may also engage a switch (for example S6.* or S14.* automation on `le
 | `mem_` id; `status`; `trust_tier` (and the tier before a restriction) | Raw IP, IP hash, e-mail or its hash, device records or hashes, public keys, recovery data, location (S0.7, S0.6.4) |
 | Account age in whole days | Exact creation time |
 | Accepted and rejected cell counts; a reliability band (low, medium, high from the `trust.*` thresholds) | Cell, prompt or output text beyond the single item of the report, appeal or alarm the view was opened from |
-| Open reports against the member (count), sanction history (type, date, reason code), appeals (kind, outcome) | The reporter's identity; the `vol_` handle; opt-in and team details; balances (use the ledger explorer with a context) |
-| Only while an open `Alarm` of kind `abuse.invite_tree`, `abuse.grant_farming` or `abuse.referral_farming` names the member (the server finds it; the caller sends nothing): invite-tree size, depth and the member's parent and children as `mem_` ids within that subtree; the number of members sharing one device record | The device record itself or any identifier that links members outside that subtree |
+| Open reports against the member (count), sanction history (type, date, reason code), appeals (kind, outcome) | The reporter's identity; the `vol_` handle; opt-in and team details; balances (use the ledger explorer; a member-linked read is logged) |
+| Only while an open `Alarm` of kind `farming.invite_tree` or `farming.referral` names the member (the server finds it; the caller sends nothing): invite-tree size and depth for a reviewer; for an operator also the member's parent and children as `mem_` ids within that subtree (`perm.invite.view_tree_edges`) [default-pending D-40]; the number of members sharing one device record | The device record itself or any identifier that links members outside that subtree |
 
 The screen states "only minimal data is shown and every view is logged" (`copy.admin.member_minimal_view`).
 
@@ -754,12 +753,12 @@ The screen states "only minimal data is shown and every view is logged" (`copy.a
 
 | AC | Given | When | Then |
 | --- | --- | --- | --- |
-| `AC-lookup-01` | The admin route table | A request searches members by name, e-mail, handle or free text | `404 NOT_FOUND`; `GET /v1/admin/members` filters by `status`, `trust_tier`, `has_open_report` only |
+| `AC-lookup-01` | The admin route table | A request searches members by name, e-mail, handle or free text | `404 NOT_FOUND`; no route lists or searches members |
 | `AC-lookup-02` | A `mem_` id that no member has | `getMemberAdmin` is called (no context object is sent) | `404 NOT_FOUND`; no member data is returned and no event is emitted (a refused `AdminAction` is written only for authorization failures, 15.34.1) |
 | `AC-lookup-03` | A valid lookup | The response is checked against an allow-list schema | It contains none of the denied fields of 11.65.2 |
 | `AC-lookup-04` | `ratelimit.admin_member_lookups_per_day` = 3 (fixture) | An admin makes a fourth lookup in one UTC day | `429 RATE_LIMITED` and an `Alarm` for operators |
 | `AC-lookup-05` | Any successful lookup | The audit trail is read | One `member.lookup` row names the admin and the `mem_` id; the call carried no body |
-| `AC-lookup-06` | An open `abuse.invite_tree` alarm names the member | `getMemberAdmin` is called | Tree size, depth and device-sharing count appear; no device identifier appears |
+| `AC-lookup-06` | An open `farming.invite_tree` alarm names the member | `getMemberAdmin` is called | Tree size, depth and device-sharing count appear; an operator also sees the parent and children `mem_` ids and a reviewer does not; no device identifier appears |
 
 ## 11.66 Tool 12: Release and takeover
 
@@ -781,11 +780,11 @@ The screen states "only minimal data is shown and every view is logged" (`copy.a
 
 ### 11.66.2 `WorkClaim` [A]
 
-Entity `WorkClaim`, table `work_claims`, prefix `clm_`, retention `moderation`. Fields: `subject_type` (`template_version`, `service`, `report`, `alarm`, `appeal`, `audit_item`), `subject_id`, `admin_user_id`, `acquired_at`, `expires_at` (= last renewal + `ui.admin_claim_ttl_s`), `ended_at`, `end_kind` (`released`, `handed_over`, `expired`, `taken_over`, `completed`), `handed_to_admin_id`. A partial unique index on `(subject_type, subject_id) WHERE ended_at IS NULL` gives exactly one active claim per item, so two simultaneous claims cannot both succeed. Events `workclaim.acquired`, `workclaim.released`, `workclaim.handed_over`, `workclaim.taken_over`, `workclaim.expired`. A write to a claimed item by anyone but the holder is `409 STATE_CONFLICT` with `details.reason` `claim_held`; the second reviewer of a two-reviewer flow claims after the first has finished (11.55). For appeals, handing over is the state machine's `appeal.reassigned` with the conflict guard of 11.58.
+Entity `WorkClaim`, table `work_claims`, prefix `clm_`, retention `moderation`. Fields: `subject_type` (`template_version`, `service`, `report`, `alarm`, `appeal`, `audit_item`), `subject_id`, `admin_user_id`, `acquired_at`, `expires_at` (= last renewal + `ui.admin_claim_ttl_s`), `ended_at`, `end_kind` (`released`, `expired`, `taken_over`, `completed`). A partial unique index on `(subject_type, subject_id) WHERE ended_at IS NULL` gives exactly one active claim per item, so two simultaneous claims cannot both succeed. Events `workclaim.acquired`, `workclaim.released`, `workclaim.taken_over`, `workclaim.expired`. A write to a claimed item by anyone but the holder is `409 STATE_CONFLICT` with `details.reason` `claim_held`; the second reviewer of a two-reviewer flow claims after the first has finished (11.55). For appeals, handing over is the state machine's `appeal.reassigned` with the conflict guard of 11.58.
 
-**Rules.** Hand over needs a target holding the item's permission, else `403`; it is a single step, the target sees it in "My work" and may release. Take over (`perm.claim.take_over`, `CT2`) names a reason, is refused while `approval_pending` (the other admin must first reject or withdraw that request), and tells the former holder with `copy.admin.claim_taken_over`.
+**Rules.** Take over (`perm.claim.take_over`, `CT2`) names a reason, is refused while `approval_pending` (the other admin must first reject or withdraw that request), and tells the former holder with `copy.admin.claim_taken_over`.
 
-**`SCR-ops-15` Work board.** "My work" and, for operators, "All claims": item, type, holder, time left, state, with Release, Hand over and Take over; queue order is released first, then oldest.
+**`SCR-ops-15` Work board.** "My work" and, for operators, "All claims": item, type, holder, time left, state, with Release and Take over; queue order is released first, then oldest.
 
 ### 11.66.3 Lease release for member-held cells [D][A]
 
@@ -868,6 +867,6 @@ This file is the third file of part 11, so it uses the issue sub-block `ISS-117`
 
 | id | severity | fd_ref | issue | resolution | status |
 | --- | --- | --- | --- | --- | --- |
-| `ISS-117` | minor | prompt | Convention gaps used by the admin tools: (a) entities `AdminApproval` (`apv_`) and `WorkClaim` (`clm_`); (b) `TermsCopy.document_kind` (`terms`, `usage_policy`, `written_permission`), needed to store the usage policy and written permission of FD§8.3 G0(i) and (k); (c) no retirement marker or event for a `GoldCell`; (d) events `admin.approval_*` and `workclaim.*`; (e) the seven parameters of 11.68; (f) the default of `security.two_person_actions` is the table of S10a 10.12 (14 names, `member.ban` among them); `audit.accept`, `quarantine.release` and `cell.overturn` are single-admin with step-up [default-pending D-34, D-39]; (g) the action codes of 11.54.3 and the reason-code lists; (h) sub-headings `11.51` upward (renumbered by FIX-21 from `11.41`) to avoid collisions with other S11 files; (i) the terms-copy upload body (derived from `service.terms_copy_max_bytes`) exceeds `api.max_body_bytes`, so it gets its own limit; (j) `Alarm` kinds `abuse.*`, `launch.rule_failing`, `ops.changelog_overdue` | Used as proposed in this file; C-001 and C-022 fold them into S0 and S16 | proposed |
-| `ISS-118` | major | FD§5.3, FD§3.4, FD§8.3 | State machines of S0.9 lack transitions the tools need: (a) a `banned` member has no exit, so an overturned ban appeal cannot be applied; (b) nothing moves a rejected cell to accepted after an overturned `cell_rejection` appeal; (c) `awaiting_second_review` has no rule for split votes; (d) an approved service cannot be re-reviewed early (`review_started` only leaves `unreviewed`, `rejected`, `review_due`, `revoked`); (e) an operator lease release has no event; (f) the launch rule can fail after a gate is reopened while the switches stay on | (a) add `banned --member.reinstated--> active` on an overturned appeal only; (b) add `rejected --cell.reinstated--> accepted` when no other attempt was accepted, otherwise correct the reliability record and create no second credit (11.58.3); (c) a further distinct reviewer breaks a tie, else the original decision stands (11.58); (d) add `approved|suspended --service.review_started--> in_review`; (e) reuse `cell.declined` with actor `admin` and reason `operator_release` (11.66.3); (f) raise `launch.rule_failing` and require an explicit `launch.switch_off`, automatic switch-off left to S14.* (11.63) | proposed |
+| `ISS-117` | minor | prompt | Convention gaps used by the admin tools: (a) entities `AdminApproval` (`apv_`) and `WorkClaim` (`clm_`); (b) `TermsCopy.document_kind` (`terms`, `usage_policy`, `written_permission`), needed to store the usage policy and written permission of FD§8.3 G0(i) and (k); (c) no retirement marker or event for a `GoldCell`; (d) events `admin.approval_*` and `workclaim.*`; (e) the seven parameters of 11.68; (f) the default of `security.two_person_actions` is the table of S10a 10.12 (14 names, `member.ban` among them); `audit.accept`, `quarantine.release` and `cell.overturn` are single-admin with step-up [default-pending D-34, D-39]; (g) the action codes of 11.54.3 and the reason-code lists; (h) sub-headings `11.51` upward (renumbered by FIX-21 from `11.41`) to avoid collisions with other S11 files; (i) the terms-copy upload body (derived from `service.terms_copy_max_bytes`) exceeds `api.max_body_bytes`, so it gets its own limit; (j) `Alarm` kinds: those of S15b 15.29.4 (category `abuse`, `launch.rule_broken`), plus `ops.changelog_overdue` as proposed | Used as proposed in this file; C-001 and C-022 fold them into S0 and S16 | proposed |
+| `ISS-118` | major | FD§5.3, FD§3.4, FD§8.3 | State machines of S0.9 lack transitions the tools need: (a) a `banned` member has no exit, so an overturned ban appeal cannot be applied; (b) nothing moves a rejected cell to accepted after an overturned `cell_rejection` appeal; (c) `awaiting_second_review` has no rule for split votes; (d) an approved service cannot be re-reviewed early (`review_started` only leaves `unreviewed`, `rejected`, `review_due`, `revoked`); (e) an operator lease release has no event; (f) the launch rule can fail after a gate is reopened while the switches stay on | (a) add `banned --member.reinstated--> active` on an overturned appeal only; (b) add `rejected --cell.reinstated--> accepted` when no other attempt was accepted, otherwise correct the reliability record and create no second credit (11.58.3); (c) a further distinct reviewer breaks a tie, else the original decision stands (11.58); (d) add `approved|suspended --service.review_started--> in_review`; (e) reuse `cell.declined` with actor `admin` and reason `operator_release` (11.66.3); (f) raise `launch.rule_broken` and require an explicit `launch.switch_off`, automatic switch-off left to S14.* (11.63) | proposed |
 | `ISS-119` | major | FD§5.7, FD§4.2, prompt | Decisions only the owner can make: (a) with fewer than two admins every two-person action is unavailable (`AD9`), and `ledger.reversal_min_approvers` is a constant 2; (b) `service.min_approvers` 1 or 2; (c) credit already spent cannot be reversed under `ledger.allow_negative_balance` = false, and a wrongly rejected cell whose work was paid to another attempt has no compensation rule; (d) whether a service approval needs a notice period like a loosening (applied: a public entry at approval time, no notice); (e) who counts as "founders" for parameters owned by `founders` (applied: loosening is `parameter.loosen` with two distinct `operator` approvers, tightening is one admin with step-up [default-pending D-39]) | Applied as stated in each section; listed for S3.* | needs_owner |

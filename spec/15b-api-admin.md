@@ -75,7 +75,8 @@ Permission names follow `perm.<area>.<action>` (S0 0.8.2). The permission matrix
 | `perm.audit.read`, `perm.audit.resolve`, `perm.appeal.read`, `perm.appeal.decide`, `perm.report.read`, `perm.report.triage` | reviewer | 15.29 |
 | `perm.alarm.read`, `perm.alarm.ack` | operator, reviewer | 15.29 |
 | `perm.screening.read`, `perm.screening.decide` | reviewer | S15c 15.B.7 (`listScreeningQueue`, `getScreeningItem`, `getScreeningContent`, `decideScreening`) |
-| `perm.member.read_admin`, `perm.member.restrict`, `perm.member.suspend`, `perm.member.ban` | operator, reviewer | 15.29 |
+| `perm.member.view_basic`, `perm.member.restrict`, `perm.member.suspend`, `perm.member.ban` | operator, reviewer | 15.29 |
+| `perm.invite.view_tree_summary`, `perm.invite.view_tree_edges` | reviewer, operator (edges: operator) | 15.29.5 |
 | `perm.ledger.read`, `perm.ledger.read_member`, `perm.ledger.verify`, `perm.ledger.reverse` | operator | 15.30 |
 | `perm.capacity.read` | operator | 15.31 |
 | `perm.claim.takeover` | operator | S15e 15.D.4.4 `takeoverWorkClaim` (replaces "the operator role"; `CR-43`) |
@@ -599,9 +600,9 @@ Acknowledging an alarm does not fix its cause; a critical `ledger` or `launch` a
 
 | op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `listMembersAdmin` | `GET /v1/admin/members` | `admin` `perm.member.read_admin` | `?status`, `?trust_tier`, `?has_open_report=true`; no search by name, e-mail or handle (there are none) | list of `{mem_id, status, trust_tier, created_on}` | - | n/a | cursor | `A-R` |
-| `getMemberAdmin` | `GET /v1/admin/members/{mem_id}` | `admin` `perm.member.read_admin` | - | `{mem_id, status, trust_tier, created_on, accepted_cells, reliability_ppm, open_reports, open_appeals, restriction, invite_tree: {root_mem_id, size, depth}}`; no devices, no keys, no balance (the ledger explorer has it); logged as a read action | `NOT_FOUND` | n/a | - | `A-R` |
-| `getInviteTree` | `GET /v1/admin/members/{mem_id}/invite-tree` | `admin` `perm.member.read_admin` | - | `{root_mem_id, size, depth, status_counts, members: [{mem_id, status, depth}]}` | `NOT_FOUND` | n/a | cursor | `A-R` |
+| `getMemberAdmin` | `GET /v1/admin/members/{mem_id}` | `admin` `perm.member.view_basic` | - | `{mem_id, status, trust_tier, created_on, accepted_cells, reliability_ppm, open_reports, open_appeals, restriction, invite_tree?}`; `invite_tree` is present only while an open `Alarm` of kind `farming.invite_tree` or `farming.referral` (15.29.4) names the member: `{size, depth}` for a caller holding `perm.invite.view_tree_summary`, and for a caller holding `perm.invite.view_tree_edges` (operator) also `parent_mem_id` and `children_mem_ids`; otherwise the field is absent; no devices, no keys, no balance (the ledger explorer has it); logged as a read action | `NOT_FOUND` | n/a | - | `A-R` |
+
+No operation lists or searches members: a member is opened by its `mem_id` from a report, appeal, alarm or ledger view (S11c 11.65.1) [default-pending D-40].
 
 ### 15.29.6 Restrictions, suspensions, bans [D]
 
