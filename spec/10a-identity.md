@@ -41,7 +41,7 @@ A `Member` is a pseudonym: one row plus public keys. One person may hold several
 | `AdminCredential` (`acr_`) | `admin_user_id`, `credential_id`, `public_key`, `sign_count`, `transports`, `label`, `status` (`pending`, `active`, `locked`, `revoked`), `last_used_at` | `permanent` | WebAuthn, 10.12 |
 | `AdminAction` (`act_`) | `principal_type`, `admin_user_id` (the actor: the proposer on the first row, the approver on the approving row), `action`, `subject_type`, `subject_id` (replace `target_ref`), `subject_hash` (stores the `params_hash`), `approves_action_id` (replaces `proposed_by` and `approved_by`), `outcome` (`proposed`, `approved`, `executed`, `expired`), `expires_at` (proposals only), `seq`, `reason`, `payload`, `request_id`, `prev_hash`, `entry_hash`, `created_at`; full column list S5a 5.6.10 | `permanent` | Hash-chained like the ledger [A] |
 
-**Never stored, by design** [D]: names, phone numbers, passwords, clear-text e-mail, raw IP addresses, hardware or advertising identifiers, browser fingerprints, precise or coarse location, provider credentials or sessions, volunteers' chat pages, private keys and the recovery key. None of these is ever sent to the server; the client holds the recovery secret in device storage from registration until the member confirms the key, and wipes it then (10.3.1, 10.4.2) [default-pending D-38]. Reason: IC3, IC4.
+**Never stored, by design** [D]: names, phone numbers, passwords, clear-text e-mail, raw IP addresses, hardware or advertising identifiers, browser fingerprints, precise or coarse location, provider credentials or sessions, volunteers' chat pages, private keys and the recovery key. None of these is ever sent to the server; the client holds the recovery secret in device storage from registration (after a recovery: from the moment the new secret is made, 10.8) until the member confirms the key, and wipes it then (10.3.1, 10.4.2) [default-pending D-38, D-41]. Reason: IC3, IC4.
 
 ## 10.3 Anonymous local identity: key generation, registration, proof of possession
 
@@ -50,7 +50,7 @@ A `Member` is a pseudonym: one row plus public keys. One person may hold several
 | Key | Algorithm | Generated | Kept on the device | Kept on the server |
 | --- | --- | --- | --- | --- |
 | Device key | Ed25519 (S0.6.4) | In the browser at first use | WebCrypto `CryptoKey` with `extractable = false` in IndexedDB where the browser supports Ed25519 [V: support on the target phones]; otherwise a bundled audited Ed25519 implementation with the seed in IndexedDB and `key_storage` = `software` [V] | `MemberKey.public_key` |
-| Recovery key | Ed25519 keypair derived from the recovery secret (10.4) | Same moment | The recovery secret is held in device storage (IndexedDB) from registration until the member confirms the key (10.4.2), then wiped; shown once, after the first accepted cell; never sent to the server [default-pending D-38] | `MemberKey.public_key`, `purpose` = `recovery` |
+| Recovery key | Ed25519 keypair derived from the recovery secret (10.4) | Same moment | The recovery secret is held in device storage (IndexedDB) from registration (after a recovery: from the moment the new secret is made, 10.8) until the member confirms the key (10.4.2), then wiped; shown once, after the first accepted cell (after a recovery: at once, 10.8); never sent to the server [default-pending D-38, D-41] | `MemberKey.public_key`, `purpose` = `recovery` |
 | Device token | 256-bit CSPRNG value | First visit | IndexedDB; random, not derived from hardware | `Device.device_token_hash` = HMAC-SHA-256 of the token under `secret.device_hash_key[v]`, with `Device.hash_key_version` (S5a 5.3.3) |
 | Session token | 256-bit CSPRNG value | Server | IndexedDB, never a cookie (S0.11.4) | SHA-256 only |
 
@@ -85,20 +85,20 @@ client:
   -> hold rs in device storage; the recovery key screen (10.4) comes after the member's first accepted cell, not here
 ```
 
-Server checks, in this order; the first failure stops the request: [D]
+Server checks, in the order of the request pipeline of S15a 15.4 (rate limits at step 3, launch gate at step 7, validation at step 8, guards at step 11), which governs where the two differ; the first failure stops the request: [D]
 
 | # | Check | Failure |
 | --- | --- | --- |
-| 1 | `launch.members_may_join` is true | `403 LAUNCH_GATE_CLOSED` |
-| 2 | Rate limits of 10.9 (device token, IP hash, invite tree) | `429 RATE_LIMITED` |
+| 1 | Rate limits of 10.9 (device token, IP hash, invite tree) | `429 RATE_LIMITED` |
+| 2 | `launch.members_may_join` is true | `403 LAUNCH_GATE_CLOSED` |
 | 3 | Both public keys are valid 32-byte Ed25519 points and differ from each other | `400 VALIDATION_FAILED` |
 | 4 | Challenge exists, unused, unexpired, `purpose` = `create`, audience matches | `401 AUTH_EXPIRED` or `AUTH_INVALID` |
 | 5 | Both signatures verify over the same `context_hash` (proof of possession of both private keys: a typo or bug cannot register a recovery key nobody holds) | `401 AUTH_INVALID` |
 | 6 | If `identity.registration_mode` = `invite_only`: code hash matches an `Invite` in state `issued`, unexpired, its tree not frozen, tree size below `invite.tree_max_members`, depth at most `invite.tree_max_depth`; the app may pre-check a code with `checkInvite` (`POST /v1/invite-checks`, S15a 15.5), which alone tells the holder why a code is unusable | `422 UNPROCESSABLE` with one uniform `copy.invite.invalid` for unknown, expired or used codes; `422 CAP_EXCEEDED` for a full tree |
-| 7 | One transaction: insert `Member` (`status` `active`, `trust_tier` `new`), two `MemberKey` rows (`authorized_by_key_id` = the key itself), upsert `Device`, redeem the `Invite`, mark the challenge used, emit `member.created` | `409 STATE_CONFLICT` on a lost race |
-| 8 | Issue a session (10.13) and return `{member_id, key_id, session}` | |
+| 7 | One transaction: insert `Member` (`status` `active`, `trust_tier` `new`), two `MemberKey` rows (`authorized_by_key_id` = the key itself), upsert `Device`, redeem the `Invite`, mark the challenge used, emit `member.created` | `409 ALREADY_EXISTS` (reason `public_key_exists`) for a public key that already exists; `409 STATE_CONFLICT` on a lost race for the invite |
+| 8 | Return `{member, key, recovery_key, session_challenge}` as `createMember` of S15a 15.5 does; no token is issued here: the client signs the `session_challenge` and calls `createSession` (10.13), which alone returns the session token | |
 
-`Idempotency-Key` is REQUIRED on registration [A]: a lost response would otherwise leave an identity whose recovery key the person never saw. In `open` mode (no invite) the new member is a founder: `invite_root_member_id` is null and the member counts as its own tree, by its own `mem_` id, for `ratelimit.invite_tree_new_members_per_day`. The member's ledger account is created by `S6.*` on `member.created`. [D]
+`Idempotency-Key` is REQUIRED on registration [A]: a lost response would otherwise leave the client without the `session_challenge` of a member that already exists. In `open` mode (no invite) the new member is a founder: `invite_root_member_id` is null and the member counts as its own tree, by its own `mem_` id, for `ratelimit.invite_tree_new_members_per_day`. The member's ledger account is created by `S6.*` on `member.created`. [D]
 
 ## 10.4 Recovery key
 
@@ -118,11 +118,11 @@ Word lists were rejected for Phase 1: a vetted Persian list of 2048 words does n
 
 ### 10.4.2 Display and offline backup [D]
 
-1. One full-screen step, shown once after the member's first accepted cell and not during registration (D-18, D-18a; FD§3.2 step 1 as timed by D-18) [default-pending D-18], in Latin script inside a `dir=ltr`, `unicode-bidi: isolate` block so Persian text around it cannot reorder the characters.
+1. One full-screen step, shown once after the member's first accepted cell and not during registration (D-18, D-18a; FD§3.2 step 1 as timed by D-18) [default-pending D-18] (after a recovery: at once, as the last screen of the recovery, 10.8 [default-pending D-41]), in Latin script inside a `dir=ltr`, `unicode-bidi: isolate` block so Persian text around it cannot reorder the characters.
 2. Options offered: write it on paper (a print stylesheet renders a card locally); copy to the clipboard (warning: clipboard managers and cloud clipboards); save as a text file (warning: cloud backup of downloads); show a QR code (rendered locally). Not offered: e-mail it, send it to the server, keep it in the browser as a backup (the temporary copy of item 5 is not one).
-3. The key is never sent to the server, never put in a URL, never written to analytics, logs or error reports, and the page that shows it makes no network request while it is open (tested, AC-identity-04).
-4. The step is one screen, not a quiz, so the sub-60-second first contribution (FD§6.2 V1) is not blocked; time spent on it is an instrumented measure [H: the step does not lower V1 conversion; test: median step time and landing-to-first-verified-cell conversion in Phase 1; kill criterion: the pre-registered V1 bar is missed because of this step].
-5. Optional confirmation: the member retypes the key; the client derives the keypair and signs a `confirm_recovery` challenge; the server sets `recovery_confirmed_at`, and the client then wipes the recovery secret from device storage. Until then the client keeps the recovery secret in device storage (held since registration, 10.3.3) and never sends it to the server [default-pending D-38]. Settings nudge until confirmed and never block.
+3. The key is never sent to the server, never put in a URL, never written to analytics, logs or error reports, and the page that shows the key and the secret makes no network request while it is open (tested, AC-identity-04); only the retype step of item 5 makes requests, and only the ones it names (tested, AC-identity-13).
+4. The step is one screen, not a quiz, and it comes after the first accepted cell (item 1), so it is not part of the sub-60-second first contribution (FD§6.2 V1); time spent on it is an instrumented measure [H: the step does not make members stop after their first accepted cell; test: median step time on this screen and the share of members who leave it before they continue, in Phase 1] [default-pending D-18].
+5. Optional confirmation: the member retypes the key; the client derives the keypair and signs a `confirm_recovery` challenge; the server sets `recovery_confirmed_at`, and the client then wipes the recovery secret from device storage. This retype step makes exactly three requests: two `POST /v1/identity-challenges` (purposes `confirm_recovery` and `step_up`, the second for the `Step-Up` header) and `confirmRecoveryKey` (S15c 15.B.5.4); none carries the recovery secret or the key. Until then the client keeps the recovery secret in device storage (held since registration, 10.3.3, or since the recovery, 10.8) and never sends it to the server [default-pending D-38, D-41]. Settings nudge until confirmed and never block.
 
 Reason for not forcing a backup: credit is small, capped by K and expires, so the cost of losing an identity is bounded; forced friction costs conversion and teaches people to photograph the key into cloud albums. [D]
 
@@ -136,8 +136,8 @@ The server holds `recovery_pub` only. Verification is a signature over a fresh c
 | --- | --- |
 | Recovery key never confirmed | Replaceable with a device-key step-up alone; the old key was never proven held |
 | Recovery key confirmed | Replacing it needs a device-key step-up AND a signature by the current recovery key, so a thief holding only an unlocked phone cannot lock the owner out (the `recovery_signature` of `rotateKey`, S15.B.9) |
-| Effect | New key `active` at once (both keys work meanwhile); old key `retiring` with `not_after` = rotation time + `identity.key_rotation_grace_s`, then `revoked`; a `SecurityNotice` on every device |
-| After a recovery (10.8) | The key used is revoked at once and a new one is mandatory in the same request (it was typed on a device that may be hostile) |
+| Effect | Device key: the new key is `active` at once (both keys work meanwhile); the old key is `retiring` with `not_after` = rotation time + `identity.key_rotation_grace_s`, then `revoked`. Recovery key: the new key holds the first K4 value (`pending`) until `identity.key_rotation_grace_s` ends; both recovery keys work meanwhile (the old one `retiring` with the same `not_after`), then the new key is `active` and the old key `revoked`, so a thief holding an unlocked phone cannot silently replace the recovery key (S15a 15.5, Rotation). A `SecurityNotice` on every device in both cases |
+| After a recovery (10.8) | The key used is revoked at once and a new one is mandatory in the same request (it was typed on a device that may be hostile); the new secret is held, shown once and wiped as in 10.8 [default-pending D-41] |
 
 ## 10.5 Optional e-mail
 
@@ -180,7 +180,7 @@ Why a grace period: a lost response or a crash between the two sides must not lo
 | --- | --- |
 | Compromise of a device key (lost or stolen phone) | `revokeMemberKey` from another device or by recovery: immediate `revoked`, no grace, sessions bound to it die at once |
 | Limits | At most `identity.max_devices_per_member` active or retiring device keys; at most one pending rotation per key |
-| Recovery key | Rules in 10.4.4 |
+| Recovery key | Rules in 10.4.4: the new recovery key holds `pending` until `identity.key_rotation_grace_s` ends and both recovery keys work meanwhile; unlike a device key it is not `active` at once |
 | Server-side secrets | Rotation of `secret.*` is in the secrets part of `S10.*`; nothing in this part needs a member to act when a server secret rotates |
 
 ## 10.7 Device linking
@@ -196,8 +196,8 @@ A (signed in, step-up):  POST /v1/device-links
         expires_at = now + identity.device_link_code_ttl_s}
     server stores SHA-256(code) only
 B (new device, no session): generate device key and device token;
-    POST /v1/device-links/redemptions {code, new_public_key, proof, device_token,
-        platform_class, key_storage}  signed by B's key (purpose device_link)
+    POST /v1/device-links/redemptions {code, challenge, new_public_key, proof, device_token,
+        platform_class, key_storage}  signed by B's key (purpose device_link; `challenge` from `POST /v1/identity-challenges`)
     server: constant-time compare of the secret hash; state awaiting_approval;
             only the first valid claim wins
     B and A both display  sas = (first 4 bytes of SHA-256(device_id || new_public_key) as uint32) mod 1,000,000, 6 digits
@@ -239,10 +239,12 @@ server:
            insert new device key and new recovery key (authorized_by = the old recovery key);
            recovery_cooldown_until = now + identity.recovery_cooldown_s;
            recovery_confirmed_at = null; RecoveryRequest(completed); SecurityNotice; emit member.recovered }
-  5. return a session for the new device key
+  5. return {member, key, recovery_key, revoked_key_ids, session_challenge} as recoverMember (S15a 15.5) does, no token; the client signs the session_challenge with the new device key and calls createSession (10.13)
 ```
 
 Status is never changed by recovery: a `suspended` or `banned` member stays so, `trust_tier` and `restricted` carry over, and a `closed` member cannot recover because closing deletes the keys (10.14). [D] Reason: recovery must not be a reset button.
+
+**New recovery secret** [A][default-pending D-41]: the client holds the new recovery secret (`new_rs`) in device storage from the moment it is made, as at registration (10.3.1, D-38), and never sends it to the server. Because the member has no accepted cell to wait for, the recovery key screen of 10.4.2 is shown once, at once, as the last screen of the recovery, right after `createSession` succeeds. The secret is wiped when the member confirms the key (10.4.2 item 5) and by the panic wipe (10.15.4); `recovery_confirmed_at` stays null until then.
 
 **Cooldown** (`identity.recovery_cooldown_s`, default 86,400 s) [D]: while `recovery_cooldown_until` is in the future the member can lease, submit, view balance and file appeals, but cannot create jobs, hold escrow, book reservations, change or add e-mail, or issue invites. Reason: a thief who just recovered cannot cash out stolen credit before the owner can notice.
 
@@ -532,7 +534,7 @@ Admin surface hardening [D]: strict Content-Security-Policy with no third-party 
 | --- | --- | --- |
 | Token | Opaque 256-bit CSPRNG value, base64url, sent as `Authorization: Bearer`; no cookie, no JWT, so no CSRF surface and no claims to forge | Same |
 | Storage | Server: SHA-256 of the token in `Session`; device: IndexedDB | Server: same; page memory only |
-| Issued by | A signed challenge with an active `MemberKey` (purpose `session`) or by registration or recovery | WebAuthn assertion (10.12) |
+| Issued by | A signed challenge with an active `MemberKey` (purpose `session`); registration and recovery return a `session_challenge` that the client signs the same way | WebAuthn assertion (10.12) |
 | Idle TTL | `session.member_idle_ttl_s` (2,592,000 s = 30 days) | `session.admin_idle_ttl_s` (1,800 s) |
 | Absolute TTL | `session.member_abs_ttl_s` (7,776,000 s = 90 days) | `session.admin_abs_ttl_s` (28,800 s) |
 | Step-up | A fresh signature (purpose `step_up`) sets `step_up_at`; valid `session.step_up_max_age_s` | Same with a new assertion |
@@ -655,7 +657,7 @@ No location is collected, inferred or displayed by default (`public.location_dis
 
 | Feature | Behavior |
 | --- | --- |
-| Panic wipe | One tap on any screen deletes the device key, device token, session, caches and local settings, then tries to revoke the device key on the server (local deletion happens first and does not wait for the network) |
+| Panic wipe | One tap on any screen deletes the device key, device token, session, the stored recovery secret (while the member has not yet confirmed the key, 10.4.2 and 10.8 [default-pending D-41]), caches and local settings, then tries to revoke the device key on the server (local deletion happens first and does not wait for the network) |
 | Quick exit | A button on every screen that navigates to a neutral page and replaces the history entry where the browser permits [V] |
 | `kill.optional_pii` [A] | Operator action (`perm.identity.purge_optional_pii`): one admin engages, two-person releases (`killswitch.release`). Immediately: refuse new e-mail addresses, delete every e-mail ciphertext and `email_lookup_hash`, lower the effective `ratelimit.ip_hash_new_members_per_day` and `ratelimit.recovery_attempts_per_day` (the lever of 10.14.2 item 3; `retention.ip_hash_ttl_days` is not changed and stays within 1..30) [default-pending D-33], set the effective `retention.request_log_days` to 0 and delete existing request logs, stop recording `actor_day_hash` |
 | Notices | The six `copy.*` keys below, all marked `needs_human_and_legal_review` |
@@ -692,18 +694,19 @@ Given / When / Then; each criterion becomes a test in the layer shown (S0.5; `S1
 
 | Id | Given | When | Then | Layer |
 | --- | --- | --- | --- | --- |
-| AC-identity-01 | `launch.members_may_join` is true and a valid invite | A client registers with both signatures | One `Member` (`new`, `active`), two `MemberKey`, one `Device`, invite `redeemed`, a session returned, `member.created` emitted | e2e |
+| AC-identity-01 | `launch.members_may_join` is true and a valid invite | A client registers with both signatures | One `Member` (`new`, `active`), two `MemberKey`, one `Device`, invite `redeemed`, a `session_challenge` returned and no token, `member.created` emitted; the client's `createSession` with a signature over that challenge then returns the session | e2e |
 | AC-identity-02 | `launch.members_may_join` is false | A client registers | `403 LAUNCH_GATE_CLOSED` and no row is written | policy |
 | AC-identity-03 | A registration whose recovery signature was made by a different key | It is submitted | `401 AUTH_INVALID`, no member created | adv |
-| AC-identity-04 | A member's first cell has been accepted and the recovery key screen is open (it is shown after the first accepted cell, not during registration) [default-pending D-18] | Network activity is recorded from registration until the member confirms the key | No request is made while the screen is shown, the recovery secret and the key appear in no request, log or event, and after confirmation the recovery secret is no longer in device storage [default-pending D-38] | e2e |
-| AC-identity-05 | A member with a confirmed recovery key | A new device recovers with the correct key | All old keys and sessions are revoked, new device and recovery keys exist, `recovery_cooldown_until` is set, `member.recovered` emitted, status and tier unchanged | e2e |
+| AC-identity-04 | A member's first cell has been accepted and the recovery key screen is open (it is shown after the first accepted cell, not during registration) [default-pending D-18] | Network activity is recorded from registration until the member starts the retype step | No request is made while the screen displays the key and the secret, and the recovery secret and the key appear in no request, log or event [default-pending D-38] | e2e |
+| AC-identity-05 | A member with a confirmed recovery key | A new device recovers with the correct key | All old keys and sessions are revoked, new device and recovery keys exist, `recovery_cooldown_until` is set, `member.recovered` emitted, status and tier unchanged; the new recovery secret is held in device storage and appears in no request, and the client signs the returned `session_challenge` to get the session [default-pending D-41] | e2e |
 | AC-identity-06 | A member inside the recovery cooldown | They create a job, change e-mail or issue an invite | `403 FORBIDDEN` (X4); leasing and submitting still work | policy |
 | AC-identity-07 | A member with `identity.recovery_max_per_90d` completed recoveries in 90 days | They recover again | `422 CAP_EXCEEDED`, nothing changes | adv |
 | AC-identity-08 | An unknown recovery key and a known key with a bad signature | Both are submitted | The two responses are identical in status and body and equal in work | adv |
-| AC-identity-09 | A device key rotation whose response was lost | The client retries inside `identity.key_rotation_grace_s` | It succeeds; after `not_after` an unconfirmed old key is `revoked` | fsm |
+| AC-identity-09 | A device key rotation whose response was lost, and a recovery key rotation | The client retries the device rotation inside `identity.key_rotation_grace_s`; a recovery signature is made with the old or the new recovery key during the grace | The retry succeeds; after `not_after` an unconfirmed old device key is `revoked`; the new device key is `active` at once; the new recovery key holds `pending` until the grace ends, both recovery keys work meanwhile, then it is `active` and the old recovery key is `revoked` | fsm |
 | AC-identity-10 | An open device-link offer | Two devices claim it, then the first is approved; later a sixth device is offered | Only the first claim wins; the key chain records `authorized_by_key_id`; the sixth is refused at `identity.max_devices_per_member` | adv |
 | AC-identity-11 | A recovery key typed with one wrong character | The client normalizes it | The checksum fails on the device, no request is sent, no recovery attempt is counted | unit |
 | AC-identity-12 | An address already held by another member | A member sets it | The response is identical to a fresh address and nothing is sent to the holder; removal deletes ciphertext and `email_lookup_hash` at once | adv |
+| AC-identity-13 | The recovery key screen is open and the member retypes the key [default-pending D-18] | The member completes the confirmation, with network activity recorded from the start of the retype step | The only requests are two `POST /v1/identity-challenges` (purposes `confirm_recovery` and `step_up`) and `POST /v1/members/me/recovery-confirmations`; none carries the recovery secret or the key; `recovery_confirmed_at` is set and the recovery secret is no longer in device storage [default-pending D-38] | e2e |
 | AC-invite-01 | One active invite | Two clients redeem it at once | One succeeds, the other gets `409 STATE_CONFLICT` | adv |
 | AC-invite-02 | A member with `invite.max_active_per_member` active invites | They issue another | `422 CAP_EXCEEDED` | policy |
 | AC-invite-03 | A direct inviter with one strike | A second member they invited is banned for `sybil` | Issuing is suspended and active invites revoked; status, tier and credit are unchanged | fsm |
