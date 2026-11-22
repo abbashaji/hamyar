@@ -170,24 +170,25 @@ Names only. Paths, bodies and final ids are owned by S15.*; where S15.* renames 
 
 | Operation | Used by | Purpose |
 | --- | --- | --- |
-| `getPublicStatus` | 01 | Launch state, public counter (when `ff.growth.v2_live_counter` is on), approved-service count |
+| `getPublicCounter` | 01 | Public counter of verified cells (only when `ff.growth.v2_live_counter` is on; with the flag off S15b answers `404 NOT_FOUND`) |
+| `createIdentityChallenge` | 02, 13, 17, every sign-in | Server challenge that the device key or the recovery key signs for `createMember`, `createSession`, `recoverMember`, `rotateKey` and `redeemDeviceLink`; the purposes are those of S15a 15.5 |
 | `createMember` | 02 | Create the identity; carries the public key and, if present, an invite token |
 | `createSession` | all | Sign a challenge with the device key |
 | `getMe` | all | Status, `trust_tier`, restriction end, key-saved flag |
-| `listOffers` | 03 | Card summaries the member may lease, already filtered by `R8` opt-ins |
+| `listOfferedCells` | 03 | Card summaries the member may lease, already filtered by `R8` opt-ins |
 | `createLease`, `getLease`, `extendLease`, `releaseLease` | 03, 04, 05 | Lease, read, extend once, decline or release |
-| `acknowledgePrompt` | 03 | Record that the full prompt was expanded (11.8.4) |
+| `expandLeasePrompt` | 03 | Record that the full prompt was expanded (11.8.4) |
 | `submitResult`, `getSubmission` | 05, 06 | Paste-back and outcome |
-| `listCellHistory` | 08 | Member's cells and outcomes |
-| `getBalance`, `listCreditLots`, `listMemberLedgerEntries` | 07 | Balance, lots with expiry, own entries |
-| `getOptIns`, `updateOptIns`, `listTopicCategories`, `listApprovedServices` | 09, 04 | Opt-in model and service list |
+| `listSubmissions`, `listLeases` | 08 | Member's outcomes (`listSubmissions`, filter `verdict`) and declined or expired leases (`listLeases`, filter `state`); S15a has no operation that lists cells as such, so History reads these two |
+| `getBalance`, `listLots`, `listLedgerEntries` | 07 | Balance, lots with expiry, own entries |
+| `getOptIns`, `replaceOptIns`, `listTopicCategories`, `listServices` | 09, 04 | Opt-in model and service list |
 | `createReport` | 16 | Report a cell |
 | `createAppeal`, `getAppeal`, `listAppeals`, `withdrawAppeal` | 14 | Appeals |
-| `createInvite`, `listInvites`, `revokeInvite`, `getReferralStatus` | 12 | Invites and referral state |
+| `createInvite`, `listInvites`, `revokeInvite`, `listReferrals` | 12 | Invites and referral state |
 | `createTeam`, `getTeam`, `joinTeam`, `leaveTeam` | 10 | Teams |
 | `getShareCard` | 11 | Aggregate data for the card |
 | `recoverMember`, `rotateKey` (`kind` `recovery`), `confirmRecoveryKey` | 13 | Recovery |
-| `createDeviceLink`, `redeemDeviceLink`, `rotateKey` (`kind` `device`), `closeMember` | 17 | Device linking, rotation, closure |
+| `createDeviceLink`, `redeemDeviceLink`, `approveDeviceLink`, `rotateKey` (`kind` `device`), `closeMember` | 17 | Device linking (the old device approves), rotation, closure |
 
 ### 11.5.2 Parameters this part reads, and additions [A]
 
@@ -246,8 +247,8 @@ Convention additions requested by this part (C-022 completes the table; names ar
 | State | Condition | Behavior |
 | --- | --- | --- |
 | Empty | Not applicable (static content) | The page never depends on data to be useful |
-| Loading | `getPublicStatus` in flight | Static content and primary action render at once; the counter area shows a placeholder, never a spinner over the whole page |
-| Error | `getPublicStatus` fails | Counter area omitted silently; the rest is unchanged |
+| Loading | `getPublicCounter` in flight | Static content and primary action render at once; the counter area shows a placeholder, never a spinner over the whole page |
+| Error | `getPublicCounter` fails | Counter area omitted silently; the rest is unchanged |
 | Offline or low bandwidth | No network | Static shell from the local copy if previously loaded; a first-ever visit shows the browser's own offline page (unavoidable); the primary action is disabled with `copy.landing.offline` |
 | Blocked: not open | `launch.members_may_join` = false (`LAUNCH_GATE_CLOSED`) | Primary action replaced by a notice `copy.landing.not_open`; no member is created; an existing member can still sign in to see balance and history [D] |
 | Blocked: join by invite only | `invite.required_to_join` = true and no invite token | Primary action opens the invite-code field (`copy.landing.invite_needed`); no identity is created without a valid token |
@@ -262,7 +263,7 @@ Convention additions requested by this part (C-022 completes the table; names ar
 | Language switch | Changes `locale` on this device only |
 | Expand risks | Shows the full risk notice (`copy.risk.provider_and_law`) |
 
-**API calls.** `getPublicStatus`.
+**API calls.** `getPublicCounter`.
 
 **Copy intent.** Plain, calm, short. State the human-presses-Send model and the "never" list before any benefit claim. No claim of anonymity (promise minimization, never anonymity, FD Principle 8), no claim about speed of completion, no political framing (FD§6.1 rank 2). The counter line says "verified cells" and nothing else.
 
@@ -295,7 +296,7 @@ All keys carry `needs_human_and_legal_review`.
 | Step | Screen | Volunteer action | First-time budget [H] | Practiced budget [H] | Stakes before the step |
 | --- | --- | --- | --- | --- | --- |
 | F1 | Landing | Tap Start | 3 s | 0 s (returning members skip it) | none |
-| F2 | Identity created | None (automatic): device key generated, `createMember`, `createSession` | 2 s | 0 s | no personal data; no key shown yet (V-09) |
+| F2 | Identity created | None (automatic): device key generated, `createIdentityChallenge`, `createMember`, `createSession` | 2 s | 0 s | no personal data; no key shown yet (V-09) |
 | F3 | One-time notice | Read three short facts, tap "I understand" (shown once; version-stamped) | 10 s | 0 s | none |
 | F4 | Offer list | Tap the first card (`ui.offer_list_size` offers) | 5 s | 3 s | none |
 | F5 | Card | Read the 8-field card; expand the full prompt (required on first use) | 20 s | 5 s | decline is free |
@@ -331,16 +332,16 @@ Five visible steps: Notice, Card, Hand-off, Paste-back, Done. Identity creation 
 
 | State | Condition | Behavior |
 | --- | --- | --- |
-| Empty | `listOffers` returns no offers | `copy.flow.no_offers`: no work fits your opt-ins or nothing is queued right now; actions: "Review opt-ins" (`SCR-vol-09`), "Check again"; nothing is lost |
-| Loading | Identity creation or `listOffers` in flight | Progress strip with a text label; never a blocking spinner longer than `ui.status_poll_max_s` without a retry button |
+| Empty | `listOfferedCells` returns no offers | `copy.flow.no_offers`: no work fits your opt-ins or nothing is queued right now; actions: "Review opt-ins" (`SCR-vol-09`), "Check again"; nothing is lost |
+| Loading | Identity creation or `listOfferedCells` in flight | Progress strip with a text label; never a blocking spinner longer than `ui.status_poll_max_s` without a retry button |
 | Error | `createMember` fails | Retry with the same `Idempotency-Key`; the device key is kept so a retry never creates two members; after a failed retry, show Help |
 | Offline or low bandwidth | No network at F2 | Flow pauses with `copy.error.try_again`; nothing is created locally except the key pair |
 | Blocked: rate limited | `ratelimit.device_new_members_per_day` or tree limit (`RATE_LIMITED`) | `copy.error.rate_limited` with the time; no reason is given about which limit applied (abuse-safe) |
-| Blocked: no approved service | `listApprovedServices` empty | `copy.flow.no_service`: contributions are not available yet; no cell is offered (launch-gate machinery, S14.*) |
+| Blocked: no approved service | `listServices` empty | `copy.flow.no_service`: contributions are not available yet; no cell is offered (launch-gate machinery, S14.*) |
 
 **Actions.** Start, I understand, Take this card, Decline, Back (never destroys a lease), Cancel flow (releases the lease with no penalty).
 
-**API calls.** `createMember`, `createSession`, `getMember`, `listApprovedServices`, `listOffers`, then those of 11.8 to 11.11.
+**API calls.** `createIdentityChallenge`, `createMember`, `createSession`, `getMe`, `listServices`, `listOfferedCells`, then those of 11.8 to 11.11.
 
 **Accessibility.** The progress strip is a labeled ordered list with `aria-current="step"`; each step change moves focus to the new heading and announces it; the whole flow works with one hand and with the keyboard.
 
@@ -447,7 +448,7 @@ function cardGate(card, expand_required, ui_state):
         copy_enabled = ui_state.expanded
         open_enabled = ui_state.expanded and card.adapter.prefill_allowed
     if ui_state.expanded and not ui_state.ack_sent:
-        call acknowledgePrompt(lease_id, reasons_covered = expand_required)   # idempotent
+        call expandLeasePrompt(lease_id, reasons_covered = expand_required)   # idempotent
         ui_state.ack_sent = true
     decline_enabled = true      # always
     report_enabled  = true      # always
@@ -455,7 +456,7 @@ function cardGate(card, expand_required, ui_state):
 
 Rules:
 
-- Expanded means the full prompt text was rendered and the scroll container reached its end (or the prompt fits without scrolling). `acknowledgePrompt` records that the prompt was displayed, not that it was read; copy never says "you confirmed you read it" (FD§0.1 item 7: "can see" is enforced, "has read" is not). [D]
+- Expanded means the full prompt text was rendered and the scroll container reached its end (or the prompt fits without scrolling). `expandLeasePrompt` records that the prompt was displayed, not that it was read; copy never says "you confirmed you read it" (FD§0.1 item 7: "can see" is enforced, "has read" is not). [D]
 - When the rule applies and the prompt is collapsed, Copy and Open are disabled with the visible reason `copy.card.expand_first`, so a keyboard or screen-reader user finds the reason next to the disabled control. Decline and Report are never disabled. [D]
 - For `expand.comprehension_check`, the card asks one multiple-choice question about the card's own fields (for example "What is the purpose of this task?"); a wrong answer re-shows the card and never penalizes the member, never reduces credit and is not stored as a per-member score; the aggregate wrong-answer rate measures banner blindness [H] (S13.*). Off by default. [D]
 - Even when no expansion is required, the expander is visible and works. [D]
@@ -469,7 +470,7 @@ Rules:
 
 | State | Condition | Behavior |
 | --- | --- | --- |
-| Empty | `listOffers` returns none | As `AC-vol-09`; copy `copy.offers.empty` |
+| Empty | `listOfferedCells` returns none | As `AC-vol-09`; copy `copy.offers.empty` |
 | Loading | `createLease` in flight after Take | The tapped summary shows "Reserving..."; double taps are ignored (one `Idempotency-Key` per tap) |
 | Error: taken | `LEASE_CONFLICT` | `copy.error.cell_taken`; the list refreshes |
 | Error: lease cap | `lease.max_active_per_member` reached | `copy.offers.lease_cap`: finish or decline an active task; the active leases are listed |
@@ -478,7 +479,7 @@ Rules:
 | Blocked: suspended or banned | `member_status` not `active` | No offers; banner and Appeal action (`SCR-vol-14`) |
 | Blocked: paused | `kill.template.<tpl_id>`, `kill.service.<svc_id>` or `kill.all_new_jobs` engaged | Affected cells are absent from the list; if all are, `copy.offers.paused`; a lease open at the moment of the pause is revoked server-side and the card shows `copy.card.revoked` with a one-tap return, telling the volunteer a pasted result for it can no longer be accepted (`reject.policy_changed` or `reject.lease_expired`) |
 
-**API calls.** `listOffers`, `createLease`, `getLease`, `acknowledgePrompt`, `releaseLease`, `getMember`.
+**API calls.** `listOfferedCells`, `createLease`, `getLease`, `expandLeasePrompt`, `releaseLease`, `getMe`.
 
 **Copy intent.** Neutral and factual; no urgency language, no "hurry", no social proof. The credit line never promises credit. The license line always states reuse plainly. Category names come from data (`TopicCategory`), not from code.
 
@@ -486,9 +487,9 @@ Rules:
 
 **Acceptance criteria**
 
-- `AC-vol-11` Given a member who has never acknowledged template `tpl_x`, When the card opens, Then `expand_required` contains `expand.first_use_of_template`, Copy and Open are disabled with `copy.card.expand_first`, Decline and Report are enabled, and after the prompt is expanded and scrolled to its end Copy is enabled and `acknowledgePrompt` is called once.
+- `AC-vol-11` Given a member who has never acknowledged template `tpl_x`, When the card opens, Then `expand_required` contains `expand.first_use_of_template`, Copy and Open are disabled with `copy.card.expand_first`, Decline and Report are enabled, and after the prompt is expanded and scrolled to its end Copy is enabled and `expandLeasePrompt` is called once.
 - `AC-vol-12` Given a cell whose `license` is outside `optin.default_licenses` but inside the member's opt-ins, When the card opens, Then `expand.non_default_license` is present and the expansion gate applies.
-- `AC-vol-13` Given the member taps Decline, When the call completes, Then the cell is `queued`, no cooldown applies, the member's `trust_tier` and sampling are unchanged, and the next `listOffers` excludes that cell for that member for the current attempt.
+- `AC-vol-13` Given the member taps Decline, When the call completes, Then the cell is `queued`, no cooldown applies, the member's `trust_tier` and sampling are unchanged, and the next `listOfferedCells` excludes that cell for that member for the current attempt.
 - `AC-vol-14` Given a card is rendered, When its fields are inspected, Then purpose, license, sensitivity, service, template with version, expected time, category and credit all appear before the full prompt, and the provenance sentence appears exactly once with the approval date.
 - `AC-vol-15` Given the template is paused by `kill.template.<tpl_id>` while the member holds a lease, When the member returns to the card, Then the lease is shown revoked with `copy.card.revoked`, Copy is disabled, and no submission can be created for it.
 - `AC-vol-16` Given a prompt containing Persian text, Latin words and digits, When Copy is tapped, Then the clipboard holds the exact prompt string whose hash equals the lease's `prompt_hash`, with no added marks and no digit conversion.
@@ -501,7 +502,7 @@ Get the exact prompt text into the volunteer's chosen chat service with the fewe
 
 ### 11.9.2 Adapter contract used by the client [D]
 
-For each service offered to this member, `listApprovedServices` returns only services in state `approved` (S0.9.6) with these fields (names from S0.8.3; every value is entered by a reviewer [V]):
+For each service offered to this member, `listServices` returns only services in state `approved` (S0.9.6) with these fields (names from S0.8.3; every value is entered by a reviewer [V]):
 
 | Field | Type | Meaning for the screen |
 | --- | --- | --- |
@@ -567,13 +568,13 @@ function handoffModes(card, service):
 | State | Condition | Behavior |
 | --- | --- | --- |
 | Empty | No approved service offered for this task | Not reachable: such a cell is not offered (`R8`, `R7`); if it happens, `copy.handoff.no_service` with Decline |
-| Loading | `listApprovedServices` pending | Copy works at once if the prompt is on the device; service list shows a placeholder |
+| Loading | `listServices` pending | Copy works at once if the prompt is on the device; service list shows a placeholder |
 | Error | `getLease` fails | Retry; the on-device prompt is still usable until the lease expires |
 | Offline or low bandwidth | No network | Copy and the instructions work; the link mode works because it needs no Hamyar call; Submit is deferred to paste-back |
 | Blocked: service paused | `kill.service.<svc_id>` engaged or service enters `review_due`, `suspended`, `revoked` | The service disappears from the list; for `suspended` or a kill switch a lease bound to `M1` for it is revoked; for `review_due` only new leases are blocked and an active lease continues until `service.review_grace_days` pass (S0.9.6); for `revoked` in-flight cells are handled per S7.*; `copy.handoff.service_paused` |
 | Blocked: lease expired | Lease timer passes `expires_at` | See 11.10; Copy disabled; "Back to tasks" |
 
-**API calls.** `listApprovedServices`, `getLease`, `extendLease`.
+**API calls.** `listServices`, `getLease`, `extendLease`.
 
 **Copy intent.** Imperative, numbered, four steps; says "you press Send" in words. No logo, brand claim or provider endorsement; service names come from registry data. No statement that a service is safe, free or allowed (those are [V] and live in the registry).
 
@@ -761,7 +762,7 @@ The volunteer also has "flagged" in the sense of their own report on a card (`SC
 | Blocked: suspended | Member suspended after submit | Outcome still readable; new tasks blocked; Appeal offered |
 | Blocked: paused | Job or template paused or voided (`cell.voided`) | `copy.feedback.voided`: the task was withdrawn; no fault of yours; credit rules shown (S6.*) |
 
-**API calls.** `getSubmission`, `getBalance`, `getMember`.
+**API calls.** `getSubmission`, `getBalance`, `getMe`.
 
 **Copy intent.** Say what is known, say what is not yet known, never congratulate beyond the fact. Never promise credit before acceptance. Never describe verification internals. Use "declared" for any statement about rules or expiry: "credit expires on the declared date".
 
@@ -810,7 +811,7 @@ The volunteer also has "flagged" in the sense of their own report on a card (`SC
 
 **Content rules [D]**
 
-- Balance is the sum of unexpired `CreditLot` amounts of the member's `member` ledger account, from `getBalance`; lots from `listCreditLots`; entries from `listMemberLedgerEntries`. Display rounds balances down (S0.6.1) and shows whole credits plus a fraction only when non-zero. The client never sums, rounds, or computes expiry itself.
+- Balance is the sum of unexpired `CreditLot` amounts of the member's `member` ledger account, from `getBalance`; lots from `listLots`; entries from `listLedgerEntries`. Display rounds balances down (S0.6.1) and shows whole credits plus a fraction only when non-zero. The client never sums, rounds, or computes expiry itself.
 - Each lot row shows credits, earned date, expiry date (`expires_at = earned_at + credit.lifetime_days x 86,400 s` with the parameter version in force at `earned_at`, S0.6.2), source (`mint`, `transfer`, `grant` starter, `grant` referral, `refund` restored), and an expiry warning when within `credit.expiry_notice_days`. Both calendars appear in the detail tooltip.
 - The starter-grant lot shows its own shorter expiry (`grant.starter_lifetime_days`) and is labeled non-transferable (`grant.non_transferable`).
 - When a member is in the accelerated-expiry arm (`ff.experiment.expiry_arm` on and an `ExperimentAssignment` exists), the screen shows only the member's own declared lifetime in days and never the word "experiment" or the other arm's value; the assignment itself is logged server-side (S12.*, S13.*) and its disclosure is part of the pilot opt-in notice (FD§9 Phase 1 setup, participants informed). [D][A]
@@ -831,7 +832,7 @@ The volunteer also has "flagged" in the sense of their own report on a card (`SC
 
 **Actions.** Take a task, View ledger entries (list only, own entries), Read more (expiry explainer), Back.
 
-**API calls.** `getBalance`, `listCreditLots`, `listMemberLedgerEntries`, `getMember`.
+**API calls.** `getBalance`, `listLots`, `listLedgerEntries`, `getMe`.
 
 **Copy intent.** Dates before percentages; no loss framing ("you will lose") beyond the plain expiry date; no countdown animation; the expiry notice is shown on this screen and as a header dot, never as a push message (V-11, V-12).
 
@@ -883,7 +884,7 @@ The volunteer also has "flagged" in the sense of their own report on a card (`SC
 
 **Actions.** Filter, Load more, Open detail, Appeal, Report, Export.
 
-**API calls.** `listCellHistory`, `getSubmission`, `listAppeals`.
+**API calls.** `listSubmissions`, `listLeases`, `getSubmission`, `listAppeals` (11.5.1 says which list feeds which filter).
 
 **Copy intent.** Neutral list language; outcome words match 11.11.2; no ranking against others.
 
@@ -938,7 +939,7 @@ The volunteer also has "flagged" in the sense of their own report on a card (`SC
 
 **Actions.** Toggle, Save, Reset to defaults, Back (asks before discarding unsaved changes).
 
-**API calls.** `getOptIns`, `updateOptIns`, `listTopicCategories`, `listApprovedServices`.
+**API calls.** `getOptIns`, `replaceOptIns`, `listTopicCategories`, `listServices`.
 
 **Copy intent.** Respectful and neutral; each item says what the volunteer will see, not what they should choose.
 
@@ -947,7 +948,7 @@ The volunteer also has "flagged" in the sense of their own report on a card (`SC
 **Acceptance criteria**
 
 - `AC-vol-43` Given a new member, When the screen opens, Then exactly the values in `optin.default_*` are selected, `P2` and `P3` are disabled, `S2` and `S3` are not selectable, and no topic category is selected.
-- `AC-vol-44` Given the volunteer enables a sensitive topic category, When they tap Save, Then a confirmation listing what such tasks can contain is shown first, `updateOptIns` is called only after confirmation, and `member.optin_changed` is emitted.
+- `AC-vol-44` Given the volunteer enables a sensitive topic category, When they tap Save, Then a confirmation listing what such tasks can contain is shown first, `replaceOptIns` is called only after confirmation, and `member.optin_changed` is emitted.
 - `AC-vol-45` Given the volunteer disables `P1`, When they next open the offer list, Then no `P1` cell is offered and their trust tier and credit are unchanged.
 - `AC-vol-46` Given a request that enables a locked axis is forced, When the server evaluates it, Then it returns `UNPROCESSABLE` and the stored `OptIn` is unchanged.
 
@@ -1090,7 +1091,7 @@ The volunteer also has "flagged" in the sense of their own report on a card (`SC
 
 **Actions.** Create, Copy link, Copy code, Revoke, toggle "add to share card" (11.16).
 
-**API calls.** `createInvite`, `listInvites`, `revokeInvite`, `getReferralStatus`.
+**API calls.** `createInvite`, `listInvites`, `revokeInvite`, `listReferrals`.
 
 **Copy intent.** Quiet, safety-first; a trust relationship, not a promotion.
 
@@ -1145,15 +1146,15 @@ The volunteer also has "flagged" in the sense of their own report on a card (`SC
 
 **Rules [D]**
 
-- The key is shown only after `getMember` reports the first accepted cell, only on the device, with Copy and Download as plain text. It is never sent to the server in clear; the server stores only a verifier (S10.*). Display is not logged. The screen is excluded from screenshots where the platform lets a page ask for that [V].
-- Confirmation asks the member to re-enter `ui.recovery_confirm_groups` groups chosen at random from the key (default 2), proving the member saved it; success calls `confirmRecoveryKey` and removes the header marker. The member may choose Later; the marker stays, and the key can be shown again only by `rotateRecoveryKey`, which creates a new key and invalidates the old one after a confirmation that states the consequence. [D]
+- The key is shown only after `getMe` reports the first accepted cell, only on the device, with Copy and Download as plain text. It is never sent to the server in clear; the server stores only a verifier (S10.*). Display is not logged. The screen is excluded from screenshots where the platform lets a page ask for that [V].
+- Confirmation asks the member to re-enter `ui.recovery_confirm_groups` groups chosen at random from the key (default 2), proving the member saved it; success calls `confirmRecoveryKey` and removes the header marker. The member may choose Later; the marker stays, and the key can be shown again only by `rotateKey` (`kind` `recovery`), which creates a new key and invalidates the old one after a confirmation that states the consequence. [D]
 - The key is excluded from digit conversion (11.4.2) and rendered `dir="ltr"`; alternate "words" display is an option only if S10.* defines a word list for it [A].
 - Restore: signed with a new device key; success emits `member.recovered`; the member then faces `identity.recovery_cooldown_s` (default 86,400 s) during which they cannot start jobs or spend (S10.*), shown as a declared safety rule with the end time. Attempts are limited by `ratelimit.recovery_attempts_per_day` and `identity.recovery_max_per_90d`; the screen never says which limit triggered or whether the key was close. A wrong key and an unknown key give the same answer (no account enumeration). [D]
 - Honest limit statement (FD Principle 11): the screen says plainly that a recovery key is the only way back, that anyone who has it can restore the identity, and that Hamyar cannot protect a key the member shares. [D]
 
 **States.** Empty: no key yet generated (not reachable after F2). Loading: restore in progress. Error: `RATE_LIMITED`; wrong key (`copy.recovery.not_recognized`); `copy.error.try_again`. Offline: save and confirm work offline except `confirmRecoveryKey`, which is queued; restore requires network. Blocked: member `closed` (`copy.recovery.closed`); too many attempts (`RATE_LIMITED` with time).
 
-**API calls.** `confirmRecoveryKey`, `rotateRecoveryKey`, `startRecovery`, `completeRecovery`, `createSession`.
+**API calls.** `confirmRecoveryKey`, `rotateKey` (`kind` `recovery`), `createIdentityChallenge` (purpose `recover`), `recoverMember`, `createSession`.
 
 | Copy key | `fa` (draft) | `en` |
 | --- | --- | --- |
@@ -1313,8 +1314,8 @@ The volunteer also has "flagged" in the sense of their own report on a card (`SC
 ```
 
 - Display options are device-local (11.4.2); time zone is the device zone by default and an IANA zone if chosen, never inferred from an IP address (S0.6.2).
-- **Link another device:** `createDeviceLinkCode` shows a one-time code valid `identity.device_link_code_ttl_s` (default 300 s); the new device enters it with `redeemDeviceLinkCode`; success emits `member.device_linked`; the old device is told. The screen explains that a linked device holds full access to the identity. [D]
-- **Rotate key:** `rotateMemberKey` replaces the device key with a grace period `identity.key_rotation_grace_s`; emits `member.key_rotated`; a confirmation states the consequence.
+- **Link another device:** `createDeviceLink` shows a one-time code valid `identity.device_link_code_ttl_s` (default 300 s); the new device enters it with `redeemDeviceLink` and shows a short check string; the old device compares the two strings and confirms with `approveDeviceLink`; the approval emits `member.device_linked`. The screen explains that a linked device holds full access to the identity. [D]
+- **Rotate key:** `rotateKey` (`kind` `device`) replaces the device key with a grace period `identity.key_rotation_grace_s`; emits `member.key_rotated`; a confirmation states the consequence.
 - **E-mail:** optional (`identity.email_optional`); if S10.* allows it, the screen says in plain words what the address is used for and that adding it can link the identity to a person; it is never requested elsewhere. [A]
 - **Close account:** `closeMember` after a confirmation that states what is deleted or reduced to an opaque id (`member_bound` retention, S0.7) and that ledger records without personal data remain (`permanent` retention); irreversible; shows the credit that will be forfeited. Emits `member.closed`.
 - States: Loading; Error with retry; Offline: display options still change (device-local), server actions disabled; Blocked: suspended or banned members can change display options and close the account, nothing else.
