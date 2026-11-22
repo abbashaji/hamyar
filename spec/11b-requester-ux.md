@@ -1026,6 +1026,7 @@ Every notice is a copy key with `fa` and `en` text and the marker `needs_human_a
 - **AC-req-74** Given the right-to-left locale and a keyboard-only user, When the person completes the wizard from step 1 to step 7, Then every control is reachable in visual order, focus is always visible, and no step needs a pointer (`T-rtl`).
 - **AC-req-75** Given a draft whose declarations pass the client checks but fail `R1` on the server (for example `R1` `not_allowlisted`), When Check my request is pressed, Then `submitJobForScreening` answers an API error, the Job stays `draft`, the `R1` reason of 11.43.1 is shown on `SCR-req-05` with the entered values intact, and nothing is charged.
 - **AC-req-76** Given the active policy version requires `ack.declared_not_guaranteed`, `ack.no_ownership_assurance` and `ack.no_personal_data` for `S0` and `S1`, When the person has not ticked all of them, Then Check my request is disabled and names the missing ones; when all are ticked, `updateJob` stores them in `Job.acks` before `submitJobForScreening`.
+- **AC-req-77** Given a quote whose `small_job_notice` is `true` (S15a 15.7.2; for example N = 7 at `price.v_prior` 0.10, `verification_pool_ucr` 700,000, below one credit), When `SCR-req-07` shows the quote and `SCR-req-08` shows the confirmation before any credit is held, Then both screens show the statement that the job stops with partial results at its first required verification cell; given a quote whose `small_job_notice` is `false` (for example N = 10, `verification_pool_ucr` 1,000,000), Then neither screen shows it [default-pending D-37].
 
 ## 11.48 Reuse from the existing panel [V]
 
@@ -1059,7 +1060,7 @@ These are listed so C-001 can fold them back into S0 (`ISS-114`). Until it does,
 | Events | `upload.accepted`, `upload.screen_passed`, `upload.screen_flagged`, `upload.screen_rejected`, `upload.screen_failed`, `rating.submitted`; `job.waitlist_expired` is used as the waitlist-lapse event (use S0.9.2's name if it differs) | 11.35.1 |
 | API | Operation ids marked `+` in 11.34; `createJob` accepts `copy_from_job_id` and `reservation_id`; `ETag` / `If-None-Match` on authenticated read responses that carry `Cache-Control: no-store` | Conditional requests are for bandwidth only |
 | Secret | Optional platform manifest-signing key for `manifest.signature` | S10.* names it; the owner decides (S3.*) |
-| ID schemes | Decision ids `RD-nn` (this file); `copy.req.*`; `SCR-req-01`..`SCR-req-18`; `AC-req-01`..`AC-req-74` | Within S0.5 |
+| ID schemes | Decision ids `RD-nn` (this file); `copy.req.*`; `SCR-req-01`..`SCR-req-18`; `AC-req-01`..`AC-req-77` | Within S0.5 |
 
 | Parameter | Type and unit | Initial configurable default | Validation | Replaced by |
 | --- | --- | --- | --- | --- |

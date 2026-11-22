@@ -499,12 +499,15 @@ Quote        { policy_version_id: id<plv>, parameter_versions: { "<parameter nam
                primary_cells: int, v_ppm: ppm, lambda_ppm: ppm, p_ucr: ucr, eta_ppm: ppm,
                primary_pay_ucr: ucr, verification_pool_ucr: ucr, levy_ucr: ucr, escrow_ucr: ucr, verification_pool_cells: int,
                admission: { decision: "admit"/"waitlist", capacity_cells: int, committed_cells: int, phi_ppm: ppm },
-               window_s: dur_s, expires_at: ts, quote_hash: hash }
+               window_s: dur_s, expires_at: ts, quote_hash: hash,
+               small_job_notice: bool }
 ```
 
 `ack` (convention addition): `stranger_reads_input` (required for `S1`), `downstream_use_uncontrolled` (required for `P1`; FD§5.7 failure mode 3). The wizard is the only place a requester states purpose, license and sensitivity, and these are *declared*, never verified (FD§5.7 failure mode 1). `inputs` holds one value per `input_slots.key`, validated against the template version (`400 VALIDATION_FAILED` with `details.fields`).
 
 `Quote` arithmetic is exactly 0.6.1 with N = `primary_cells`: `p_ucr = 1,000,000 + v_ppm + lambda_ppm`; `escrow_ucr = N x p_ucr`; `primary_pay_ucr = N x 1,000,000`; `verification_pool_ucr = N x v_ppm`; `levy_ucr = N x lambda_ppm`; `verification_pool_cells = floor(verification_pool_ucr / 1,000,000)`; `eta_ppm = floor(10^12 / p_ucr)`. `v_ppm` and `lambda_ppm` are the values in force for the job type (`price.v_prior` until `price.v_min_sample_cells`, then the measured value, `S6.*`); `parameter_versions` records the version of every parameter used so the quote is reproducible. `S6.*` owns the admission algorithm; this part only fixes what it returns. [D]
+
+`small_job_notice` (boolean) is `true` when `verification_pool_ucr` is below 1,000,000, that is when `verification_pool_cells` is 0 (for example N below 10 at the verification fraction v = 0.10, `S6.*` 6.11.1), and `false` otherwise. `true` means that the job stops at its first required verification cell with partial results (`job.stop_requested` with closure reason `verification_shortfall`; accepted primary cells stay paid, the levy is posted on them and the unspent escrow is refunded, `S6.*` 6.7.3 and `AC-ledger-17`). The requester screens show this statement with the quote and on the confirmation screen before any credit is held (`AC-req-77`, `S11.*`). [A][default-pending D-37]
 
 ```
 createJob   req { template_id: id<tpl>, title: text<80>?, inputs: object?, upload_ids: [id<upl>]?, glossary_id: id<gls>?,
