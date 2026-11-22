@@ -1,0 +1,56 @@
+id: C-192
+title: 'R5-final: spec status, known issues, op-id gate'
+type: normal
+priority: 3
+lease_minutes: 90
+goal: 'You close the specification for the build phase. Write TWO files. (1) docs/opid-aliases.txt: one line per operation id that scripts/check_opids.py still reports and that the Noticed sections of docs/fix/R5-08.md and the other R5 logs mark ''no S15 operation'': ''old_id OPEN:<one-line reason>''; first read docs/fix/R5-*.md. Do not alias an id for which S15 has an operation: fix nothing in spec/ (you may not edit it). Lines starting with # are comments. (2) docs/SPEC-STATUS.md: the build-phase hand-over: (a) ''Status'' one paragraph: what the spec is, that five rounds of fixes and independent audits were applied (docs/audit/FINAL-*.md), that round 5 had no re-audit by decision of the owner, and the honest limit: the CI scripts check names, paths, parameter definitions, issue registers and operation ids, not meaning; (b) ''Rules for build cells'': when a build cell finds two parts that disagree it uses the authority order of docs/decisions.md and D-30 of docs/owner-decisions.md (owner decisions, then Founding Document, then S0, then the owning part, then others), applies the winner, records the fix in docs/spec-issues-found.md and never silently picks; where docs/owner-decisions.md marks a value default-pending it builds the default; (c) ''Known issues'': every row of docs/audit/FINAL-4.md and every ''Noticed, not fixed'' of docs/fix/R5-*.md that is still open, one line each with file and cause (read the R5 logs and say closed or open; do not claim a row is closed unless its R5 log says applied or already-applied); (d) ''Owner actions before launch'': D-01 (two admins before any gate), D-02 (Reserve seed) and every default-pending decision of D-18a..D-44 in one list. Create docs/spec-issues-found.md with one header line and an empty table (columns: date | parts | disagreement | winner | rule used | build cell). Facts you state must come from the files you read; mark anything you did not verify as [UNVERIFIED].'
+after:
+- C-179
+- C-180
+- C-181
+- C-182
+- C-183
+- C-184
+- C-185
+- C-186
+- C-187
+- C-188
+- C-189
+- C-190
+- C-191
+read:
+- docs/decisions.md
+- docs/owner-decisions.md
+- docs/audit/FINAL-4.md
+- docs/audit/FINAL-3.md
+- docs/audit/FINAL-2.md
+- docs/fix/R5-01a.md
+- docs/fix/R5-01b.md
+- docs/fix/R5-02.md
+- docs/fix/R5-03a.md
+- docs/fix/R5-03b.md
+- docs/fix/R5-04.md
+- docs/fix/R5-05a.md
+- docs/fix/R5-05b.md
+- docs/fix/R5-06.md
+- docs/fix/R5-07a.md
+- docs/fix/R5-07b.md
+- docs/fix/R5-08.md
+- docs/fix/R5-09.md
+- scripts/check_opids.py
+allowed_paths:
+- docs/opid-aliases.txt
+- docs/SPEC-STATUS.md
+- docs/spec-issues-found.md
+outputs:
+- docs/opid-aliases.txt
+- docs/SPEC-STATUS.md
+- docs/spec-issues-found.md
+acceptance:
+- cmd: python scripts/check_opids.py
+- cmd: python scripts/check_text.py docs/SPEC-STATUS.md --present 'Known issues' 'Rules for build cells' 'Owner actions before launch' 'D-01'
+- cmd: python scripts/check_params.py
+- cmd: python scripts/check_issues.py
+- cmd: python scripts/check_stale.py
+- cmd: python scripts/check_refs.py api
+notes: 'Final cell of round 5. Nothing in spec/ is edited here. If check_opids still fails after the aliases, an id is cited that has an S15 operation under another name: add it as an alias line ''id OPEN:renamed, see <file>'' and list it in Known issues.'

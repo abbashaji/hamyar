@@ -1,0 +1,75 @@
+id: C-185
+title: 'R5-05a: terminal paths: payout guard, flagged cells, deadline'
+type: normal
+priority: 4
+lease_minutes: 90
+goal: 'You apply a fixed list of audit findings to spec parts and write docs/fix/R5-05a.md. SOURCES: docs/audit/FINAL-4.md (the ''Findings'' table; rows 1-66: each row you are assigned states file:line, defect and the proposed fix; READ each of your rows first), docs/owner-decisions.md (the owner''s accepted decisions D-01..D-44: they are binding, apply them, never invent another choice), and the parts named below. AUTHORITY WHEN SOURCES CONFLICT: docs/owner-decisions.md, then the Founding Document, then S0 (spec/00-conventions.md), then the part that owns the concept per D-30 (entities and columns: S5a; enums and states: S0; operations and paths: S15a/S15b; copy keys for requester rejections: S7), then all other parts. METHOD: for each assigned row, locate the cited text by reading about 30 lines around the cited line (lines drift; search nearby, never guess); make the MINIMAL edit in place (apply_changes with small old/new strings; never rewrite sections, never delete content that is not part of the fix); after an edit, check that every other place in YOUR files that states the same fact now agrees (search by reading the neighbouring sections and any table that repeats it); do not touch anything not named by your rows; if you notice another defect list it under ''## Noticed, not fixed'' with file:line and do not fix it. Names: edits may change only the identifiers your row says to change; never rename any other id, parameter, endpoint, state or enum; never mention retired names in the new text. If an edit would contradict the Founding Document, a ground rule of docs/decisions.md or a decision of docs/owner-decisions.md, do not make it: record skipped-needs-owner with the reason. STATUS WORDS: applied / already-applied / skipped-needs-owner / skipped-not-found (with what you searched). LOG docs/fix/R5-05a.md: a table with columns exactly: edit | file:line | before | after | status (one row per edit, row numbers of FINAL-4 in the first column), then ''## Read-back'' (after ALL edits re-open every edited place and state in a phrase what you now read; also state, for each row, which other places you checked for the same fact), then ''## Noticed, not fixed'', then a last line ''Result: DONE'' or ''Result: DONE WITH SKIPS''. Mark every edit that follows a decision as default-pending in the ''after'' column. Do not run anything; CI runs the acceptance commands.
+
+
+  TASK R5-05a: Rows 2, 17, 18, 49, 50, 51, 52 of FINAL-4 (D-26, D-31, D-43). Read 5.22.1, JT-15, JT-18, 5.23.2 (G-accept, DEFER paragraph), CT-07, CT-15..CT-19, 5.29.8 first and in your Read-back state, for each closure reason (every one of 0.9.2) and each of `settling` and `cancelling`, what happens to a submitted, flagged or deferred cell so that `settle()` always runs. D-43: in `settling` or `cancelling` no cell is deferred: blocked acceptance (payout guard, donor suspended, template paused, switch off, no headroom) is VOID with reason; a flagged cell with no audit cell in leased, submitted or flagged_for_audit is VOID (CT-16); put the rule in G-accept, in 5.22.1 for every row that continues submitted cells, in JT-18, in CT-19 (what ends a flagged cell after escalation) and fix the 06a:301 comment. Row 49: the guard names `submitted` or `flagged_for_audit`. Row 50: the deferral deadline is the `overrun_timeout` deadline of JT-15 including the pause in progress (05b and 05a:711). Row 51: the value of `commons.job_overrun_days` is the one stamped at quote (JT-04), say it in JT-15, 16c and 05a. Row 52: CT-07 creates the Audit in the same transaction with `flag_age_out_days_applied`; when `pool_ok` is false a mandatory flag is flagged with no audit cell and `ledger.verification_budget_exhausted` is raised. ROUND-5 RULES: (1) The rows of docs/audit/FINAL-4.md state defect and action; where an owner decision (D-35, D-39..D-44 in docs/owner-decisions.md) names the choice, it overrides the row''s proposal. (2) SIBLING RULE: after every edit, open EVERY other file and line that states the same fact (the row names them; search the parts listed in your read list with the key words of the fact) and make them agree in the same cell; if a sibling is outside your allowed files, list it under ''## Noticed, not fixed'' with file:line. (3) Write each fact once in its owner part and point from the others where the row allows. (4) Never reintroduce a retired name; never cite an operation id that S15a/S15b (or a NEW row of 15c..15g) does not define. (5) Line numbers in the rows are approximate: search near them.
+
+  '
+after:
+- C-183
+- C-184
+- C-003
+- C-004
+- C-005
+- C-035
+- C-042
+- C-046
+- C-047
+- C-075
+- C-077
+- C-087
+- C-088
+- C-089
+- C-096
+- C-097
+- C-139
+- C-140
+- C-144
+- C-145
+- C-146
+- C-147
+- C-155
+- C-161
+- C-162
+- C-166
+- C-167
+- C-168
+- C-169
+- C-171
+- C-172
+read:
+- docs/decisions.md
+- docs/owner-decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- docs/audit/FINAL-4.md
+- spec/00-conventions.md
+- spec/08b-verification.md
+- spec/05b-state-machines.md
+- spec/05a-entities.md
+- spec/06a-ledger.md
+- spec/16c-parameters-b.md
+allowed_paths:
+- docs/fix/R5-05a.md
+- spec/05b-state-machines.md
+- spec/05a-entities.md
+- spec/06a-ledger.md
+- spec/16c-parameters-b.md
+outputs:
+- docs/fix/R5-05a.md
+acceptance:
+- cmd: python scripts/check_fixlog.py docs/fix/R5-05a.md
+- cmd: python scripts/check_spec.py spec/05b-state-machines.md --min-lines 701 --min-tags 1
+- cmd: python scripts/check_spec.py spec/05a-entities.md --min-lines 1729 --min-tags 1
+- cmd: python scripts/check_spec.py spec/06a-ledger.md --min-lines 753 --min-tags 1
+- cmd: python scripts/check_spec.py spec/16c-parameters-b.md --min-lines 166 --min-tags 1
+- cmd: python scripts/check_text.py spec/05b-state-machines.md --present 'funding_shortfall' 'flag_age_out_days_applied'
+- cmd: python scripts/check_params.py
+- cmd: python scripts/check_issues.py
+- cmd: python scripts/check_stale.py
+- cmd: python scripts/check_refs.py api
+notes: 'Round-5 fix cell. Edits only inside allowed_paths. Large files: read in chunks of at most 600 lines with read_files; commit (apply_changes) after every ~10 edits and keep the log table current. Evidence tags and heading format as in docs/decisions.md. Acceptance is partly structural: completeness is what the goal says.'

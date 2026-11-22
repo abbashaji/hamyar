@@ -1,0 +1,117 @@
+id: C-179
+title: 'R5-01a: two-person list, enrollment and approval vocabulary'
+type: normal
+priority: 4
+lease_minutes: 90
+goal: 'You apply a fixed list of audit findings to spec parts and write docs/fix/R5-01a.md. SOURCES: docs/audit/FINAL-4.md (the ''Findings'' table; rows 1-66: each row you are assigned states file:line, defect and the proposed fix; READ each of your rows first), docs/owner-decisions.md (the owner''s accepted decisions D-01..D-44: they are binding, apply them, never invent another choice), and the parts named below. AUTHORITY WHEN SOURCES CONFLICT: docs/owner-decisions.md, then the Founding Document, then S0 (spec/00-conventions.md), then the part that owns the concept per D-30 (entities and columns: S5a; enums and states: S0; operations and paths: S15a/S15b; copy keys for requester rejections: S7), then all other parts. METHOD: for each assigned row, locate the cited text by reading about 30 lines around the cited line (lines drift; search nearby, never guess); make the MINIMAL edit in place (apply_changes with small old/new strings; never rewrite sections, never delete content that is not part of the fix); after an edit, check that every other place in YOUR files that states the same fact now agrees (search by reading the neighbouring sections and any table that repeats it); do not touch anything not named by your rows; if you notice another defect list it under ''## Noticed, not fixed'' with file:line and do not fix it. Names: edits may change only the identifiers your row says to change; never rename any other id, parameter, endpoint, state or enum; never mention retired names in the new text. If an edit would contradict the Founding Document, a ground rule of docs/decisions.md or a decision of docs/owner-decisions.md, do not make it: record skipped-needs-owner with the reason. STATUS WORDS: applied / already-applied / skipped-needs-owner / skipped-not-found (with what you searched). LOG docs/fix/R5-01a.md: a table with columns exactly: edit | file:line | before | after | status (one row per edit, row numbers of FINAL-4 in the first column), then ''## Read-back'' (after ALL edits re-open every edited place and state in a phrase what you now read; also state, for each row, which other places you checked for the same fact), then ''## Noticed, not fixed'', then a last line ''Result: DONE'' or ''Result: DONE WITH SKIPS''. Mark every edit that follows a decision as default-pending in the ''after'' column. Do not run anything; CI runs the acceptance commands.
+
+
+  TASK R5-01a: Rows 1, 12, 13, 41, 42, 43, 44, 45, 48 of FINAL-4 (decisions D-34, D-35, D-39). ONE table of two-person action names owned by 10a 10.12 (14 names); S0 default and fixed minimum, S16 `security.two_person_actions` row, S15b 15.22.4, 11c and 14 conform and add none. S15b: replace the default-list sentence by a pointer; `createAdminUser` and `changeAdminRoles` are `2P` `admin.role_grant`; lifetime `identity.device_link_code_ttl_s`, handed over by the proposer; one sentence on the bootstrap fallback. Delete the two-person claims of `experiment.start` (13 13.8.2), `flag.enable_credit_moving` (12), `service.approve` (15b), `audit.accept`, `quarantine.release`, `cell.overturn` and the founders case in 11c (catalog rows :168 CT2 one approver, :181, :226, :198, ISS-117 (f)); conform 11c:150 and 11.61 to D-34 (parameter adds names, removes none). Row 41: D-35 in 10.11 rule 5, AD9, 11c:59, 14.8.6 (:536-538) with the words except the enrollment fallback; add AC-admin-05 and the alarm kind `admin.bootstrap_enrollment` (category `security`) in 10.18.2 and 15b 15.29.4. Row 43: one entity name (`AdminApproval`, `apv_`), one lifetime name (`security.two_person_ttl_s` if S16b defines it, else the S15b name: read 16b and 15b and choose the one S16b defines), one step-up age name (the one S16b defines), event `admin.approval_failed` in 10.18.2. Row 44: 10a:416 member kill switch scope matches 14.2. Row 45: for each of `invite.seed_issue`, `admin.credential_add`, `admin.credential_unlock`, `disclosure.release`, `secret.emergency_access` find the operation in 15b..15f; if none, mark the name reserved (no operation in Phase 1) in the table of 10.12. Row 48: ISS-102 status resolved citing D-34 and D-35. ROUND-5 RULES: (1) The rows of docs/audit/FINAL-4.md state defect and action; where an owner decision (D-35, D-39..D-44 in docs/owner-decisions.md) names the choice, it overrides the row''s proposal. (2) SIBLING RULE: after every edit, open EVERY other file and line that states the same fact (the row names them; search the parts listed in your read list with the key words of the fact) and make them agree in the same cell; if a sibling is outside your allowed files, list it under ''## Noticed, not fixed'' with file:line. (3) Write each fact once in its owner part and point from the others where the row allows. (4) Never reintroduce a retired name; never cite an operation id that S15a/S15b (or a NEW row of 15c..15g) does not define. (5) Line numbers in the rows are approximate: search near them.
+
+  '
+after:
+- C-000
+- C-011
+- C-015
+- C-017
+- C-018
+- C-019
+- C-021
+- C-022
+- C-027
+- C-044
+- C-045
+- C-051
+- C-052
+- C-053
+- C-054
+- C-056
+- C-059
+- C-062
+- C-064
+- C-065
+- C-066
+- C-072
+- C-073
+- C-074
+- C-076
+- C-079
+- C-080
+- C-081
+- C-082
+- C-084
+- C-085
+- C-086
+- C-089
+- C-090
+- C-091
+- C-092
+- C-094
+- C-138
+- C-139
+- C-140
+- C-141
+- C-142
+- C-144
+- C-147
+- C-148
+- C-150
+- C-152
+- C-153
+- C-155
+- C-161
+- C-162
+- C-163
+- C-164
+- C-165
+- C-170
+- C-171
+- C-172
+read:
+- docs/decisions.md
+- docs/owner-decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- docs/audit/FINAL-4.md
+- spec/16b-parameters-a.md
+- spec/15c-api-reconcile-core.md
+- spec/15e-api-reconcile-admin.md
+- spec/10b-safety.md
+- spec/15b-api-admin.md
+- spec/10a-identity.md
+- spec/00-conventions.md
+- spec/16-parameters.md
+- spec/11c-admin-tools.md
+- spec/14-launch-gates.md
+- spec/13-measurement.md
+- spec/12-public-growth.md
+allowed_paths:
+- docs/fix/R5-01a.md
+- spec/15b-api-admin.md
+- spec/10a-identity.md
+- spec/00-conventions.md
+- spec/16-parameters.md
+- spec/11c-admin-tools.md
+- spec/14-launch-gates.md
+- spec/13-measurement.md
+- spec/12-public-growth.md
+outputs:
+- docs/fix/R5-01a.md
+acceptance:
+- cmd: python scripts/check_fixlog.py docs/fix/R5-01a.md
+- cmd: python scripts/check_spec.py spec/15b-api-admin.md --min-lines 1020 --min-tags 1
+- cmd: python scripts/check_spec.py spec/10a-identity.md --min-lines 677 --min-tags 1
+- cmd: python scripts/check_spec.py spec/00-conventions.md --min-lines 850 --min-tags 1
+- cmd: python scripts/check_spec.py spec/16-parameters.md --min-lines 552 --min-tags 1
+- cmd: python scripts/check_spec.py spec/11c-admin-tools.md --min-lines 741 --min-tags 1
+- cmd: python scripts/check_spec.py spec/14-launch-gates.md --min-lines 572 --min-tags 1
+- cmd: python scripts/check_spec.py spec/13-measurement.md --min-lines 982 --min-tags 1
+- cmd: python scripts/check_spec.py spec/12-public-growth.md --min-lines 681 --min-tags 1
+- cmd: python scripts/check_text.py spec/15b-api-admin.md --absent 'admin\.role_change' '`admin\.enroll`'
+- cmd: python scripts/check_text.py spec/11c-admin-tools.md --absent 'member\.resolve_handle'
+- cmd: python scripts/check_text.py spec/10a-identity.md --present 'admin\.bootstrap_enrollment'
+- cmd: python scripts/check_params.py
+- cmd: python scripts/check_issues.py
+- cmd: python scripts/check_stale.py
+- cmd: python scripts/check_refs.py api
+notes: 'Round-5 fix cell. Edits only inside allowed_paths. Large files: read in chunks of at most 600 lines with read_files; commit (apply_changes) after every ~10 edits and keep the log table current. Evidence tags and heading format as in docs/decisions.md. Acceptance is partly structural: completeness is what the goal says.'

@@ -1,0 +1,67 @@
+id: C-186
+title: 'R5-05b: restitution leftovers, mint headroom naming'
+type: normal
+priority: 4
+lease_minutes: 90
+goal: 'You apply a fixed list of audit findings to spec parts and write docs/fix/R5-05b.md. SOURCES: docs/audit/FINAL-4.md (the ''Findings'' table; rows 1-66: each row you are assigned states file:line, defect and the proposed fix; READ each of your rows first), docs/owner-decisions.md (the owner''s accepted decisions D-01..D-44: they are binding, apply them, never invent another choice), and the parts named below. AUTHORITY WHEN SOURCES CONFLICT: docs/owner-decisions.md, then the Founding Document, then S0 (spec/00-conventions.md), then the part that owns the concept per D-30 (entities and columns: S5a; enums and states: S0; operations and paths: S15a/S15b; copy keys for requester rejections: S7), then all other parts. METHOD: for each assigned row, locate the cited text by reading about 30 lines around the cited line (lines drift; search nearby, never guess); make the MINIMAL edit in place (apply_changes with small old/new strings; never rewrite sections, never delete content that is not part of the fix); after an edit, check that every other place in YOUR files that states the same fact now agrees (search by reading the neighbouring sections and any table that repeats it); do not touch anything not named by your rows; if you notice another defect list it under ''## Noticed, not fixed'' with file:line and do not fix it. Names: edits may change only the identifiers your row says to change; never rename any other id, parameter, endpoint, state or enum; never mention retired names in the new text. If an edit would contradict the Founding Document, a ground rule of docs/decisions.md or a decision of docs/owner-decisions.md, do not make it: record skipped-needs-owner with the reason. STATUS WORDS: applied / already-applied / skipped-needs-owner / skipped-not-found (with what you searched). LOG docs/fix/R5-05b.md: a table with columns exactly: edit | file:line | before | after | status (one row per edit, row numbers of FINAL-4 in the first column), then ''## Read-back'' (after ALL edits re-open every edited place and state in a phrase what you now read; also state, for each row, which other places you checked for the same fact), then ''## Noticed, not fixed'', then a last line ''Result: DONE'' or ''Result: DONE WITH SKIPS''. Mark every edit that follows a decision as default-pending in the ''after'' column. Do not run anything; CI runs the acceptance commands.
+
+
+  TASK R5-05b: Rows 19, 53, 54, 55, 59, 60 of FINAL-4 (D-03, D-30). Row 19: the last bullet of 5.29.8 gets the closed-escrow rule of 06a 6.6.3 (refused with STATE_CONFLICT, logged `ledger.reversal_refused`, no restitution while `appeal_restitution` is off). Row 59: ISS-56 restated as D-03, status proposed. Row 60: CT-17 reverses what is held and records `shortfall_ucr`, and refuses only for a closed escrow (as 06a 6.6.3). Rows 53, 54, 55: `mint_headroom`: 05a says `row_version` is bumped by every update and the guard is the headroom predicate; field table gets `row_version` and `updated_at`; 05b names the generated key and passes the lease issue time (`consume`) and the current time (`reserve`) and lets the function derive month and `member_day` keys; 06a 6.8.2 names `mint_headroom` as the store, the lock order, and says the 6.8.1 count excludes a flagged cell whose reservation CT-19 released. ROUND-5 RULES: (1) The rows of docs/audit/FINAL-4.md state defect and action; where an owner decision (D-35, D-39..D-44 in docs/owner-decisions.md) names the choice, it overrides the row''s proposal. (2) SIBLING RULE: after every edit, open EVERY other file and line that states the same fact (the row names them; search the parts listed in your read list with the key words of the fact) and make them agree in the same cell; if a sibling is outside your allowed files, list it under ''## Noticed, not fixed'' with file:line. (3) Write each fact once in its owner part and point from the others where the row allows. (4) Never reintroduce a retired name; never cite an operation id that S15a/S15b (or a NEW row of 15c..15g) does not define. (5) Line numbers in the rows are approximate: search near them.
+
+  '
+after:
+- C-185
+- C-003
+- C-004
+- C-005
+- C-042
+- C-046
+- C-047
+- C-077
+- C-087
+- C-088
+- C-089
+- C-096
+- C-097
+- C-139
+- C-140
+- C-144
+- C-145
+- C-146
+- C-155
+- C-161
+- C-162
+- C-166
+- C-167
+- C-168
+- C-169
+- C-171
+- C-172
+read:
+- docs/decisions.md
+- docs/owner-decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- docs/audit/FINAL-4.md
+- spec/00-conventions.md
+- spec/05b-state-machines.md
+- spec/06a-ledger.md
+- spec/05a-entities.md
+allowed_paths:
+- docs/fix/R5-05b.md
+- spec/05b-state-machines.md
+- spec/06a-ledger.md
+- spec/05a-entities.md
+outputs:
+- docs/fix/R5-05b.md
+acceptance:
+- cmd: python scripts/check_fixlog.py docs/fix/R5-05b.md
+- cmd: python scripts/check_spec.py spec/05b-state-machines.md --min-lines 701 --min-tags 1
+- cmd: python scripts/check_spec.py spec/06a-ledger.md --min-lines 753 --min-tags 1
+- cmd: python scripts/check_spec.py spec/05a-entities.md --min-lines 1729 --min-tags 1
+- cmd: python scripts/check_text.py spec/05b-state-machines.md --absent 'ledger correction between the donor and the Reserve'
+- cmd: python scripts/check_params.py
+- cmd: python scripts/check_issues.py
+- cmd: python scripts/check_stale.py
+- cmd: python scripts/check_refs.py api
+notes: 'Round-5 fix cell. Edits only inside allowed_paths. Large files: read in chunks of at most 600 lines with read_files; commit (apply_changes) after every ~10 edits and keep the log table current. Evidence tags and heading format as in docs/decisions.md. Acceptance is partly structural: completeness is what the goal says.'

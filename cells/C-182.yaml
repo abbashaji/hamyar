@@ -1,0 +1,65 @@
+id: C-182
+title: 'R5-03a: identity wire model: token, signature, session, key rotation'
+type: normal
+priority: 4
+lease_minutes: 90
+goal: 'You apply a fixed list of audit findings to spec parts and write docs/fix/R5-03a.md. SOURCES: docs/audit/FINAL-4.md (the ''Findings'' table; rows 1-66: each row you are assigned states file:line, defect and the proposed fix; READ each of your rows first), docs/owner-decisions.md (the owner''s accepted decisions D-01..D-44: they are binding, apply them, never invent another choice), and the parts named below. AUTHORITY WHEN SOURCES CONFLICT: docs/owner-decisions.md, then the Founding Document, then S0 (spec/00-conventions.md), then the part that owns the concept per D-30 (entities and columns: S5a; enums and states: S0; operations and paths: S15a/S15b; copy keys for requester rejections: S7), then all other parts. METHOD: for each assigned row, locate the cited text by reading about 30 lines around the cited line (lines drift; search nearby, never guess); make the MINIMAL edit in place (apply_changes with small old/new strings; never rewrite sections, never delete content that is not part of the fix); after an edit, check that every other place in YOUR files that states the same fact now agrees (search by reading the neighbouring sections and any table that repeats it); do not touch anything not named by your rows; if you notice another defect list it under ''## Noticed, not fixed'' with file:line and do not fix it. Names: edits may change only the identifiers your row says to change; never rename any other id, parameter, endpoint, state or enum; never mention retired names in the new text. If an edit would contradict the Founding Document, a ground rule of docs/decisions.md or a decision of docs/owner-decisions.md, do not make it: record skipped-needs-owner with the reason. STATUS WORDS: applied / already-applied / skipped-needs-owner / skipped-not-found (with what you searched). LOG docs/fix/R5-03a.md: a table with columns exactly: edit | file:line | before | after | status (one row per edit, row numbers of FINAL-4 in the first column), then ''## Read-back'' (after ALL edits re-open every edited place and state in a phrase what you now read; also state, for each row, which other places you checked for the same fact), then ''## Noticed, not fixed'', then a last line ''Result: DONE'' or ''Result: DONE WITH SKIPS''. Mark every edit that follows a decision as default-pending in the ''after'' column. Do not run anything; CI runs the acceptance commands.
+
+
+  TASK R5-03a: Rows 3, 4, 7, 8, 28, 29, 30, 31, 32, 38 of FINAL-4 (D-18, D-38, D-41). Row 3: `device_token` is `b64u<32>` in every 15a schema (and any other part that types it). Row 4: split the Effect row of 10a 10.4.4 by key kind (device key: new `active`, old `retiring`; recovery key: new holds the first K4 value until `identity.key_rotation_grace_s` ends, both work, then `active`); same in AC-identity-09 and 10.6. Row 7: rewrite 15c 15.B.4 and 15.B.5.4 messages to the `sig_input` of 10a 10.3.2 (`request_hash` is the `context_hash` for `step_up`). Row 8: 10a check 8, 10.8 step 5 and AC-identity-01 follow 15a (`session_challenge` then `createSession`). Row 28, 29: reword 10a:101 and :124, split AC-identity-04 into display and confirmation as the row says. Row 30: after a recovery the new secret is handled as in D-41 (10.8, panic wipe list). Row 31: add `challenge` to the redemption body of 10.7. Row 32: SAS inputs `device_id` and `new_public_key` in 10a, 15a and 15c. Row 38: the 15a pipeline order governs; align the 10a check table and the error code of a known public key. ROUND-5 RULES: (1) The rows of docs/audit/FINAL-4.md state defect and action; where an owner decision (D-35, D-39..D-44 in docs/owner-decisions.md) names the choice, it overrides the row''s proposal. (2) SIBLING RULE: after every edit, open EVERY other file and line that states the same fact (the row names them; search the parts listed in your read list with the key words of the fact) and make them agree in the same cell; if a sibling is outside your allowed files, list it under ''## Noticed, not fixed'' with file:line. (3) Write each fact once in its owner part and point from the others where the row allows. (4) Never reintroduce a retired name; never cite an operation id that S15a/S15b (or a NEW row of 15c..15g) does not define. (5) Line numbers in the rows are approximate: search near them.
+
+  '
+after:
+- C-181
+- C-011
+- C-020
+- C-037
+- C-045
+- C-053
+- C-076
+- C-083
+- C-089
+- C-130
+- C-138
+- C-139
+- C-140
+- C-145
+- C-150
+- C-155
+- C-161
+- C-162
+- C-163
+- C-164
+- C-170
+- C-172
+- C-173
+read:
+- docs/decisions.md
+- docs/owner-decisions.md
+- docs/source/Hamyar - Founding Document.md
+- docs/source/prompt.md
+- docs/audit/FINAL-4.md
+- spec/05a-entities.md
+- spec/11a-volunteer-ux.md
+- spec/11d-i18n-copy.md
+- spec/15a-api-core.md
+- spec/10a-identity.md
+- spec/15c-api-reconcile-core.md
+allowed_paths:
+- docs/fix/R5-03a.md
+- spec/15a-api-core.md
+- spec/10a-identity.md
+- spec/15c-api-reconcile-core.md
+outputs:
+- docs/fix/R5-03a.md
+acceptance:
+- cmd: python scripts/check_fixlog.py docs/fix/R5-03a.md
+- cmd: python scripts/check_spec.py spec/15a-api-core.md --min-lines 765 --min-tags 1
+- cmd: python scripts/check_spec.py spec/10a-identity.md --min-lines 677 --min-tags 1
+- cmd: python scripts/check_spec.py spec/15c-api-reconcile-core.md --min-lines 323 --min-tags 1
+- cmd: python scripts/check_text.py spec/15a-api-core.md --absent 'device_token[^|\n]{0,24}b64u<16>'
+- cmd: python scripts/check_params.py
+- cmd: python scripts/check_issues.py
+- cmd: python scripts/check_stale.py
+- cmd: python scripts/check_refs.py api
+notes: 'Round-5 fix cell. Edits only inside allowed_paths. Large files: read in chunks of at most 600 lines with read_files; commit (apply_changes) after every ~10 edits and keep the log table current. Evidence tags and heading format as in docs/decisions.md. Acceptance is partly structural: completeness is what the goal says.'

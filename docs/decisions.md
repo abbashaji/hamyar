@@ -48,3 +48,6 @@ Cells C-138..C-160 apply the findings of docs/audit/FINAL-2.md (one cell per fil
 
 ## Round 4
 Cells C-161..C-178 apply the open findings of docs/audit/FINAL-3.md (rows 1-51, each in exactly one cell R4-01..R4-13), then four independent re-audit slices (docs/audit/FINAL-4a..d.md) and a merge (docs/audit/FINAL-4.md). Fix logs: docs/fix/R4-*.md. Decisions: docs/owner-decisions.md (D-01..D-38; D-35..D-38 answer the four open questions of FINAL-3).
+
+## Round 5 (last fix round before the build)
+Cells C-179..C-192 fix every open row of docs/audit/FINAL-4.md (rows 1-66, each in one cell R5-01a..R5-09; cells sit in topic order so that a fact and all its sibling files are edited together) and end with R5-final, which writes docs/SPEC-STATUS.md (hand-over to the build phase, known issues, rules for build cells) and docs/opid-aliases.txt. There is no re-audit by decision of the owner. New CI check: `scripts/check_opids.py` (every cited operation id is defined in S15). Decisions: docs/owner-decisions.md D-39..D-44.
