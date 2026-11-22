@@ -296,7 +296,7 @@ All keys carry `needs_human_and_legal_review`.
 | Step | Screen | Volunteer action | First-time budget [H] | Practiced budget [H] | Stakes before the step |
 | --- | --- | --- | --- | --- | --- |
 | F1 | Landing | Tap Start | 3 s | 0 s (returning members skip it) | none |
-| F2 | Identity created | None (automatic): device key generated, `createMember`, `createSession` | 2 s | 0 s | no personal data; no key shown yet (V-09) |
+| F2 | Identity created | None (automatic): device key generated, `createIdentityChallenge`, `createMember`, `createSession` | 2 s | 0 s | no personal data; no key shown yet (V-09) |
 | F3 | One-time notice | Read three short facts, tap "I understand" (shown once; version-stamped) | 10 s | 0 s | none |
 | F4 | Offer list | Tap the first card (`ui.offer_list_size` offers) | 5 s | 3 s | none |
 | F5 | Card | Read the 8-field card; expand the full prompt (required on first use) | 20 s | 5 s | decline is free |
@@ -332,16 +332,16 @@ Five visible steps: Notice, Card, Hand-off, Paste-back, Done. Identity creation 
 
 | State | Condition | Behavior |
 | --- | --- | --- |
-| Empty | `listOffers` returns no offers | `copy.flow.no_offers`: no work fits your opt-ins or nothing is queued right now; actions: "Review opt-ins" (`SCR-vol-09`), "Check again"; nothing is lost |
-| Loading | Identity creation or `listOffers` in flight | Progress strip with a text label; never a blocking spinner longer than `ui.status_poll_max_s` without a retry button |
+| Empty | `listOfferedCells` returns no offers | `copy.flow.no_offers`: no work fits your opt-ins or nothing is queued right now; actions: "Review opt-ins" (`SCR-vol-09`), "Check again"; nothing is lost |
+| Loading | Identity creation or `listOfferedCells` in flight | Progress strip with a text label; never a blocking spinner longer than `ui.status_poll_max_s` without a retry button |
 | Error | `createMember` fails | Retry with the same `Idempotency-Key`; the device key is kept so a retry never creates two members; after a failed retry, show Help |
 | Offline or low bandwidth | No network at F2 | Flow pauses with `copy.error.try_again`; nothing is created locally except the key pair |
 | Blocked: rate limited | `ratelimit.device_new_members_per_day` or tree limit (`RATE_LIMITED`) | `copy.error.rate_limited` with the time; no reason is given about which limit applied (abuse-safe) |
-| Blocked: no approved service | `listApprovedServices` empty | `copy.flow.no_service`: contributions are not available yet; no cell is offered (launch-gate machinery, S14.*) |
+| Blocked: no approved service | `listServices` empty | `copy.flow.no_service`: contributions are not available yet; no cell is offered (launch-gate machinery, S14.*) |
 
 **Actions.** Start, I understand, Take this card, Decline, Back (never destroys a lease), Cancel flow (releases the lease with no penalty).
 
-**API calls.** `createMember`, `createSession`, `getMember`, `listApprovedServices`, `listOffers`, then those of 11.8 to 11.11.
+**API calls.** `createIdentityChallenge`, `createMember`, `createSession`, `getMe`, `listServices`, `listOfferedCells`, then those of 11.8 to 11.11.
 
 **Accessibility.** The progress strip is a labeled ordered list with `aria-current="step"`; each step change moves focus to the new heading and announces it; the whole flow works with one hand and with the keyboard.
 
@@ -448,7 +448,7 @@ function cardGate(card, expand_required, ui_state):
         copy_enabled = ui_state.expanded
         open_enabled = ui_state.expanded and card.adapter.prefill_allowed
     if ui_state.expanded and not ui_state.ack_sent:
-        call acknowledgePrompt(lease_id, reasons_covered = expand_required)   # idempotent
+        call expandLeasePrompt(lease_id, reasons_covered = expand_required)   # idempotent
         ui_state.ack_sent = true
     decline_enabled = true      # always
     report_enabled  = true      # always
@@ -456,7 +456,7 @@ function cardGate(card, expand_required, ui_state):
 
 Rules:
 
-- Expanded means the full prompt text was rendered and the scroll container reached its end (or the prompt fits without scrolling). `acknowledgePrompt` records that the prompt was displayed, not that it was read; copy never says "you confirmed you read it" (FD§0.1 item 7: "can see" is enforced, "has read" is not). [D]
+- Expanded means the full prompt text was rendered and the scroll container reached its end (or the prompt fits without scrolling). `expandLeasePrompt` records that the prompt was displayed, not that it was read; copy never says "you confirmed you read it" (FD§0.1 item 7: "can see" is enforced, "has read" is not). [D]
 - When the rule applies and the prompt is collapsed, Copy and Open are disabled with the visible reason `copy.card.expand_first`, so a keyboard or screen-reader user finds the reason next to the disabled control. Decline and Report are never disabled. [D]
 - For `expand.comprehension_check`, the card asks one multiple-choice question about the card's own fields (for example "What is the purpose of this task?"); a wrong answer re-shows the card and never penalizes the member, never reduces credit and is not stored as a per-member score; the aggregate wrong-answer rate measures banner blindness [H] (S13.*). Off by default. [D]
 - Even when no expansion is required, the expander is visible and works. [D]
@@ -470,7 +470,7 @@ Rules:
 
 | State | Condition | Behavior |
 | --- | --- | --- |
-| Empty | `listOffers` returns none | As `AC-vol-09`; copy `copy.offers.empty` |
+| Empty | `listOfferedCells` returns none | As `AC-vol-09`; copy `copy.offers.empty` |
 | Loading | `createLease` in flight after Take | The tapped summary shows "Reserving..."; double taps are ignored (one `Idempotency-Key` per tap) |
 | Error: taken | `LEASE_CONFLICT` | `copy.error.cell_taken`; the list refreshes |
 | Error: lease cap | `lease.max_active_per_member` reached | `copy.offers.lease_cap`: finish or decline an active task; the active leases are listed |
@@ -479,7 +479,7 @@ Rules:
 | Blocked: suspended or banned | `member_status` not `active` | No offers; banner and Appeal action (`SCR-vol-14`) |
 | Blocked: paused | `kill.template.<tpl_id>`, `kill.service.<svc_id>` or `kill.all_new_jobs` engaged | Affected cells are absent from the list; if all are, `copy.offers.paused`; a lease open at the moment of the pause is revoked server-side and the card shows `copy.card.revoked` with a one-tap return, telling the volunteer a pasted result for it can no longer be accepted (`reject.policy_changed` or `reject.lease_expired`) |
 
-**API calls.** `listOffers`, `createLease`, `getLease`, `acknowledgePrompt`, `releaseLease`, `getMember`.
+**API calls.** `listOfferedCells`, `createLease`, `getLease`, `expandLeasePrompt`, `releaseLease`, `getMe`.
 
 **Copy intent.** Neutral and factual; no urgency language, no "hurry", no social proof. The credit line never promises credit. The license line always states reuse plainly. Category names come from data (`TopicCategory`), not from code.
 
@@ -487,9 +487,9 @@ Rules:
 
 **Acceptance criteria**
 
-- `AC-vol-11` Given a member who has never acknowledged template `tpl_x`, When the card opens, Then `expand_required` contains `expand.first_use_of_template`, Copy and Open are disabled with `copy.card.expand_first`, Decline and Report are enabled, and after the prompt is expanded and scrolled to its end Copy is enabled and `acknowledgePrompt` is called once.
+- `AC-vol-11` Given a member who has never acknowledged template `tpl_x`, When the card opens, Then `expand_required` contains `expand.first_use_of_template`, Copy and Open are disabled with `copy.card.expand_first`, Decline and Report are enabled, and after the prompt is expanded and scrolled to its end Copy is enabled and `expandLeasePrompt` is called once.
 - `AC-vol-12` Given a cell whose `license` is outside `optin.default_licenses` but inside the member's opt-ins, When the card opens, Then `expand.non_default_license` is present and the expansion gate applies.
-- `AC-vol-13` Given the member taps Decline, When the call completes, Then the cell is `queued`, no cooldown applies, the member's `trust_tier` and sampling are unchanged, and the next `listOffers` excludes that cell for that member for the current attempt.
+- `AC-vol-13` Given the member taps Decline, When the call completes, Then the cell is `queued`, no cooldown applies, the member's `trust_tier` and sampling are unchanged, and the next `listOfferedCells` excludes that cell for that member for the current attempt.
 - `AC-vol-14` Given a card is rendered, When its fields are inspected, Then purpose, license, sensitivity, service, template with version, expected time, category and credit all appear before the full prompt, and the provenance sentence appears exactly once with the approval date.
 - `AC-vol-15` Given the template is paused by `kill.template.<tpl_id>` while the member holds a lease, When the member returns to the card, Then the lease is shown revoked with `copy.card.revoked`, Copy is disabled, and no submission can be created for it.
 - `AC-vol-16` Given a prompt containing Persian text, Latin words and digits, When Copy is tapped, Then the clipboard holds the exact prompt string whose hash equals the lease's `prompt_hash`, with no added marks and no digit conversion.
@@ -502,7 +502,7 @@ Get the exact prompt text into the volunteer's chosen chat service with the fewe
 
 ### 11.9.2 Adapter contract used by the client [D]
 
-For each service offered to this member, `listApprovedServices` returns only services in state `approved` (S0.9.6) with these fields (names from S0.8.3; every value is entered by a reviewer [V]):
+For each service offered to this member, `listServices` returns only services in state `approved` (S0.9.6) with these fields (names from S0.8.3; every value is entered by a reviewer [V]):
 
 | Field | Type | Meaning for the screen |
 | --- | --- | --- |
@@ -568,13 +568,13 @@ function handoffModes(card, service):
 | State | Condition | Behavior |
 | --- | --- | --- |
 | Empty | No approved service offered for this task | Not reachable: such a cell is not offered (`R8`, `R7`); if it happens, `copy.handoff.no_service` with Decline |
-| Loading | `listApprovedServices` pending | Copy works at once if the prompt is on the device; service list shows a placeholder |
+| Loading | `listServices` pending | Copy works at once if the prompt is on the device; service list shows a placeholder |
 | Error | `getLease` fails | Retry; the on-device prompt is still usable until the lease expires |
 | Offline or low bandwidth | No network | Copy and the instructions work; the link mode works because it needs no Hamyar call; Submit is deferred to paste-back |
 | Blocked: service paused | `kill.service.<svc_id>` engaged or service enters `review_due`, `suspended`, `revoked` | The service disappears from the list; for `suspended` or a kill switch a lease bound to `M1` for it is revoked; for `review_due` only new leases are blocked and an active lease continues until `service.review_grace_days` pass (S0.9.6); for `revoked` in-flight cells are handled per S7.*; `copy.handoff.service_paused` |
 | Blocked: lease expired | Lease timer passes `expires_at` | See 11.10; Copy disabled; "Back to tasks" |
 
-**API calls.** `listApprovedServices`, `getLease`, `extendLease`.
+**API calls.** `listServices`, `getLease`, `extendLease`.
 
 **Copy intent.** Imperative, numbered, four steps; says "you press Send" in words. No logo, brand claim or provider endorsement; service names come from registry data. No statement that a service is safe, free or allowed (those are [V] and live in the registry).
 
