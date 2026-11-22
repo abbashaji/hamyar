@@ -469,7 +469,7 @@ function effective_variant(flag_key, member):
 | --- | --- | --- |
 | Disable any growth flag | `tighten` | Immediate, one operator; change-log entry within `change.tighten_publish_within_s` |
 | Enable `V1`, `V2`, `V3`, `V4`, `V6`, `ff.public.ledger_page` | `neutral` | Entry with notice `change.notice_days_default` |
-| Enable `ff.growth.v5_referral` (moves credit from the Reserve) | `loosen` | Entry with `reason`, notice `change.notice_days_default`, two operators; `S10.*` appends `flag.enable_credit_moving` to `security.two_person_actions` (`ISS-128`) |
+| Enable `ff.growth.v5_referral` (moves credit from the Reserve) | `loosen` | Entry with `reason`, notice `change.notice_days_default`, one operator with step-up, not a two-person action (D-39; `ISS-128`) |
 | Start an experiment | `neutral` | Entry of `subject_kind` `pre_registration` with the locked hash |
 
 ### 12.11.3 Assignment mechanism [D]
@@ -778,7 +778,7 @@ Given / When / Then, in the ID scheme of S0.5. Tests are named in `S18.*`.
 | `S5.*` | Add entities `Milestone` and `TeamMembership`; states for `Referral`, `Team`, `Milestone`, `Experiment`, `BadgeAward`; fields `Referral.bonus_enabled`, accepting member and acceptance time of a `Cell` |
 | `S6.*` | Partial-amount `reversal` of a partly spent lot; the K truncation rule for `grant`; Reserve balance at UTC day start; checkpoint hash and daily checkpoint (S0.6.4) |
 | `S7.*` | Policy stamps (R7, R9) readable per cell for the milestone guard |
-| `S10.*` | Threat-model rows for counter, public ledger, share card, teams, referral, experiments; append `milestone.publish` and `flag.enable_credit_moving` to `security.two_person_actions`; confirm `join_source` storage and event retention |
+| `S10.*` | Threat-model rows for counter, public ledger, share card, teams, referral, experiments; append `milestone.publish` to `security.two_person_actions`; confirm `join_source` storage and event retention |
 | `S11.*` | Both V1 variants; in-app offers and exposure calls; notices; layout of `SCR-pub-*` |
 | `S13.*` | Event schema for S12.13.1; metric definitions; `PreRegistration` fields of S12.11.7 and lock; analysis rules; publication of results |
 | `S14.*` | Gate rule for enabling `ff.growth.*`; `LaunchGateItem`s: public ledger page reviewed (G1), share capability and host reachability (G2), counsel memo on credit bonuses and randomized offers (G0) |
@@ -798,5 +798,5 @@ Each resolution is already applied in this file. `C-001` consolidates them into 
 | `ISS-125` | major | FD§6.2 V5, FD§4.6 | Referral clawback needs a reversal of a partly spent lot, which S0.8.5 does not define; two-person reversals do not scale with volume | Clawback covers the unspent remainder only; spent credit is recorded as `unrecovered_ucr`; `S6.*` is asked for a partial-amount reversal rule; scaling is revisited with measured volume | proposed |
 | `ISS-126` | major | FD§4.4, FD§6.1 | A score, badge or team total that excludes gold cells would reveal which cells were hidden gold cells | Every member-visible count includes accepted cells of every `cell_kind` identically (S12.1 rule 6) | applied |
 | `ISS-127` | minor | FD§6.3 | FD§6.3 allows small conditional rewards in Phase 2; this part's instruction forbids rewards that move money, and the reward form for members in Iran is unresolved [V] | No money-moving reward is specified; any such feature needs a new spec decision after counsel and the FD§6.3 conditions | needs_owner |
-| `ISS-128` | minor | none | Convention gaps: entities `Milestone` (`mst_`) and `TeamMembership` (`tmm_`); states for `Referral`, `Team`, `Milestone`, `Experiment`, `BadgeAward`; enums `subject_kind`, `block_reason`, `assignment_mode`, `population`, badge `family`; events of S12.13.1; parameters of S12.13.3; `milestone.publish` and `flag.enable_credit_moving` for `security.two_person_actions`; `Referral.bonus_enabled` | Added in this file in the forms used above; `C-001` folds them into S0 | proposed |
+| `ISS-128` | minor | none | Convention gaps: entities `Milestone` (`mst_`) and `TeamMembership` (`tmm_`); states for `Referral`, `Team`, `Milestone`, `Experiment`, `BadgeAward`; enums `subject_kind`, `block_reason`, `assignment_mode`, `population`, badge `family`; events of S12.13.1; parameters of S12.13.3; `milestone.publish` for `security.two_person_actions`; `Referral.bonus_enabled` | Added in this file in the forms used above; `C-001` folds them into S0 | proposed |
 | `ISS-129` | minor | none | `ExperimentAssignment` is `permanent` (S0.7) yet must reference a member, and `permanent` rows hold no personal data | The row keeps only the opaque `mem_` id that the `member_bound` closure rule leaves behind, plus coarse stratifier values | proposed |
