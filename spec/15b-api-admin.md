@@ -68,7 +68,7 @@ Permission names follow `perm.<area>.<action>` (S0 0.8.2). The permission matrix
 | `perm.parameter.read`, `perm.parameter.edit.<owner>` with `<owner>` = `operator`, `reviewer`, `founders` | operator, reviewer, founders (S0 0.10.5) | 15.26 |
 | `perm.launch.read`, `perm.launch.evidence`, `perm.launch.signoff`, `perm.launch.switch` | operator | 15.27 |
 | `perm.flag.read`, `perm.flag.edit` | operator | 15.27 |
-| `perm.killswitch.read`, `perm.killswitch.engage.global`, `perm.killswitch.engage.template`, `perm.killswitch.engage.service`, `perm.killswitch.engage.member`, `perm.killswitch.release` | operator (template, service and member engage also reviewer) | 15.28 |
+| `perm.killswitch.read`, `perm.killswitch.engage.global`, `perm.killswitch.engage.template`, `perm.killswitch.engage.service`, `perm.killswitch.engage.member`, `perm.killswitch.release` | operator (template and service engage also reviewer) | 15.28 |
 | `perm.audit.read`, `perm.audit.resolve`, `perm.appeal.read`, `perm.appeal.decide`, `perm.report.read`, `perm.report.triage` | reviewer | 15.29 |
 | `perm.alarm.read`, `perm.alarm.ack` | operator, reviewer | 15.29 |
 | `perm.screening.read`, `perm.screening.decide` | reviewer | S15c 15.B.7 (`listScreeningQueue`, `getScreeningItem`, `getScreeningContent`, `decideScreening`) |
