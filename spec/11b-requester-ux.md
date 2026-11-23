@@ -51,7 +51,7 @@ Each row is a decision [D] that every requester screen obeys.
 | `RD-06` | The price breakdown (`v`, `lambda`, `p`, `eta`) is always shown and always says whether `v` is measured or the prior. [D] | Verification cost is shown, not hidden (FD§4.3). |
 | `RD-07` | Escrow confirmation is the only requester action that spends credit; it is an explicit button bound to the hash of the quote the person saw; initial focus is on the summary, not on the button. [D] | Prevents accidental spend and price drift. |
 | `RD-08` | A requester never sees a volunteer identity, a `vol_` handle, a gold cell, or any timing finer than the granularity in 11.42. [D] | FD§5.6, S0.6.4, member safety. |
-| `RD-09` | For licenses `L1` and `L2` the notice "downstream use uncontrolled" is shown on the declarations step, requires acknowledgement on escrow confirmation, and is repeated on the results screen and in the manifest. [D] | FD§5.7 failure mode 3: "the card and the job form must say so". |
+| `RD-09` | For licenses `L1` and `L2` the notice "downstream use uncontrolled" is shown on the declarations step and is repeated on the results screen and in the manifest; when the declared purpose is `P1`, the acknowledgement `downstream_use_uncontrolled` is also required on escrow confirmation (S15a 15.7.2). [D] | FD§5.7 failure mode 3: "the card and the job form must say so". |
 | `RD-10` | No result is shown before assembly or partial settlement. [D] | A cell can be overturned (`cell.overturned`); showing then retracting output would mislead. |
 | `RD-11` | A `rejected`, `quote_expired` or `cancelled` job is terminal. "Fix and resubmit" creates a new job that copies declarations and uploads (`createJob` with `copy_from_job_id`). [D] | Keeps the Job machine of S0.9.2 unchanged. |
 | `RD-12` | No requester screen mentions, suggests or enables bypassing a regional or technical restriction or a service's terms. [D] | FD Principle 9, prompt ground rule 3. |
@@ -108,7 +108,7 @@ The key lives in memory for the duration of one user action. A double tap on Con
 
 ## 11.34 API operations used by the requester screens
 
-Operation ids (lowerCamelCase, S0.5) are the contract between the screens and S15.*; the paths are proposals in the shapes of S0.11 [A]. Every write carries an `Idempotency-Key` (S0.11.5). Every response is `Cache-Control: no-store`. Amount fields are integer strings, ratio fields are `*_ppm` integers. Operations marked `+` are convention additions (11.49).
+Operation ids (lowerCamelCase, S0.5) are the contract between the screens and S15.*; the paths are proposals in the shapes of S0.11 [A]. Every write carries an `Idempotency-Key` (S0.11.5). Every response is `Cache-Control: no-store`. Amount fields are integer strings, ratio fields are `*_ppm` integers. Operations marked `+` are convention additions (11.49) that S15 defines in 15d (15.C.4); an operation that S15a or S15b defines carries no mark. Admin operations are keyed in the generated OpenAPI document with the prefix `admin` (S15b 15.21.1), so an id shared with a member operation stays unique there; the ids in this table name the member operations [default-pending D-08].
 
 | Operation id | Method and path (proposal) | Used by |
 | --- | --- | --- |
@@ -134,7 +134,7 @@ Operation ids (lowerCamelCase, S0.5) are the contract between the screens and S1
 | `createReservation` | `POST /v1/reservations` | 10 |
 | `listReservations` / `getReservation` | `GET /v1/reservations`, `GET /v1/reservations/{reservation_id}` | 01, 11 |
 | `cancelReservation` | `POST /v1/reservations/{reservation_id}/cancellation` | 11 |
-| `getJobProgress`+ | `GET /v1/jobs/{job_id}/progress` (ETag, conditional `If-None-Match`) | 12 |
+| `getJobProgress` | `GET /v1/jobs/{job_id}/progress` (ETag, conditional `If-None-Match`) | 12 |
 | `listJobCells` | `GET /v1/jobs/{job_id}/cells` (primary cells only; `ordinal`, status and attempts, no output) | 13 |
 | `getCancellationPreview`+ | `GET /v1/jobs/{job_id}/cancellation-preview` | 14 |
 | `cancelJob` | `POST /v1/jobs/{job_id}/cancellation` | 09, 14 |
@@ -142,8 +142,8 @@ Operation ids (lowerCamelCase, S0.5) are the contract between the screens and S1
 | `getJobDeliverable` | `GET /v1/jobs/{job_id}/deliverable` | 16 |
 | `getJobDeliverableContent` | `GET /v1/jobs/{job_id}/deliverable/content` (JSON `{media_type, encoding, content, content_hash}`; the client saves it as a file; Bearer header, no query-string secrets, S0.11.1) | 16 |
 | `getJobManifest` | `GET /v1/jobs/{job_id}/manifest` | 16 |
-| `rateJob` | `PUT /v1/jobs/{job_id}/rating` (replaces an earlier rating; no read exists yet, 15.C.7 O7) | 17 |
-| `createAppeal`+ / `getAppeal`+ | `POST /v1/appeals` with `kind` = `job_rejection` and `subject_id` = the job id; `GET /v1/appeals/{appeal_id}` | 18 |
+| `rateJob` | `PUT /v1/jobs/{job_id}/rating` (replaces an earlier rating; the stored rating is read back as `Job.rating`, S15a 15.7.2) | 17 |
+| `createAppeal` / `getAppeal` | `POST /v1/appeals` with `kind` = `job_rejection` and `subject_id` = the job id; `GET /v1/appeals/{appeal_id}` (S15b 15.29.7) | 18 |
 | `createReport` | `POST /v1/reports` | 13, 16 |
 
 ### 11.34.1 Response shapes the screens depend on [A]
@@ -161,6 +161,9 @@ Only fields the screens read are listed; unknown fields are ignored (S0.11.1). `
   "policy": { "policy_version_id": "plv_...", "stamped_at": "2026-11-12T09:30:00Z" },
   "rejection": null,   // or { "reasons": ["policy.R2.sensitivity_not_accepted"], "decided_at": "...", "appeal": { "allowed_until": "...", "appeal_id": null } }
   "quote_expires_at": "2026-11-12T10:00:00Z", "pause_reason": null, "closure_reason": null,
+  "quote": null,    // or the `Quote` of S15a 15.7.2
+  "window": null,   // or { "window_s": 172800, "completes_by": "..." } (S15a 15.7.2)
+  "rating": null,   // or { "score": 5, "updated_at": "..." } (S15a 15.7.2; scale in S5a 5.7.5)
   "created_at": "...", "updated_at": "..." }
 
 // Upload view (getUpload)
@@ -345,7 +348,7 @@ Finding kinds the screen can display (detection is owned by S9.*; the set is a d
 | --- | --- |
 | Purpose | Collect the four mandatory declarations (purpose, license, sensitivity, service requirement; FD§5.2) in plain language, then submit the job for checking |
 | Entry conditions | Job `draft`; at least one upload with `screen_status` `passed` or `flagged_for_review` |
-| Blocks | Four option groups in this order: Purpose `P0`..`P3`, License `L0`..`L3`, Sensitivity `S0`..`S3`, Service `M0`..`M2`. Each option shows its code, a short name and the plain-language explanation of 11.44 (what it means, what it allows, what it does not). Options the active allowlist locks are shown disabled with the reason `copy.req.locked_phase` or `copy.req.locked_unreviewed` (for `P2`, `P3`, `L3`, `M2` in Phases 1-2; the data comes from `getPublicPolicy`, RD-03). Under License `L1`/`L2`: an optional `license_spdx_id` chosen from `license_options` [V counsel], and the downstream notice (11.45). Under Sensitivity `S1`: a required tick "I accept that a stranger will read this" (`ack.stranger_reads`). Acknowledgements: one tick per key of `required_acks` in the active policy version (S7.* 7.5.2: `ack.declared_not_guaranteed` and `ack.no_ownership_assurance` always, `ack.no_personal_data` for `S0` and `S1`, `ack.stranger_reads` for `S1`, `ack.open_license_reuse` for `L1` and `L2`), texts `copy.req.ack_*` (11.45), stored in `Job.acks` through `updateJob`; without them the server answers `R1` `ack_missing`. The tick that `SCR-req-08` sends as `downstream_use_uncontrolled` is the same acknowledgement as `ack.open_license_reuse` [A] (`ISS-114`). Under Service `M1`: a list from `listServices`. A live volunteer-card preview (`previewCells`) updates with the choices. A read-only summary and the notices `copy.req.notice_declared`, `copy.req.notice_screening_limits`. Button Check my request |
+| Blocks | Four option groups in this order: Purpose `P0`..`P3`, License `L0`..`L3`, Sensitivity `S0`..`S3`, Service `M0`..`M2`. Each option shows its code, a short name and the plain-language explanation of 11.44 (what it means, what it allows, what it does not). Options the active allowlist locks are shown disabled with the reason `copy.req.locked_phase` or `copy.req.locked_unreviewed` (for `P2`, `P3`, `L3`, `M2` in Phases 1-2; the data comes from `getPublicPolicy`, RD-03). Under License `L1`/`L2`: an optional `license_spdx_id` chosen from `license_options` [V counsel], and the downstream notice (11.45). Under Sensitivity `S1`: a required tick "I accept that a stranger will read this" (`ack.stranger_reads`). Acknowledgements: one tick per key of `required_acks` in the active policy version (S7.* 7.5.2: `ack.declared_not_guaranteed` and `ack.no_ownership_assurance` always, `ack.no_personal_data` for `S0` and `S1`, `ack.stranger_reads` for `S1`, `ack.open_license_reuse` for `L1` and `L2`), texts `copy.req.ack_*` (11.45), stored in `Job.acks` through `updateJob`; without them the server answers `R1` `ack_missing`. The tick that `SCR-req-08` shows for `downstream_use_uncontrolled` is required for purpose `P1` (S15a 15.7.2) and is not the tick `ack.open_license_reuse`, which the active policy version requires for `L1` and `L2` [A] (`ISS-114`). Under Service `M1`: a list from `listServices`. A live volunteer-card preview (`previewCells`) updates with the choices. A read-only summary and the notices `copy.req.notice_declared`, `copy.req.notice_screening_limits`. Button Check my request |
 | States | `incomplete` (groups missing; the button is disabled and names them, which is the client form of `R1`), `submit_refused` (`submitJobForScreening` returns an API error and the Job stays `draft`: `422 POLICY_REJECTED` with `details.reasons`, for example an `R1` sub-code, or `400 VALIDATION_FAILED`; the reasons of 11.43.1 are shown in place on this step, nothing is charged and every entered value is kept) [A: S7.* 7.1 decision 2], `combination_hint` (the allowlist says the combination is not accepted now: an inline explanation with the reason code; the button stays enabled because the server decides, RD-03), `s2_s3_chosen` (the definition is shown and the page says it will not be accepted now; the choice is allowed so that an honest answer is recorded and explained, RD-05) |
 | Actions | `getPublicPolicy`, `listServices`, `updateJob` (merge patch with `If-Match`), `previewCells`, `submitJobForScreening` (Check my request) |
 | Copy intent | Explain each code by its consequence for the requester, not by legal categories; always say "declared"; never imply that a declaration is verified or that output use can be controlled downstream |
@@ -396,13 +399,13 @@ Finding kinds the screen can display (detection is owned by S9.*; the set is a d
 | --- | --- |
 | Purpose | The single, explicit act that holds credit and admits the job |
 | Entry conditions | Job `quoted`, `window.status` `available`, quote not expired, balance sufficient |
-| Blocks | A summary (template, `cell_count`, declarations in words, window, total to hold, balance after) in a region that receives initial focus. Required acknowledgements, each a separate tick with its own text: `window_is_quote` (always) and `downstream_use_uncontrolled` (only when the license is `L1` or `L2`, RD-09). The notices `copy.req.notice_declared` and `copy.req.notice_credit_not_money`. Button "Confirm and hold {total} credits" |
+| Blocks | A summary (template, `cell_count`, declarations in words, window, total to hold, balance after) in a region that receives initial focus. Required acknowledgements, each a separate tick with its own text: `window_is_quote` (always) and `downstream_use_uncontrolled` (only when the declared purpose is `P1`, S15a 15.7.2, RD-09). The notices `copy.req.notice_declared` and `copy.req.notice_credit_not_money`. Button "Confirm and hold {total} credits" |
 | States | `ready`, `submitting`, `conflict_quote_changed` (`409 STATE_CONFLICT`, `details.reason` `quote_changed`: reloads the quote and returns to `SCR-req-07`), `conflict_policy_changed` (`details.reason` `policy_version_changed`: the quote is void, Fix and resubmit is offered, nothing was charged), `insufficient_credit`, `at_job_cap` (`CAP_EXCEEDED`, `details.cap` `concurrent_jobs`) |
 | Actions | `confirmJob` with `{quote_hash, reservation_id?}` and one `Idempotency-Key` (11.33.4); the acknowledgement ticks are client-side only, the acknowledgements themselves are declared earlier in `Declarations` |
 | Copy intent | Say exactly what happens: credit is held now, volunteers are paid per accepted cell, unspent credit returns, results arrive in the quoted window or in part; the button states the amount |
 | Accessibility | Ticks are native checkboxes; the button's accessible name contains the amount; the result (`admitted`) is announced and focus moves to the progress heading |
 
-- **AC-req-27** Given a license of `L2`, When the acknowledgement `downstream_use_uncontrolled` is not ticked, Then the Confirm button is disabled; given license `L0` the tick is not rendered and is not sent.
+- **AC-req-27** Given a purpose of `P1`, When the acknowledgement `downstream_use_uncontrolled` is not ticked, Then the Confirm button is disabled; given purpose `P0` the tick is not rendered and is not sent.
 - **AC-req-28** Given the person double-taps Confirm, When both requests carry the same `Idempotency-Key`, Then exactly one `escrow_hold` exists, the second response is a replay, and the screen shows one admitted job.
 - **AC-req-29** Given the quote changed since it was shown (different `quote_hash`), When Confirm is pressed, Then the server answers `409 STATE_CONFLICT` with `details.reason` `quote_changed`, no credit moves, and the new quote is shown for a fresh decision.
 - **AC-req-30** Given the active policy version changed after the quote, When Confirm is pressed, Then the job is not admitted, `copy.req.err_policy_changed` is shown and Fix and resubmit is offered.
@@ -690,7 +693,7 @@ The linear baseline is crude because volunteer supply arrives in daily batches; 
 | Entry conditions | Job `completed`, or `failed` or `cancelled` with accepted cells; within `ui.requester.rating_window_days` of the terminal state; one rating per job: a stored rating is shown and can be replaced until the window ends |
 | Blocks | Outcome: Good / Mixed / Poor (`outcome_rating`: `good`, `mixed`, `poor`). Optional tags: `accuracy`, `format`, `completeness`, `speed_vs_quote`, `other`. Optional comment up to `ui.requester.rating_comment_max_chars`. Optional "these cells look wrong": pick up to `ui.requester.rating_flag_cells_max` cell indices. A statement of use: the rating changes nobody's credit, is never shown to volunteers with the requester's name, and may lead to closer checks of the cells flagged; in aggregate it helps judge templates. The objective figure "finished {x} before or after the quoted deadline" is shown but is recorded by the system, not by the rating |
 | States | `open`, `submitted` (shows the stored rating; editable until the window ends), `window_closed` (read-only), `not_eligible` |
-| Actions | `rateJob` (a later submission replaces the earlier rating; the stored rating is the `rating` object of `Job`, S15a 15.7.2) |
+| Actions | `rateJob` (a later submission replaces the earlier rating; `score` is the integer of the chosen outcome, scale and mapping in S5a 5.7.5 `requester_rating`; the stored rating is the `rating` object of `Job`, S15a 15.7.2) |
 | Copy intent | Short and optional; makes clear that a low rating is allowed and safe; never asks for personal details |
 | Accessibility | Three outcomes are radio buttons with text labels and icons; the cell picker accepts typed indices and shows the chosen list as text |
 
@@ -928,7 +931,7 @@ For an unknown code the screen shows `copy.req.reason_unknown` (EN "This request
 | --- | --- |
 | Purpose | Let a requester challenge a `rejected` job once, within the appeal window (`appeal_kind` `job_rejection`, S0.9.7) |
 | Entry conditions | Job `rejected`; `rejection.appeal.allowed_until` in the future; fewer than `appeal.max_per_decision` appeals filed for this decision |
-| Blocks | The recorded reasons; a note field up to `ui.requester.appeal_note_max_chars` ("why do you think this is wrong"); a statement that a reviewer who did not make the decision will look, that the target time is `appeal.reviewer_sla_days` days and is a target, not a promise, and that the decision can be upheld or overturned; Send. After filing: the appeal state in words (`filed`, `assigned`, `in_review`, `awaiting_second_review`, `upheld`, `overturned`, `withdrawn`) |
+| Blocks | The recorded reasons; a note field, sent as `statement`, up to `appeal.reason_max_chars` characters ("why do you think this is wrong"); a statement that a reviewer who did not make the decision will look, that the target time is `appeal.reviewer_sla_days` days and is a target, not a promise, and that the decision can be upheld or overturned; Send. After filing: the appeal state in words (`filed`, `assigned`, `in_review`, `awaiting_second_review`, `upheld`, `overturned`, `withdrawn`) |
 | States | `open`, `filed` (read-only, polled with `getAppeal`), `window_closed`, `already_filed`, `overturned` (banner and Continue: Fix and resubmit creates a copy whose screening records the appeal id; how the reversal is applied to the copy is S7.* and S10.* [V]) |
 | Actions | `createAppeal` with `{kind: "job_rejection", subject_id: <the job id>, statement}`, `getAppeal` |
 | Copy intent | A request for a second pair of eyes, not a fight; no promise of outcome; no new sensitive material should be pasted into the note (say so) |

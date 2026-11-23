@@ -548,7 +548,7 @@ There is no endpoint that marks an audit passed without a verdict from the compa
 | op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `listAppeals` | `GET /v1/admin/appeals` | `admin` `perm.appeal.read` | `?state`, `?kind`, `?assigned_to=me`, `?overdue=true` | list of `{apl_id, kind, state, filed_at, due_at, assigned_admin_id}` | - | n/a | cursor | `A-R` |
-| `getAppeal` | `GET /v1/admin/appeals/{apl_id}` | `admin` `perm.appeal.read` | - | appeal with `subject_ref`, the member's text (length bounded by S10.*), prior decisions; logged as a read action | `NOT_FOUND` | n/a | - | `A-R` |
+| `getAppeal` | `GET /v1/admin/appeals/{apl_id}` | `admin` `perm.appeal.read` | - | appeal with `subject_ref`, the member's `statement` (at most `appeal.reason_max_chars` characters, 15.29.7), prior decisions; logged as a read action | `NOT_FOUND` | n/a | - | `A-R` |
 | `assignAppeal` | `POST /v1/admin/appeals/{apl_id}/assignments` | `admin` `perm.appeal.decide` | `{admin_id?}` (default: caller) | 200 appeal; event `appeal.assigned` (or `appeal.reassigned` when already assigned) | `FORBIDDEN` (the assignee made the decision under appeal) | req | - | `A-W` |
 | `startAppealReview` | `POST /v1/admin/appeals/{apl_id}/review-starts` | `admin` `perm.appeal.decide` | `{}` | 200 appeal (`in_review`); event `appeal.review_started` | `STATE_CONFLICT` | req | - | `A-W` |
 | `requestSecondAppealReview` | `POST /v1/admin/appeals/{apl_id}/second-review-requests` | `admin` `perm.appeal.decide` | `{reason}` | 200 appeal; event `appeal.second_review_requested` | `STATE_CONFLICT` | req | - | `A-W` |
@@ -625,11 +625,11 @@ Locking a team is tightening (`CR-17`): one admin with step-up, linked to a repo
 
 ### 15.29.7 Member appeals (moved from 15d)
 
-*Moved from 15d (15.C.4.1, rows 1 and 2) in answer to A12 findings 27 and 28; the overlay text in 15d is not deleted.* The admin queue is 15.29.2 and the events are in 15.34.3; this is the member side, which no table of S15a or S15b defined. Auth is `member`: an admin token is `401 AUTH_INVALID`, reason `wrong_scheme` (S15a 15.4). A `suspended` or `banned` member may use all four operations (S15a 15.4: they can still file appeals), so none is marked active only. `listAppeals` and `getAppeal` here are the member operations; the admin operations of 15.29.2 carry the same two names and are keyed apart as the opening of this file says (A12 finding 15; decision D-08 of `docs/audit/FINAL.md` is pending) [D][A].
+*Moved from 15d (15.C.4.1, rows 1 and 2) in answer to A12 findings 27 and 28; the overlay text in 15d is not deleted.* The admin queue is 15.29.2 and the events are in 15.34.3; this is the member side, which no table of S15a or S15b defined. Auth is `member`: an admin token is `401 AUTH_INVALID`, reason `wrong_scheme` (S15a 15.4). A `suspended` or `banned` member may use all four operations (S15a 15.4: they can still file appeals), so none is marked active only. `listAppeals` and `getAppeal` here are the member operations; the admin operations of 15.29.2 carry the same two names and are keyed apart as the opening of this file says (A12 finding 15). The accepted default of D-08 (`docs/owner-decisions.md`) holds: neither id is renamed, and the `admin` prefix of the generated `operationId` (15.21.1, Operation ids) keeps the two apart in the OpenAPI document [default-pending D-08] [D][A].
 
 | op | Method path | Auth | Request | Response | Errors | Idem | Page | RL |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `createAppeal` | `POST /v1/appeals` | `member` | `{kind (submission_rejection, job_rejection, member_ban), subject_id (id<sub>, id<job> or null), statement?: text<500>}` | 201 `{appeal: Appeal}`, `Location: /v1/appeals/{appeal_id}`; event `appeal.filed` | `NOT_FOUND`, `ALREADY_EXISTS` (`appeal_exists`), `STATE_CONFLICT` (`appeal_window_closed`, `not_appealable`), `VALIDATION_FAILED` (`kind` and `subject_id` do not fit; `subject_id` is required except for `member_ban`) | req | - | `RL-WRITE` |
+| `createAppeal` | `POST /v1/appeals` | `member` | `{kind (submission_rejection, job_rejection, member_ban), subject_id (id<sub>, id<job> or null), statement?: text<appeal.reason_max_chars>}` | 201 `{appeal: Appeal}`, `Location: /v1/appeals/{appeal_id}`; event `appeal.filed` | `NOT_FOUND`, `ALREADY_EXISTS` (`appeal_exists`), `STATE_CONFLICT` (`appeal_window_closed`, `not_appealable`), `VALIDATION_FAILED` (`kind` and `subject_id` do not fit; `subject_id` is required except for `member_ban`) | req | - | `RL-WRITE` |
 | `listAppeals` | `GET /v1/appeals` | `member` | `?state`, `?kind` | `Page<Appeal>`, newest first (S15a 15.11 order rule) | - | n/a | cursor | `RL-READ` |
 | `getAppeal` | `GET /v1/appeals/{appeal_id}` | `member` | - | `Appeal` | `NOT_FOUND` | n/a | - | `RL-READ` |
 | `withdrawAppeal` | `POST /v1/appeals/{appeal_id}/withdrawals` | `member` | `{}` | 200 `{appeal: Appeal}`; event `appeal.withdrawn` | `STATE_CONFLICT` (`appeal_decided`), `NOT_FOUND` | req | - | `RL-WRITE` |
@@ -637,8 +637,8 @@ Locking a team is tightening (`CR-17`): one admin with step-up, linked to a repo
 ```
 Appeal        { id: id<apl>, kind: enum<appeal_kind>, subject: { kind: "submission"/"job"/"member", id: id<sub>/id<job>/null },
                 state: "filed"/"in_review"/"decided"/"withdrawn", outcome: "upheld"/"overturned"/null,
-                outcome_copy_key: copy_key/null, statement: text<500>/null, filed_at: ts, decided_at: ts/null }
-createAppeal  req { kind: "submission_rejection"/"job_rejection"/"member_ban", subject_id: id<sub>/id<job>/null, statement: text<500>? }
+                outcome_copy_key: copy_key/null, statement: text<appeal.reason_max_chars>/null, filed_at: ts, decided_at: ts/null }
+createAppeal  req { kind: "submission_rejection"/"job_rejection"/"member_ban", subject_id: id<sub>/id<job>/null, statement: text<appeal.reason_max_chars>? }
               201 { appeal: Appeal }       Location: /v1/appeals/{appeal_id}
 listAppeals   Page<Appeal>, newest first, filters state, kind (S15a 15.11 order rule)
 withdrawAppeal req {}   200 { appeal: Appeal }

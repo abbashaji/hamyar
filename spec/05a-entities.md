@@ -702,7 +702,7 @@ A requester's request, or a Commons job. Machine S0.9.2. The declarations, the p
 | `escrow_id` | id `esc_` | null until `escrow_confirmed` | |
 | `reservation_id` | id `rsn_` | null | set when activated from a reservation |
 | `submitted_at`, `admitted_at`, `started_at`, `assembled_at`, `settled_at` | ts | null | |
-| `requester_rating` | int | null, 1..5 | rating of the outcome (prompt F); no free text, because free text can hold personal data |
+| `requester_rating` | int | null, 1..5 | rating of the outcome (prompt F): integer 1..5, 5 best; the screen words of S11b `SCR-req-17` are stored as `good` = 5, `mixed` = 3, `poor` = 1 and shown back as those words [A]; no free text, because free text can hold personal data |
 | `requester_rated_at` | ts | null until rated | time of the latest `rateJob` that stored `requester_rating`; the source of `Job.rating.updated_at` in S15a 15.7.2 [default-pending D-24] |
 | `pause_causes` | arr of enum(`job_pause_cause`) | NN, default empty; non-empty iff `state = 'suspended'` (CHECK) | set of `kill_template`, `kill_service`, `kill_member`, `policy_tightened`, `template_paused`, `service_suspended`; JT-11 adds a member, JT-12 fires when the last member clears (05b 5.22, 5.22.2) |
 | `state_before_pause` | enum | set iff `state = 'suspended'`; `admitted` or `running` | the state JT-12 returns to |
@@ -1182,7 +1182,7 @@ Challenge to a rejection, ban or report outcome. Machine S0.9.7. [D]
 | `decision_event_ref` | text | null | an opaque event id for automatic decisions (for example a `reject.*` outcome) |
 | `decision_at` | ts | NN | `filed` is allowed only within `appeal.window_days` of it (API error otherwise) |
 | `state` | enum | NN | `filed`, `assigned`, `in_review`, `awaiting_second_review`, `upheld`, `overturned`, `withdrawn` |
-| `statement` | text | null after retention, <= 2000 chars | free text; may contain personal data, so it is access-controlled and held under the retention rule of this table (`moderation`, S5.15.4) [default-pending D-32] |
+| `statement` | text | null after retention, <= `appeal.reason_max_chars` characters (S15b 15.29.7) | free text; may contain personal data, so it is access-controlled and held under the retention rule of this table (`moderation`, S5.15.4) [default-pending D-32] |
 | `original_decider_admin_id` | id `adm_` | null | the assigned reviewer must differ (S0.9.7) |
 | `assigned_admin_id`, `second_reviewer_admin_id` | id `adm_` | null, FK | bans and template rejections need `appeal.ban_min_reviewers` |
 | `resulting_action_id` | id `act_` | null, FK | the reversing action, for example `cell.overturned` or `member.reinstated` |

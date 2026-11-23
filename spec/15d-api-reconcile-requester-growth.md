@@ -82,8 +82,8 @@ S15b already has the admin queue (15.29.2), the events `appeal.filed`, `appeal.w
 ```
 Appeal        { id: id<apl>, kind: enum<appeal_kind>, subject: { kind: "submission"/"job"/"member", id: id<sub>/id<job>/null },
                 state: "filed"/"in_review"/"decided"/"withdrawn", outcome: "upheld"/"overturned"/null,
-                outcome_copy_key: copy_key/null, statement: text<500>/null, filed_at: ts, decided_at: ts/null }
-createAppeal  req { kind: "submission_rejection"/"job_rejection"/"member_ban", subject_id: id<sub>/id<job>/null, statement: text<500>? }
+                outcome_copy_key: copy_key/null, statement: text<appeal.reason_max_chars>/null, filed_at: ts, decided_at: ts/null }
+createAppeal  req { kind: "submission_rejection"/"job_rejection"/"member_ban", subject_id: id<sub>/id<job>/null, statement: text<appeal.reason_max_chars>? }
               201 { appeal: Appeal }       Location: /v1/appeals/{appeal_id}
 listAppeals   Page<Appeal>, newest first, filters state, kind (S15a 15.11 order rule)
 withdrawAppeal req {}   200 { appeal: Appeal }
@@ -305,7 +305,7 @@ These are contradictions or gaps that this reconciliation exposed and that it ca
 | O4 | S15b 15.29 against 12.9.1 | 12 has `team.locked`, `team.unlocked`, `team.disbanded` after reports; S15b has no admin endpoint, permission or event owner for them, so a reported team cannot be locked. | Add `lockTeam`, `unlockTeam` (single admin for lock, tightening) to S15b with `perm.report.triage` or a `perm.team.*` permission; the report outcome links to the action. |
 | O5 | S15a `createReport` | `subject_kind` `result` takes an `id<sub>`, which a requester never receives (`ResultItem` has `cell_id`, no submission id). 11b screens 13 and 16 report results. | Accept `id<cel>` for `subject_kind` `result` when the caller owns the job. |
 | O6 | S15a 15.7.3 `cancelJob` | The text says `refund_ucr` is visible in `getJob`; `Job` has no such field. | Point the text at `getSettlementReceipt` (this file) or add the field. |
-| O7 | S15a 15.7.3 `rateJob` | `PUT` only; 11b screen 17 must show an earlier rating and no read exists. | Add `rating` to `Job` (additive) or a `GET /v1/jobs/{job_id}/rating`; 11b rows `createJobRating`, `getJobRating` use `POST` and `GET` on a path that S15 defines with `PUT`. |
+| O7 | S15a 15.7.3 `rateJob` | `PUT` only; 11b screen 17 must show an earlier rating and no read exists. | Add `rating` to `Job` (additive) or a `GET /v1/jobs/{job_id}/rating`; 11b rows `createJobRating`, `getJobRating` use `POST` and `GET` on a path that S15 defines with `PUT`. Done: `Job.rating` of S15a 15.7.2 is the read-back. |
 | O8 | S15b 15.34.3 `appeal.overturned` | Consumers lack `job_svc`, so a `job_rejection` appeal has no effect owner; `template_rejection` is listed as a kind but members cannot file it. | Add `job_svc` as consumer and define what overturning a terminal `rejected` job does (a fast-tracked copy is the proposal); decide who files `template_rejection` for an author. |
 | O9 | S15a 15.3 rule 1 | Strict requests are defined for body fields; 11b sends query parameters that S15 does not define (`listServices ?state=approved`, `getManifest ?profile=requester`). | State whether an unknown query parameter is `400 VALIDATION_FAILED` reason `unknown_field`; the edits for 11b:121 and 11b:149 below drop these two. |
 | O10 | S15a `Features` against 12.11 | `flags` are booleans without arm names, yet 12.11.1 returns `a.arm_key`, and 12.11.5 says members see their own arm on a settings screen. No S15 operation shows that arm. | Check the mechanics of 12.12 for any with more than two arms or arm-specific client behavior; if any exists, add an optional `variants` map to `Features` (additive), and add a member read of own arms or drop the settings display. |
@@ -322,7 +322,7 @@ These are contradictions or gaps that this reconciliation exposed and that it ca
 - **S3** S15a 15.13 and 15.1: the S15 operation tables include this file.
 - **S4** S15a 15.9: append the five new `details.reason` values of 15.C.6 to their code rows.
 - **S5** S15b 15.34: done; 15.34.4 has rows for `experiment.assigned` and `experiment.exposed`, and `job_svc` is a consumer of `appeal.overturned` (15.34.3).
-- **S6** S15a 15.7.3 and `Job`: refund text (O6) and rating read-back (O7).
+- **S6** S15a 15.7.3 and `Job`: refund text (O6) and rating read-back (O7). The rating read-back is done (`Job.rating`, S15a 15.7.2).
 
 ## Edits required in citing parts
 
@@ -411,11 +411,11 @@ For a later cell to apply [D]. Each block is one edit: a line number in the citi
 
 11b:150
 - | `createJobRating`+ / `getJobRating`+ | `POST` and `GET /v1/jobs/{job_id}/rating` | 17 |
-+ | `rateJob` | `PUT /v1/jobs/{job_id}/rating` (replaces an earlier rating; no read exists yet, 15.C.7 O7) | 17 |
++ | `rateJob` | `PUT /v1/jobs/{job_id}/rating` (replaces an earlier rating; the stored rating is read back as `Job.rating`, S15a 15.7.2) | 17 |
 
 11b:151
 - | `createAppeal` / `getAppeal` | `POST /v1/appeals` with `appeal_kind` = `job_rejection`; `GET /v1/appeals/{appeal_id}` | 18 |
-+ | `createAppeal`+ / `getAppeal`+ | `POST /v1/appeals` with `kind` = `job_rejection` and `subject_id` = the job id; `GET /v1/appeals/{appeal_id}` | 18 |
++ | `createAppeal` / `getAppeal` | `POST /v1/appeals` with `kind` = `job_rejection` and `subject_id` = the job id; `GET /v1/appeals/{appeal_id}` (S15b 15.29.7) | 18 |
 ```
 
 Prose in 11b that depends on the removed or changed rows (screen sections 03, 04, 07, 09, 11, 13, 16; line numbers not given to this cell) is changed to match [A]:
