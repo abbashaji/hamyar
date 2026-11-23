@@ -517,13 +517,13 @@ applyChange(ctx, name, new_value, effective_from, reason):
 | Switch | Enforced at | Effect |
 | --- | --- | --- |
 | `kill.all_minting` | `LedgerService.post` for `mint` | `KILL_SWITCH_ENGAGED`; Commons cells may still be accepted without credit only as S6.* defines |
-| `kill.all_new_jobs` | `createJob`, `submitJob`, `confirmEscrow` | Refused; running jobs continue |
-| `kill.template.<id>` | Lease issuance, `submitJob` | Template `paused`; its jobs `suspended`; no lease for its cells |
-| `kill.service.<id>` | Lease issuance, `submitJob` | Service `suspended`; cells needing it not shown; in-flight handling per S7.* |
+| `kill.all_new_jobs` | `createJob` with `submit` true, `submitJobForScreening`, `confirmJob` | Refused; running jobs continue |
+| `kill.template.<id>` | Lease issuance, `submitJobForScreening` | Template `paused`; its jobs `suspended`; no lease for its cells |
+| `kill.service.<id>` | Lease issuance, `submitJobForScreening` | Service `suspended`; cells needing it not shown; in-flight handling per S7.* |
 | `kill.member.<id>` | Authentication and lease issuance | Principal refused |
 
 - Engaging is one operator and immediate; releasing needs two operators (`security.two_person_actions`). Every change writes `KillSwitch`, `AdminAction`, an event and an epoch bump.
-- Launch switches: `members_may_join` is checked in `createMember` and in `leaseNextCell` (4.16 F1, `AC-bm6-01`), `member_jobs_enabled` in `submitJob` and `confirmEscrow` (`AC-bm7-01`), `minting_enabled` in `post` for `mint`; each refuses with `LAUNCH_GATE_CLOSED`. The only writer is `LaunchGate.applySignedOff`, which re-evaluates the gate rule of S14.* in the same commit. No environment variable, header, role or build flag bypasses it; dev, test and staging pass the same sign-off flow with synthetic administrators and synthetic evidence, and their data is labeled `synthetic` [D].
+- Launch switches: `members_may_join` is checked in `createMember` and in `createLease` (4.16 F1, `AC-bm6-01`), `member_jobs_enabled` in `submitJobForScreening` and `confirmJob` (`AC-bm7-01`), `minting_enabled` in `post` for `mint`; each refuses with `LAUNCH_GATE_CLOSED`. The only writer is `LaunchGate.applySignedOff`, which re-evaluates the gate rule of S14.* in the same commit. No environment variable, header, role or build flag bypasses it; dev, test and staging pass the same sign-off flow with synthetic administrators and synthetic evidence, and their data is labeled `synthetic` [D].
 
 ## 4.10 Migrations
 
@@ -761,11 +761,11 @@ What the host and a network observer can see, and what happens on seizure, is ow
 
 These show which components act and which writes commit together. States and guards are in S5.*; money rules in S6.*. [D]
 
-**F1. Lease a cell.** Member app calls `leaseNextCell`. One unit of work: read `ConfigSnapshot` and re-check epoch, kill switches and launch switches; select a queued cell whose opt-ins cover it (R8) and whose service is `approved`; compare-and-set `Cell.queued` to `leased`; insert `Lease` with a 128-bit nonce stored as a hash and `expires_at` from the store clock; insert the event rows. Commit. The rendered prompt and nonce are returned once. Two concurrent callers: exactly one commit wins the compare-and-set; the other retries or receives no cell.
+**F1. Lease a cell.** Member app calls `createLease`. One unit of work: read `ConfigSnapshot` and re-check epoch, kill switches and launch switches; select a queued cell whose opt-ins cover it (R8) and whose service is `approved`; compare-and-set `Cell.queued` to `leased`; insert `Lease` with a 128-bit nonce stored as a hash and `expires_at` from the store clock; insert the event rows. Commit. The rendered prompt and nonce are returned once. Two concurrent callers: exactly one commit wins the compare-and-set; the other retries or receives no cell.
 
 **F2. Submit, check, accept, pay.** Member app posts the paste-back with the lease id and nonce and an idempotency key. One unit of work: validate nonce and size; store `Submission` (a replay returns the stored outcome and writes nothing); run inline automatic checks (bounded); decide `accepted`, `rejected` or `flagged_for_audit`; on acceptance, post the `payout` or `mint` transaction through `LedgerService.post` in the same commit; update cell state; insert events. Checks that need a second donor's output make the cell `flagged_for_audit` and finish later in the `audit_sweeper`; the member sees a pending result [D].
 
-**F3. Admit a job.** `submitJob`: policy evaluation (pure) and stamping; template and service checks; `quote` from the stored forecast and the latest v and λ. `confirmEscrow` (separate request, within `price.quote_ttl_s`): one unit of work that re-checks the quote, capacity and kill switches, posts `escrow_hold`, creates the cells, and moves the job to `admitted`. No capacity is promised before this commit.
+**F3. Admit a job.** `submitJobForScreening`: policy evaluation (pure) and stamping; template and service checks; `quote` from the stored forecast and the latest v and λ. `confirmJob` (separate request, within `price.quote_ttl_s`): one unit of work that re-checks the quote, capacity and kill switches, posts `escrow_hold`, creates the cells, and moves the job to `admitted`. No capacity is promised before this commit.
 
 **F4. Revoke or suspend a service.** An admin action (second approver where required) in one unit of work: change the service state, bump `config_epoch`, engage `kill.service.<id>` if suspending, mark dependent jobs `suspended` or stopped per S7.*, write `AdminAction`, emit events. Because brakes are read inside lease and admission transactions (4.9.4), no new lease is issued after this commit. In-flight leases follow S7.*.
 

@@ -95,7 +95,7 @@ Blocks: `BLK-header`; **My work** (claims I hold, with time left); **Queues** (o
 
 **`SCR-ops-02` Approvals inbox** [D]. Purpose: decide or follow two-person requests. Roles: `reviewer`, `operator`. Blocks: `BLK-header`; tabs "I can decide", "Waiting for another admin", "Closed"; each row is a `BLK-twoperson` card with the action name, subject, reason code, `BLK-diff` of the payload and `BLK-affected` as computed at request time and recomputed now (a difference is highlighted). Actions: `approval.approve`, `approval.reject`, `approval.withdraw` (11.54.3).
 
-**`SCR-ops-03` Audit-trail viewer** [D]. Purpose: read the `AdminAction` log. Roles: `operator` (all rows), `reviewer` (rows of the reviewer areas and their own rows). Blocks: `BLK-list` with filters `action_code`, `admin_user_id`, `subject_type`, `subject_id`, date range (UTC, with local time beside it); row detail with `BLK-diff` of `before_hash` and `after_hash` targets where the record is visible to the viewer; a "Verify chain" button (`verifyAdminActionChain`) that recomputes the hash chain over a chosen range and reports the first break. The viewer has no edit or delete control and no export beyond aggregate counts (`AD8`).
+**`SCR-ops-03` Audit-trail viewer** [D]. Purpose: read the `AdminAction` log. Roles: `operator` (all rows), `reviewer` (rows of the reviewer areas and their own rows). Blocks: `BLK-list` with filters `action_code`, `admin_user_id`, `subject_type`, `subject_id`, date range (UTC, with local time beside it); row detail with `BLK-diff` of `before_hash` and `after_hash` targets where the record is visible to the viewer; a "Verify chain" button (`startAdminActionVerification`) that recomputes the hash chain over a chosen range and reports the first break. The viewer has no edit or delete control and no export beyond aggregate counts (`AD8`).
 
 ## 11.54 Two-person approvals, the admin action log and the action catalog
 
@@ -235,7 +235,7 @@ All admin writes need `Idempotency-Key` (S0.11.5) and carry `RateLimit-*` header
 | `AC-appr-04` | Only one active `AdminUser` holds `operator` | They open a `killswitch.release` dialog | `previewAdminAction` returns `fail_closed` true; the confirm button stays disabled and shows `copy.admin.fail_closed_one_admin` |
 | `AC-appr-05` | Between request and second approval the target entry was already reversed | B approves | Execution fails its guard, the request becomes `failed`, `admin.approval_failed` is emitted by actor `system` with `precondition_failed`, no ledger entry is written |
 | `AC-trail-01` | An action whose state change succeeds but whose `AdminAction` insert fails | The transaction commits | It does not: both roll back and the client gets `503 UNAVAILABLE` |
-| `AC-trail-02` | An `AdminAction` row edited directly in the database | `verifyAdminActionChain` runs over its day | The result names the first row whose `entry_hash` no longer matches |
+| `AC-trail-02` | An `AdminAction` row edited directly in the database | `startAdminActionVerification` runs over its day | The result names the first row whose `entry_hash` no longer matches |
 
 ## 11.55 Tool 1: Template review queue
 
@@ -266,14 +266,13 @@ All admin writes need `Idempotency-Key` (S0.11.5) and carry `RateLimit-*` header
 | `listTemplateVersions` | `GET /v1/admin/template-versions` | Filters above; `ETag` per row |
 | `getTemplateVersion` | `GET /v1/admin/template-versions/{tpv_id}` | Includes diff base and lint results |
 | `runTemplateChecks` | `POST /v1/admin/template-versions/{tpv_id}/check-runs` | Deterministic, no side effects; `check_hash` is stored in the `review` row by `submitTemplateReview` (15.D.4.7) |
-| `createTemplateVersionComment` | `POST .../{tpv_id}/comments` | `CT0` |
-| `requestTemplateChanges` | `POST .../{tpv_id}/change-requests` | `If-Match` |
-| `approveTemplateVersion` / `rejectTemplateVersion` | `POST .../{tpv_id}/approvals`, `.../rejections` | `If-Match` |
+| internal review comment (no S15 operation) | none | `CT0` |
+| `submitTemplateReview` | `POST /v1/admin/template-versions/{tpv_id}/reviews` | Body `decision` is `approve`, `request_changes` or `reject` (S15b 15.24); `If-Match` |
 | `retireTemplateVersion` | `POST .../{tpv_id}/retirements` | `CT2` |
 
 | AC | Given | When | Then |
 | --- | --- | --- | --- |
-| `AC-tplq-01` | A version authored by admin A in `in_review` | A calls `approveTemplateVersion` | `403 FORBIDDEN` and a refused `AdminAction` |
+| `AC-tplq-01` | A version authored by admin A in `in_review` | A calls `submitTemplateReview` with decision `approve` | `403 FORBIDDEN` and a refused `AdminAction` |
 | `AC-tplq-02` | A new template with `template.min_reviewers_new` = 2 (fixture) | Reviewer B approves, then B approves again | The first call moves it to `awaiting_second_review`; the second returns `409 STATE_CONFLICT`; reviewer C's approval then yields `approved` and a second `AdminAction` |
 | `AC-tplq-03` | A version whose lint reports a blocking finding | A reviewer opens Approve | The button is disabled; the API returns `422 UNPROCESSABLE` with `details.fields` naming the finding |
 | `AC-tplq-04` | Two reviewers open the same version, one saves a change request first | The second submits with a stale `If-Match` | `412 PRECONDITION_FAILED`; no state change |
@@ -309,9 +308,9 @@ All admin writes need `Idempotency-Key` (S0.11.5) and carry `RateLimit-*` header
 | --- | --- | --- |
 | `listServices`, `createService`, `getService` | `GET`, `POST /v1/admin/services`, `GET .../{svc_id}` | `ETag` on the entry |
 | `startServiceReview` | `POST /v1/admin/services/{svc_id}/reviews` | |
-| `uploadTermsCopy` | `POST /v1/admin/services/{svc_id}/terms-copies` | JSON with the bytes as base64; body limit `ceil(4 * service.terms_copy_max_bytes / 3) + 4096` bytes, derived because base64 adds one third [A] (`ISS-117`) |
-| `listTermsCopies`, `getTermsCopy`, `getTermsCopyContent` | `GET .../terms-copies`, `GET /v1/admin/terms-copies/{tcp_id}[/content]` | Content is returned as JSON `{content_base64, hash}` |
-| `recordFlagAnswer`, `listFlagAnswers` | `POST`, `GET .../{svc_id}/flag-answers` | Append-only |
+| `createTermsCopy` | `POST /v1/admin/services/{svc_id}/terms-copies` | JSON with the bytes as base64; body limit `ceil(4 * service.terms_copy_max_bytes / 3) + 4096` bytes, derived because base64 adds one third [A] (`ISS-117`) |
+| `listTermsCopies`, `getTermsCopy`, `getTermsCopyChunk` | `GET .../terms-copies`, `GET /v1/admin/terms-copies/{tcp_id}`, `GET /v1/admin/terms-copies/{tcp_id}/chunks/{n}` | Content is read chunk by chunk as JSON `{n, data_base64}` (S15b 15.23.2) |
+| `recordFlagAnswers`, `listFlagAnswers` | `POST`, `GET .../{svc_id}/flag-answers` | Append-only |
 | `updateServiceAdapter` | `PATCH /v1/admin/services/{svc_id}/adapter` | JSON Merge Patch, `If-Match` |
 | `approveService`, `rejectService`, `revokeService` | `POST .../{svc_id}/approvals`, `.../rejections`, `.../revocations` | `revokeService` is `CT2` |
 
@@ -319,7 +318,7 @@ All admin writes need `Idempotency-Key` (S0.11.5) and carry `RateLimit-*` header
 | --- | --- | --- | --- |
 | `AC-svc-01` | A new entry | Created | State `unreviewed`; Approve is disabled; S7.* refuses job creation for it |
 | `AC-svc-02` | `third_party_task_use` is `unknown` | Approve is called | `422 UNPROCESSABLE`, `details.fields` names the flag; unknown is treated as no |
-| `AC-svc-03` | A gate flag answered `yes` with no terms copy | `recordFlagAnswer` is called | `422 UNPROCESSABLE` with `copy_key` `copy.admin.terms_copy_required` |
+| `AC-svc-03` | A gate flag answered `yes` with no terms copy | `recordFlagAnswers` is called | `422 UNPROCESSABLE` with `copy_key` `copy.admin.terms_copy_required` |
 | `AC-svc-04` | A file one byte over `service.terms_copy_max_bytes` | Uploaded | `413 PAYLOAD_TOO_LARGE`; a file within the limit is stored and its returned hash equals SHA-256 of the uploaded bytes |
 | `AC-svc-05` | A flag with answers `yes` (earlier) and `no` (later) | The matrix loads | The effective answer is `no`, both rows remain in the history, no row was edited |
 | `AC-svc-06` | `adapter.supports_prefill` true while `prefilled_link_use` is `unknown` | The adapter is read by the volunteer app | `adapter.copy_only` is true |
@@ -417,9 +416,9 @@ The appellant receives a reason code rendered as copy, never reviewer notes.
 | `op` | Method and path | Notes |
 | --- | --- | --- |
 | `listAppeals`, `getAppeal` | `GET /v1/admin/appeals[/{apl_id}]` | `ETag` |
-| `assignAppeal`, `reassignAppeal` | `POST .../{apl_id}/assignments`, `.../reassignments` | Conflict guard |
+| `assignAppeal` | `POST .../{apl_id}/assignments` | Also reassigns (`appeal.reassigned` when already assigned); conflict guard |
 | `startAppealReview` | `POST .../{apl_id}/reviews` | |
-| `requestAppealSecondReview` | `POST .../{apl_id}/second-reviews` | |
+| `requestSecondAppealReview` | `POST .../{apl_id}/second-review-requests` | |
 | `decideAppeal` | `POST .../{apl_id}/decisions` | `{outcome, reason_code, reason_text}`; `If-Match` |
 
 | AC | Given | When | Then |
@@ -462,7 +461,7 @@ When reports on a template reach `template.autopause_report_count` inside `templ
 | `restrictMember`, `suspendMember`, `banMember`, `reinstateMember`, `liftMemberRestriction` | `POST /v1/admin/members/{mem_id}/restrictions`, `.../suspensions`, `.../bans`, `.../reinstatements`, `.../restriction-lifts` | Body carries `reason_code`, `reason`, `reason_copy_key`, `linked_ids`, `ends_at?` (15.29.6); `banMember` returns `202` |
 | `stopJob` | `POST /v1/admin/jobs/{job_id}/stop-requests` | `CT2`; `perm.job.stop`, step-up, defined in 15.D.4.3 |
 | `voidCell` | `POST /v1/admin/cells/{cel_id}/voidings` | `CT2`; `perm.cell.void`, step-up, body `{reason_code, reason, linked_ids}`, defined in 15.D.4.3 |
-| `createCellOverturn` | `POST /v1/admin/cell-overturns` | Body `{cell_ids, reason_code, reason, linked_ids}`; one admin with step-up, no approval (15.D.4.3) [default-pending D-39] |
+| `overturnCells` | `POST /v1/admin/cell-overturns` | Body `{cell_ids, reason_code, reason, linked_ids}`; one admin with step-up, no approval (15.D.4.3) [default-pending D-39] |
 
 | AC | Given | When | Then |
 | --- | --- | --- | --- |
@@ -470,7 +469,7 @@ When reports on a template reach `template.autopause_report_count` inside `templ
 | `AC-abuse-02` | A `suspendMember` call whose body has no `reason_code` | Sent | `400 VALIDATION_FAILED` with `details.fields` naming `reason_code`; no `AdminAction` row and no event (a refused `AdminAction` is written only for authorization failures, 15.34.1) |
 | `AC-abuse-03` | A ban initiated by reviewer A | A confirms | `202`, member status unchanged; the ban executes only after distinct admin B approves |
 | `AC-abuse-04` | Any response of the abuse and appeal APIs | Checked against the schema | No field contains a reporter's `mem_` or `vol_` id |
-| `AC-abuse-05` | A `createCellOverturn` for accepted cells | Executed by one admin with step-up | For each cell `cell.overturned`, a ledger `reversal` and a `rework` cell (S0 `ISS-05`) exist, or the whole request is rejected by the guard of 11.60.3 |
+| `AC-abuse-05` | An `overturnCells` call for accepted cells | Executed by one admin with step-up | For each cell `cell.overturned`, a ledger `reversal` and a `rework` cell (S0 `ISS-05`) exist, or the whole request is rejected by the guard of 11.60.3 |
 | `AC-abuse-06` | An item older than `report.triage_sla_days` | The queue loads | The overdue badge shows |
 
 ## 11.60 Tool 6: Ledger explorer and reversal
@@ -524,7 +523,7 @@ No `PUT`, `PATCH` or `DELETE` route exists on any ledger resource.
 | `AC-ledgerx-04` | An entry that is already a `reversal` | A requests a reversal | `409 STATE_CONFLICT` |
 | `AC-ledgerx-05` | An operator requests a member's account (`?member_id`) | Sent | `200`; one `AdminAction` of kind `read` (`member.lookup`) names the admin and the `mem_` id, and the call carried no body (a logged read, D-20) [default-pending D-40] |
 | `AC-ledgerx-06` | An open `ledger.invariant_violated` | An operator acknowledges the alarm | The alarm shows acknowledged and the invariant row stays red until a passing check runs |
-| `AC-ledgerx-07` | A seeded edit of one entry (the BM1 corruption test) | `createLedgerVerification` runs | The first broken `seq` is named and `ledger.invariant_violated` is raised |
+| `AC-ledgerx-07` | A seeded edit of one entry (the BM1 corruption test) | `startHashChainVerification` runs | The first broken `seq` is named and `ledger.invariant_violated` is raised |
 | `AC-ledgerx-08` | A balance of 9007199254740993 `ucr` | Displayed | Shown exactly, as a string, never through a JavaScript number |
 
 ## 11.61 Tool 7: Parameter editor
@@ -558,7 +557,7 @@ No `PUT`, `PATCH` or `DELETE` route exists on any ledger resource.
 | `listParameters`, `getParameter` | `GET /v1/admin/parameters[/{name}]` | `ETag`; `name` is the dotted key |
 | `listParameterVersions` | `GET /v1/admin/parameters/{name}/versions` | |
 | `createParameterChangeSet` | `POST /v1/admin/parameter-change-sets` | `201` when executed (tighten, neutral), `202` with an `AdminApproval` (loosening set); `expected_version` per item; one parameter is `proposeParameterChange` at `POST /v1/admin/parameter-changes` (15.D.4.5) |
-| `withdrawParameterVersion` | `POST /v1/admin/parameter-versions/{pmv_id}/withdrawals` | `CT2` |
+| `withdrawParameterChange` | `POST /v1/admin/parameter-versions/{pmv_id}/withdrawals` | `CT2` |
 | `listPublicChangeLog` | `GET /v1/public/change-log[/{chg_id}]` | All entries are public; annotations are `POST /v1/admin/changelog-entries` |
 
 | AC | Given | When | Then |
@@ -617,7 +616,7 @@ bottleneck = argmax over candidates with blocked > 0; ties broken by oldest
 show: name, blocked count, age, link to its screen
 ```
 
-**API.** `getCapacitySnapshot` `GET /v1/admin/capacity`, `listCapacityDays`, `listSupplyGauges`, `getOperationsSnapshot` `GET /v1/admin/capacity/operations`; `listAdminMetricSnapshots` `GET /v1/admin/metric-snapshots?kind=`; `getBottleneck` `GET /v1/admin/bottleneck` (15.D.4.6). Audit: reads are not logged individually; alarms are `Alarm` rows.
+**API.** `getCapacitySnapshot` `GET /v1/admin/capacity`, `listCapacityDays`, `listSupplyGauges`, `getOperationsSnapshot` `GET /v1/admin/capacity/operations`; `listMetricSnapshots` `GET /v1/admin/metric-snapshots?kind=`; `getBottleneck` `GET /v1/admin/bottleneck` (15.D.4.6). Audit: reads are not logged individually; alarms are `Alarm` rows.
 
 | AC | Given | When | Then |
 | --- | --- | --- | --- |
