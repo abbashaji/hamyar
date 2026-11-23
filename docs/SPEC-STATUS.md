@@ -36,6 +36,7 @@ Rows 1 to 66 each have an edit that the R5 log of its cell marks applied or alre
 - `spec/12-public-growth.md` 12.1.2, 12.10.5: no read of one referral by id (R5-08).
 - `spec/07-policy.md` 7.15.4, 7.8.4: no stored draft policy version and no separate proposal step; S15b 15.25 creates, classifies and publishes in one call, so the draft and awaiting_approval states of 7.2.1 and 7.8.4 are unreachable through S15 (R5-08).
 - `spec/11a-volunteer-ux.md` 11.6, 11.7: no public operation for the launch state or the approved-service count, which the landing needs before sign-in (R5-07a).
+- `spec/05b-state-machines.md` :460: still cites the old nonce operation name; S15a 15.6.2 defines it as `issueLeaseNonce` (R5-08 renamed it in 09, 27-12 to 27-15). Aliased as renamed; 05b was not in any R5 cell for this id.
 
 ### Noticed, not fixed, by log (all open unless marked closed)
 

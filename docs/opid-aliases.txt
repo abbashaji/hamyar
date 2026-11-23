@@ -5,3 +5,4 @@ createTemplateVersionComment OPEN:internal review comment on a template version 
 getPublicMilestone OPEN:read of one public milestone has no S15 operation (spec/12-public-growth.md 12.1.2, SCR-pub-06, 12.6.1)
 getReferral OPEN:read of one referral by id has no S15 operation (spec/12-public-growth.md 12.1.2 and 12.10.5)
 createPolicyVersionDraft OPEN:a stored draft policy version and a separate proposal step have no S15 operation (spec/07-policy.md 7.15.4, 7.8.4; S15b 15.25 creates, classifies and publishes in one call)
+rotateLeaseNonce OPEN:renamed, see spec/09-result-return.md 9.4.3 (S15a 15.6.2 operation issueLeaseNonce); still cited at spec/05b-state-machines.md:460
