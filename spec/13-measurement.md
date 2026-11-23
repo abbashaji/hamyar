@@ -860,8 +860,8 @@ Table `experiments` (`Experiment`, `exp_`, `permanent`). [D]
 | `status` | enum `draft`, `registered`, `running`, `stopped` | `stopped` is terminal (13.8.2) |
 | `hypothesis` | text, 1..500 chars | Plain statement, written before `registered` |
 | `flag_key` | text | The kill flag, for `EXP-01` `ff.experiment.expiry_arm` (S0.10.7). The flag off means no new assignment and no new application (13.8.4) |
-| `unit` | enum `member`, `invite_tree` | `invite_tree` assigns every member of one invite tree the arm of the tree's root, for mechanisms that spill between members; Phase 1 uses `member` [A] |
-| `eligibility` | json | `{ created_at_gte, population: "new_members"\|"all_members", min_trust_tier, locales, status, include_existing: false }`; each field has the meaning and default of 12.11.1 (`status` defaults to `active`) |
+| `unit` | enum `member`, `invite_tree` | `invite_tree` assigns every member of one invite tree the arm of the tree's root, for mechanisms that spill between members; Phase 1 uses `member` and `invite_tree` is reserved (12.11.1) [A] |
+| `eligibility` | json | `{ created_at_gte, population: "new_members"\|"all_members", min_trust_tier, locales, status, include_existing: false }`; each field has the meaning and default of 12.11.1 (`status` defaults to `active`); the pairs of `population` and `include_existing` that are allowed are the table below the columns |
 | `strata` | json array | Allowed entries: `pilot_week` (always present) and `locale` (optional); the stratum string is built as in 13.8.4 item 2. Default `["pilot_week"]` |
 | `arms` | json array | `{ arm_key, weight_ppm, parameter_overrides, flag_overrides }` (13.8.3) |
 | `block_size` | int | Derived and stored at `registered` (13.8.3) |
@@ -870,6 +870,15 @@ Table `experiments` (`Experiment`, `exp_`, `permanent`). [D]
 | `prereg_id` | text, nullable | The locked `prr_` that lists this experiment; required for `registered` |
 | `start_at`, `stop_at` | timestamptz, nullable | Server time |
 
+**`eligibility.population` with `eligibility.include_existing`.** All four pairs are defined; `created_at_gte`, `min_trust_tier`, `locales` and `status` narrow the members of every allowed pair alike (12.11.1) [A].
+
+| `population` | `include_existing` | Members assigned | At the guard `draft` to `registered` |
+| --- | --- | --- | --- |
+| `new_members` | `false` (default) | Only members created while the experiment is `running`, in the `member.created` transaction (13.8.4 item 1); nobody who existed at `start_at` | Allowed |
+| `new_members` | `true` | None: `new_members` excludes members who already exist and `true` asks to assign them | Refused, `VALIDATION_FAILED` |
+| `all_members` | `true` | The members created while `running`, as in the first row, and the members who already existed at `start_at`, assigned lazily at their first `getFeatures` evaluation after `start_at` (13.8.4 item 1, S12.11.2) | Allowed |
+| `all_members` | `false` | None: `all_members` includes members who already exist and `false` assigns none of them | Refused, `VALIDATION_FAILED` |
+
 Table `experiment_assignments` (`ExperimentAssignment`, `asg_`, `permanent`): `id`, `experiment_id`, `member_id` (the opaque `mem_` id; the row survives the member's closure and then points to nothing), `arm_key`, `stratum`, `block_id`, `position_in_block`, `assigned_at`, `source` (`random`, `forced_by_admin` with an `AdminAction`, never used for eligible members of a running experiment unless `FND` documents a defect). Unique `(experiment_id, member_id)`. Table `experiment_blocks` (`ExperimentBlock`, `blk_`): `id`, `experiment_id`, `stratum`, `block_index`, `permutation` (json array of `arm_key`), `next_position`, `created_at`. [D]
 
 ### 13.8.2 State machine
@@ -877,8 +886,8 @@ Table `experiment_assignments` (`ExperimentAssignment`, `asg_`, `permanent`): `i
 | From | To | Event | Guard | Effects |
 | --- | --- | --- | --- | --- |
 | (none) | `draft` | `experiment.created` | `perm.experiment.manage` | Salt generated |
-| `draft` | `registered` | `experiment.registered` | A locked `PreRegistration` lists the `code`; weights sum to 1,000,000; block size `<= 100` (13.8.3); every override passes validation | `block_size` stored; arms and weights frozen |
-| `registered` | `running` | `experiment.started` | One admin with step-up, not a two-person action (D-39); flag `flag_key` is on; `experiment.assignment_log_enabled` is true; `now >= cohort_start_at` of the pre-registration | `start_at` set; `ChangeLogEntry` published (`experiment` kind: code, arms, weights, overridden parameter names, start); notice to members per `change.notice_days_default` is not required for prospective-only overrides on members first assigned after start, but the pilot opt-in text names the experiment (`AN-11`) |
+| `draft` | `registered` | `experiment.registered` | A locked `PreRegistration` lists the `code`; weights sum to 1,000,000; block size `<= 100` (13.8.3); every override passes validation; the pair `population` and `include_existing` is an allowed row of the table in 13.8.1 | `block_size` stored; arms and weights frozen |
+| `registered` | `running` | `experiment.started` | One admin with step-up, not a two-person action (D-39); flag `flag_key` is on; `experiment.assignment_log_enabled` is true; `now >= cohort_start_at` of the pre-registration | `start_at` set; `ChangeLogEntry` published (`subject_kind` `pre_registration`, the one kind of S12.5.1 and S12.11.2, naming the `prr_` id, the locked hash and the `exp_` id; the entry also states code, arms, weights, overridden parameter names and start); notice to members per `change.notice_days_default` is not required for prospective-only overrides on members first assigned after start, but the pilot opt-in text names the experiment (`AN-11`) |
 | `running` | `stopped` | `experiment.stopped` | Any admin with `perm.experiment.manage`, or the flag turned off, or the kill switch scope covering it | `stop_at` set; salt published in a change-log entry |
 
 Editing `arms` after `registered` is rejected (`409 STATE_CONFLICT`). A changed design is a new experiment code. [D]

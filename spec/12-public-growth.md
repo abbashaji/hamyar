@@ -437,9 +437,9 @@ Owned here: how growth flags are evaluated and how members are randomized. Owned
 | `flag_key` | one of `ff.growth.v1_fast_path` .. `ff.growth.v6_milestones` |
 | `status` | `draft`, `registered`, `running`, `stopped` (T), as `S13.8.2`. Events `experiment.created`, `experiment.registered`, `experiment.started`, `experiment.stopped` (reason `completed` or `killed`) (`ISS-128`) |
 | `arms` | ordered list `{arm_key, weight_ppm}`; weights sum to exactly 1,000,000; exactly one arm has `arm_key` = `control` |
-| `population` | `new_members` (created after start) or `all_members` (active at start or later); the field `population` of `eligibility` in `S13.8.1`, with these two values only |
-| `eligibility` | the json of `S13.8.1`: `created_at_gte`, `population`, `min_trust_tier`, `locales`, `status` (default `active` only), `include_existing` (bool, default false, as `S13.8.1`; true assigns members who already exist lazily, 12.11.2) |
-| `unit` | always the member; never a device, IP hash or invite |
+| `population` | `new_members` (created after start) or `all_members` (members who already exist at start and members created after it, within the rest of `eligibility`); the field `population` of `eligibility` in `S13.8.1`, with these two values only; the allowed pairs with `include_existing` are the table of `S13.8.1` (`new_members` with false, `all_members` with true) |
+| `eligibility` | the json of `S13.8.1`: `created_at_gte` (RFC 3339 UTC timestamp or null, default null: a member is eligible only if its `created_at` is at or after it; null is no lower bound), `population`, `min_trust_tier`, `locales`, `status` (default `active` only), `include_existing` (bool, default false, as `S13.8.1`; true assigns members who already exist lazily, 12.11.2) |
+| `unit` | always the member (`unit` `member` of `S13.8.1`); the value `invite_tree` of `S13.8.1` is reserved and no growth mechanic uses it; never a device, IP hash or invite |
 | `assignment_mode` | `hash_blocked`: the permuted blocks of `S13.8.4` (12.11.3), the only mode `S13.8` defines. `hash_bucket` stays a reserved name and is rejected with `VALIDATION_FAILED` until `S13.8` defines it |
 | `strata` | at most two of the allowed stratifiers (12.11.4) |
 | `block_size` | derived and stored at `registered` by the rule of `S13.8.3` (weights reduced by their greatest common divisor; two arms at 500,000 ppm give 2); at most 100 |
