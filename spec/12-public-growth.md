@@ -29,12 +29,12 @@ This part specifies what the project shows the public and how it tests growth (p
 | Public ledger | `listPublicLedgerCheckpoints` (one date: `from` = `to`), `listPublicLedgerDaily`: `GET /v1/public/ledger/checkpoints`, `GET /v1/public/ledger/daily` | `none` | `ff.public.ledger_page` | `public.counter_refresh_s` | `SCR-pub-02` |
 | Parameter page | `listPublicParameters`, `getPublicParameter`, `listPublicParameterVersions`: `GET /v1/public/parameters[/{name}[/versions]]` | `none` | none (served whenever the API is up) | `public.counter_refresh_s` | `SCR-pub-03` |
 | Change log | `listPublicChangeLog`, `getPublicChangeLogEntry`: `GET /v1/public/change-log[/{chg_id}]` | `none` | none | `public.counter_refresh_s` | `SCR-pub-04` |
-| Milestones | `listPublicMilestones`, `getPublicMilestone`: `GET /v1/public/milestones[/{milestone_key}]` | `none` | `ff.growth.v6_milestones` | `public.counter_refresh_s` | `SCR-pub-05`, `SCR-pub-06` |
+| Milestones | `listPublicMilestones`: `GET /v1/public/milestones` (the detail of one milestone is read from this list; a read of a single milestone has no S15 operation) | `none` | `ff.growth.v6_milestones` | `public.counter_refresh_s` | `SCR-pub-05`, `SCR-pub-06` |
 | Public teams | `listPublicTeams` `GET /v1/public/teams` | `none` | `ff.growth.v4_teams` | `public.counter_refresh_s` | `SCR-pub-07` |
 | Experiments | `listPublicExperiments` `GET /v1/public/experiments` | `none` | none | `public.counter_refresh_s` | `SCR-pub-08` |
 | Share card payload | `getShareCard` `GET /v1/members/me/share-card` | `member` | `ff.growth.v3_share_card` | `no-store` | in-app, `S11.*` |
 | Teams (member) | S12.9 table | `member` | `ff.growth.v4_teams` | `no-store` | in-app, `S11.*` |
-| Referral | `createReferral` `POST /v1/referrals`, `listReferrals`, `getReferral` | `member` | `ff.growth.v5_referral` | `no-store` | in-app, `S11.*` |
+| Referral | `createReferral` `POST /v1/referrals`, `listReferrals` `GET /v1/referrals` | `member` | `ff.growth.v5_referral` | `no-store` | in-app, `S11.*` |
 | Flags and exposure | `getFeatures` `GET /v1/members/me/features`, `recordExperimentExposure` `POST /v1/experiment-exposures` | `member` | none | `no-store` | none |
 
 All public routes are rate-limited by `ratelimit.public_rpm` per IP hash, carry an `ETag` (S0.11.7), and accept no query that selects one member. Public screens are `SCR-pub-nn` (role `pub`, S0.5), owned here; this part specifies their content and states (empty, suppressed, stale, error), `S11.*` specifies layout and typography.
@@ -303,7 +303,7 @@ Reason for revocation on overturn only: one honest overturn should not strip rec
 
 ### 12.8.2 Card content spec [D]
 
-`getShareCardPayload` returns an object validated with `additionalProperties: false`:
+`getShareCard` returns an object (the field mapping to S15a is in S15d 15.C.2 row 25) validated with `additionalProperties: false`:
 
 | Field | Source | Shown on card |
 | --- | --- | --- |
@@ -419,7 +419,7 @@ Triggers inside `growth.referral.clawback_window_days` after `paid_at`: (1) the 
 | Operation (proposal) | Route | Notes |
 | --- | --- | --- |
 | `createReferral` | `POST /v1/referrals` | `Idempotency-Key` required; returns the invitation link once; caps checked |
-| `listReferrals`, `getReferral` | `GET /v1/referrals[/{referral_id}]` | The referrer sees counts and states only, never who joined or what they did; the newcomer sees only their own bonus state |
+| `listReferrals` | `GET /v1/referrals` | Reading one referral by id has no S15 operation. The referrer sees counts and states only, never who joined or what they did; the newcomer sees only their own bonus state |
 | payout, clawback | system and admin only | No member-callable payout route exists |
 
 Copy: `copy.growth.referral_terms` (S12.14): bonuses are declared, may be delayed or withheld, can be reversed, and have no cash value.
@@ -731,7 +731,7 @@ Given / When / Then, in the ID scheme of S0.5. Tests are named in `S18.*`.
 | `AC-badge-01` | A member reaches the 10-cell threshold | The event is replayed | `cells_10` is awarded once; `badge.awarded` is emitted once |
 | `AC-badge-02` | An overturn drops the member below a held threshold | Evaluation runs | The award becomes `revoked` (`badge.revoked`); reaching the threshold again awards it again |
 | `AC-badge-03` | Any badge is awarded | The ledger and tier are read | No `LedgerEntry` was created and `trust_tier`, caps and sampling are unchanged |
-| `AC-sharecard-01` | A member with a team, a label and badges | `getShareCardPayload` | The body validates against the closed schema of S12.8.2 and contains no team, label, id, service or time field |
+| `AC-sharecard-01` | A member with a team, a label and badges | `getShareCard` | The body validates against the closed schema of S12.8.2 and contains no team, label, id, service or time field |
 | `AC-sharecard-02` | The card is rendered | Network traffic is observed | No request leaves for any host other than the project's own |
 | `AC-team-01` | A member below `team.create_min_tier` | `createTeam` | `403 FORBIDDEN` |
 | `AC-team-02` | A member joins at time t | Cells were accepted before and after t | Only cells accepted at or after t count toward the team score |
