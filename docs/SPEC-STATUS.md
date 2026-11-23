@@ -166,3 +166,35 @@ Rows 1 to 66 each have an edit that the R5 log of its cell marks applied or alre
 - `spec/12-public-growth.md` 12.12.2 (V2): says population `all_members` without saying `include_existing` must be true; 12.12.3 to 12.12.6 not read.
 - `docs/fix/R4-03.md` rows 11-c to 11-g, 13-g and `docs/fix/R4-01.md` row 1: citations drift; only those named by FINAL-4 row 66 were corrected.
 - `docs/fix/R4-04.md` and other offset notes: state that no other citation was re-checked.
+
+## Owner actions before launch
+
+One list. Every item is an owner action: confirm the default or overturn it. Cells have applied each default and marked the edit default-pending; nothing here is confirmed by the owner unless `docs/owner-decisions.md` says so. Source: `docs/owner-decisions.md` sections A and B.
+
+- **D-01 (two admins before any gate).** Create at least two distinct admins before any launch gate can be signed: the `launch.min_signoffs` floor is 2 and two-person actions (sign-off, ledger reversal, ban) stay blocked below two. The owner names who they are.
+- **D-02 (Reserve seed).** Seed the Reserve before the pilot (16d proposes at least 150 credits, 3 x pilot of 50, a launch precondition [V]) or accept that grants stay paused; this blocks `launch.members_may_join`.
+- **D-18a.** Confirm two-stage consent: the join page is the one three-fact notice of S11a; the S11d notices and unticked boxes are shown once before the first Send; the recovery key is shown after the first accepted cell.
+- **D-23.** Confirm that the starter-grant hold for a shared IP hash is dropped (no IP hash is persisted).
+- **D-24.** Confirm that `Job.rating` is the integer only, no comment.
+- **D-25.** Confirm that the code-change template's `diff_applies_cleanly` and `path_allowlist` checks are removed, the template is not `objective`, and it relies on audit (blanket for high risk).
+- **D-26.** Confirm that a cell blocked by the payout guard is deferred and then stops the job through `job.stop_requested`; decide whether a bounded wait needs a new S16c parameter and value.
+- **D-27.** Confirm that the second issue of each double-numbered issue id gets a new id in the range 17001 to 17099.
+- **D-28.** Confirm that S13 13.8.4 is the one experiment stratum rule (`pilot_week` and `locale` only).
+- **D-29.** Confirm that `assembling` gets a failure exit through `job.stop_requested` and that no new events are added for `launch.member_jobs_enabled` and `launch.minting_enabled`.
+- **D-30.** Confirm the naming authority (S5a for entities and columns, S0 for enums and state names, the Device retention rule, invite tree id type).
+- **D-31.** Set the values of `anomaly.restrict_count` (initial 3), `anomaly.restrict_window_days` (14), `commons.job_overrun_days` (30) and `audit.flag_age_out_days` (14); all are initial configurable defaults [A].
+- **D-32.** Confirm that no file may claim reason codes only or no free text for a field that has free text.
+- **D-33.** Confirm that `retention.ip_hash_ttl_days` has range 1..30 and that the lever to turn the daily IP limits off is removed.
+- **D-34.** Confirm the fixed minimum set of two-person actions (at least `launch.signoff`, `killswitch.release`, `ledger.reversal`, `member.ban`, `parameter.loosen`) and that the parameter only adds names.
+- **D-35.** Confirm the second-admin bootstrap: the bootstrap command issues the enrollment code while fewer than two operators are active, as a system `AdminAction` with an alarm; and decide who holds infrastructure access to run it.
+- **D-36.** Confirm that `template.min_reviewers_loosen` does not exist and that the S16 ranges of `service.min_approvers` and `template.min_reviewers_new` are 1..2.
+- **D-37.** Confirm that a job with N below 10 at v = 0.10 stops at its first required verification cell with partial results, and that the quote and confirmation screen say so.
+- **D-38.** Confirm that the recovery secret stays in device storage until the member confirms the key and is never sent to the server.
+- **D-39.** Confirm the two-person scope: none of `experiment.start`, `flag.enable_credit_moving`, `service.approve`, `audit.accept`, `quarantine.release`, `cell.overturn` is two-person; founders-owned parameters follow `parameter.loosen`; names with no Phase 1 operation (`invite.seed_issue`, `disclosure.release`, `secret.emergency_access`) stay reserved.
+- **D-40.** Confirm that admins have no member list or search and that the invite tree shows only while an open farming alarm names the member (counts for a reviewer, parent and children for an operator).
+- **D-41.** Confirm that after a recovery the new secret is held, shown once at the end of the recovery and wiped as at registration.
+- **D-42.** Confirm that the first quote of a high-risk template uses v not below `verify.blanket_redundancy_n` minus 1, and decide whether a margin above that is wanted (R5-06 Noticed); a job larger than the holdable size is refused at quote.
+- **D-43.** Confirm that in `settling` or `cancelling` a blocked cell is voided, never deferred, and a flagged cell with no audit cell is voided.
+- **D-44.** Confirm the device link model (the offer holds the redemption data; approval creates the `Device` and the `MemberKey`) and the four identity entities with their retention.
+
+The five owner questions of `docs/audit/FINAL-4.md` are answered by D-39 to D-43. The step-up choices for `revokeDevice` (required) and `denyDeviceLink` (not required) made by R5-03b are not in D-01 to D-44 and are also owner actions.
