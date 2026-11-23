@@ -1053,7 +1053,7 @@ Conventions of S0.11 apply: plural resource nouns, commands as `POST` creating a
 | `createExperiment`, `updateExperiment` | `POST`, `PATCH /v1/admin/experiments[/{exp_id}]` | admin | `perm.experiment.edit` |
 | `registerExperiment`, `startExperiment`, `stopExperiment` | `POST /v1/admin/experiments/{exp_id}/registrations`, `/starts`, `/stops` | admin, step-up; two-person start is open (S15.E Issues raised, item 3) | `perm.experiment.run` |
 | `getExperimentBalance` | `GET /v1/admin/experiments/{exp_id}/balance` | admin | `perm.metrics.view`; counts only |
-| `createCalibrationRecords` | `POST /v1/admin/calibration-records` | admin | `perm.calibration.record` |
+| `createCalibrationRecord` | `POST /v1/admin/calibration-records` | admin | `perm.calibration.record` |
 | `getCalibrationSummary` (was `getCalibrationStatistics`), `getCalibrationProposals` | `GET /v1/admin/calibration/summary`, `GET /v1/admin/calibration-proposals` (path not reconciled here) | admin | `perm.calibration.read` |
 | `createCalibrationReport`, `listCalibrationReports`, `getCalibrationReport` | `POST`, `GET /v1/admin/calibration-reports`; `GET /v1/admin/calibration-reports/{clr_id}` | admin | `perm.calibration.write` (create), `perm.calibration.read` (lists, get) |
 | `createIncident`, `listIncidents`, `getIncident`, `updateIncident`, `startIncidentInvestigation`, `resolveIncident` | `POST`, `GET /v1/admin/incidents`; `GET`, `PATCH /v1/admin/incidents/{inc_id}`; `POST /v1/admin/incidents/{inc_id}/investigations`, `/resolutions` | admin | `perm.incident.record` (writes), `perm.metrics.view` (reads) |
