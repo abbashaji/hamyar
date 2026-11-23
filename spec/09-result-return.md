@@ -78,8 +78,8 @@ The nonce is bound **relationally**: it is a column of one lease row, and that r
 
 - **Single use.** `nonce_consumed_at` is set in the same transaction that inserts the `Submission` (9.14, SC-17). After that, the nonce can only authenticate a replay of the identical payload (9.10). [D]
 - **Expiry.** The nonce has no clock of its own. It is valid exactly while the lease is `active` and `now <= grace_until` (9.4.4). Extending the lease moves `grace_until`; so does nothing else. [D]
-- **Rotation.** `POST /v1/leases/{lease_id}/nonces` (operation `rotateLeaseNonce` [A]) issues a new nonce, invalidates the old one in the same transaction, and requires an `Idempotency-Key`. It is allowed only while the lease is `active` and the nonce is unconsumed, at most `lease.max_nonce_rotations` times. It exists because a mobile page may reload between lease and paste-back. [A]
-- **Idempotent replay of `createLease` and `rotateLeaseNonce`** returns the stored response with `lease_nonce` set to `null` and `details.nonce_redelivery` = `use_rotation`. The idempotency store never holds a plaintext nonce (`ISS-98`). [D]
+- **Rotation.** `POST /v1/leases/{lease_id}/nonces` (operation `issueLeaseNonce`, S15a 15.6.2) issues a new nonce, invalidates the old one in the same transaction, and requires an `Idempotency-Key`. It is allowed only while the lease is `active` and the nonce is unconsumed, at most `lease.max_nonce_rotations` times. It exists because a mobile page may reload between lease and paste-back. [A]
+- **Idempotent replay of `createLease` and `issueLeaseNonce`** returns the stored response with `lease_nonce` set to `null` and `details.nonce_redelivery` = `use_rotation`. The idempotency store never holds a plaintext nonce (`ISS-98`). [D]
 - **Failed attempts.** Each gate failure on a lease increments `leases.gate_failures`. When it exceeds `lease.max_gate_failures`, further submit calls on that lease return `429 RATE_LIMITED` until the lease ends. The nonce is not revoked by failures, so a third party cannot lock a donor out (a caller must already be the lease's member, SC-09). [D]
 
 ### 9.4.4 Lease deadlines used by the return path
@@ -814,12 +814,12 @@ Problems and gaps found while specifying the return path. Each resolution is alr
 | `ISS-95` | minor | FD§3.4, S0.9.3 | S0.9.3 requeues an expired lease "at once", while `lease.submit_grace_s` accepts a late paste-back | The reaper acts at `grace_until = expires_at + lease.submit_grace_s`; `expires_at` stays the donor-facing deadline; state machines unchanged (9.4.4) | applied |
 | `ISS-96` | minor | FD§5.6 | "Input and output hashes" do not say whether the hash covers what arrived or what is stored, and the two differ after normalization | `raw_hash` over the received string, `output_hash` over the canonical text; the manifest uses `output_hash` (9.7.4) | applied |
 | `ISS-97` | minor | prompt scope E | A "minimum plausible time" cannot be derived before Phase 0, so a hard timing rule risks rejecting honest practiced donors | One hard floor, `verify.timing_min_s`, kept low and replaced by `CAL`; everything else is a flag, active only after `calibration.min_samples_per_service` samples (9.12) | proposed |
-| `ISS-98` | major | prompt, S0.11.5 | S0.11.5 replays the stored response of an idempotent call, which for `createLease` would re-serve the plaintext nonce and force the idempotency store to hold secrets, contradicting hash-only storage | Secret response fields are not stored; replay returns `lease_nonce` = null with `details.nonce_redelivery` = `use_rotation`; `rotateLeaseNonce` recovers a lost nonce (9.4.3) | proposed |
+| `ISS-98` | major | prompt, S0.11.5 | S0.11.5 replays the stored response of an idempotent call, which for `createLease` would re-serve the plaintext nonce and force the idempotency store to hold secrets, contradicting hash-only storage | Secret response fields are not stored; replay returns `lease_nonce` = null with `details.nonce_redelivery` = `use_rotation`; `issueLeaseNonce` recovers a lost nonce (9.4.3) | proposed |
 
 **Convention additions made by this part** (not issues; listed so C-001 can fold them back) [A]
 
 - `reject.attestation_invalid` added to the cell rejection reason list of S0.8.4 (9.13).
-- Operations `submitResult` and `rotateLeaseNonce` and their paths (9.3, 9.5); response fields `lease_nonce`, `details.reject_code`, `details.reason`, `details.nonce_redelivery`, `details.stored_submission_id`.
+- Operations `submitResult` and `issueLeaseNonce` and their paths (9.3, 9.5); response fields `lease_nonce`, `details.reject_code`, `details.reason`, `details.nonce_redelivery`, `details.stored_submission_id`.
 - Entity field requirements on `Lease` and `Submission`, and the table `submission_fingerprints` (9.4.5, 9.14.3).
 - The 16 added parameters and constraints `S9-C1` and `S9-C2` (9.18).
 - Signal names `signal.forgery_attempt`, `signal.conflicting_resubmit`, `signal.timing_below_floor`, `signal.timing_soft_fast`, `signal.timing_regular`; flag names in 9.9 and in SC-21 of 9.14.1; ops log event `submission.gate_rejected`; metrics of 9.17.
